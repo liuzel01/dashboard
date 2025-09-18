@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Layout, Menu, Typography, App as AntApp, Select, Spin, Alert } from 'antd';
+import { Layout, Menu, App as AntApp, Select, Spin, Alert } from 'antd';
 import { DeploymentUnitOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';

@@ -25,6 +25,21 @@ import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
 type IpPermission = any; // Using any for now, can be typed out from AWS SDK
 
+interface IpRange {
+  CidrIp?: string;
+  Description?: string;
+}
+
+interface UserIdGroupPair {
+  Description?: string;
+  UserId?: string;
+  GroupName?: string;
+  GroupId?: string;
+  VpcId?: string;
+  VpcPeeringConnectionId?: string;
+  PeeringStatus?: string;
+}
+
 interface Platform {
   name: string;
   loadBalancerArn: string;
@@ -144,7 +159,7 @@ const SecurityGroupPage: React.FC = () => {
       };
 
       const ipRanges = (permission.IpRanges || []).map(
-        (range, rangeIndex) => ({
+        (range: IpRange, rangeIndex: number) => ({
           ...common,
           key: `ip-${permIndex}-${rangeIndex}`,
           source: range.CidrIp,
@@ -159,7 +174,7 @@ const SecurityGroupPage: React.FC = () => {
       );
 
       const userIdGroupPairs = (permission.UserIdGroupPairs || []).map(
-        (group, groupIndex) => ({
+        (group: UserIdGroupPair, groupIndex: number) => ({
           ...common,
           key: `sg-${permIndex}-${groupIndex}`,
           source: group.GroupId,
@@ -184,26 +199,28 @@ const SecurityGroupPage: React.FC = () => {
       title: '协议',
       dataIndex: 'protocol',
       key: 'protocol',
-      render: (protocol: string) => <Tag color="blue">{protocol === '-1' ? 'ALL' : protocol?.toUpperCase()}</Tag>,
+      render: (p: string) => <Tag>{p === '-1' ? 'ALL' : p.toUpperCase()}</Tag>,
     },
     {
       title: '端口范围',
       key: 'port',
-      render: (_: any, record: any) => {
-        if (record.protocol === '-1') return 'All';
-        return record.fromPort === record.toPort ? record.fromPort : `${record.fromPort}-${record.toPort}`;
-      },
+      render: (_: any, r: any) =>
+        r.protocol === '-1'
+          ? 'All'
+          : r.fromPort === r.toPort
+          ? r.fromPort
+          : `${r.fromPort}-${r.toPort}`,
     },
     { title: '来源', dataIndex: 'source', key: 'source' },
     { title: '描述', dataIndex: 'description', key: 'description' },
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: any) => (
+      render: (_: any, r: any) => (
         <Button
           danger
           icon={<DeleteOutlined />}
-          onClick={() => handleRemoveRule(record.originalPermission)}
+          onClick={() => handleRemoveRule(r.originalPermission)}
         >
           删除
         </Button>

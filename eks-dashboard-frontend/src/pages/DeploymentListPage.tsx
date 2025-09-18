@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { Table, Input, Button, App, Spin, Space, Alert } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
@@ -116,7 +116,7 @@ const DeploymentListPage: React.FC = () => {
       title: '副本',
       dataIndex: 'replicas',
       key: 'replicas',
-      render: (text: any, record: Deployment) =>
+      render: (_: any, record: Deployment) =>
         `${record.availableReplicas || 0}/${record.replicas}`,
     },
     { title: '镜像', dataIndex: 'images', key: 'images', width: '40%' },

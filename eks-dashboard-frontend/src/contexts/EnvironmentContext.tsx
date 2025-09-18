@@ -1,4 +1,5 @@
-import React, { createContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { createContext, useState, useEffect, useMemo } from 'react';
+import type { ReactNode } from 'react';
 import { setApiEnvironment } from '../services/api';
 
 export interface Environment {
@@ -30,20 +31,36 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
 
   useEffect(() => {
     const fetchEnvironments = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const response = await fetch('http://localhost:3000/api/environments');
+        // Step 1: Fetch the configuration to determine the API base URL.
+        const configResponse = await fetch('/environment.json');
+        if (!configResponse.ok) {
+          throw new Error('Could not load /environment.json. Please ensure it exists in the public folder.');
+        }
+        const config = await configResponse.json();
+        const apiBaseUrl = config.API_BASE_URL;
+
+        if (!apiBaseUrl) {
+          throw new Error('API_BASE_URL not found in /environment.json');
+        }
+
+        // Step 2: Use the base URL to fetch the list of environments.
+        const response = await fetch(`${apiBaseUrl}/environments`);
         if (!response.ok) {
           throw new Error('Failed to fetch environments');
         }
         const data: Environment[] = await response.json();
         setEnvironments(data);
 
-        // 从 localStorage 或 默认选择第一个
+        // Step 3: Set the initial environment from localStorage or default to the first one.
         const storedEnvId = localStorage.getItem('currentEnvironmentId');
         const initialEnv = data.find(e => e.id === storedEnvId) || data[0] || null;
-        setCurrentEnvironment(initialEnv);
-        if (initialEnv) setApiEnvironment(initialEnv.id);
-
+        if (initialEnv) {
+          // Use the handler which also updates localStorage and the API service
+          handleSetCurrentEnvironment(initialEnv);
+        }
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -53,7 +70,7 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
 
     fetchEnvironments();
   }, []);
-
+  
   const handleSetCurrentEnvironment = (environment: Environment) => {
     setCurrentEnvironment(environment);
     localStorage.setItem('currentEnvironmentId', environment.id);
