@@ -1,0 +1,16 @@
+[
+  {
+    "id": "hashex",
+    "name": "Hashex - 测试 (ap-east-1)",
+    "aws_access_key_id": "access_key",
+    "aws_secret_access_key": "secret_key",
+    "aws_region": "ap-east-1",
+    "kubeContext": "hash",
+    "platforms": [
+      {
+        "name": "shanghu管理端",
+        "loadBalancerArn": "arn:ADDRESS"
+      }
+    ]
+  }
+]

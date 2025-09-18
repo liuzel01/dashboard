@@ -1,0 +1,73 @@
+0,0 +1,60 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Dependencies
+# ------------
+# Ignore node_modules directories in any subdirectory
+**/node_modules
+
+
+# Build output
+# ------------
+# For Vite (frontend) and NestJS (backend)
+**/dist
+**/dist-ssr
+/build
+
+
+# Logs
+# ----
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+
+# Test coverage
+# -------------
+/coverage
+/coverage-ts
+
+
+# Environment variables and sensitive files
+# -----------------------------------------
+# Never commit .env files. Use .env.example for templates.
+.env
+.env.*
+!.env.example
+!.env.test
+eks-dashboard-backend/src/environments/environments.json
+
+# Also ignore .local files which might contain environment-specific settings
+*.local
+
+# Sensitive credentials like private keys
+**/*.pem
+*.key
+
+
+# IDE / Editor directories and files
+# ----------------------------------
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+# OS generated files
+# ------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
