@@ -11,7 +11,6 @@ import './App.css';
 import Home from './pages/Home';
 
 const { Header, Content, Sider } = Layout;
-const { Title } = Typography;
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, loading, error } = useContext(EnvironmentContext);

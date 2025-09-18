@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Modal, Spin, Alert, Button, Space } from 'antd';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import { FullscreenOutlined, FullscreenExitOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { AnsiUp } from 'ansi_up';
 

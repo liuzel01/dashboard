@@ -1,3 +1,18 @@
+interface IpRange {
+  CidrIp?: string;
+  Description?: string;
+}
+
+interface UserIdGroupPair {
+  Description?: string;
+  UserId?: string;
+  GroupName?: string;
+  GroupId?: string;
+  VpcId?: string;
+  VpcPeeringConnectionId?: string;
+  PeeringStatus?: string;
+}
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Table,
@@ -100,14 +115,14 @@ export const SecurityGroupModal: React.FC<SecurityGroupModalProps> = ({
         fromPort: permission.FromPort,
         toPort: permission.ToPort,
       };
-      const ipRanges = (permission.IpRanges || []).map((range, rangeIndex) => ({
+const ipRanges = (permission.IpRanges || []).map((range: IpRange, rangeIndex: number) => ({
         ...common,
         key: `ip-${permIndex}-${rangeIndex}`,
         source: range.CidrIp,
         description: range.Description,
         originalPermission: { ...permission, IpRanges: [range], UserIdGroupPairs: [] },
       }));
-      const userIdGroupPairs = (permission.UserIdGroupPairs || []).map((group, groupIndex) => ({
+const userIdGroupPairs = (permission.UserIdGroupPairs || []).map((group: UserIdGroupPair, groupIndex: number) => ({
         ...common,
         key: `sg-${permIndex}-${groupIndex}`,
         source: group.GroupId,

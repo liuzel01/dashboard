@@ -88,20 +88,29 @@ cd <project-folder>
 
 推荐使用 `PM2` 来管理后端 Node.js 进程，它可以保证服务在后台持续运行，并在崩溃时自动重启。
 
-1. **安装依赖** (只安装生产环境需要的包)
+1. **安装依赖并构建**
+
+    在生产服务器上直接构建应用，需要先安装完整的依赖（包括构建所需的 `devDependencies`）。
 
     ```bash
+    # 切换到后端项目目录
+
     cd /path/to/your/project/eks-dashboard-backend
-    npm install --production
-    ```
 
-2. **构建应用**
+    # 安装所有依赖
+
+    npm install
+
+    # 构建应用
+    npm run build    ```
+
+2. **(可选) 清理开发依赖**
+
+    为了节省磁盘空间并保持生产环境整洁，可以在构建完成后移除开发依赖。
 
     ```bash
-    npm run build
+    npm prune --production
     ```
-
-    此命令会将 TypeScript 编译为 JavaScript，并输出到 `dist` 目录。
 
 3. **使用 PM2 启动服务**
 

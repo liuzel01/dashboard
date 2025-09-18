@@ -6,7 +6,6 @@ import { JumpServerModule } from './jump-server/jump-server.module';
 import { KubernetesModule } from './kubernetes/kubernetes.module';
 import { DeploymentsModule } from './deployments/deployments.module';
 import { EnvironmentsModule } from './environments/environments.module';
-import { LogsModule } from './logs/logs.module';
 import { QueryModule } from './query/query.module';
 import { DatabaseModule } from './database/database.module';
 import { SecurityGroupModule } from './security-group/security-group.module';
@@ -21,7 +20,6 @@ import { SecurityGroupModule } from './security-group/security-group.module';
     KubernetesModule,
     DeploymentsModule,
     EnvironmentsModule,
-    LogsModule,
     QueryModule,
     DatabaseModule,
     SecurityGroupModule,
