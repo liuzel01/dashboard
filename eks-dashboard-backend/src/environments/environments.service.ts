@@ -37,16 +37,21 @@ export class EnvironmentsService implements OnModuleInit {
 
   onModuleInit() {
     try {
-      const filePath = path.join(
-        __dirname,
-        'environments',
-        'environments.json',
-      );
+      // 从项目的根目录加载配置文件，这比依赖 `__dirname` 更加健壮。
+      // 这假定 `environments.json` 文件与 `package.json` 在同一目录。
+      const filePath = path.resolve(process.cwd(), 'environments.json');
+      this.logger.log(`Attempting to load environments from: ${filePath}`);
+
       const fileContent = fs.readFileSync(filePath, 'utf-8');
       this.environments = JSON.parse(fileContent);
-      this.logger.log(`Loaded ${this.environments.length} environments.`);
+      this.logger.log(
+        `Successfully loaded ${this.environments.length} environments.`,
+      );
     } catch (error) {
-      this.logger.error('Failed to load environments.json', error.stack);
+      this.logger.error(
+        'Failed to load or parse environments.json. Please ensure the file exists at the project root and is valid JSON.',
+        error.stack,
+      );
       throw new Error('Could not load environments configuration.');
     }
   }

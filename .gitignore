@@ -39,7 +39,7 @@ lerna-debug.log*
 .env.*
 !.env.example
 !.env.test
-eks-dashboard-backend/src/environments/environments.json
+eks-dashboard-backend/environments.json
 
 # Also ignore .local files which might contain environment-specific settings
 *.local
