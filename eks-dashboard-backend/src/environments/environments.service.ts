@@ -4,6 +4,7 @@ import * as path from 'path';
 import { EC2Client } from '@aws-sdk/client-ec2';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
+import { fromIni } from '@aws-sdk/credential-providers';
 
 interface Platform {
   name: string;
@@ -13,8 +14,9 @@ interface Platform {
 export interface Environment {
   id: string;
   name: string;
-  aws_access_key_id: string;
-  aws_secret_access_key: string;
+  aws_access_key_id?: string;
+  aws_secret_access_key?: string;
+  aws_profile?: string;
   aws_region: string;
   kubeContext: string;
   platforms?: Platform[];
@@ -67,26 +69,43 @@ export class EnvironmentsService implements OnModuleInit {
       return this.clientsCache.get(environmentId)!;
     }
 
-    const env = this.environments.find((e) => e.id === environmentId);
+    const env = this.getEnvironmentById(environmentId);
 
     if (!env) {
       throw new Error(`Environment with id "${environmentId}" not found.`);
     }
 
-    const credentials = {
-      accessKeyId: env.aws_access_key_id,
-      secretAccessKey: env.aws_secret_access_key,
+    const clientConfig: { region: string; credentials?: any } = {
+      region: env.aws_region,
     };
 
-    const ec2 = new EC2Client({ region: env.aws_region, credentials });
-    const ssm = new SSMClient({ region: env.aws_region, credentials });
-    const elbv2 = new ElasticLoadBalancingV2Client({
-      region: env.aws_region,
-      credentials,
-    });
+    if (env.aws_access_key_id && env.aws_secret_access_key) {
+      this.logger.debug(
+        `Using AWS access key for environment "${environmentId}"`,
+      );
+      clientConfig.credentials = {
+        accessKeyId: env.aws_access_key_id,
+        secretAccessKey: env.aws_secret_access_key,
+      };
+    } else if (env.aws_profile) {
+      this.logger.debug(
+        `Using AWS profile "${env.aws_profile}" for environment "${environmentId}"`,
+      );
+      clientConfig.credentials = fromIni({ profile: env.aws_profile });
+    } else {
+      this.logger.debug(
+        `Using default AWS credential provider chain for environment "${environmentId}"`,
+      );
+      // 如果没有指定凭证，SDK 将使用其默认凭证链（环境变量、EC2 实例配置文件等）
+    }
 
-    this.clientsCache.set(environmentId, { ec2, ssm, elbv2 });
-    return { ec2, ssm, elbv2 };
+    const clients = {
+      ec2: new EC2Client(clientConfig),
+      ssm: new SSMClient(clientConfig),
+      elbv2: new ElasticLoadBalancingV2Client(clientConfig),
+    };
+    this.clientsCache.set(environmentId, clients);
+    return clients;
   }
 
   getPlatformsForEnvironment(environmentId: string): Platform[] {

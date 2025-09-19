@@ -56,14 +56,32 @@ export class KubernetesService {
     const user = kc.getCurrentUser();
 
     if (user?.exec?.command === 'aws') {
-      this.logger.log(
-        `Injecting credentials for env "${environmentId}" into kubeconfig exec provider.`,
+      this.logger.debug(
+        `Configuring AWS credentials for Kubeconfig exec provider for env "${environmentId}".`,
       );
-      user.exec.env = [
-        { name: 'AWS_ACCESS_KEY_ID', value: env.aws_access_key_id },
-        { name: 'AWS_SECRET_ACCESS_KEY', value: env.aws_secret_access_key },
+
+      // Initialize with region, which is always needed.
+      const awsEnv: { name: string; value: string }[] = [
         { name: 'AWS_REGION', value: env.aws_region },
       ];
+
+      if (env.aws_access_key_id && env.aws_secret_access_key) {
+        this.logger.debug(`Using AWS access key for Kubeconfig.`);
+        awsEnv.push(
+          { name: 'AWS_ACCESS_KEY_ID', value: env.aws_access_key_id },
+          { name: 'AWS_SECRET_ACCESS_KEY', value: env.aws_secret_access_key },
+        );
+      } else if (env.aws_profile) {
+        this.logger.debug(
+          `Using AWS profile "${env.aws_profile}" for Kubeconfig.`,
+        );
+        awsEnv.push({ name: 'AWS_PROFILE', value: env.aws_profile });
+      } else {
+        this.logger.debug(
+          `Using default AWS credential provider chain for Kubeconfig.`,
+        );
+      }
+      user.exec.env = awsEnv;
     }
 
     const k8sAppsV1Api = kc.makeApiClient(k8s.AppsV1Api);
