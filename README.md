@@ -170,7 +170,7 @@ server {
 
     # 反向代理后端 API 请求 (所有 /api 开头的请求都会被转发到后端服务)
     location /api/ {
-        proxy_pass http://localhost:3000/; # 后端服务地址
+        proxy_pass http://localhost:3000; # 后端服务地址 (注意：去掉了末尾的斜杠)
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
