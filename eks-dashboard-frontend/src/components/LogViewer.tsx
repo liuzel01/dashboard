@@ -13,9 +13,7 @@ interface LogViewerProps {
 
 const ansiUp = new AnsiUp();
 
-interface ViteMetaEnv {
-  VITE_SOCKET_URL?: string;
-}
+// Vite env is accessed dynamically below; we will treat it as a map of strings.
 
 export const LogViewer: React.FC<LogViewerProps> = ({
   deploymentName,
@@ -46,12 +44,25 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       setIsConnected(false);
       setIsAutoScrollEnabled(true); // 每次打开时重置为自动滚动
 
-  const socketUrl = (import.meta as unknown as { env?: ViteMetaEnv })?.env?.VITE_SOCKET_URL;
-  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-  // Use configured VITE_SOCKET_URL, otherwise prefer the page origin so
-  // production frontends don't attempt to connect to the user's localhost.
-  const backendFallback = socketUrl || pageOrigin;
-      const candidates: (string | undefined)[] = [undefined, socketUrl, backendFallback];
+      // Read Vite env in a safe way
+  const viteEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> })?.env || {};
+      const isDev = !!viteEnv.DEV;
+      const socketUrl = viteEnv.VITE_SOCKET_URL as string | undefined;
+      const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
+      // Production: only try the configured socket URL or the page origin and
+      // use websocket transport only. Development: keep multi-candidate and
+      // polling fallback for convenience during dev.
+      let candidates: (string | undefined)[];
+      const backendPreferred = socketUrl || pageOrigin;
+      let transports: ('websocket' | 'polling')[];
+      if (isDev) {
+        candidates = [undefined, socketUrl, backendPreferred];
+        transports = ['polling', 'websocket'];
+      } else {
+        candidates = [backendPreferred];
+        transports = ['websocket'];
+      }
 
       let connected = false;
       let stopped = false;
@@ -59,8 +70,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
 
       const tryConnect = async (candidate?: string): Promise<Socket> => {
         if (stopped || connected) throw new Error('stopped_or_connected');
-        // allow polling as a fallback transport when websocket handshake fails
-        const transports = ['polling', 'websocket'];
+        // use transports determined by environment
         const socket = candidate
           ? io(candidate, { path: '/socket.io', transports })
           : io({ path: '/socket.io', transports });
