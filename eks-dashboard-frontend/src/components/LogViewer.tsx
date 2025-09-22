@@ -39,8 +39,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       setIsConnected(false);
       setIsAutoScrollEnabled(true); // 每次打开时重置为自动滚动
 
-      const socketUrl = (import.meta as unknown as { env?: ViteMetaEnv })?.env?.VITE_SOCKET_URL;
-      const backendFallback = socketUrl || 'http://localhost:3000';
+  const socketUrl = (import.meta as unknown as { env?: ViteMetaEnv })?.env?.VITE_SOCKET_URL;
+  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  // Use configured VITE_SOCKET_URL, otherwise prefer the page origin so
+  // production frontends don't attempt to connect to the user's localhost.
+  const backendFallback = socketUrl || pageOrigin;
       const candidates: (string | undefined)[] = [undefined, socketUrl, backendFallback];
 
       let connected = false;
@@ -79,7 +82,12 @@ export const LogViewer: React.FC<LogViewerProps> = ({
         socket.on('connect_error', (err: unknown) => {
           console.warn('WebSocket connect_error via', candidate ?? 'default/proxy', err);
           if (!connected) {
-            setError(`无法连接日志服务（尝试 ${candidate ?? '页面代理'} 失败）。${candidate ? '请检查后端是否监听该地址。' : '请检查 Vite 代理配置或后端。'}`); 
+            // If candidate looks like a localhost address, give a clearer hint
+            const candidateLabel = candidate ?? '页面代理';
+            const localhostHint = candidate && /localhost|127\.0\.0\.1/.test(candidate)
+              ? '（请注意：浏览器中的 localhost 指向客户端机器，部署到服务器时应使用服务的公网地址或页面域名）'
+              : '';
+            setError(`无法连接日志服务（尝试 ${candidateLabel} 失败）。${candidate ? '请检查后端是否监听该地址。' : '请检查 Vite 代理配置或后端。'}${localhostHint}`);
           }
         });
 
