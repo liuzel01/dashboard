@@ -29,13 +29,20 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   const [isConnected, setIsConnected] = useState(false);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [currentCandidate, setCurrentCandidate] = useState<string | null>(null);
+  const [suppressErrorsUntil, setSuppressErrorsUntil] = useState<number | null>(null);
+  const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // 确保所有必要信息都存在时才连接
     if (visible && deploymentName && environmentId) {
-      setLogs([]);
-      setError(null);
+  setLogs([]);
+  setError(null);
+  // Suppress showing transient connection errors for a short window
+  // while we try multiple candidates / retries. This improves UX when
+  // backend or proxy is still warming up after deploy/restart.
+  setSuppressErrorsUntil(Date.now() + 5000);
+  setLastErrorMessage(null);
       setIsConnected(false);
       setIsAutoScrollEnabled(true); // 每次打开时重置为自动滚动
 
@@ -81,24 +88,34 @@ export const LogViewer: React.FC<LogViewerProps> = ({
 
         socket.on('connect_error', (err: unknown) => {
           console.warn('WebSocket connect_error via', candidate ?? 'default/proxy', err);
-          if (!connected) {
-            // If candidate looks like a localhost address, give a clearer hint
-            const candidateLabel = candidate ?? '页面代理';
-            const localhostHint = candidate && /localhost|127\.0\.0\.1/.test(candidate)
-              ? '（请注意：浏览器中的 localhost 指向客户端机器，部署到服务器时应使用服务的公网地址或页面域名）'
-              : '';
-            setError(`无法连接日志服务（尝试 ${candidateLabel} 失败）。${candidate ? '请检查后端是否监听该地址。' : '请检查 Vite 代理配置或后端。'}${localhostHint}`);
+          const candidateLabel = candidate ?? '页面代理';
+          const localhostHint = candidate && /localhost|127\.0\.0\.1/.test(candidate)
+            ? '（请注意：浏览器中的 localhost 指向客户端机器，部署到服务器时应使用服务的公网地址或页面域名）'
+            : '';
+          const msg = `无法连接日志服务（尝试 ${candidateLabel} 失败）。${candidate ? '请检查后端是否监听该地址。' : '请检查 Vite 代理配置或后端。'}${localhostHint}`;
+          setLastErrorMessage(msg);
+          // only surface to UI after suppression window
+          if (!connected && (!suppressErrorsUntil || Date.now() >= suppressErrorsUntil)) {
+            setError(msg);
           }
         });
 
         socket.on('connect_timeout', (timeout) => {
           console.warn('connect_timeout', candidate, timeout);
-          if (!connected) setError(`连接超时（尝试 ${candidate ?? '页面代理'}）`);
+          const msg = `连接超时（尝试 ${candidate ?? '页面代理'}）`;
+          setLastErrorMessage(msg);
+          if (!connected && (!suppressErrorsUntil || Date.now() >= suppressErrorsUntil)) {
+            setError(msg);
+          }
         });
 
         socket.on('error', (err: unknown) => {
           console.warn('socket error', candidate, err);
-          if (!connected) setError(`Socket 错误（${candidate ?? '页面代理'}）：${String(err)}`);
+          const msg = `Socket 错误（${candidate ?? '页面代理'}）：${String(err)}`;
+          setLastErrorMessage(msg);
+          if (!connected && (!suppressErrorsUntil || Date.now() >= suppressErrorsUntil)) {
+            setError(msg);
+          }
         });
 
         socket.io?.on('reconnect_attempt', (attempt) => {
@@ -148,6 +165,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({
             // ignore
           }
         }
+        // after trying all candidates, if not connected, surface the last error
+        if (!connected) {
+          if (lastErrorMessage) setError(lastErrorMessage);
+          else setError('无法连接日志服务（所有候选地址均失败）。');
+        }
       })();
 
       // cleanup
@@ -165,7 +187,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       // 如果弹窗可见但缺少必要信息，则显示错误
       setError('无法获取日志：缺少环境或应用名称。');
     }
-  }, [visible, deploymentName, environmentId]);
+  }, [visible, deploymentName, environmentId, lastErrorMessage, suppressErrorsUntil]);
 
   // 自动滚动到日志底部
   useEffect(() => {
