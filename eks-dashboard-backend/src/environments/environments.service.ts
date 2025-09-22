@@ -19,6 +19,26 @@ export interface Environment {
   aws_profile?: string;
   aws_region: string;
   kubeContext: string;
+  database?: {
+    host: string;
+    port: number;
+    user: string;
+    password?: string;
+    database: string;
+  };
+  redis?: {
+    host: string;
+    port: number;
+    password?: string;
+    ssl?: boolean;
+  };
+  jumpServer?: {
+    host: string;
+    port: number;
+    username: string;
+    privateKeyPath: string;
+  };
+  tenants?: { id: number; name: string }[];
   platforms?: Platform[];
 }
 
@@ -119,5 +139,13 @@ export class EnvironmentsService implements OnModuleInit {
       throw new Error(`Environment with id "${environmentId}" not found.`);
     }
     return env.platforms || [];
+  }
+
+  getTenantsForEnvironment(
+    environmentId: string,
+  ): { id: number; name: string }[] {
+    const env = this.getEnvironmentById(environmentId);
+    // 如果环境没有定义租户，返回空数组
+    return env?.tenants || [];
   }
 }

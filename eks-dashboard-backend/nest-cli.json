@@ -5,11 +5,7 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "webpack": true,
-    "assets": [
-      {
-      "include": "environments/*.json",
-      "watchAssets": true
-      }
-    ]
+    "assets": [],
+    "watchAssets": true
   }
 }

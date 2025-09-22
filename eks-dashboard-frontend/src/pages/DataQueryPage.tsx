@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useContext, useEffect, useCallback } from 'react';
+import { useRef } from 'react';
 import {
   Input,
   Tabs,
@@ -12,11 +13,21 @@ import {
   Modal,
   App,
   Form,
+  Select,
   Dropdown,
+  Tag,
   Menu,
 } from 'antd';
 import { DownOutlined } from '@ant-design/icons';
-import { aggregateQuery, updateUser, deactivateUser } from '../services/api';
+import {
+  aggregateQuery,
+  updateUser,
+  deactivateUser,
+  deleteRedisKey,
+  getTenantsForEnvironment,
+  getRedisKey,
+} from '../services/api';
+import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import PlaceholderPage from './PlaceholderPage';
 
 const { Search } = Input;
@@ -24,16 +35,35 @@ const { TabPane } = Tabs;
 
 // 模拟数据结构
 interface UserInfo {
-  [key: string]: any;
+  tenant_user_id?: string | number;
+  tenant_id?: number;
+  email?: string | null;
+  tel?: string | null;
+  tel_country_code?: string | null;
+  [key: string]: unknown;
 }
 
 interface RedisData {
-  key: string;
-  value: any;
+  key: string; // The key name
+  ttl: number; // The TTL in seconds
+  value?: string | object | null;
 }
+
+type AggregateResult = {
+  mysql?: { data?: UserInfo | null };
+  redis?: { data?: RedisData[] | null };
+};
+
+type RedisKeyResult = {
+  key: string;
+  value?: string | null;
+  ttlSeconds?: number;
+  ttl?: number;
+};
 
 const DataQueryPage: React.FC = () => {
   const { message, modal } = App.useApp();
+  const { currentEnvironment } = useContext(EnvironmentContext);
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -44,6 +74,56 @@ const DataQueryPage: React.FC = () => {
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
   const [lastSearchTerm, setLastSearchTerm] = useState('');
+  const [tenants, setTenants] = useState<{ id: number; name: string }[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(
+    undefined,
+  );
+  const currentTenantRef = useRef<number | undefined>(selectedTenantId);
+  const [tenantsLoading, setTenantsLoading] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const storedTab = typeof window !== 'undefined' ? sessionStorage.getItem('dataQueryActiveTab') : null;
+  const [activeTabKey, setActiveTabKey] = useState<string>(storedTab ?? '1');
+
+  // Persist active tab so component remounts (e.g., due to route/state) won't reset it
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('dataQueryActiveTab', activeTabKey);
+    } catch {
+      // ignore
+    }
+  }, [activeTabKey]);
+
+  const fetchTenants = useCallback(async () => {
+    if (currentEnvironment) {
+      setTenantsLoading(true);
+      try {
+        const data = await getTenantsForEnvironment();
+        setTenants(data || []);
+        // 如果有租户列表，默认选中第一个，否则清空
+        setSelectedTenantId(data?.length > 0 ? data[0].id : undefined);
+      } catch (e) {
+  // Log to console for diagnostics and show a user-friendly message
+  console.error('fetchTenants error', e);
+        message.error('获取租户列表失败');
+        setTenants([]);
+        setSelectedTenantId(undefined);
+      } finally {
+        setTenantsLoading(false);
+      }
+    } else {
+      setTenants([]);
+      setSelectedTenantId(undefined);
+    }
+  }, [currentEnvironment, message]);
+
+  useEffect(() => {
+    fetchTenants();
+  }, [fetchTenants]);
+
+  // keep a ref in sync so callbacks always read latest tenant id
+  useEffect(() => {
+    currentTenantRef.current = selectedTenantId;
+  }, [selectedTenantId]);
 
   const onSearch = async (value: string) => {
     if (!value.trim()) {
@@ -52,18 +132,59 @@ const DataQueryPage: React.FC = () => {
     setLastSearchTerm(value);
     setLoading(true);
     setSearched(true);
-    setError(null);
-
     try {
-      // 简单地假设纯数字是UID，可以根据需要实现更复杂的类型推断
-      const type = /^\d+$/.test(value) ? 'UID' : 'UID';
-      const results = await aggregateQuery(value, type);
+      // 简单地假设纯数字是 tenant_user_id
+      const isNumeric = /^\d+$/.test(value);
+      if (isNumeric) {
+        const uid = value.trim();
+        const tenantFromRef = currentTenantRef.current;
+        // Query MySQL user info (best-effort)
+        try {
+          const results = await aggregateQuery(uid, 'UID', tenantFromRef);
+          const res = results as unknown as AggregateResult;
+          setUserInfo(res.mysql?.data || null);
+        } catch {
+          setUserInfo(null);
+        }
 
-      setUserInfo(results.mysql.data || null);
-      setRedisData(results.redis.data || null);
-
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.message || err.message;
+        // Construct Redis key from tenant_user_id and fetch it
+        const key = `reset_pass_forbid_succ${uid}`;
+        try {
+          const redisRes = await getRedisKey(key);
+          const r = redisRes as unknown as RedisKeyResult;
+          const ttlVal = r.ttlSeconds ?? r.ttl ?? -2;
+          // If key does not exist, backend should return 404, but double-check here
+          if (ttlVal === -2) {
+            setRedisData([]);
+          } else {
+            setRedisData([
+              {
+                key: r.key,
+                ttl: ttlVal,
+                value: r.value ?? null,
+              },
+            ]);
+          }
+        } catch (err) {
+          // If API returns 404, treat as 'no key'
+          const e = err as { response?: { status?: number } };
+          if (e?.response?.status === 404) {
+            setRedisData([]);
+          } else {
+            setRedisData([]);
+          }
+        }
+      } else {
+        // 非数字，使用原 aggregateQuery 行为（兼顾旧流程）
+  const tenantFromRef = currentTenantRef.current;
+  const results = await aggregateQuery(value, 'UID', tenantFromRef);
+  const res = results as unknown as AggregateResult;
+  setUserInfo(res.mysql?.data || null);
+  setRedisData(res.redis?.data || null);
+      }
+    } catch (err) {
+      const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+      const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
       setError(`查询失败: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -86,11 +207,14 @@ const DataQueryPage: React.FC = () => {
     tel: string;
     tel_country_code: string;
   }) => {
-    if (!userInfo?.tenant_user_id) return;
-    
+    if (!userInfo?.tenant_user_id || !userInfo?.tenant_id) {
+      message.error('无法更新：缺少用户信息或租户ID。');
+      return;
+    }
+
     setEditLoading(true);
 
-    const dataToUpdate: { [key: string]: any } = {};
+  const dataToUpdate: Record<string, string | undefined> = {};
 
     // Compare form values with original userInfo and send only changed fields.
     // This prevents re-validating unchanged but currently invalid fields (e.g., a deactivated email).
@@ -113,12 +237,13 @@ const DataQueryPage: React.FC = () => {
 
     try {
       // The backend service will handle converting empty strings to null.
-      await updateUser(userInfo.tenant_user_id, dataToUpdate);
+      await updateUser(String(userInfo.tenant_user_id), userInfo.tenant_id, dataToUpdate);
       message.success('用户信息更新成功！');
       setIsEditModalVisible(false);
       await onSearch(lastSearchTerm); // 重新获取数据以刷新页面
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.message || err.message;
+    } catch (err) {
+      const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+      const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
       message.error(`更新失败: ${errorMessage}`);
     } finally {
       setEditLoading(false);
@@ -126,13 +251,17 @@ const DataQueryPage: React.FC = () => {
   };
 
   const handleDeactivate = async () => {
-    if (!userInfo?.tenant_user_id) return;
+    if (!userInfo?.tenant_user_id || !userInfo?.tenant_id) {
+      message.error('无法注销：缺少用户信息或租户ID。');
+      return;
+    }
     try {
-      await deactivateUser(userInfo.tenant_user_id);
+  await deactivateUser(String(userInfo.tenant_user_id), userInfo.tenant_id);
       message.success('账号已成功注销！');
       onSearch(lastSearchTerm); // 重新获取数据以刷新页面
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.message || err.message;
+    } catch (err) {
+      const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+      const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
       message.error(`注销失败: ${errorMessage}`);
     }
   };
@@ -145,6 +274,43 @@ const DataQueryPage: React.FC = () => {
       okType: 'danger',
       cancelText: '取消',
       onOk: handleDeactivate,
+    });
+  };
+
+  const formatTtl = (ttlInSeconds: number): string => {
+    if (ttlInSeconds < 0) {
+      return '无过期时间';
+    }
+    if (ttlInSeconds === 0) {
+      return '已过期';
+    }
+    const hours = Math.floor(ttlInSeconds / 3600);
+    const minutes = Math.floor((ttlInSeconds % 3600) / 60);
+    const seconds = ttlInSeconds % 60;
+    return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+  };
+
+  const handleDeleteRedisKey = (key: string) => {
+    modal.confirm({
+      title: '确认删除 Redis 键？',
+      content: `你确定要删除键 "${key}" 吗？此操作可能会立即解除相关限制。`,
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setDeletingKey(key);
+        try {
+          await deleteRedisKey(key);
+          message.success(`键 "${key}" 已成功删除！`);
+          await onSearch(lastSearchTerm); // 重新获取数据以刷新页面
+        } catch (err) {
+          const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+          const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
+          message.error(`删除失败: ${errorMessage}`);
+        } finally {
+          setDeletingKey(null);
+        }
+      },
     });
   };
 
@@ -179,7 +345,7 @@ const DataQueryPage: React.FC = () => {
     );
 
     return (
-      <Tabs defaultActiveKey="1" type="card">
+      <Tabs activeKey={activeTabKey} onChange={(k) => setActiveTabKey(k)} type="card">
         <TabPane tab="用户基本信息 (MySQL)" key="1">
           {userInfo ? (
             <Card
@@ -192,6 +358,7 @@ const DataQueryPage: React.FC = () => {
             >
               <Descriptions bordered column={1}>
                 <Descriptions.Item label="UID">{userInfo.tenant_user_id || 'N/A'}</Descriptions.Item>
+                <Descriptions.Item label="Tenant ID">{userInfo.tenant_id || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Email">{userInfo.email || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Telephone">{userInfo.tel || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Telephone Country Code">{userInfo.tel_country_code || 'N/A'}</Descriptions.Item>
@@ -209,13 +376,46 @@ const DataQueryPage: React.FC = () => {
         </TabPane>
         <TabPane tab="缓存数据 (Redis)" key="2">
           {redisData && redisData.length > 0 ? (
-            <Card>
-              <Descriptions title="Redis 键值对" bordered column={1} size="small">
-                {redisData.map(item => (
+            <Card title="解除OTC买币限制相关缓存键">
+              <Descriptions bordered column={1} size="small">
+                {redisData.map((item) => (
                   <Descriptions.Item key={item.key} label={item.key}>
-                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, background: '#f5f5f5', padding: '8px', borderRadius: '4px' }}>
-                      {JSON.stringify(item.value, null, 2)}
-                    </pre>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ flex: 1, marginRight: 12 }}>
+                        {item.value == null ? (
+                          <span style={{ color: '#888' }}>（空）</span>
+                        ) : typeof item.value === 'object' ? (
+                          // If object has few keys, render inline, else pretty-print JSON
+                          Object.keys(item.value).length <= 5 ? (
+                            <span>
+                              {Object.entries(item.value)
+                                .map(([k, v]) => `${k}: ${String(v)}`)
+                                .join(' | ')}
+                            </span>
+                          ) : (
+                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
+                              {JSON.stringify(item.value, null, 2)}
+                            </pre>
+                          )
+                        ) : (
+                          <span>{String(item.value)}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Tag color={item.ttl > 0 ? 'blue' : 'default'}>剩余时间: {formatTtl(item.ttl)}</Tag>
+                          <span style={{ color: '#666', fontSize: 12 }}>({item.ttl} 秒)</span>
+                        </div>
+                        <Button
+                          type="link"
+                          danger
+                          onClick={() => handleDeleteRedisKey(item.key)}
+                          loading={deletingKey === item.key}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </div>
                   </Descriptions.Item>
                 ))}
               </Descriptions>
@@ -241,6 +441,16 @@ const DataQueryPage: React.FC = () => {
           style={{ width: 400 }}
           allowClear
         />
+        {tenants.length > 0 && (
+          <Select
+            value={selectedTenantId}
+            onChange={setSelectedTenantId}
+            options={tenants.map((t) => ({ label: t.name, value: t.id }))}
+            style={{ width: 120 }}
+            loading={tenantsLoading}
+            placeholder="选择租户"
+          />
+        )}
       </Space>
       <div>
         {renderResults()}

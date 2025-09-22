@@ -52,34 +52,78 @@ export const restartDeployment = async (name: string) => {
  * @param identifier - 要查询的ID (例如 UID, email, phone)
  * @param type - 标识符的类型
  */
-export const aggregateQuery = async (identifier: string, type: 'UID' | 'EMAIL' | 'PHONE') => {
-  const response = await api.post('/query/aggregate', { identifier, type });
+export const aggregateQuery = async (
+  identifier: string,
+  type: 'UID' | 'EMAIL' | 'PHONE',
+  tenantId?: number,
+) => {
+  const response = await api.post('/query/aggregate', {
+    identifier,
+    type,
+    tenantId,
+  });
   return response.data;
 };
 
 /**
  * 更新用户信息
  * @param uid - 用户ID
+ * @param tenantId - 租户ID
  * @param data - 要更新的数据，例如 { email: 'new@email.com' }
  */
 export const updateUser = async (
   uid: string,
+  tenantId: number,
   data: { email?: string; tel?: string; tel_country_code?: string },
 ) => {
-  const response = await api.patch(`/query/users/${uid}`, data);
+  const response = await api.patch(`/query/users/${uid}`, { ...data, tenantId });
   return response.data;
 };
 
-export const deactivateUser = async (uid: string) => {
-  const response = await api.post(`/query/users/${uid}/deactivate`);
+export const deactivateUser = async (uid: string, tenantId: number) => {
+  const response = await api.post(`/query/users/${uid}/deactivate`, { tenantId });
   return response.data;
 };
 
+/**
+ * 删除一个指定的 Redis 键
+ * @param key - 要删除的键名
+ */
+export const deleteRedisKey = async (key: string) => {
+  if (!_environmentId) {
+    throw new Error('Environment ID has not been set.');
+  }
+  const response = await api.delete('/query/redis-key', { params: { key } });
+  return response.data;
+};
+
+/**
+ * 获取单个 Redis 键的信息（value + ttl）
+ * @param key - 要查询的 Redis 键名
+ */
+export const getRedisKey = async (key: string) => {
+  if (!_environmentId) {
+    throw new Error('Environment ID has not been set.');
+  }
+  const response = await api.get('/query/redis-key', { params: { key } });
+  return response.data;
+};
 /**
  * 获取当前环境的所有可管理平台
  */
 export const getPlatforms = async () => {
   const response = await api.get('/security-groups/platforms');
+  return response.data;
+};
+
+/**
+ * 获取当前环境的所有租户
+ */
+export const getTenantsForEnvironment = async () => {
+  if (!_environmentId) {
+    throw new Error('Environment ID has not been set.');
+  }
+  const response = await api.get(`/environments/${_environmentId}/tenants`);
   return response.data;
 };
 

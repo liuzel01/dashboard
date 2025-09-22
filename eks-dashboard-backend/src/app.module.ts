@@ -9,6 +9,8 @@ import { EnvironmentsModule } from './environments/environments.module';
 import { QueryModule } from './query/query.module';
 import { DatabaseModule } from './database/database.module';
 import { SecurityGroupModule } from './security-group/security-group.module';
+import { RedisModule } from './redis/redis.module';
+import { TunnelModule } from './tunnel/tunnel.module';
 
 @Module({
   imports: [
@@ -23,6 +25,8 @@ import { SecurityGroupModule } from './security-group/security-group.module';
     QueryModule,
     DatabaseModule,
     SecurityGroupModule,
+    RedisModule,
+    TunnelModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,13 +1,17 @@
 import {
   Injectable,
   InternalServerErrorException,
+  HttpException,
+  ConflictException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { RedisService } from '../redis/redis.service';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 // --- 模拟的数据服务，请替换为你自己的真实服务 ---
-@Injectable()
+/*@Injectable()
 export class RedisDataService {
   async findKeysByUid(uid: string) {
     if (uid === '12345') {
@@ -21,7 +25,7 @@ export class RedisDataService {
     }
     return [];
   }
-}
+}*/
 
 @Injectable()
 export class MongoDataService {
@@ -38,26 +42,96 @@ export class QueryService {
 
   constructor(
     private readonly databaseService: DatabaseService,
-    private readonly redisService: RedisDataService,
+    private readonly redisService: RedisService,
     private readonly mongoService: MongoDataService,
   ) {}
 
-  async aggregate(identifier: string, type: string) {
-    this.logger.log(`Aggregating data for ${type}: ${identifier}`);
+  // Helper to fetch a single redis key and return TTL and formatted TTL
+  async getRedisKey(environmentId: string, key: string) {
+    try {
+      const result = await this.redisService.getKeyWithTtl(environmentId, key);
+      const ttl = result.ttl; // seconds
+      // If TTL is -2 it means the key does not exist. Return 404 so front-end won't show a non-existent key.
+      if (ttl === -2) {
+        throw new NotFoundException(`Key "${key}" not found.`);
+      }
+      const formatted = this.formatTtl(ttl);
+      return {
+        key: result.key,
+        value: result.value,
+        ttlSeconds: ttl,
+        ttlFormatted: formatted,
+      };
+    } catch (e) {
+      // Use warn level here because missing keys or transient redis timeouts are
+      // expected in some flows and should not be logged as ERROR for routine queries.
+      this.logger.warn(
+        `Warning fetching redis key ${key} in env ${environmentId}: ${String(e)}`,
+      );
+      throw e;
+    }
+  }
+
+  private formatTtl(ttl: number) {
+    if (ttl === -2) return '不存在';
+    if (ttl === -1) return '无过期时间';
+    const sec = Math.max(0, Math.floor(ttl));
+    const hours = Math.floor(sec / 3600);
+    const minutes = Math.floor((sec % 3600) / 60);
+    const seconds = sec % 60;
+    return `${hours}小时${minutes}分钟${seconds}秒`;
+  }
+
+  async aggregate(
+    environmentId: string,
+    identifier: string,
+    type: 'UID' | 'EMAIL' | 'PHONE',
+    tenantId?: number,
+  ) {
+    this.logger.log(
+      `Aggregating data for ${type}: ${identifier} in env ${environmentId} (tenant: ${tenantId || 'any'})`,
+    );
     const uid = identifier; // 简化处理，真实应用中可能需要转换
 
-    const results = await Promise.allSettled([
-      this.databaseService.findUserByUid(uid),
-      this.redisService.findKeysByUid(uid),
-      this.mongoService.findActivityByUid(uid),
-    ]);
+    // 步骤 1: 从 MySQL 获取用户以找到数据库 ID
+    const user = await this.databaseService.findUserByUid(
+      environmentId,
+      uid,
+      tenantId,
+    );
 
-    const [mysqlResult, redisResult, mongoResult] = results;
+    // 步骤 2: 根据用户 ID 查询 Redis 和 Mongo
+    const redisPromise = user?.id
+      ? (async () => {
+          // Wrap Redis call with a short timeout so slow/unavailable Redis won't
+          // block the whole aggregation. If it times out, return not found.
+          const p = this.redisService.getKeysWithTtl(
+            environmentId,
+            `*${user.id}*`,
+          );
+          const timeoutMs = 2500;
+          const timeout = new Promise<any>((res) =>
+            setTimeout(() => res([]), timeoutMs),
+          );
+          try {
+            return await Promise.race([p, timeout]);
+          } catch (e) {
+            this.logger.warn('Redis subquery failed or timed out', e);
+            return [];
+          }
+        })()
+      : Promise.resolve([]); // 如果没有用户，则不查询 redis
+
+    const mongoPromise = this.mongoService.findActivityByUid(uid);
+
+    const results = await Promise.allSettled([redisPromise, mongoPromise]);
 
     return {
-      mysql: this.formatSettledResult(mysqlResult, '未找到用户信息'),
-      redis: this.formatSettledResult(redisResult, '未找到缓存数据'),
-      mongo: this.formatSettledResult(mongoResult, '未找到活动日志'),
+      mysql: user
+        ? { status: 'success', data: user }
+        : { status: 'not_found', error: '未找到用户信息' },
+      redis: this.formatSettledResult(results[0], '未找到缓存数据'),
+      mongo: this.formatSettledResult(results[1], '未找到活动日志'),
     };
   }
 
@@ -72,84 +146,169 @@ export class QueryService {
       }
       return { status: 'not_found', error: notFoundMessage };
     }
-    this.logger.error('一个子查询失败', result.reason);
-    return { status: 'error', error: result.reason.message || '查询失败' };
+    // Downgrade to warn: a subquery failing (e.g., redis timeout) should not be
+    // treated as a full ERROR in the unified query endpoint logs.
+    this.logger.warn('一个子查询失败', result.reason);
+    return { status: 'error', error: result.reason?.message || '查询失败' };
   }
 
   async updateUser(
+    environmentId: string,
     uid: string,
-    data: {
-      email?: string | null;
-      tel?: string | null;
-      tel_country_code?: string | null;
-    },
+    tenantId: number,
+    data: UpdateUserDto,
   ) {
-    const updatePayload: { [key: string]: any } = {};
+    // This try-catch block will capture raw database errors (like permission issues)
+    // and provide a more informative error message to the frontend.
+    try {
+      const updatePayload: { [key: string]: any } = {};
 
-    // 只处理请求中明确提供的字段，避免因DTO中未提供的字段为undefined而引发问题
-    if (data.email !== undefined) {
-      // DTO中的 @Transform 已经将 '' 转换为了 null
-      updatePayload.email = data.email;
-    }
-
-    // 只有在请求中明确提供了 tel 字段时才处理
-    if (data.tel !== undefined) {
-      if (data.tel === '') {
-        // 业务规则：如果电话号码被清空，电话国家代码也必须被清空
-        updatePayload.tel = null;
-        updatePayload.tel_country_code = null;
-      } else {
-        updatePayload.tel = data.tel;
-        // 如果电话号码被更新，并且请求中也包含了国家代码，则一并更新
-        if (data.tel_country_code !== undefined) {
-          updatePayload.tel_country_code = data.tel_country_code;
-        }
+      // 只处理请求中明确提供的字段，避免因DTO中未提供的字段为undefined而引发问题
+      if (data.email !== undefined) {
+        // DTO中的 @Transform 已经将 '' 转换为了 null
+        updatePayload.email = data.email;
       }
-    } else if (data.tel_country_code !== undefined) {
-      // 处理只更新国家代码的场景
-      updatePayload.tel_country_code = data.tel_country_code;
-    }
 
-    if (Object.keys(updatePayload).length === 0) {
-      return { message: 'No fields to update.' };
-    }
+      // 只有在请求中明确提供了 tel 字段时才处理
+      if (data.tel !== undefined) {
+        if (data.tel === '') {
+          // 业务规则：如果电话号码被清空，电话国家代码也必须被清空
+          updatePayload.tel = null;
+          updatePayload.tel_country_code = null;
+        } else {
+          updatePayload.tel = data.tel;
+          // 如果电话号码被更新，并且请求中也包含了国家代码，则一并更新
+          if (data.tel_country_code !== undefined) {
+            updatePayload.tel_country_code = data.tel_country_code;
+          }
+        }
+      } else if (data.tel_country_code !== undefined) {
+        // 处理只更新国家代码的场景
+        updatePayload.tel_country_code = data.tel_country_code;
+      }
 
-    const result = await this.databaseService.updateUserByUid(
-      uid,
-      updatePayload,
-    );
-    if (result.affectedRows === 0) {
-      throw new NotFoundException(`User with UID ${uid} not found.`);
+      if (Object.keys(updatePayload).length === 0) {
+        return { message: 'No fields to update.' };
+      }
+
+      const result = await this.databaseService.updateUserByUid(
+        environmentId,
+        uid,
+        tenantId,
+        updatePayload,
+      );
+      if (result.affectedRows === 0) {
+        throw new NotFoundException(`User with UID ${uid} not found.`);
+      }
+      return { message: 'User updated successfully.' };
+    } catch (error) {
+      // 专门处理唯一约束冲突错误
+      if (error?.code === 'ER_DUP_ENTRY') {
+        if (error.message.includes('tbl_user_tel_tenantId_uindex')) {
+          throw new ConflictException(
+            '此电话号码已被同一租户下的其他用户使用。',
+          );
+        }
+        // 可以为其他唯一键添加更多判断
+        throw new ConflictException(
+          '更新失败，因为一个或多个字段的值与现有记录冲突。',
+        );
+      }
+      // If it's an exception we've already handled (like NotFoundException), rethrow it.
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      // Otherwise, log the specific DB error and wrap it in a 500 error.
+      this.logger.error(
+        `Database error while updating user ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException(
+        `Database error on update: ${error.message}`,
+      );
     }
-    return { message: 'User updated successfully.' };
   }
 
-  async deactivateUser(uid: string) {
-    const user = await this.databaseService.findUserByUid(uid);
-    if (!user) {
-      throw new NotFoundException(`User with UID ${uid} not found.`);
-    }
+  async deactivateUser(environmentId: string, uid: string, tenantId: number) {
+    try {
+      const user = await this.databaseService.findUserByUid(
+        environmentId,
+        uid,
+        tenantId,
+      );
+      if (!user) {
+        throw new NotFoundException(`User with UID ${uid} not found.`);
+      }
 
-    const updates: { [key: string]: any } = {};
+      const updates: { [key: string]: any } = {};
 
-    // Only append -del if it's not already there
-    if (user.email && !user.email.endsWith('-del')) {
-      updates.email = `${user.email}-del`;
-    }
-    if (user.tel && !user.tel.endsWith('-del')) {
-      updates.tel = `${user.tel}-del`;
-    }
+      // Only append -del if it's not already there and the field is a string
+      if (typeof user.email === 'string' && !user.email.endsWith('-del')) {
+        updates.email = `${user.email}-del`;
+      }
+      if (typeof user.tel === 'string' && !user.tel.endsWith('-del')) {
+        updates.tel = `${user.tel}-del`;
+      }
 
-    if (Object.keys(updates).length === 0) {
-      return {
-        message: 'User already deactivated or has no email/phone to mark.',
-      };
-    }
+      if (Object.keys(updates).length === 0) {
+        return {
+          message: 'User already deactivated or has no email/phone to mark.',
+        };
+      }
 
-    const result = await this.databaseService.updateUserByUid(uid, updates);
-    if (result.affectedRows === 0) {
-      throw new InternalServerErrorException('Failed to deactivate user.');
+      const result = await this.databaseService.updateUserByUid(
+        environmentId,
+        uid,
+        tenantId,
+        updates,
+      );
+      if (result.affectedRows === 0) {
+        // FIX: This is a logic bug. It should be a 404, not a 500.
+        // This can happen if the user is deleted between the SELECT and UPDATE.
+        this.logger.warn(
+          `Deactivation for user ${uid} in env ${environmentId} affected 0 rows. The user might have been deleted.`,
+        );
+        throw new NotFoundException(
+          `Failed to deactivate user with UID ${uid}. The record may have been modified or deleted.`,
+        );
+      }
+      return { message: 'User deactivated successfully.' };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(
+        `Database error while deactivating user ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException(
+        `Database error on deactivation: ${error.message}`,
+      );
     }
-    return { message: 'User deactivated successfully.' };
+  }
+
+  async deleteRedisKey(environmentId: string, key: string) {
+    try {
+      const deletedCount = await this.redisService.deleteKey(
+        environmentId,
+        key,
+      );
+      if (deletedCount > 0) {
+        return { message: `Key "${key}" deleted successfully.` };
+      } else {
+        throw new NotFoundException(`Key "${key}" not found.`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error deleting Redis key "${key}" in env ${environmentId}:`,
+        error,
+      );
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Failed to delete key: ${error.message}`,
+      );
+    }
   }
 }

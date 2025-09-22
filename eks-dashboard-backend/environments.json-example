@@ -2,14 +2,93 @@
   {
     "id": "hashex",
     "name": "Hashex - 测试 (ap-east-1)",
-    "aws_access_key_id": "access_key",
-    "aws_secret_access_key": "secret_key",
+    "aws_profile": "hashex",
     "aws_region": "ap-east-1",
     "kubeContext": "hash",
+    "database": {
+      "host": "18.11",
+      "port": 3306,
+      "user": "root",
+      "password": "Passwd",
+      "database": "spot"
+    },
+    "redis": {
+      "host": "18.11",
+      "port": 6379,
+      "password": "Passwd!"
+    },
+    "tenants": [
+      { "id": 1, "name": "hashex"},
+    ],
     "platforms": [
       {
-        "name": "shanghu管理端",
-        "loadBalancerArn": "arn:ADDRESS"
+        "name": "商户管理端",
+        "loadBalancerArn": "hashex"
+      }
+    ]
+  },
+  {
+    "id": "icoin",
+    "name": "iCoin - 生产 (ap-northeast-1)",
+    "aws_profile": "icoin",
+    "aws_region": "ap-northeast-1",
+    "kubeContext": "icoin-old",
+    "database": {
+      "host": "icoin.1.ap-northeast-1.rds.amazonaws.com",
+      "port": 3306,
+      "user": "root",
+      "password": "Passwd+YCP0s",
+      "database": "spot"
+    },
+    "jumpServer": {
+      "host": "3.11",
+      "port": 22,
+      "username": "ubuntu",
+      "privateKeyPath": "icoin-jmper.pem"
+    },
+    "redis": {
+      "host": "master.icoin.unyljr.apne1.cache.amazonaws.com",
+      "port": 6379,
+      "password": "Passwd",
+      "ssl": true
+    },
+    "tenants": [
+      { "id": 1, "name": "skybit"},
+      { "id": 2, "name": "icoin" },
+      { "id": 4, "name": "aget" },
+      { "id": 5, "name": "event" },
+      { "id": 6, "name": "mini" }
+    ],
+    "platforms": [
+      {
+        "name": "超级管理端",
+        "loadBalancerArn": "icoin"
+      }
+    ]
+  },
+  {
+    "id": "tb",
+    "name": "TB - 生产 (ap-east-1)",
+    "aws_profile": "",
+    "aws_region": "ap-southeast-1",
+    "kubeContext": "",
+    "platforms": [
+      {
+        "name": "超级管理端",
+        "loadBalancerArn": "tb"
+      }
+    ]
+  },
+  {
+    "id": "tbtest",
+    "name": "TB - 测试 (ap-east-1)",
+    "aws_profile": "",
+    "aws_region": "ap-east-1",
+    "kubeContext": "",
+    "platforms": [
+      {
+        "name": "超级管理端",
+        "loadBalancerArn": "tbtest"
       }
     ]
   }

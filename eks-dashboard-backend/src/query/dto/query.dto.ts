@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsOptional, IsInt } from 'class-validator';
 
 export class AggregateQueryDto {
   @IsString()
@@ -10,4 +10,8 @@ export class AggregateQueryDto {
   @IsString()
   @IsNotEmpty()
   type: 'UID' | 'EMAIL' | 'PHONE';
+
+  @IsOptional()
+  @IsInt()
+  tenantId?: number;
 }
