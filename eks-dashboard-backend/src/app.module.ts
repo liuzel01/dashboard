@@ -11,6 +11,7 @@ import { DatabaseModule } from './database/database.module';
 import { SecurityGroupModule } from './security-group/security-group.module';
 import { RedisModule } from './redis/redis.module';
 import { TunnelModule } from './tunnel/tunnel.module';
+import { LogsModule } from './logs/logs.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { TunnelModule } from './tunnel/tunnel.module';
     SecurityGroupModule,
     RedisModule,
     TunnelModule,
+    LogsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

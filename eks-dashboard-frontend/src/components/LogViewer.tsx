@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Modal, Spin, Alert, Button, Space } from 'antd';
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import { FullscreenOutlined, FullscreenExitOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { AnsiUp } from 'ansi_up';
 
@@ -13,6 +13,10 @@ interface LogViewerProps {
 
 const ansiUp = new AnsiUp();
 
+interface ViteMetaEnv {
+  VITE_SOCKET_URL?: string;
+}
+
 export const LogViewer: React.FC<LogViewerProps> = ({
   deploymentName,
   environmentId,
@@ -24,6 +28,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
+  const [currentCandidate, setCurrentCandidate] = useState<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,39 +39,119 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       setIsConnected(false);
       setIsAutoScrollEnabled(true); // 每次打开时重置为自动滚动
 
-      // 通过调用不带 URL 的 io()，它将自动连接到提供网页的服务器。
-      // Vite 的代理配置将处理 WebSocket 连接的转发。
-      const newSocket = io({
-        transports: ['websocket'],
-      });
+      const socketUrl = (import.meta as unknown as { env?: ViteMetaEnv })?.env?.VITE_SOCKET_URL;
+      const backendFallback = socketUrl || 'http://localhost:3000';
+      const candidates: (string | undefined)[] = [undefined, socketUrl, backendFallback];
 
-      newSocket.on('connect', () => {
-        console.log('WebSocket connected');
-        setIsConnected(true);
-        // 发送一个包含 deploymentName 和 environmentId 的对象
-        newSocket.emit('get-logs', { deploymentName, environmentId });
-      });
+      let connected = false;
+      let stopped = false;
+      let activeSocket: Socket | null = null;
 
-      newSocket.on('log-chunk', (chunk: string) => {
-        setLogs((prevLogs) => [...prevLogs, chunk]);
-      });
+      const tryConnect = async (candidate?: string): Promise<Socket> => {
+        if (stopped || connected) throw new Error('stopped_or_connected');
+        // allow polling as a fallback transport when websocket handshake fails
+        const transports = ['polling', 'websocket'];
+        const socket = candidate
+          ? io(candidate, { path: '/socket.io', transports })
+          : io({ path: '/socket.io', transports });
+        setCurrentCandidate(candidate ?? '页面代理(default)');
 
-      newSocket.on('log-error', (errorMessage: string) => {
-        setError(errorMessage);
-      });
+        const timeout = setTimeout(() => {
+          if (!connected) {
+            try {
+              socket.disconnect();
+            } catch {
+              // ignore disconnect errors
+            }
+          }
+        }, 4000);
 
-      newSocket.on('log-end', (endMessage: string) => {
-        setLogs((prevLogs) => [...prevLogs, `\n--- ${endMessage} ---\n`]);
-      });
+        socket.on('connect', () => {
+          clearTimeout(timeout);
+          connected = true;
+          activeSocket = socket;
+          console.log('WebSocket connected via', candidate ?? 'default/proxy');
+          setIsConnected(true);
+          setError(null);
+          socket.emit('get-logs', { deploymentName, environmentId });
+        });
 
-      newSocket.on('disconnect', () => {
-        console.log('WebSocket disconnected');
-        setIsConnected(false);
-      });
+        socket.on('connect_error', (err: unknown) => {
+          console.warn('WebSocket connect_error via', candidate ?? 'default/proxy', err);
+          if (!connected) {
+            setError(`无法连接日志服务（尝试 ${candidate ?? '页面代理'} 失败）。${candidate ? '请检查后端是否监听该地址。' : '请检查 Vite 代理配置或后端。'}`); 
+          }
+        });
 
-      // 组件卸载时断开连接
+        socket.on('connect_timeout', (timeout) => {
+          console.warn('connect_timeout', candidate, timeout);
+          if (!connected) setError(`连接超时（尝试 ${candidate ?? '页面代理'}）`);
+        });
+
+        socket.on('error', (err: unknown) => {
+          console.warn('socket error', candidate, err);
+          if (!connected) setError(`Socket 错误（${candidate ?? '页面代理'}）：${String(err)}`);
+        });
+
+        socket.io?.on('reconnect_attempt', (attempt) => {
+          console.log('reconnect attempt', attempt);
+        });
+
+        socket.on('disconnect', () => {
+          console.log('WebSocket disconnected');
+          setIsConnected(false);
+        });
+
+        socket.on('log-chunk', (chunk: string) => setLogs((prev) => [...prev, chunk]));
+        socket.on('log-error', (msg: string) => setError(msg));
+        socket.on('log-end', (m: string) => setLogs((prev) => [...prev, `\n--- ${m} ---\n`]));
+
+        return socket;
+      };
+
+      (async () => {
+        let socketInstance: Socket | null = null;
+        for (const c of candidates) {
+          if (stopped || connected) break;
+          try {
+            console.log('尝试连接日志服务，候选地址：', c ?? '页面代理（默认）');
+            socketInstance = await tryConnect(c);
+
+            // wait up to ~4.2s for connection
+            let waited = 0;
+            while (!connected && waited < 4200) {
+              // wait in loop for connection
+              await new Promise((r) => setTimeout(r, 200));
+              waited += 200;
+            }
+
+            if (connected) {
+              // activeSocket 已设置为成功的 socket
+              break;
+            }
+          } catch (e) {
+            console.warn('connect attempt failed', c, e);
+          }
+
+          // If this attempt didn't succeed, ensure the instance is disconnected.
+          try {
+            if (socketInstance && socketInstance.disconnect) socketInstance.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+      })();
+
+      // cleanup
       return () => {
-        newSocket.disconnect();
+        stopped = true;
+        setIsConnected(false);
+        try {
+          if (activeSocket && activeSocket.disconnect) activeSocket.disconnect();
+        } catch {
+          // ignore
+        }
+        setCurrentCandidate(null);
       };
     } else if (visible) {
       // 如果弹窗可见但缺少必要信息，则显示错误
@@ -116,7 +201,10 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       return <Spin tip="正在连接日志服务..." />;
     }
     if (error) {
-      return <Alert message="日志错误" description={error} type="error" showIcon />;
+      const desc = currentCandidate
+        ? `${error}（尝试地址：${currentCandidate}）`
+        : error;
+      return <Alert message="日志错误" description={desc} type="error" showIcon />;
     }
     if (logs.length === 0 && isConnected && !error) {
       return <Spin tip="正在等待日志流..." />;
@@ -153,7 +241,8 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       footer={null}
       width={isMaximized ? '100%' : '80vw'}
       style={isMaximized ? { top: 0, padding: 0, maxWidth: '100vw', height: '100vh' } : {}}
-      bodyStyle={{ padding: 0, height: isMaximized ? 'calc(100vh - 55px)' : '60vh', position: 'relative' }}
+      // AntD v5 deprecates `bodyStyle` in favor of `styles` for specific parts.
+      styles={{ body: { padding: 0, height: isMaximized ? 'calc(100vh - 55px)' : '60vh', position: 'relative' } }}
       destroyOnClose // 关闭时销毁 Modal 里的子元素，确保下次打开是全新的
     >
       <div
