@@ -105,4 +105,48 @@ export class QueryController {
     }
     return this.queryService.getRedisKey(environmentId, key);
   }
+
+  @Get('users/:uid/trader')
+  async getTraderInfo(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (!tenantId) {
+      throw new HttpException(
+        'Query parameter "tenantId" is required.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const tId = Number(tenantId);
+    return this.queryService.getTraderInfoByUserUid(environmentId, uid, tId);
+  }
+
+  @Patch('users/:uid/trader')
+  async updateTraderNick(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Body() body: { nick_name?: string; tenantId?: number },
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (body.nick_name === undefined) {
+      throw new HttpException(
+        'nick_name is required in body',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (body.tenantId === undefined) {
+      throw new HttpException(
+        'tenantId is required in body',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.queryService.updateTraderNickName(
+      environmentId,
+      uid,
+      body.nick_name,
+      body.tenantId,
+    );
+  }
 }

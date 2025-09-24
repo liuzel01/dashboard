@@ -109,6 +109,22 @@ export const getRedisKey = async (key: string) => {
   return response.data;
 };
 /**
+ * 获取指定用户的交易员信息（tiger.copy_trade_user_info）
+ * @param uid - tbl_user.tenant_user_id
+ */
+export const getTraderInfo = async (uid: string, tenantId: number) => {
+  const response = await api.get(`/query/users/${uid}/trader`, { params: { tenantId } });
+  return response.data;
+};
+
+/**
+ * 更新指定用户的交易员 nick_name 字段
+ */
+export const updateTraderNickName = async (uid: string, nickName: string, tenantId: number) => {
+  const response = await api.patch(`/query/users/${uid}/trader`, { nick_name: nickName, tenantId });
+  return response.data;
+};
+/**
  * 获取当前环境的所有可管理平台
  */
 export const getPlatforms = async () => {

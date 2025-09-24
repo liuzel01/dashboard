@@ -26,7 +26,9 @@ import {
   deleteRedisKey,
   getTenantsForEnvironment,
   getRedisKey,
+  getTraderInfo,
 } from '../services/api';
+import { updateTraderNickName } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import PlaceholderPage from './PlaceholderPage';
 
@@ -73,6 +75,12 @@ const DataQueryPage: React.FC = () => {
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
+  const [traderInfo, setTraderInfo] = useState<Record<string, unknown> | null>(null);
+  const [isTraderEditVisible, setIsTraderEditVisible] = useState(false);
+  const [traderEditLoading, setTraderEditLoading] = useState(false);
+  const [traderLoading, setTraderLoading] = useState(false);
+  const [traderDetailVisible, setTraderDetailVisible] = useState(false);
+  const [traderForm] = Form.useForm();
   const [lastSearchTerm, setLastSearchTerm] = useState('');
   const [tenants, setTenants] = useState<{ id: number; name: string }[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(
@@ -138,6 +146,14 @@ const DataQueryPage: React.FC = () => {
       if (isNumeric) {
         const uid = value.trim();
         const tenantFromRef = currentTenantRef.current;
+        if (!tenantFromRef) {
+          message.error('查询前请先选择租户。');
+          setUserInfo(null);
+          setRedisData(null);
+          setTraderInfo(null);
+          setLoading(false);
+          return;
+        }
         // Query MySQL user info (best-effort)
         try {
           const results = await aggregateQuery(uid, 'UID', tenantFromRef);
@@ -146,6 +162,20 @@ const DataQueryPage: React.FC = () => {
         } catch {
           setUserInfo(null);
         }
+
+          // 当 userInfo 可用时，再去查询交易员信息
+          try {
+            setTraderLoading(true);
+            setTraderInfo(null);
+            const trader = await getTraderInfo(uid, tenantFromRef!);
+            console.debug('getTraderInfo response for', uid, 'tenant', tenantFromRef, trader);
+            setTraderInfo(trader || null);
+          } catch (err) {
+            console.warn('getTraderInfo failed', err);
+            setTraderInfo(null);
+          } finally {
+            setTraderLoading(false);
+          }
 
         // Construct Redis key from tenant_user_id and fetch it
         const key = `reset_pass_forbid_succ${uid}`;
@@ -348,8 +378,9 @@ const DataQueryPage: React.FC = () => {
       <Tabs activeKey={activeTabKey} onChange={(k) => setActiveTabKey(k)} type="card">
         <TabPane tab="用户基本信息 (MySQL)" key="1">
           {userInfo ? (
+            <>
             <Card
-              title="用户详情 (常用字段)"
+              title="用户详情 (spot.tbl_user)"
               extra={
                 <Dropdown overlay={userActionsMenu}>
                   <Button>操作 <DownOutlined /></Button>
@@ -372,6 +403,63 @@ const DataQueryPage: React.FC = () => {
                 查看全部字段
               </Button>
             </Card>
+            {/* Trader info section - rendered after the user details card so it can show independently */}
+            <div style={{ marginTop: 16 }}>
+              <Card
+                title="交易员信息 (tiger.copy_trade_user_info)"
+                extra={
+                  traderInfo ? (
+                    <Dropdown overlay={
+                      <Menu>
+                        <Menu.Item key="edit" onClick={() => {
+                          // open trader edit modal and set form value
+                          traderForm.setFieldsValue({ nick_name: traderInfo?.nick_name ?? '' });
+                          setIsTraderEditVisible(true);
+                        }}>
+                          编辑信息
+                        </Menu.Item>
+                      </Menu>
+                    }>
+                      <Button>操作 <DownOutlined /></Button>
+                    </Dropdown>
+                  ) : null
+                }
+              >
+                <Spin spinning={traderLoading} tip="正在查询交易员信息...">
+                  {traderInfo ? (
+                    <div>
+                      {/* 展示常用字段：与用户详情处保持一致的展示方式 */}
+                      <Descriptions bordered column={1}>
+                        {(() => {
+                          // 挑选常用字段，如果不存在则使用前几个字段
+                          const commonKeys = ['user_id', 'nick_name', 'id', 'status', 'create_time'];
+                          const entries = Object.entries(traderInfo);
+                          const shown: [string, unknown][] = [];
+                          for (const k of commonKeys) {
+                            if (k in (traderInfo as Record<string, unknown>)) {
+                              shown.push([k, (traderInfo as Record<string, unknown>)[k]]);
+                            }
+                          }
+                          if (shown.length === 0) {
+                            // fallback: show first 3 fields
+                            for (let i = 0; i < Math.min(3, entries.length); i++) shown.push(entries[i]);
+                          }
+                          return shown.map(([k, v]) => (
+                            <Descriptions.Item key={k} label={k}>{v == null ? 'N/A' : String(v)}</Descriptions.Item>
+                          ));
+                        })()}
+                      </Descriptions>
+                      <div style={{ marginTop: 12 }}>
+                        <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setTraderDetailVisible(true)}>查看全部字段</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Empty description="无交易员信息" />
+                  )}
+                </Spin>
+              </Card>
+            </div>
+            </>
           ) : ( <Empty description="无用户基本信息" /> )}
         </TabPane>
         <TabPane tab="缓存数据 (Redis)" key="2">
@@ -482,6 +570,62 @@ const DataQueryPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      {/* 编辑交易员 nick_name 模态框 */}
+      <Modal
+        title="编辑交易员 nick_name"
+        open={isTraderEditVisible}
+        onCancel={() => setIsTraderEditVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Form form={traderForm} layout="vertical" onFinish={async (vals: { nick_name: string }) => {
+          if (!userInfo?.tenant_user_id) {
+            message.error('缺少用户 UID，无法更新');
+            return;
+          }
+          setTraderEditLoading(true);
+          try {
+            const tenantIdForCall = userInfo.tenant_id || currentTenantRef.current!;
+            await updateTraderNickName(String(userInfo.tenant_user_id), vals.nick_name, tenantIdForCall!);
+            message.success('交易员 nick_name 更新成功');
+            setIsTraderEditVisible(false);
+            // refresh trader info
+            const t = await getTraderInfo(String(userInfo.tenant_user_id), tenantIdForCall!);
+            setTraderInfo(t || null);
+          } catch (err) {
+            const e = err as { response?: { data?: { message?: string } }; message?: string };
+            const msg = e?.response?.data?.message || e?.message || String(err);
+            message.error(`更新失败: ${msg}`);
+          } finally {
+            setTraderEditLoading(false);
+          }
+        }}>
+          <Form.Item name="nick_name" label="nick_name">
+            <Input />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={traderEditLoading}>保存</Button>
+          </Form.Item>
+        </Form>
+      </Modal>
+      {/* 交易员全部字段 Modal */}
+      {traderInfo && (
+        <Modal
+          title="交易员所有字段信息"
+          open={traderDetailVisible}
+          onCancel={() => setTraderDetailVisible(false)}
+          footer={[
+            <Button key="back" onClick={() => setTraderDetailVisible(false)}>关闭</Button>,
+          ]}
+          width={800}
+        >
+          <Descriptions bordered column={1} size="small" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {Object.entries(traderInfo).map(([key, value]) => (
+              <Descriptions.Item key={key} label={key}>{String(value)}</Descriptions.Item>
+            ))}
+          </Descriptions>
+        </Modal>
+      )}
       {userInfo && (
         <Modal
           title="用户所有字段信息"

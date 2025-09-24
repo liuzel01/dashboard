@@ -198,4 +198,14 @@ export class DatabaseService implements OnModuleDestroy {
     const [result] = await pool.execute(sql, values);
     return result as mysql.ResultSetHeader;
   }
+
+  /**
+   * Run an arbitrary parameterized query against the environment's database.
+   * Returns the raw result from mysql2 (rows or ResultSetHeader).
+   */
+  async runQuery(environmentId: string, sql: string, params: any[] = []) {
+    const pool = await this.getPool(environmentId);
+    const res = await pool.execute(sql, params);
+    return res;
+  }
 }
