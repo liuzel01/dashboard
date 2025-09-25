@@ -171,7 +171,14 @@ const DataQueryPage: React.FC = () => {
             console.debug('getTraderInfo response for', uid, 'tenant', tenantFromRef, trader);
             setTraderInfo(trader || null);
           } catch (err) {
-            console.warn('getTraderInfo failed', err);
+            // If the error is a 404, it's an expected "not found" case, not a system error.
+            const axiosError = err as { response?: { status?: number } };
+            if (axiosError.response?.status === 404) {
+              console.log(`Trader info not found for UID ${uid} (tenant: ${tenantFromRef})`);
+            } else {
+              // For other errors (500, network issues), log it as a warning.
+              console.warn('getTraderInfo failed', err);
+            }
             setTraderInfo(null);
           } finally {
             setTraderLoading(false);
@@ -572,7 +579,7 @@ const DataQueryPage: React.FC = () => {
       </Modal>
       {/* 编辑交易员 nick_name 模态框 */}
       <Modal
-        title="编辑交易员 nick_name"
+        title="编辑交易员昵称"
         open={isTraderEditVisible}
         onCancel={() => setIsTraderEditVisible(false)}
         footer={null}
@@ -587,7 +594,7 @@ const DataQueryPage: React.FC = () => {
           try {
             const tenantIdForCall = userInfo.tenant_id || currentTenantRef.current!;
             await updateTraderNickName(String(userInfo.tenant_user_id), vals.nick_name, tenantIdForCall!);
-            message.success('交易员 nick_name 更新成功');
+            message.success('交易员昵称更新成功');
             setIsTraderEditVisible(false);
             // refresh trader info
             const t = await getTraderInfo(String(userInfo.tenant_user_id), tenantIdForCall!);
