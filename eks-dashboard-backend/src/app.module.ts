@@ -12,6 +12,8 @@ import { SecurityGroupModule } from './security-group/security-group.module';
 import { RedisModule } from './redis/redis.module';
 import { TunnelModule } from './tunnel/tunnel.module';
 import { LogsModule } from './logs/logs.module';
+import { LinesModule } from './lines/lines.module';
+import { SiteMonitorModule } from './site-monitor/site-monitor.module';
 
 @Module({
   imports: [
@@ -29,6 +31,8 @@ import { LogsModule } from './logs/logs.module';
     RedisModule,
     TunnelModule,
     LogsModule,
+    LinesModule,
+    SiteMonitorModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,11 +1,13 @@
 import React, { useContext } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Layout, Menu, App as AntApp, Select, Spin, Alert } from 'antd';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { Layout, Menu, Select, Spin, Alert } from 'antd';
+import { Link, Routes, Route, useLocation } from 'react-router-dom';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
 import SecurityGroupPage from './pages/SecurityGroupPage';
+import LineListPage from './pages/LineListPage';
+import SiteMonitorPage from './pages/SiteMonitorPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import './App.css';
 import Home from './pages/Home';
@@ -52,6 +54,12 @@ const AppLayout: React.FC = () => {
           <Menu.Item key="/security-groups" icon={<SafetyCertificateOutlined />}>
             <Link to="/security-groups">安全组管理</Link>
           </Menu.Item>
+          <Menu.Item key="/lines" icon={<GlobalOutlined />}>
+            <Link to="/lines">线路列表</Link>
+          </Menu.Item>
+          <Menu.Item key="/site-monitors" icon={<AimOutlined />}>
+            <Link to="/site-monitors">站点监控</Link>
+          </Menu.Item>
         </Menu>
       </Sider>
       <Layout
@@ -78,6 +86,8 @@ const AppLayout: React.FC = () => {
               <Route path="/jump-servers" element={<WindowsJumpServerPage />} />
               <Route path="/data-query" element={<DataQueryPage />} />
               <Route path="/security-groups" element={<SecurityGroupPage />} />
+              <Route path="/lines" element={<LineListPage />} />
+              <Route path="/site-monitors" element={<SiteMonitorPage />} />
               {/* 默认路由，指向第一个菜单项 */}
               <Route path="/" element={<Home />} />
             </Routes>
@@ -88,14 +98,10 @@ const AppLayout: React.FC = () => {
   );
 };
 
-const App: React.FC = () => {
-  return (
-    <AntApp>
-      <EnvironmentProvider>
-        <AppLayout />
-      </EnvironmentProvider>
-    </AntApp>
-  );
-};
+const App: React.FC = () => (
+  <EnvironmentProvider>
+    <AppLayout />
+  </EnvironmentProvider>
+);
 
 export default App;

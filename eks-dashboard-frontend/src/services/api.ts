@@ -231,3 +231,88 @@ export const resetJumpServerPassword = async (instanceId: string) => {
   const response = await api.post(`/jump-servers/${instanceId}/reset-password`);
   return response.data;
 };
+
+/**
+ * 获取线路列表
+ * @param params - 包含分页和租户ID的参数
+ */
+export const getLines = async (params: { page: number; size: number; tenantId: number; lineUrl?: string }) => {
+  const response = await api.get('/lines', { params });
+  return response.data;
+};
+
+// Site Monitors
+export const getSiteMonitors = async (tenantId?: number) => {
+  if (!_environmentId) {
+    throw new Error('Environment ID has not been set.');
+  }
+  const response = await api.get('/site-monitors', {
+    params: tenantId !== undefined ? { tenantId } : undefined,
+    headers: { 'X-Target-Environment': _environmentId },
+  });
+  return response.data;
+};
+
+export const createSiteMonitor = async (data: {
+  name: string;
+  host: string;
+  port: number;
+  isHttps: boolean;
+  environmentLabel?: string;
+  notes?: string;
+  tenantId?: number;
+  acceptableStatusCodes?: string;
+}) => {
+  const response = await api.post('/site-monitors', data, {
+    headers: { 'X-Target-Environment': _environmentId },
+  });
+  return response.data;
+};
+
+export const deleteSiteMonitor = async (id: number) => {
+  const response = await api.delete(`/site-monitors/${id}`, {
+    headers: { 'X-Target-Environment': _environmentId },
+  });
+  return response.data;
+};
+
+export const checkSiteMonitor = async (id: number) => {
+  const response = await api.post(`/site-monitors/${id}/check`, undefined, {
+    headers: { 'X-Target-Environment': _environmentId },
+  });
+  return response.data;
+};
+
+export const updateSiteMonitor = async (id: number, data: Partial<{ tenantId: number; name: string; host: string; port: number; isHttps: boolean; notes: string; acceptableStatusCodes: string }>) => {
+  const response = await api.patch(`/site-monitors/${id}`, data, {
+    headers: { 'X-Target-Environment': _environmentId },
+  });
+  return response.data;
+};
+
+export const getSiteMonitorById = async (id: number) => {
+  if (!_environmentId) throw new Error('Environment ID has not been set.');
+  const response = await api.get(`/site-monitors/${id}`, {
+    headers: { 'X-Target-Environment': _environmentId },
+  });
+  return response.data;
+};
+
+// Alerts config APIs
+export const getAlertConfig = async () => {
+  if (!_environmentId) throw new Error('Environment ID has not been set.');
+  const resp = await api.get('/alerts/config', { headers: { 'X-Target-Environment': _environmentId } });
+  return resp.data;
+};
+
+export const saveAlertConfig = async (data: { lark_webhook_url?: string | null; failure_threshold?: number | null; cooldown_minutes?: number | null; probe_timeout_ms?: number | null; acceptable_status_codes?: string | null }) => {
+  if (!_environmentId) throw new Error('Environment ID has not been set.');
+  const resp = await api.post('/alerts/config', data, { headers: { 'X-Target-Environment': _environmentId } });
+  return resp.data;
+};
+
+export const testAlert = async () => {
+  if (!_environmentId) throw new Error('Environment ID has not been set.');
+  const resp = await api.post('/alerts/test', undefined, { headers: { 'X-Target-Environment': _environmentId } });
+  return resp.data;
+};

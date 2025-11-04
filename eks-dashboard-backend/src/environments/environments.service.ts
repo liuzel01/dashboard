@@ -5,6 +5,7 @@ import { EC2Client } from '@aws-sdk/client-ec2';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { fromIni } from '@aws-sdk/credential-providers';
+import { EnvironmentsDbService } from './environments.db.service';
 
 interface Platform {
   name: string;
@@ -40,6 +41,10 @@ export interface Environment {
   };
   tenants?: { id: number; name: string }[];
   platforms?: Platform[];
+  alerts?: {
+    lark_webhook_url?: string;
+    acceptable_status_codes?: string; // e.g., "200-399" or "200,302,404"
+  };
 }
 
 @Injectable()
@@ -54,6 +59,8 @@ export class EnvironmentsService implements OnModuleInit {
       elbv2: ElasticLoadBalancingV2Client;
     }
   >();
+
+  constructor(private readonly envDb: EnvironmentsDbService) {}
 
   onModuleInit() {
     try {
@@ -76,7 +83,9 @@ export class EnvironmentsService implements OnModuleInit {
     }
   }
 
-  getEnvironments() {
+  async getEnvironments() {
+    const dbList = await this.envDb.getEnvironments();
+    if (dbList && dbList.length > 0) return dbList;
     // 出于安全考虑，不返回密钥信息给前端
     return this.environments.map(({ id, name }) => ({ id, name }));
   }
@@ -141,11 +150,10 @@ export class EnvironmentsService implements OnModuleInit {
     return env.platforms || [];
   }
 
-  getTenantsForEnvironment(
-    environmentId: string,
-  ): { id: number; name: string }[] {
+  async getTenantsForEnvironment(environmentId: string): Promise<{ id: number; name: string }[]> {
+    const dbTenants = await this.envDb.getTenantsForEnvironment(environmentId);
+    if (dbTenants && dbTenants.length > 0) return dbTenants;
     const env = this.getEnvironmentById(environmentId);
-    // 如果环境没有定义租户，返回空数组
     return env?.tenants || [];
   }
 }
