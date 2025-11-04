@@ -10,11 +10,13 @@ ensure_build() {
   pushd "$ROOT_DIR/eks-dashboard-backend" >/dev/null
   npm ci || npm install
   npm run build
+  mkdir -p logs
   popd >/dev/null
 
   echo "[dev] Installing frontend deps..."
   pushd "$ROOT_DIR/eks-dashboard-frontend" >/dev/null
   npm ci || npm install
+  mkdir -p logs
   popd >/dev/null
 }
 
