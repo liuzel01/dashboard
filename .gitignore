@@ -17,13 +17,25 @@
 
 # Logs
 # ----
+# Logs
+# Root-level logs and logs in any subfolder
 /logs
+**/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# PM2 logs
+**/pm2-*.log
+
+# PM2 local runtime stores (kept per-repo via scripts)
+.pm2-dev/
+.pm2-prod/
+# If you ever run pm2 without PM2_HOME override, ignore the default as well
+.pm2/
 
 
 # Test coverage
