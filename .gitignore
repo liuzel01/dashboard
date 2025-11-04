@@ -6,7 +6,7 @@
 # Ignore node_modules directories in any subdirectory
 **/node_modules
 
-
+eks-dashboard-backend/sites.csv
 # Build output
 # ------------
 # For Vite (frontend) and NestJS (backend)
