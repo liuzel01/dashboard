@@ -16,6 +16,7 @@ ensure_build() {
   echo "[prod] Installing frontend deps..."
   pushd "$ROOT_DIR/eks-dashboard-frontend" >/dev/null
   npm ci || npm install
+  npm run build
   mkdir -p logs
   popd >/dev/null
 }
@@ -38,7 +39,8 @@ stop() {
 }
 
 restart() {
-  echo "[prod] Restarting apps..."
+  echo "[prod] Rebuilding and restarting apps..."
+  ensure_build
   for name in "${APPS[@]}"; do
     pm2 restart "$name" --namespace prod || true
   done
