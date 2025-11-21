@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-export PM2_HOME="$ROOT_DIR/.pm2-prod"
+PM2_HOME="${PM2_HOME:-$HOME/.pm2}"
+export PM2_HOME
 
 echo "[prod-down] Stopping pm2 apps..."
 pm2 delete eks-dashboard-frontend --namespace prod || true

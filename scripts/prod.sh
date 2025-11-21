@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-export PM2_HOME="$ROOT_DIR/.pm2-prod"
+PM2_HOME="${PM2_HOME:-$HOME/.pm2}"
+export PM2_HOME
 APPS=(eks-dashboard-backend eks-dashboard-frontend)
 
 ensure_build() {

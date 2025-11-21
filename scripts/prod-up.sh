@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-export PM2_HOME="$ROOT_DIR/.pm2-prod"
+PM2_HOME="${PM2_HOME:-$HOME/.pm2}"
+export PM2_HOME
 
 echo "[prod-up] Installing deps and building backend..."
 pushd "$ROOT_DIR/eks-dashboard-backend" >/dev/null
