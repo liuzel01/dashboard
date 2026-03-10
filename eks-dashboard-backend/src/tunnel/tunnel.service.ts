@@ -11,10 +11,8 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import {
-  EnvironmentsService,
-  Environment,
-} from '../environments/environments.service';
+import { EnvironmentsService } from '../environments/environments.service';
+import type { Environment } from '../environments/environment.types';
 
 interface ActiveTunnel {
   server: net.Server;

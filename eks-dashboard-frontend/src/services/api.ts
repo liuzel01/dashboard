@@ -143,6 +143,27 @@ export const getTenantsForEnvironment = async () => {
   return response.data;
 };
 
+// 环境管理（配置）
+export const getEnvironmentConfigs = async () => {
+  const response = await api.get('/environments/config');
+  return response.data;
+};
+
+export const getEnvironmentConfig = async (id: string) => {
+  const response = await api.get(`/environments/config/${id}`);
+  return response.data;
+};
+
+export const createEnvironmentConfig = async (data: any) => {
+  const response = await api.post('/environments/config', data);
+  return response.data;
+};
+
+export const updateEnvironmentConfig = async (id: string, data: any) => {
+  const response = await api.put(`/environments/config/${id}`, data);
+  return response.data;
+};
+
 /**
  * 获取当前环境 LB 的安全组规则
  */

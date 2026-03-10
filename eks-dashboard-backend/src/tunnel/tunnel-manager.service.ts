@@ -3,10 +3,8 @@ import { Client, ConnectConfig } from 'ssh2';
 import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
-import {
-  EnvironmentsService,
-  Environment,
-} from '../environments/environments.service';
+import { EnvironmentsService } from '../environments/environments.service';
+import type { Environment } from '../environments/environment.types';
 
 export interface ForwardSpec {
   name: string; // e.g. 'mysql' | 'redis'

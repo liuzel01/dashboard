@@ -6,46 +6,7 @@ import { SSMClient } from '@aws-sdk/client-ssm';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { fromIni } from '@aws-sdk/credential-providers';
 import { EnvironmentsDbService } from './environments.db.service';
-
-interface Platform {
-  name: string;
-  loadBalancerArn: string;
-}
-
-export interface Environment {
-  id: string;
-  name: string;
-  aws_access_key_id?: string;
-  aws_secret_access_key?: string;
-  aws_profile?: string;
-  aws_region: string;
-  kubeContext: string;
-  database?: {
-    host: string;
-    port: number;
-    user: string;
-    password?: string;
-    database: string;
-  };
-  redis?: {
-    host: string;
-    port: number;
-    password?: string;
-    ssl?: boolean;
-  };
-  jumpServer?: {
-    host: string;
-    port: number;
-    username: string;
-    privateKeyPath: string;
-  };
-  tenants?: { id: number; name: string }[];
-  platforms?: Platform[];
-  alerts?: {
-    lark_webhook_url?: string;
-    acceptable_status_codes?: string; // e.g., "200-399" or "200,302,404"
-  };
-}
+import type { Environment, Platform } from './environment.types';
 
 @Injectable()
 export class EnvironmentsService implements OnModuleInit {
@@ -62,7 +23,14 @@ export class EnvironmentsService implements OnModuleInit {
 
   constructor(private readonly envDb: EnvironmentsDbService) {}
 
-  onModuleInit() {
+  async onModuleInit() {
+    const dbEnvs = await this.envDb.getEnvironmentConfigs();
+    if (dbEnvs.length > 0) {
+      this.environments = dbEnvs;
+      this.logger.log(`Loaded ${dbEnvs.length} environments from DB.`);
+      return;
+    }
+
     try {
       // 从项目的根目录加载配置文件，这比依赖 `__dirname` 更加健壮。
       // 这假定 `environments.json` 文件与 `package.json` 在同一目录。
@@ -72,11 +40,11 @@ export class EnvironmentsService implements OnModuleInit {
       const fileContent = fs.readFileSync(filePath, 'utf-8');
       this.environments = JSON.parse(fileContent);
       this.logger.log(
-        `Successfully loaded ${this.environments.length} environments.`,
+        `Successfully loaded ${this.environments.length} environments from file.`,
       );
     } catch (error) {
       this.logger.error(
-        'Failed to load or parse environments.json. Please ensure the file exists at the project root and is valid JSON.',
+        'Failed to load environments from DB and could not load environments.json. Please ensure DB is available or the file exists at the project root.',
         error.stack,
       );
       throw new Error('Could not load environments configuration.');
@@ -92,6 +60,37 @@ export class EnvironmentsService implements OnModuleInit {
 
   getEnvironmentById(environmentId: string): Environment | undefined {
     return this.environments.find((e) => e.id === environmentId);
+  }
+
+  async getEnvironmentConfigs() {
+    const dbEnvs = await this.envDb.getEnvironmentConfigs();
+    if (dbEnvs.length > 0) return dbEnvs;
+    return this.environments;
+  }
+
+  async getEnvironmentConfigById(environmentId: string): Promise<Environment | undefined> {
+    const dbEnv = await this.envDb.getEnvironmentConfigById(environmentId);
+    if (dbEnv) return dbEnv;
+    return this.getEnvironmentById(environmentId);
+  }
+
+  async upsertEnvironmentConfig(environment: Environment) {
+    const dbReady = await this.envDb.isConfigAvailable();
+    if (!dbReady) {
+      throw new Error('environments_config table is not available in DB.');
+    }
+    await this.envDb.upsertEnvironmentConfig(environment);
+    await this.envDb.upsertEnvironmentMeta(environment.id, environment.name);
+    await this.reloadFromDb();
+    this.clientsCache.delete(environment.id);
+  }
+
+  private async reloadFromDb() {
+    const dbEnvs = await this.envDb.getEnvironmentConfigs();
+    if (dbEnvs.length > 0) {
+      this.environments = dbEnvs;
+      this.logger.log(`Reloaded ${dbEnvs.length} environments from DB.`);
+    }
   }
 
   getAwsClients(environmentId: string): {

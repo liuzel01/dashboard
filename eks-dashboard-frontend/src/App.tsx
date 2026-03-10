@@ -1,13 +1,14 @@
 import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert } from 'antd';
 import { Link, Routes, Route, useLocation } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined } from '@ant-design/icons';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
 import SecurityGroupPage from './pages/SecurityGroupPage';
 import LineListPage from './pages/LineListPage';
 import SiteMonitorPage from './pages/SiteMonitorPage';
+import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import './App.css';
 import Home from './pages/Home';
@@ -42,6 +43,9 @@ const AppLayout: React.FC = () => {
           mode="inline"
           selectedKeys={[location.pathname]}
         >
+          <Menu.Item key="/environments" icon={<SettingOutlined />}>
+            <Link to="/environments">环境管理</Link>
+          </Menu.Item>
           <Menu.Item key="/deployments" icon={<DeploymentUnitOutlined />}>
             <Link to="/deployments">EKS 部署</Link>
           </Menu.Item>
@@ -88,6 +92,7 @@ const AppLayout: React.FC = () => {
               <Route path="/security-groups" element={<SecurityGroupPage />} />
               <Route path="/lines" element={<LineListPage />} />
               <Route path="/site-monitors" element={<SiteMonitorPage />} />
+              <Route path="/environments" element={<EnvironmentManagementPage />} />
               {/* 默认路由，指向第一个菜单项 */}
               <Route path="/" element={<Home />} />
             </Routes>
