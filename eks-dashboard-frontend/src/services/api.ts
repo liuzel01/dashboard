@@ -164,6 +164,38 @@ export const updateEnvironmentConfig = async (id: string, data: any) => {
   return response.data;
 };
 
+// S3 Upload
+export const getS3Buckets = async () => {
+  const response = await api.get('/s3/buckets');
+  return response.data;
+};
+
+export const checkS3ObjectExists = async (bucket: string, key: string) => {
+  const response = await api.post('/s3/object-exists', { bucket, key });
+  return response.data;
+};
+
+export const uploadS3Object = async (
+  bucket: string,
+  key: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+) => {
+  const formData = new FormData();
+  formData.append('bucket', bucket);
+  formData.append('key', key);
+  formData.append('file', file);
+  const response = await api.post('/s3/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (evt) => {
+      if (!evt.total) return;
+      const percent = Math.round((evt.loaded / evt.total) * 100);
+      onProgress?.(percent);
+    },
+  });
+  return response.data;
+};
+
 /**
  * 获取当前环境 LB 的安全组规则
  */

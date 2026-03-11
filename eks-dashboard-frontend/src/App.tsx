@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert } from 'antd';
 import { Link, Routes, Route, useLocation } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined } from '@ant-design/icons';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -9,6 +9,7 @@ import SecurityGroupPage from './pages/SecurityGroupPage';
 import LineListPage from './pages/LineListPage';
 import SiteMonitorPage from './pages/SiteMonitorPage';
 import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
+import S3UploadPage from './pages/S3UploadPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import './App.css';
 import Home from './pages/Home';
@@ -26,6 +27,10 @@ const EnvironmentSwitcher: React.FC = () => {
       value={currentEnvironment?.id}
       onChange={(value) => setCurrentEnvironment(environments.find(e => e.id === value)!)}
       options={environments.map(env => ({ label: env.name, value: env.id }))}
+      showSearch
+      filterOption={(input, option) =>
+        ((option?.label as string) || '').toLowerCase().includes(input.toLowerCase())
+      }
       style={{ width: 240, marginRight: 24 }}
     />
   );
@@ -45,6 +50,9 @@ const AppLayout: React.FC = () => {
         >
           <Menu.Item key="/environments" icon={<SettingOutlined />}>
             <Link to="/environments">环境管理</Link>
+          </Menu.Item>
+          <Menu.Item key="/s3-upload" icon={<CloudUploadOutlined />}>
+            <Link to="/s3-upload">S3 上传</Link>
           </Menu.Item>
           <Menu.Item key="/deployments" icon={<DeploymentUnitOutlined />}>
             <Link to="/deployments">EKS 部署</Link>
@@ -93,6 +101,7 @@ const AppLayout: React.FC = () => {
               <Route path="/lines" element={<LineListPage />} />
               <Route path="/site-monitors" element={<SiteMonitorPage />} />
               <Route path="/environments" element={<EnvironmentManagementPage />} />
+              <Route path="/s3-upload" element={<S3UploadPage />} />
               {/* 默认路由，指向第一个菜单项 */}
               <Route path="/" element={<Home />} />
             </Routes>

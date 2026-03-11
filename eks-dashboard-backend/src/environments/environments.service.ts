@@ -4,6 +4,7 @@ import * as path from 'path';
 import { EC2Client } from '@aws-sdk/client-ec2';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
+import { S3Client } from '@aws-sdk/client-s3';
 import { fromIni } from '@aws-sdk/credential-providers';
 import { EnvironmentsDbService } from './environments.db.service';
 import type { Environment, Platform } from './environment.types';
@@ -18,6 +19,7 @@ export class EnvironmentsService implements OnModuleInit {
       ec2: EC2Client;
       ssm: SSMClient;
       elbv2: ElasticLoadBalancingV2Client;
+      s3: S3Client;
     }
   >();
 
@@ -97,6 +99,7 @@ export class EnvironmentsService implements OnModuleInit {
     ec2: EC2Client;
     ssm: SSMClient;
     elbv2: ElasticLoadBalancingV2Client;
+    s3: S3Client;
   } {
     if (this.clientsCache.has(environmentId)) {
       return this.clientsCache.get(environmentId)!;
@@ -136,6 +139,7 @@ export class EnvironmentsService implements OnModuleInit {
       ec2: new EC2Client(clientConfig),
       ssm: new SSMClient(clientConfig),
       elbv2: new ElasticLoadBalancingV2Client(clientConfig),
+      s3: new S3Client(clientConfig),
     };
     this.clientsCache.set(environmentId, clients);
     return clients;

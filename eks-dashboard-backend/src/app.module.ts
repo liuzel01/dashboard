@@ -14,6 +14,7 @@ import { TunnelModule } from './tunnel/tunnel.module';
 import { LogsModule } from './logs/logs.module';
 import { LinesModule } from './lines/lines.module';
 import { SiteMonitorModule } from './site-monitor/site-monitor.module';
+import { S3Module } from './s3/s3.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { SiteMonitorModule } from './site-monitor/site-monitor.module';
     LogsModule,
     LinesModule,
     SiteMonitorModule,
+    S3Module,
   ],
   controllers: [AppController],
   providers: [AppService],
