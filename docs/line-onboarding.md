@@ -1,0 +1,143 @@
+# 新增线路菜单（Line Onboarding）开发说明
+
+本文档用于说明菜单 **“新增线路”** 的页面流程、后端 API、配置项和关键状态字段，方便后续开发人员或 AI Agent 快速接手。
+
+## 1. 功能目标
+
+- 将“新增线路”从人工散乱操作收敛为可执行向导。
+- 核心是步骤化编排：
+  - 生成并确认线路子域名
+  - 自动创建/复用 DCDN 域名
+  - 自动配置 HTTPS / WebSocket / WAF
+  - 输出 Ingress 与 SQL 指令
+  - 通过外部 `/api/lines` 做验收
+
+## 2. 页面与代码位置
+
+- 前端页面：`eks-dashboard-frontend/src/pages/LineOnboardingPage.tsx`
+- 前端 API：`eks-dashboard-frontend/src/services/api.ts`
+- 后端控制器：`eks-dashboard-backend/src/lines/lines.controller.ts`
+- 后端服务：`eks-dashboard-backend/src/lines/lines.service.ts`
+- 后端 DTO：
+  - `eks-dashboard-backend/src/lines/dto/provision-dcdn-domain.dto.ts`
+  - `eks-dashboard-backend/src/lines/dto/get-dcdn-domain-status.dto.ts`
+  - `eks-dashboard-backend/src/lines/dto/apply-dcdn-security.dto.ts`
+- 设计稿：`dashboard.pen`（Page/LineOnboarding）
+
+## 3. 向导流程（前端）
+
+## 步骤1：录入一级域名
+
+- 用户填写一级域名（如 `sample.com`）并确认。
+- 页面保留域名购买与 SSL 购买链接。
+
+## 步骤2：生成并确认子域名
+
+- 生成规则：随机前缀 + `new` + 步骤1域名。
+- 示例：`a1b2c3new.sample.com`。
+
+## 步骤3：DCDN 与安全配置（重点）
+
+- 分两段：
+  - `1) 创建/复用 DCDN 域名`
+  - `2) 配置 HTTPS/WebSocket/WAF`
+- 先创建/复用，再做安全配置，避免用户误解。
+- “刷新域名状态”仅依赖已确认子域名，可单独用于状态查看。
+
+### 步骤3-1 创建/复用 DCDN
+
+- 依赖输入：
+  - 子域名（步骤2）
+  - 源站域名（用户输入）
+- 创建参数：
+  - 类型：源站域名
+  - 端口：443
+  - 优先级：主
+  - 权重：10
+  - 加速区域：global
+
+### 步骤3-2 HTTPS/WebSocket/WAF
+
+- 证书来源支持：
+  - `CAS（推荐）`：上传到 CAS，再绑定到 DCDN（云盾 SSL 证书中心）
+  - `直传（备用）`：直接上传证书私钥到 DCDN
+- 默认模式由后端环境变量控制（默认 CAS）。
+
+## 步骤4：Ingress 手工应用
+
+- 页面仅输出命令，人工执行：
+  - `cp ...`
+  - `kubectl apply -f ...`
+
+## 步骤5：超级后台登记 + 联通性检查
+
+- 检查 URL：
+  - `https://{子域名}/pro/p/symbol/list`
+
+## 步骤6：输出 SQL（人工执行）
+
+- 输出模板：
+  - `INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (...)`
+
+## 步骤7：外部 API 验收
+
+- 调用外部系统接口（非本系统）：
+  - `http://172.31.29.3:3000/api/lines`
+
+## 4. 后端 API（/api/lines）
+
+- `GET /api/lines/external/check?lineUrl=...`
+  - 外部 API 验收检查
+- `POST /api/lines/dcdn/provision`
+  - 创建或复用 DCDN 域名
+- `GET /api/lines/dcdn/status?domainName=...`
+  - 刷新 DCDN 状态快照
+- `POST /api/lines/dcdn/security/apply`
+  - 应用 HTTPS / WebSocket / WAF
+  - 支持 `certSource: cas | upload`
+
+## 5. 环境变量（后端）
+
+参考：`eks-dashboard-backend/.env-example`
+
+- DCDN
+  - `DCDN_ENDPOINT`
+  - `ALIYUN_ACCESS_KEY_ID`
+  - `ALIYUN_ACCESS_KEY_SECRET`
+- 证书与 CAS
+  - `DCDN_CERT_SOURCE`（默认 `cas`）
+  - `DCDN_CERT_REGION`（默认 `ap-southeast-1`）
+  - `CAS_ENDPOINT`（默认 `https://cas.ap-southeast-1.aliyuncs.com`）
+  - `CAS_API_VERSION`（默认 `2020-04-07`）
+- WAF
+  - `DCDN_WAF_CLIENT_IP_TAG`（可选）
+- 外部线路验收接口
+  - `LINE_VERIFY_API_URL`
+
+## 6. 状态字段说明（步骤3展示）
+
+- `domainStatus`
+  - DCDN 域名状态（如 `online`, `configuring`）
+- `cnameCheckStatus`
+  - CNAME 检测状态：`0=已配置`，非 `0` 通常表示“等待配置/校验中”
+- `cnameCheckErrMsg`
+  - CNAME 检测说明
+- `httpsEnabled / websocketEnabled / wafEnabled`
+  - 安全开关状态
+- `certName / certRegion / certDomainName / certExpireTime`
+  - 当前绑定证书信息
+- `certStatus`
+  - 若云端未显式返回，后端会在 `HTTPS=on 且证书名存在` 时派生为 `bound`
+
+## 7. 已知注意点
+
+- WebSocket 与 WAF 在部分场景可能互斥，后端会返回 warning，需以实际业务验证为准。
+- DCDN 与 DNS 状态存在传播延迟，步骤3建议多次刷新观察。
+- 刷新接口错误默认会下沉到页面提示，不一定会在后端控制台出现红色异常堆栈。
+
+## 8. 推荐调试顺序
+
+1. 先执行 `1) 创建/复用 DCDN 域名`
+2. 再执行 `2) 配置 HTTPS/WebSocket/WAF`
+3. 点“刷新域名状态”观察关键字段
+4. 继续步骤4~7完成环境验收
