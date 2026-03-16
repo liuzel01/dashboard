@@ -318,6 +318,28 @@ export const provisionDcdnDomain = async (data: {
   return response.data;
 };
 
+export const getDcdnDomainStatus = async (domainName: string) => {
+  const response = await api.get('/lines/dcdn/status', {
+    params: { domainName, _ts: Date.now() },
+  });
+  return response.data;
+};
+
+export const applyDcdnSecurity = async (data: {
+  domainName: string;
+  sslPub: string;
+  sslPri: string;
+  certName?: string;
+  certSource?: 'cas' | 'upload';
+  enableWebsocket?: boolean;
+  enableWaf?: boolean;
+  websocketOriginScheme?: 'http' | 'https' | 'follow';
+  websocketHeartbeat?: number;
+}) => {
+  const response = await api.post('/lines/dcdn/security/apply', data);
+  return response.data;
+};
+
 // Site Monitors
 export const getSiteMonitors = async (tenantId?: number) => {
   if (!_environmentId) {

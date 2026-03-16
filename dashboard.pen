@@ -9110,8 +9110,8 @@
                             {
                               "type": "text",
                               "id": "PhdAW",
-                              "fill": "#1677FF",
-                              "content": "SSL证书购买地址：https://www.aimi.com.cn/ssl-buy?certId=24",
+                              "fill": "#3F3F46",
+                              "content": "购买并完成过户后，在下方录入新一级域名（示例：sample.com）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9119,10 +9119,10 @@
                             {
                               "type": "text",
                               "id": "FAIsD",
-                              "fill": "#3F3F46",
-                              "content": "购买并完成过户后，在下方录入新一级域名（示例：sample.com）\n确认后该域名将用于步骤2-步骤6",
+                              "fill": "#777777",
+                              "content": "确认后该域名将用于步骤2-步骤6",
                               "fontFamily": "Inter",
-                              "fontSize": 13,
+                              "fontSize": 12,
                               "fontWeight": "normal"
                             },
                             {
@@ -9331,7 +9331,7 @@
                               "type": "text",
                               "id": "cFBtg",
                               "fill": "#0A0A0A",
-                              "content": "步骤3：阿里云国际 DCDN 自动创建",
+                              "content": "步骤3：阿里云国际 DCDN 配置",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "600"
@@ -9340,7 +9340,7 @@
                               "type": "text",
                               "id": "zAt7s",
                               "fill": "#3F3F46",
-                              "content": "- 使用步骤2确认的子域名自动调用接口创建 DCDN（加速区域：全球）",
+                              "content": "使用步骤2确认的子域名（如 aaanew.sample.com）进行配置",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9349,7 +9349,7 @@
                               "type": "text",
                               "id": "OGQMX",
                               "fill": "#3F3F46",
-                              "content": "- 源站信息：类型=源站域名，地址=用户输入，优先级=主，权重=10，端口=443",
+                              "content": "在 DCDN 中完成映射并记录返回的 CNAME",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9358,7 +9358,7 @@
                               "type": "text",
                               "id": "JM2eV",
                               "fill": "#3F3F46",
-                              "content": "- 创建成功后返回并展示 CNAME；失败可手工回填 CNAME",
+                              "content": "预留输入项：线路域名 / CNAME / 备注",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
