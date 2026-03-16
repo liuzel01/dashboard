@@ -66,9 +66,9 @@ cd <project-folder>
 
 - **配置来源优先级**：若数据库存在 `environments_config` 表且有数据，则以数据库为准；否则回退到 `environments.json` 文件。
 - **AWS 凭证选择**：
-  1) 若存在 `aws_access_key_id` + `aws_secret_access_key`，优先使用 AK/SK  
-  2) 否则若存在 `aws_profile`，使用服务器本地 AWS profile（`~/.aws/credentials`）  
-  3) 两者都没有，则走默认 AWS 凭证链（如 EC2 Role / IRSA）
+  1. 若存在 `aws_access_key_id` + `aws_secret_access_key`，优先使用 AK/SK
+  2. 否则若存在 `aws_profile`，使用服务器本地 AWS profile（`~/.aws/credentials`）
+  3. 两者都没有，则走默认 AWS 凭证链（如 EC2 Role / IRSA）
 - **Kube Context**：访问集群仍依赖 `kubeContext`，即使 AK/SK 正确也需要配置该字段。
 
 #### 数据库表与字段概览（便于运维/AI 快速理解）
@@ -188,10 +188,10 @@ Nginx 在这里扮演两个角色：
 
 server {
     listen 80;
-    server_name your-server-ip-or-domain; # 替换为您的服务器 IP 或域名
+    server_name 127.0.0.1; # 替换为您的服务器 IP 或域名
 
     # 前端静态文件根目录 (请使用您前端项目构建后输出的绝对路径)
-    root /path/to/your/project/eks-dashboard-frontend/build;
+    root /var/lib/jenkins/dashboard/eks-dashboard-frontend/dist/;
     index index.html index.htm;
 
     # 处理前端路由（对于使用 History API 的单页应用）
@@ -199,13 +199,32 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # 反向代理后端 API 请求 (所有 /api 开头的请求都会被转发到后端服务)
+    # 普通 API：转发并保留原始 URI（适合后端已带 /api 前缀的场景）
     location /api/ {
-        proxy_pass http://localhost:3000; # 后端服务地址 (注意：去掉了末尾的斜杠)
+        proxy_pass http://127.0.0.1:3000;          # 不带 URI 子路径 --> 保留 /api/xxx
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    # WebSocket / socket.io：必须支持 Upgrade
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:3000;         # 保留原始 URI，后端应为 /socket.io/ 路由
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 86400s;                # 允许长时间的日志流
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
     }
 }
 ```

@@ -14,7 +14,7 @@ async function bootstrap() {
     origin: '*', // 在生产环境中，请指定您的前端域名
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Target-Environment'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Target-Environment', 'X-User-Id', 'X-Username'],
   });
   await app.listen(3000, '0.0.0.0');
 }

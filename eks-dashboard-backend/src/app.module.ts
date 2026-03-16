@@ -15,6 +15,8 @@ import { LogsModule } from './logs/logs.module';
 import { LinesModule } from './lines/lines.module';
 import { SiteMonitorModule } from './site-monitor/site-monitor.module';
 import { S3Module } from './s3/s3.module';
+import { AccessControlModule } from './access-control/access-control.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { S3Module } from './s3/s3.module';
     LinesModule,
     SiteMonitorModule,
     S3Module,
+    AccessControlModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

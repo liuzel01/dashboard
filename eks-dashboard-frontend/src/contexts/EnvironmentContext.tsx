@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { setApiEnvironment } from '../services/api';
+import { getRuntimeConfig } from '../services/runtimeConfig';
 
 export interface Environment {
   id: string;
@@ -36,11 +37,7 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     setError(null);
     try {
       // Step 1: Fetch the configuration to determine the API base URL.
-      const configResponse = await fetch('/environment.json');
-      if (!configResponse.ok) {
-        throw new Error('Could not load /environment.json. Please ensure it exists in the public folder.');
-      }
-      const config = await configResponse.json();
+      const config = await getRuntimeConfig();
       const apiBaseUrl = config.API_BASE_URL;
 
       if (!apiBaseUrl) {

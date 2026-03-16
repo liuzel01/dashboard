@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
-import { Layout, Menu, Select, Spin, Alert } from 'antd';
-import { Link, Routes, Route, useLocation } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined } from '@ant-design/icons';
+import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
+import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -10,11 +10,18 @@ import LineListPage from './pages/LineListPage';
 import SiteMonitorPage from './pages/SiteMonitorPage';
 import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import S3UploadPage from './pages/S3UploadPage';
+import AccountManagementPage from './pages/AccountManagementPage';
+import LineOnboardingPage from './pages/LineOnboardingPage';
+import ForbiddenPage from './pages/ForbiddenPage';
+import LoginPage from './pages/LoginPage';
+import SsoCallbackPage from './pages/SsoCallbackPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
+import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
 import Home from './pages/Home';
 
 const { Header, Content, Sider } = Layout;
+const { Text } = Typography;
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, loading, error } = useContext(EnvironmentContext);
@@ -36,8 +43,70 @@ const EnvironmentSwitcher: React.FC = () => {
   );
 };
 
+const ProtectedRoute: React.FC<{ required?: string[]; requiredAny?: string[]; children: React.ReactNode }> = ({ required = [], requiredAny = [], children }) => {
+  const { permissions, loading, isAuthenticated } = useContext(AuthContext);
+
+  if (loading) {
+    return <Spin />;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const allRequiredAllowed = required.length === 0 || required.every((key) => permissions.includes(key));
+  const anyRequiredAllowed = requiredAny.length === 0 || requiredAny.some((key) => permissions.includes(key));
+  if (!allRequiredAllowed || !anyRequiredAllowed) {
+    return <Navigate to="/403" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 const AppLayout: React.FC = () => {
- const location = useLocation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { me, permissions, loading: authLoading, error: authError, isAuthenticated, logout } = useContext(AuthContext);
+
+  const hasPermission = (key?: string | string[]) => {
+    if (!key) return true;
+    if (Array.isArray(key)) {
+      return key.some((k) => permissions.includes(k));
+    }
+    return permissions.includes(key);
+  };
+
+  const menuItems = [
+    { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
+    { key: '/s3-upload', label: 'S3 上传', icon: <CloudUploadOutlined />, permission: 'menu:s3-upload' },
+    { key: '/deployments', label: 'EKS 部署', icon: <DeploymentUnitOutlined />, permission: 'menu:deployments' },
+    { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
+    { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
+    { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
+    { key: '/lines', label: '线路列表', icon: <GlobalOutlined />, permission: 'menu:lines' },
+    { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
+    { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
+    { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
+  ];
+
+  const visibleMenuItems = authLoading
+    ? menuItems
+    : menuItems.filter((item) => hasPermission(item.permission));
+
+  if (!authLoading && !isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const identityLabel =
+    me?.identity?.display_name ||
+    me?.identity?.email ||
+    me?.username ||
+    'Unknown';
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -48,30 +117,11 @@ const AppLayout: React.FC = () => {
           mode="inline"
           selectedKeys={[location.pathname]}
         >
-          <Menu.Item key="/environments" icon={<SettingOutlined />}>
-            <Link to="/environments">环境管理</Link>
-          </Menu.Item>
-          <Menu.Item key="/s3-upload" icon={<CloudUploadOutlined />}>
-            <Link to="/s3-upload">S3 上传</Link>
-          </Menu.Item>
-          <Menu.Item key="/deployments" icon={<DeploymentUnitOutlined />}>
-            <Link to="/deployments">EKS 部署</Link>
-          </Menu.Item>
-          <Menu.Item key="/jump-servers" icon={<DeploymentUnitOutlined />}>
-            <Link to="/jump-servers">Windows跳板机</Link>
-          </Menu.Item>
-          <Menu.Item key="/data-query" icon={<DeploymentUnitOutlined />}>
-            <Link to="/data-query">查询中心</Link>
-          </Menu.Item>
-          <Menu.Item key="/security-groups" icon={<SafetyCertificateOutlined />}>
-            <Link to="/security-groups">安全组管理</Link>
-          </Menu.Item>
-          <Menu.Item key="/lines" icon={<GlobalOutlined />}>
-            <Link to="/lines">线路列表</Link>
-          </Menu.Item>
-          <Menu.Item key="/site-monitors" icon={<AimOutlined />}>
-            <Link to="/site-monitors">站点监控</Link>
-          </Menu.Item>
+          {visibleMenuItems.map((item) => (
+            <Menu.Item key={item.key} icon={item.icon} disabled={authLoading}>
+              <Link to={item.key}>{item.label}</Link>
+            </Menu.Item>
+          ))}
         </Menu>
       </Sider>
       <Layout
@@ -87,21 +137,30 @@ const AppLayout: React.FC = () => {
             background: '#fff',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'space-between',
           }}
         >
           <EnvironmentSwitcher />
+          <Space size={12}>
+            <Text type="secondary">{identityLabel}</Text>
+            <Button onClick={handleLogout}>退出登录</Button>
+          </Space>
         </Header>
         <Content style={{ margin: '24px 16px', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: 24, background: '#fff', borderRadius: '8px', flex: 1}}>
+            {authError && <Alert type="error" message={authError} showIcon style={{ marginBottom: 16 }} />}
             <Routes>
-              <Route path="/deployments" element={<DeploymentListPage />} />
-              <Route path="/jump-servers" element={<WindowsJumpServerPage />} />
-              <Route path="/data-query" element={<DataQueryPage />} />
-              <Route path="/security-groups" element={<SecurityGroupPage />} />
-              <Route path="/lines" element={<LineListPage />} />
-              <Route path="/site-monitors" element={<SiteMonitorPage />} />
-              <Route path="/environments" element={<EnvironmentManagementPage />} />
-              <Route path="/s3-upload" element={<S3UploadPage />} />
+              <Route path="/deployments" element={<ProtectedRoute required={['menu:deployments']}><DeploymentListPage /></ProtectedRoute>} />
+              <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
+              <Route path="/data-query" element={<ProtectedRoute required={['menu:data-query']}><DataQueryPage /></ProtectedRoute>} />
+              <Route path="/security-groups" element={<ProtectedRoute required={['menu:security-groups']}><SecurityGroupPage /></ProtectedRoute>} />
+              <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
+              <Route path="/line-onboarding" element={<ProtectedRoute requiredAny={['menu:line-onboarding', 'menu:lines']}><LineOnboardingPage /></ProtectedRoute>} />
+              <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
+              <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
+              <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
+              <Route path="/access-control" element={<ProtectedRoute required={['menu:access-control']}><AccountManagementPage /></ProtectedRoute>} />
+              <Route path="/403" element={<ForbiddenPage />} />
               {/* 默认路由，指向第一个菜单项 */}
               <Route path="/" element={<Home />} />
             </Routes>
@@ -113,9 +172,15 @@ const AppLayout: React.FC = () => {
 };
 
 const App: React.FC = () => (
-  <EnvironmentProvider>
-    <AppLayout />
-  </EnvironmentProvider>
+  <AuthProvider>
+    <EnvironmentProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/sso/callback" element={<SsoCallbackPage />} />
+        <Route path="/*" element={<AppLayout />} />
+      </Routes>
+    </EnvironmentProvider>
+  </AuthProvider>
 );
 
 export default App;

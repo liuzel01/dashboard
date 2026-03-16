@@ -20,6 +20,14 @@ export const setApiEnvironment = (environmentId: string | null) => {
   }
 };
 
+export const setAuthToken = (token: string | null) => {
+  if (token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.common['Authorization'];
+  }
+};
+
 /**
  * 获取应用列表
  * @param params - 包含查询参数的对象, 例如 { name: 'filter-text' }
@@ -294,6 +302,22 @@ export const getLines = async (params: { page: number; size: number; tenantId: n
   return response.data;
 };
 
+export const verifyExternalLine = async (lineUrl: string) => {
+  const response = await api.get('/lines/external/check', {
+    params: { lineUrl },
+  });
+  return response.data;
+};
+
+export const provisionDcdnDomain = async (data: {
+  domainName: string;
+  originDomain: string;
+  scope?: 'global' | 'domestic' | 'overseas';
+}) => {
+  const response = await api.post('/lines/dcdn/provision', data);
+  return response.data;
+};
+
 // Site Monitors
 export const getSiteMonitors = async (tenantId?: number) => {
   if (!_environmentId) {
@@ -368,4 +392,66 @@ export const testAlert = async () => {
   if (!_environmentId) throw new Error('Environment ID has not been set.');
   const resp = await api.post('/alerts/test', undefined, { headers: { 'X-Target-Environment': _environmentId } });
   return resp.data;
+};
+
+// Access control (users/roles/permissions)
+export const getAccessUsers = async () => {
+  const response = await api.get('/users');
+  return response.data;
+};
+
+export const createAccessUser = async (data: { username: string; displayName?: string; password?: string; status?: 'active' | 'disabled'; roleIds?: number[] }) => {
+  const response = await api.post('/users', data);
+  return response.data;
+};
+
+export const updateAccessUser = async (id: number, data: { username?: string; displayName?: string; status?: 'active' | 'disabled'; roleIds?: number[] }) => {
+  const response = await api.patch(`/users/${id}`, data);
+  return response.data;
+};
+
+export const resetAccessUserPassword = async (id: number, password?: string) => {
+  const response = await api.post(`/users/${id}/reset-password`, { password });
+  return response.data;
+};
+
+export const getAccessRoles = async () => {
+  const response = await api.get('/roles');
+  return response.data;
+};
+
+export const createAccessRole = async (data: { name: string; description?: string }) => {
+  const response = await api.post('/roles', data);
+  return response.data;
+};
+
+export const updateAccessRole = async (id: number, data: { name?: string; description?: string }) => {
+  const response = await api.patch(`/roles/${id}`, data);
+  return response.data;
+};
+
+export const deleteAccessRole = async (id: number) => {
+  const response = await api.delete(`/roles/${id}`);
+  return response.data;
+};
+
+export const updateAccessRolePermissions = async (id: number, permissionIds: number[]) => {
+  const response = await api.put(`/roles/${id}/permissions`, { permissionIds });
+  return response.data;
+};
+
+export const getAccessPermissions = async () => {
+  const response = await api.get('/permissions');
+  return response.data;
+};
+
+// Auth / Me
+export const getMe = async () => {
+  const response = await api.get('/me');
+  return response.data;
+};
+
+export const login = async (data: { username: string; password: string }) => {
+  const response = await api.post('/auth/login', data);
+  return response.data;
 };
