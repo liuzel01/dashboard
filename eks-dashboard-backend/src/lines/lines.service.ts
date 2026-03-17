@@ -248,6 +248,49 @@ export class LinesService {
     }
   }
 
+  private normalizeCertificateDomain(domainRaw: string): string {
+    const domain = String(domainRaw || '').trim().toLowerCase().replace(/^\*\./, '');
+    return domain;
+  }
+
+  private splitCertificateDomains(value: unknown): string[] {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.map((item) => this.normalizeCertificateDomain(String(item))).filter(Boolean);
+    }
+    return String(value)
+      .split(/[,\s;|]+/)
+      .map((item) => this.normalizeCertificateDomain(item))
+      .filter(Boolean);
+  }
+
+  private rootDomainMatched(rootDomain: string, certificateDomains: string[]): string[] {
+    const root = this.normalizeCertificateDomain(rootDomain);
+    return certificateDomains.filter((domain) => domain === root || domain.endsWith(`.${root}`));
+  }
+
+  private collectCasCertificateRecords(payload: unknown, output: any[]) {
+    if (payload == null) return;
+    if (Array.isArray(payload)) {
+      payload.forEach((item) => this.collectCasCertificateRecords(item, output));
+      return;
+    }
+    if (typeof payload !== 'object') return;
+
+    const obj = payload as Record<string, unknown>;
+    const certId = obj.CertificateId ?? obj.CertId ?? obj.Id;
+    const certName = obj.Name ?? obj.CertName ?? obj.CertificateName;
+    const commonName = obj.CommonName ?? obj.CertDomainName ?? obj.DomainName;
+    const sans = obj.Sans ?? obj.SubjectAlternativeName ?? obj.DomainList;
+    const endDate = obj.EndDate ?? obj.CertExpireTime ?? obj.ExpireDate;
+
+    if (certId || certName || commonName || sans || endDate) {
+      output.push(obj);
+    }
+
+    Object.values(obj).forEach((value) => this.collectCasCertificateRecords(value, output));
+  }
+
   private extractBooleanFlag(
     input: unknown,
     trueValues: string[] = ['on', 'enabled', 'true', '1'],
@@ -651,6 +694,76 @@ export class LinesService {
     }
   }
 
+  async listCasCertificates(rootDomainRaw: string) {
+    const rootDomain = this.normalizeToHost(rootDomainRaw);
+    const casClient = this.createCasClient();
+    const requestList = async (orderType: 'UPLOAD' | 'CERT') => {
+      try {
+        return await casClient.request(
+          'ListUserCertificateOrder',
+          {
+            CurrentPage: 1,
+            ShowSize: 100,
+            OrderType: orderType,
+          },
+          {
+            method: 'POST',
+            timeout: 15000,
+          },
+        );
+      } catch (error) {
+        console.warn(`ListUserCertificateOrder failed (${orderType}):`, error?.message || error);
+        return null;
+      }
+    };
+
+    const [uploadResp, certResp] = await Promise.all([requestList('UPLOAD'), requestList('CERT')]);
+    const records: any[] = [];
+    this.collectCasCertificateRecords(uploadResp, records);
+    this.collectCasCertificateRecords(certResp, records);
+
+    const uniqueMap = new Map<string, any>();
+    records.forEach((item) => {
+      const certId = Number(item?.CertificateId ?? item?.CertId ?? item?.Id);
+      if (!Number.isFinite(certId) || certId <= 0) return;
+      const name = String(item?.Name ?? item?.CertName ?? item?.CertificateName ?? '').trim();
+      const commonName = String(item?.CommonName ?? item?.CertDomainName ?? item?.DomainName ?? '').trim();
+      const sans = this.splitCertificateDomains(item?.Sans ?? item?.SubjectAlternativeName ?? item?.DomainList);
+      const common = this.normalizeCertificateDomain(commonName);
+      const domains = [common, ...sans].filter(Boolean);
+      const matchedDomains = this.rootDomainMatched(rootDomain, domains);
+      if (matchedDomains.length === 0) return;
+
+      const endDateRaw = item?.EndDate ?? item?.CertExpireTime ?? item?.ExpireDate ?? null;
+      const endDate = endDateRaw ? String(endDateRaw) : null;
+      const key = String(certId);
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, {
+          certificateId: certId,
+          certName: name || `cert-${certId}`,
+          commonName: commonName || null,
+          sans,
+          matchedDomains,
+          endDate,
+          orderType: String(item?.OrderType || item?.ProductType || '').toUpperCase() || null,
+        });
+      }
+    });
+
+    const certificates = Array.from(uniqueMap.values()).sort((a, b) => {
+      const left = a.endDate ? new Date(a.endDate).getTime() : 0;
+      const right = b.endDate ? new Date(b.endDate).getTime() : 0;
+      return right - left;
+    });
+
+    return {
+      rootDomain,
+      total: certificates.length,
+      certificates,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
   async applyDcdnSecurity(dto: ApplyDcdnSecurityDto) {
     const domainName = this.normalizeToHost(dto.domainName);
     const client = this.createDcdnClient();
@@ -666,6 +779,9 @@ export class LinesService {
     let wafConfigured = false;
     let appliedCertName = certName;
     let appliedCertId: number | null = null;
+    const sslPub = dto.sslPub?.trim() || '';
+    const sslPri = dto.sslPri?.trim() || '';
+    const casCertificateId = dto.casCertificateId ? Number(dto.casCertificateId) : null;
 
     if (enableWebsocket && enableWaf) {
       warnings.push(
@@ -675,12 +791,20 @@ export class LinesService {
 
     try {
       if (certSource === 'cas') {
-        const casClient = this.createCasClient();
-        const casUpload = await this.uploadCertificateToCas(casClient, certName, dto.sslPub, dto.sslPri);
-        appliedCertName = casUpload.certName;
-        appliedCertId = casUpload.certId;
-        if (appliedCertName !== certName) {
-          warnings.push(`证书名称 ${certName} 已存在，已自动使用 ${appliedCertName}`);
+        if (casCertificateId && Number.isFinite(casCertificateId) && casCertificateId > 0) {
+          appliedCertId = casCertificateId;
+          appliedCertName = (dto.casCertificateName || certName).trim();
+        } else {
+          if (!sslPub || !sslPri) {
+            throw new BadRequestException('CAS 模式未选择复用证书时，必须提供 cert.crt 与 privkey.key');
+          }
+          const casClient = this.createCasClient();
+          const casUpload = await this.uploadCertificateToCas(casClient, certName, sslPub, sslPri);
+          appliedCertName = casUpload.certName;
+          appliedCertId = casUpload.certId;
+          if (appliedCertName !== certName) {
+            warnings.push(`证书名称 ${certName} 已存在，已自动使用 ${appliedCertName}`);
+          }
         }
         await client.request(
           'SetDcdnDomainSSLCertificate',
@@ -698,6 +822,9 @@ export class LinesService {
           },
         );
       } else {
+        if (!sslPub || !sslPri) {
+          throw new BadRequestException('直传模式必须提供 cert.crt 与 privkey.key');
+        }
         await client.request(
           'SetDcdnDomainSSLCertificate',
           {
@@ -705,8 +832,8 @@ export class LinesService {
             SSLProtocol: 'on',
             CertName: certName,
             CertType: 'upload',
-            SSLPub: dto.sslPub,
-            SSLPri: dto.sslPri,
+            SSLPub: sslPub,
+            SSLPri: sslPri,
           },
           {
             method: 'POST',

@@ -62,6 +62,9 @@
   - `CAS（推荐）`：上传到 CAS，再绑定到 DCDN（云盾 SSL 证书中心）
   - `直传（备用）`：直接上传证书私钥到 DCDN
 - 默认模式由后端环境变量控制（默认 CAS）。
+- CAS 模式下支持两种子模式：
+  - `复用已有 CAS 证书`：按步骤1根域名加载可复用证书并选择绑定
+  - `上传新证书到 CAS`：手工上传 `cert.crt` + `privkey.key`
 
 ## 步骤4：Ingress 手工应用
 
@@ -95,6 +98,8 @@
 - `POST /api/lines/dcdn/security/apply`
   - 应用 HTTPS / WebSocket / WAF
   - 支持 `certSource: cas | upload`
+- `GET /api/lines/dcdn/cas-certificates?rootDomain=...`
+  - 按根域名查询可复用的 CAS 证书列表（用于步骤3复用证书）
 
 ## 5. 环境变量（后端）
 

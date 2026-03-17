@@ -6,6 +6,7 @@ import {
   Divider,
   Input,
   Radio,
+  Select,
   Space,
   Steps,
   Switch,
@@ -15,6 +16,7 @@ import {
 } from 'antd';
 import {
   applyDcdnSecurity,
+  getDcdnCasCertificates,
   getDcdnDomainStatus,
   provisionDcdnDomain,
   verifyExternalLine,
@@ -75,6 +77,16 @@ type DcdnSecurityApplyResult = {
   message: string;
 };
 
+type CasCertificateOption = {
+  certificateId: number;
+  certName: string;
+  commonName: string | null;
+  sans: string[];
+  matchedDomains: string[];
+  endDate: string | null;
+  orderType: string | null;
+};
+
 const SOURCE_INGRESS = '/home/ubuntu/kylin-script/k8s-yaml/ingress/app-ingress-0313.yaml';
 const INGRESS_DIR = '/home/ubuntu/kylin-script/k8s-yaml/ingress';
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -124,6 +136,10 @@ const LineOnboardingPage: React.FC = () => {
   const [sslPriInput, setSslPriInput] = useState('');
   const [certNameInput, setCertNameInput] = useState('');
   const [certSource, setCertSource] = useState<'cas' | 'upload'>('cas');
+  const [casCertMode, setCasCertMode] = useState<'reuse' | 'upload'>('reuse');
+  const [casCertLoading, setCasCertLoading] = useState(false);
+  const [casCertOptions, setCasCertOptions] = useState<CasCertificateOption[]>([]);
+  const [selectedCasCertId, setSelectedCasCertId] = useState<number | undefined>(undefined);
   const [enableWebsocket, setEnableWebsocket] = useState(true);
   const [enableWaf, setEnableWaf] = useState(true);
   const [securityApplyResult, setSecurityApplyResult] = useState<DcdnSecurityApplyResult | null>(null);
@@ -146,6 +162,12 @@ const LineOnboardingPage: React.FC = () => {
   const insertSql = confirmedSubdomain
     ? `INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (${tenantIdNormalized}, '${confirmedSubdomain}', 1, NOW());`
     : "INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (1, '{步骤2子域名}', 1, NOW());";
+  const selectedCasCert = useMemo(
+    () => casCertOptions.find((item) => item.certificateId === selectedCasCertId),
+    [casCertOptions, selectedCasCertId],
+  );
+  const showUploadCertificateInputs =
+    certSource === 'upload' || (certSource === 'cas' && casCertMode === 'upload');
   const toStatusText = (value: boolean | null | undefined) => {
     if (value === true) return '已开启';
     if (value === false) return '未开启';
@@ -196,6 +218,8 @@ const LineOnboardingPage: React.FC = () => {
   const resetFromStep2 = () => {
     setGeneratedSubdomain('');
     setConfirmedSubdomain('');
+    setCasCertOptions([]);
+    setSelectedCasCertId(undefined);
     setDcdnCname('');
     setDcdnConfirmed(false);
     setIngressApplied(false);
@@ -218,6 +242,10 @@ const LineOnboardingPage: React.FC = () => {
     setSslPriInput('');
     setCertNameInput('');
     setCertSource('cas');
+    setCasCertMode('reuse');
+    setCasCertLoading(false);
+    setCasCertOptions([]);
+    setSelectedCasCertId(undefined);
     setEnableWebsocket(true);
     setEnableWaf(true);
     setSecurityApplyResult(null);
@@ -279,6 +307,7 @@ const LineOnboardingPage: React.FC = () => {
     setSecurityApplyError(null);
     setSecurityApplyResult(null);
     setDcdnConfirmed(false);
+    setSelectedCasCertId(undefined);
   };
 
   const readTextFile = (file: File): Promise<string> =>
@@ -310,6 +339,39 @@ const LineOnboardingPage: React.FC = () => {
       message.success(`已读取文件：${file.name}`);
     } catch {
       message.error('读取文件失败，请重试');
+    }
+  };
+
+  const handleLoadCasCertificates = async () => {
+    if (!confirmedRootDomain) {
+      message.warning('请先完成步骤1并确认一级域名');
+      return;
+    }
+    setCasCertLoading(true);
+    try {
+      const resp = (await getDcdnCasCertificates(confirmedRootDomain)) as {
+        certificates?: CasCertificateOption[];
+        total?: number;
+      };
+      const list = Array.isArray(resp?.certificates) ? resp.certificates : [];
+      setCasCertOptions(list);
+      if (list.length > 0) {
+        setSelectedCasCertId(list[0].certificateId);
+        message.success(`已加载 ${list.length} 个可复用 CAS 证书`);
+      } else {
+        setSelectedCasCertId(undefined);
+        message.warning('未找到可复用的 CAS 证书，请切换为“上传新证书到CAS”');
+      }
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || '加载 CAS 证书列表失败';
+      message.error(msg);
+      setCasCertOptions([]);
+      setSelectedCasCertId(undefined);
+    } finally {
+      setCasCertLoading(false);
     }
   };
 
@@ -423,8 +485,13 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先完成步骤2');
       return;
     }
-    if (!sslPubInput.trim() || !sslPriInput.trim()) {
+    const usingUploadMaterial = certSource === 'upload' || (certSource === 'cas' && casCertMode === 'upload');
+    if (usingUploadMaterial && (!sslPubInput.trim() || !sslPriInput.trim())) {
       message.error('请提供 cert.crt 与 privkey.key 内容');
+      return;
+    }
+    if (certSource === 'cas' && casCertMode === 'reuse' && !selectedCasCertId) {
+      message.error('请选择一个可复用的 CAS 证书');
       return;
     }
     setDcdnSecurityApplying(true);
@@ -433,10 +500,13 @@ const LineOnboardingPage: React.FC = () => {
     try {
       const result = (await applyDcdnSecurity({
         domainName: confirmedSubdomain,
-        sslPub: sslPubInput.trim(),
-        sslPri: sslPriInput.trim(),
+        sslPub: usingUploadMaterial ? sslPubInput.trim() : undefined,
+        sslPri: usingUploadMaterial ? sslPriInput.trim() : undefined,
         certName: certNameInput.trim() || undefined,
         certSource,
+        casCertificateId: certSource === 'cas' && casCertMode === 'reuse' ? selectedCasCertId : undefined,
+        casCertificateName:
+          certSource === 'cas' && casCertMode === 'reuse' ? selectedCasCert?.certName : undefined,
         enableWebsocket,
         enableWaf,
       })) as DcdnSecurityApplyResult;
@@ -794,7 +864,11 @@ const LineOnboardingPage: React.FC = () => {
           </Text>
           <Radio.Group
             value={certSource}
-            onChange={(e) => setCertSource(e.target.value)}
+            onChange={(e) => {
+              setCertSource(e.target.value);
+              setSecurityApplyError(null);
+              setSecurityApplyResult(null);
+            }}
             optionType="button"
             buttonStyle="solid"
             disabled={!dcdnAutoResult?.domainName}
@@ -802,14 +876,99 @@ const LineOnboardingPage: React.FC = () => {
             <Radio.Button value="cas">CAS（推荐）</Radio.Button>
             <Radio.Button value="upload">直传（备用）</Radio.Button>
           </Radio.Group>
-          <Space wrap>
-            <Button onClick={() => document.getElementById('dcdn-cert-file')?.click()} disabled={!dcdnAutoResult?.domainName}>
-              读取 cert.crt
-            </Button>
-            <Button onClick={() => document.getElementById('dcdn-key-file')?.click()} disabled={!dcdnAutoResult?.domainName}>
-              读取 privkey.key
-            </Button>
-          </Space>
+
+          {certSource === 'cas' ? (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Radio.Group
+                value={casCertMode}
+                onChange={(e) => {
+                  setCasCertMode(e.target.value);
+                  setSecurityApplyError(null);
+                  setSecurityApplyResult(null);
+                }}
+                optionType="button"
+                buttonStyle="solid"
+                disabled={!dcdnAutoResult?.domainName}
+              >
+                <Radio.Button value="reuse">复用已有 CAS 证书</Radio.Button>
+                <Radio.Button value="upload">上传新证书到 CAS</Radio.Button>
+              </Radio.Group>
+              {casCertMode === 'reuse' ? (
+                <>
+                  <Space>
+                    <Button
+                      loading={casCertLoading}
+                      onClick={handleLoadCasCertificates}
+                      disabled={!dcdnAutoResult?.domainName || !confirmedRootDomain}
+                    >
+                      加载 {confirmedRootDomain || '{一级域名}'} 可复用证书
+                    </Button>
+                    <Text type="secondary">
+                      当前已加载：{casCertOptions.length} 个
+                    </Text>
+                  </Space>
+                  <Select
+                    showSearch
+                    value={selectedCasCertId}
+                    onChange={(value) => setSelectedCasCertId(value)}
+                    placeholder="请选择可复用的 CAS 证书"
+                    style={{ width: '100%' }}
+                    disabled={!dcdnAutoResult?.domainName}
+                    options={casCertOptions.map((item) => ({
+                      label: `${item.certName} | CN=${item.commonName || '-'} | 到期=${item.endDate || '-'}`,
+                      value: item.certificateId,
+                    }))}
+                    filterOption={(input, option) =>
+                      String(option?.label || '').toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                  {selectedCasCert ? (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="已选 CAS 证书"
+                      description={
+                        <Space direction="vertical" size={2}>
+                          <Text>证书ID：{selectedCasCert.certificateId}</Text>
+                          <Text>证书名：{selectedCasCert.certName}</Text>
+                          <Text>匹配域名：{selectedCasCert.matchedDomains.join(', ') || '-'}</Text>
+                          <Text>到期时间：{selectedCasCert.endDate || '-'}</Text>
+                        </Space>
+                      }
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </Space>
+          ) : null}
+
+          {showUploadCertificateInputs ? (
+            <>
+              <Space wrap>
+                <Button onClick={() => document.getElementById('dcdn-cert-file')?.click()} disabled={!dcdnAutoResult?.domainName}>
+                  读取 cert.crt
+                </Button>
+                <Button onClick={() => document.getElementById('dcdn-key-file')?.click()} disabled={!dcdnAutoResult?.domainName}>
+                  读取 privkey.key
+                </Button>
+              </Space>
+              <Input.TextArea
+                value={sslPubInput}
+                onChange={(e) => setSslPubInput(e.target.value)}
+                placeholder="粘贴 cert.crt 内容（BEGIN CERTIFICATE ...）"
+                autoSize={{ minRows: 3, maxRows: 8 }}
+                disabled={!dcdnAutoResult?.domainName}
+              />
+              <Input.TextArea
+                value={sslPriInput}
+                onChange={(e) => setSslPriInput(e.target.value)}
+                placeholder="粘贴 privkey.key 内容（BEGIN PRIVATE KEY ...）"
+                autoSize={{ minRows: 3, maxRows: 8 }}
+                disabled={!dcdnAutoResult?.domainName}
+              />
+            </>
+          ) : null}
+
           <input
             id="dcdn-cert-file"
             type="file"
@@ -827,21 +986,7 @@ const LineOnboardingPage: React.FC = () => {
           <Input
             value={certNameInput}
             onChange={(e) => setCertNameInput(e.target.value)}
-            placeholder="证书名称（可选，默认 {子域名}-cert）"
-            disabled={!dcdnAutoResult?.domainName}
-          />
-          <Input.TextArea
-            value={sslPubInput}
-            onChange={(e) => setSslPubInput(e.target.value)}
-            placeholder="粘贴 cert.crt 内容（BEGIN CERTIFICATE ...）"
-            autoSize={{ minRows: 3, maxRows: 8 }}
-            disabled={!dcdnAutoResult?.domainName}
-          />
-          <Input.TextArea
-            value={sslPriInput}
-            onChange={(e) => setSslPriInput(e.target.value)}
-            placeholder="粘贴 privkey.key 内容（BEGIN PRIVATE KEY ...）"
-            autoSize={{ minRows: 3, maxRows: 8 }}
+            placeholder={certSource === 'cas' && casCertMode === 'reuse' ? '可选：DCDN 侧绑定显示名称' : '证书名称（可选，默认 {子域名}-cert）'}
             disabled={!dcdnAutoResult?.domainName}
           />
           <Space>

@@ -325,12 +325,21 @@ export const getDcdnDomainStatus = async (domainName: string) => {
   return response.data;
 };
 
+export const getDcdnCasCertificates = async (rootDomain: string) => {
+  const response = await api.get('/lines/dcdn/cas-certificates', {
+    params: { rootDomain, _ts: Date.now() },
+  });
+  return response.data;
+};
+
 export const applyDcdnSecurity = async (data: {
   domainName: string;
-  sslPub: string;
-  sslPri: string;
+  sslPub?: string;
+  sslPri?: string;
   certName?: string;
   certSource?: 'cas' | 'upload';
+  casCertificateId?: number;
+  casCertificateName?: string;
   enableWebsocket?: boolean;
   enableWaf?: boolean;
   websocketOriginScheme?: 'http' | 'https' | 'follow';

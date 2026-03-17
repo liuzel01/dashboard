@@ -5,6 +5,7 @@ import { VerifyExternalLineDto } from './dto/verify-external-line.dto';
 import { ProvisionDcdnDomainDto } from './dto/provision-dcdn-domain.dto';
 import { GetDcdnDomainStatusDto } from './dto/get-dcdn-domain-status.dto';
 import { ApplyDcdnSecurityDto } from './dto/apply-dcdn-security.dto';
+import { ListCasCertificatesDto } from './dto/list-cas-certificates.dto';
 
 @Controller('lines')
 export class LinesController {
@@ -38,5 +39,11 @@ export class LinesController {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   applyDcdnSecurity(@Body() body: ApplyDcdnSecurityDto) {
     return this.linesService.applyDcdnSecurity(body);
+  }
+
+  @Get('dcdn/cas-certificates')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  listCasCertificates(@Query() query: ListCasCertificatesDto) {
+    return this.linesService.listCasCertificates(query.rootDomain);
   }
 }

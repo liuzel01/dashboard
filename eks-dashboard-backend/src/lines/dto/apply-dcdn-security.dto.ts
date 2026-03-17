@@ -1,4 +1,13 @@
-import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ApplyDcdnSecurityDto {
@@ -6,13 +15,13 @@ export class ApplyDcdnSecurityDto {
   @IsNotEmpty()
   domainName!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  sslPub!: string;
+  sslPub?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  sslPri!: string;
+  sslPri?: string;
 
   @IsOptional()
   @IsString()
@@ -22,6 +31,15 @@ export class ApplyDcdnSecurityDto {
   @IsString()
   @IsIn(['cas', 'upload'])
   certSource?: 'cas' | 'upload';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  casCertificateId?: number;
+
+  @IsOptional()
+  @IsString()
+  casCertificateName?: string;
 
   @IsOptional()
   @IsBoolean()
