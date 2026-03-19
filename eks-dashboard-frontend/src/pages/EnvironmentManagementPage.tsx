@@ -12,6 +12,7 @@ import { EnvironmentContext } from '../contexts/EnvironmentContext';
 type EnvConfig = {
   id: string;
   name: string;
+  super_admin_url?: string;
   aws_region?: string;
   aws_profile?: string;
   aws_access_key_id?: string;
@@ -79,8 +80,17 @@ const EnvironmentManagementPage: React.FC = () => {
     setLoading(true);
     try {
       const data: EnvConfig = await getEnvironmentConfig(id);
+      // 先重置，避免上一次编辑时的可选字段残留在表单中
+      form.resetFields();
       form.setFieldsValue({
-        ...data,
+        id: data.id,
+        name: data.name,
+        super_admin_url: data.super_admin_url ?? '',
+        aws_region: data.aws_region,
+        aws_profile: data.aws_profile ?? '',
+        aws_access_key_id: data.aws_access_key_id ?? '',
+        aws_secret_access_key: data.aws_secret_access_key ?? '',
+        kubeContext: data.kubeContext ?? '',
         database: toJsonString(data.database),
         redis: toJsonString(data.redis),
         jumpServer: toJsonString(data.jumpServer),
@@ -110,6 +120,7 @@ const EnvironmentManagementPage: React.FC = () => {
     const payload: any = {
       id: values.id,
       name: values.name,
+      super_admin_url: normalizeOptionalString(values.super_admin_url),
       aws_region: values.aws_region,
       aws_profile: normalizeOptionalString(values.aws_profile),
       aws_access_key_id: normalizeOptionalString(values.aws_access_key_id),
@@ -153,6 +164,7 @@ const EnvironmentManagementPage: React.FC = () => {
     () => [
       { title: '环境ID', dataIndex: 'id', width: 140 },
       { title: '名称', dataIndex: 'name', width: 220 },
+      { title: '大管理端地址', dataIndex: 'super_admin_url', width: 280 },
       { title: 'Region', dataIndex: 'aws_region', width: 140 },
       { title: 'AWS Profile', dataIndex: 'aws_profile', width: 160 },
       { title: 'AWS Access Key ID', dataIndex: 'aws_access_key_id', width: 220 },
@@ -223,6 +235,9 @@ const EnvironmentManagementPage: React.FC = () => {
             rules={[{ required: true, message: '请输入名称' }]}
           >
             <Input />
+          </Form.Item>
+          <Form.Item label="大管理端地址（Super Admin URL）" name="super_admin_url">
+            <Input placeholder="例如: https://yyds.sample.com" />
           </Form.Item>
           <Form.Item
             label="AWS Region"

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -16,11 +16,14 @@ import {
 } from 'antd';
 import {
   applyDcdnSecurity,
+  getEnvironmentConfig,
+  getTenantsForEnvironment,
   getDcdnCasCertificates,
   getDcdnDomainStatus,
   provisionDcdnDomain,
   verifyExternalLine,
 } from '../services/api';
+import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
 const { Text, Paragraph, Link } = Typography;
 
@@ -83,8 +86,14 @@ type CasCertificateOption = {
   commonName: string | null;
   sans: string[];
   matchedDomains: string[];
+  wildcardMatched: boolean | null;
   endDate: string | null;
   orderType: string | null;
+};
+
+type TenantOption = {
+  id: number;
+  name: string;
 };
 
 const SOURCE_INGRESS = '/home/ubuntu/kylin-script/k8s-yaml/ingress/app-ingress-0313.yaml';
@@ -94,7 +103,7 @@ const SUBDOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0
 
 const normalizeDomain = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
 
-const generateHex = (length = 6) => {
+const generateHex = (length = 16) => {
   const bytes = new Uint8Array(Math.max(4, Math.ceil(length / 2)));
   if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
     window.crypto.getRandomValues(bytes);
@@ -109,6 +118,11 @@ const generateHex = (length = 6) => {
     .slice(0, length);
 };
 
+const randomPrefixLength = () => {
+  // 12~20位十六进制，降低碰撞概率并保持长度多样性
+  return 12 + Math.floor(Math.random() * 9);
+};
+
 const getMonthDay = () => {
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -117,6 +131,7 @@ const getMonthDay = () => {
 };
 
 const LineOnboardingPage: React.FC = () => {
+  const { currentEnvironment } = useContext(EnvironmentContext);
   const [rootDomainInput, setRootDomainInput] = useState('sample.com');
   const [confirmedRootDomain, setConfirmedRootDomain] = useState('');
 
@@ -147,27 +162,116 @@ const LineOnboardingPage: React.FC = () => {
 
   const [ingressApplied, setIngressApplied] = useState(false);
   const [connectivityChecked, setConnectivityChecked] = useState(false);
-  const [tenantIdInput, setTenantIdInput] = useState('1');
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [tenantLoading, setTenantLoading] = useState(false);
+  const [tenantLoadError, setTenantLoadError] = useState<string | null>(null);
+  const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(undefined);
   const [sqlConfirmed, setSqlConfirmed] = useState(false);
 
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [superAdminUrl, setSuperAdminUrl] = useState<string>('');
+  const [superAdminLoading, setSuperAdminLoading] = useState(false);
 
   const monthDay = useMemo(() => getMonthDay(), []);
   const targetIngress = `${INGRESS_DIR}/app-ingress-${monthDay}.yaml`;
   const applyCommand = `kubectl apply -f ${targetIngress}`;
   const connectivityUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/pro/p/symbol/list` : '';
-  const tenantIdNormalized = tenantIdInput.trim() || '1';
+  const selectedTenant = useMemo(
+    () => tenants.find((tenant) => tenant.id === selectedTenantId),
+    [tenants, selectedTenantId],
+  );
+  const tenantIdNormalized = selectedTenantId ? String(selectedTenantId) : '{租户ID}';
   const insertSql = confirmedSubdomain
     ? `INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (${tenantIdNormalized}, '${confirmedSubdomain}', 1, NOW());`
-    : "INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (1, '{步骤2子域名}', 1, NOW());";
+    : "INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES ({租户ID}, '{步骤2子域名}', 1, NOW());";
   const selectedCasCert = useMemo(
     () => casCertOptions.find((item) => item.certificateId === selectedCasCertId),
     [casCertOptions, selectedCasCertId],
   );
   const showUploadCertificateInputs =
     certSource === 'upload' || (certSource === 'cas' && casCertMode === 'upload');
+
+  useEffect(() => {
+    const envId = currentEnvironment?.id;
+    if (!envId) {
+      setSuperAdminUrl('');
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setSuperAdminLoading(true);
+      try {
+        const cfg = (await getEnvironmentConfig(envId)) as { super_admin_url?: string };
+        if (!cancelled) {
+          setSuperAdminUrl((cfg?.super_admin_url || '').trim());
+        }
+      } catch {
+        if (!cancelled) {
+          setSuperAdminUrl('');
+        }
+      } finally {
+        if (!cancelled) {
+          setSuperAdminLoading(false);
+        }
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEnvironment?.id]);
+
+  useEffect(() => {
+    const envId = currentEnvironment?.id;
+    setSqlConfirmed(false);
+    setVerifyResult(null);
+    setVerifyError(null);
+    if (!envId) {
+      setTenants([]);
+      setSelectedTenantId(undefined);
+      setTenantLoadError(null);
+      return;
+    }
+    let cancelled = false;
+    const loadTenants = async () => {
+      setTenantLoading(true);
+      setTenantLoadError(null);
+      try {
+        const data = (await getTenantsForEnvironment()) as TenantOption[];
+        const normalized = Array.isArray(data)
+          ? data
+              .map((item) => ({
+                id: Number(item.id),
+                name: String(item.name || ''),
+              }))
+              .filter((item) => Number.isInteger(item.id) && item.id > 0)
+          : [];
+        if (cancelled) return;
+        setTenants(normalized);
+        setSelectedTenantId((prev) => {
+          if (prev && normalized.some((item) => item.id === prev)) return prev;
+          return normalized[0]?.id;
+        });
+      } catch (error: any) {
+        if (cancelled) return;
+        setTenants([]);
+        setSelectedTenantId(undefined);
+        const backendMsg = error?.response?.data?.message;
+        const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '加载租户列表失败';
+        setTenantLoadError(msg);
+      } finally {
+        if (!cancelled) {
+          setTenantLoading(false);
+        }
+      }
+    };
+    loadTenants();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEnvironment?.id]);
   const toStatusText = (value: boolean | null | undefined) => {
     if (value === true) return '已开启';
     if (value === false) return '未开启';
@@ -200,6 +304,12 @@ const LineOnboardingPage: React.FC = () => {
     if (raw.includes('pending') || raw.includes('wait')) return '处理中';
     if (raw.includes('fail') || raw.includes('error')) return '失败';
     return value;
+  };
+  const toDisplayTime = (value?: string | null) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('zh-CN', { hour12: false });
   };
 
   const stepDone = [
@@ -277,7 +387,7 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先完成步骤1并确认一级域名');
       return;
     }
-    const prefix = `${generateHex(6)}new`;
+    const prefix = generateHex(randomPrefixLength());
     const subdomain = `${prefix}.${confirmedRootDomain}`;
     setGeneratedSubdomain(subdomain);
     if (subdomain !== confirmedSubdomain) {
@@ -347,9 +457,13 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先完成步骤1并确认一级域名');
       return;
     }
+    if (!confirmedSubdomain) {
+      message.warning('请先完成步骤2并确认当前 DCDN 子域名');
+      return;
+    }
     setCasCertLoading(true);
     try {
-      const resp = (await getDcdnCasCertificates(confirmedRootDomain)) as {
+      const resp = (await getDcdnCasCertificates(confirmedRootDomain, confirmedSubdomain)) as {
         certificates?: CasCertificateOption[];
         total?: number;
       };
@@ -433,7 +547,7 @@ const LineOnboardingPage: React.FC = () => {
       setDcdnAutoResult((prev) => ({
         domainName: status.domainName || confirmedSubdomain,
         fetchedAt: status.fetchedAt || new Date().toISOString(),
-        originDomain: prev?.originDomain || originDomainInput || '-',
+        originDomain: status.originDomain || prev?.originDomain || originDomainInput || '-',
         scope: status.scope || prev?.scope || 'global',
         created: prev?.created ?? false,
         cname: status.cname || prev?.cname || null,
@@ -515,7 +629,7 @@ const LineOnboardingPage: React.FC = () => {
         setDcdnAutoResult((prev) => ({
           domainName: result.status?.domainName || prev?.domainName || confirmedSubdomain,
           fetchedAt: result.status?.fetchedAt || new Date().toISOString(),
-          originDomain: prev?.originDomain || originDomainInput || '-',
+          originDomain: result.status?.originDomain || prev?.originDomain || originDomainInput || '-',
           scope: (result.status?.scope as DcdnProvisionResult['scope']) || prev?.scope || 'global',
           created: prev?.created ?? false,
           cname: result.status?.cname || prev?.cname || null,
@@ -631,8 +745,8 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先完成步骤5');
       return;
     }
-    if (!/^\d+$/.test(tenantIdNormalized)) {
-      message.error('tenant_id 需为正整数');
+    if (!selectedTenantId) {
+      message.error('请先选择目标租户');
       return;
     }
     if (!confirmedSubdomain) {
@@ -702,6 +816,33 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤1：购买备案域名并确认一级域名" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="先选择目标租户"
+            description="步骤6 的 tenant_domain SQL 会自动使用这里选择的租户 ID。"
+          />
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>目标租户（当前环境）</Text>
+            <Select
+              value={selectedTenantId}
+              onChange={(value) => {
+                setSelectedTenantId(value);
+                setSqlConfirmed(false);
+                setVerifyResult(null);
+                setVerifyError(null);
+              }}
+              loading={tenantLoading}
+              style={{ width: '100%' }}
+              placeholder={tenantLoading ? '加载中...' : '请选择租户'}
+              options={tenants.map((tenant) => ({
+                value: tenant.id,
+                label: `${tenant.id} - ${tenant.name}`,
+              }))}
+              notFoundContent={tenantLoading ? '加载中...' : '当前环境暂无租户'}
+            />
+            {tenantLoadError ? <Text type="danger">{tenantLoadError}</Text> : null}
+          </Space>
           <Paragraph style={{ marginBottom: 0 }}>
             购买地址：
             <Link href="https://www.aimi.com.cn/" target="_blank" rel="noreferrer">
@@ -731,7 +872,7 @@ const LineOnboardingPage: React.FC = () => {
       <Card title="步骤2：根据步骤1域名生成线路子域名" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text>推荐命令：<Text code>openssl rand -hex 16</Text></Text>
-          <Text type="secondary">系统将把随机前缀与步骤1域名拼接，示例：aaanew.sample.com</Text>
+          <Text type="secondary">系统将生成随机前缀（12~20位十六进制）并与步骤1域名拼接，示例：f0c15ebd6dc50f8.sample.com</Text>
           <Space>
             <Button onClick={handleGenerateSubdomain} disabled={!confirmedRootDomain}>
               生成子域名
@@ -829,14 +970,12 @@ const LineOnboardingPage: React.FC = () => {
                   <Text>证书状态：{toCertStatusText(dcdnAutoResult.certStatus)}</Text>
                   <Text>证书绑定域名：{dcdnAutoResult.certDomainName || '-'}</Text>
                   <Text>证书到期：{dcdnAutoResult.certExpireTime || '-'}</Text>
-                  <Text>创建时间：{dcdnAutoResult.createdAt || '-'}</Text>
-                  <Text>更新时间：{dcdnAutoResult.updatedAt || '-'}</Text>
+                  <Text>创建时间：{toDisplayTime(dcdnAutoResult.createdAt)}</Text>
+                  <Text>更新时间：{toDisplayTime(dcdnAutoResult.updatedAt)}</Text>
                   <Text>资源组：{dcdnAutoResult.resourceGroupId || '-'}</Text>
                   <Text>
-                    最近刷新：
-                    {dcdnLastRefreshAt
-                      ? new Date(dcdnLastRefreshAt).toLocaleString('zh-CN', { hour12: false })
-                      : '-'}
+                    最近刷新（本地）：
+                    {toDisplayTime(dcdnLastRefreshAt)}
                   </Text>
                   <Text>
                     标签：
@@ -899,7 +1038,7 @@ const LineOnboardingPage: React.FC = () => {
                     <Button
                       loading={casCertLoading}
                       onClick={handleLoadCasCertificates}
-                      disabled={!dcdnAutoResult?.domainName || !confirmedRootDomain}
+                      disabled={!dcdnAutoResult?.domainName || !confirmedRootDomain || !confirmedSubdomain}
                     >
                       加载 {confirmedRootDomain || '{一级域名}'} 可复用证书
                     </Button>
@@ -915,7 +1054,7 @@ const LineOnboardingPage: React.FC = () => {
                     style={{ width: '100%' }}
                     disabled={!dcdnAutoResult?.domainName}
                     options={casCertOptions.map((item) => ({
-                      label: `${item.certName} | CN=${item.commonName || '-'} | 到期=${item.endDate || '-'}`,
+                      label: `${item.certName} | 匹配=${item.matchedDomains.join(', ')} | 到期=${item.endDate || '-'}`,
                       value: item.certificateId,
                     }))}
                     filterOption={(input, option) =>
@@ -932,6 +1071,7 @@ const LineOnboardingPage: React.FC = () => {
                           <Text>证书ID：{selectedCasCert.certificateId}</Text>
                           <Text>证书名：{selectedCasCert.certName}</Text>
                           <Text>匹配域名：{selectedCasCert.matchedDomains.join(', ') || '-'}</Text>
+                          <Text>匹配类型：{selectedCasCert.wildcardMatched ? '泛域名匹配' : '精确域名匹配'}</Text>
                           <Text>到期时间：{selectedCasCert.endDate || '-'}</Text>
                         </Space>
                       }
@@ -1067,10 +1207,37 @@ const LineOnboardingPage: React.FC = () => {
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
           <Text>
+            当前环境：<Text code>{currentEnvironment?.name || currentEnvironment?.id || '-'}</Text>
+          </Text>
+          <Text>
+            大管理端地址：
+            {superAdminUrl ? (
+              <Link href={superAdminUrl} target="_blank" rel="noreferrer">
+                {superAdminUrl}
+              </Link>
+            ) : (
+              <Text type="warning">
+                {superAdminLoading ? '加载中...' : '未配置，请在“环境管理”中设置大管理端地址'}
+              </Text>
+            )}
+          </Text>
+          <Text>
             联通性检查地址：
             <Text code>{connectivityUrl || 'https://{步骤2子域名}/pro/p/symbol/list'}</Text>
           </Text>
           <Space>
+            <Button
+              onClick={() => {
+                if (!superAdminUrl) {
+                  message.warning('当前环境未配置大管理端地址');
+                  return;
+                }
+                window.open(superAdminUrl, '_blank', 'noopener,noreferrer');
+              }}
+              disabled={!superAdminUrl}
+            >
+              打开大管理端
+            </Button>
             <Button
               onClick={() => {
                 if (!connectivityUrl) {
@@ -1094,17 +1261,18 @@ const LineOnboardingPage: React.FC = () => {
       <Card title="步骤6：在环境平台数据库新增 tenant_domain 数据" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text type="secondary">
-            tenant_id 是当前环境中对应租户 ID。当前版本只输出 SQL，由你手工执行。
+            tenant_id 自动取自步骤1选择的目标租户。当前版本只输出 SQL，由你手工执行。
           </Text>
-          <Input
-            value={tenantIdInput}
-            onChange={(e) => {
-              setTenantIdInput(e.target.value);
-              setSqlConfirmed(false);
-            }}
-            placeholder="tenant_id，例如 1"
-            disabled={!connectivityChecked}
-          />
+          <Text>
+            目标租户：
+            {selectedTenant ? (
+              <Text code>
+                {selectedTenant.id} - {selectedTenant.name}
+              </Text>
+            ) : (
+              <Text type="warning">未选择（请回到步骤1选择）</Text>
+            )}
+          </Text>
           <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
             {insertSql}
           </Paragraph>
@@ -1118,11 +1286,11 @@ const LineOnboardingPage: React.FC = () => {
                   message.error('复制失败，请手工复制');
                 }
               }}
-              disabled={!connectivityChecked}
+              disabled={!connectivityChecked || !selectedTenantId}
             >
               复制 SQL
             </Button>
-            <Button type="primary" onClick={handleConfirmSql} disabled={!connectivityChecked}>
+            <Button type="primary" onClick={handleConfirmSql} disabled={!connectivityChecked || !selectedTenantId}>
               已手工执行 SQL
             </Button>
             {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}

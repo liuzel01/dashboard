@@ -9,6 +9,10 @@ export class CreateEnvironmentConfigDto {
   @IsNotEmpty()
   name!: string;
 
+  @IsOptional()
+  @IsString()
+  super_admin_url?: string;
+
   @IsString()
   @IsNotEmpty()
   aws_region!: string;
@@ -58,6 +62,10 @@ export class UpdateEnvironmentConfigDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  super_admin_url?: string;
 
   @IsOptional()
   @IsString()

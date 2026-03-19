@@ -9093,7 +9093,7 @@
                               "type": "text",
                               "id": "RTN4w",
                               "fill": "#0A0A0A",
-                              "content": "步骤1：购买备案域名并录入一级域名",
+                              "content": "步骤1：先选择租户，再购买备案域名并录入一级域名",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "600"
@@ -9102,7 +9102,7 @@
                               "type": "text",
                               "id": "uhxSu",
                               "fill": "#1677FF",
-                              "content": "购买地址：https://www.aimi.com.cn/",
+                              "content": "购买地址：https://www.aimi.com.cn/  |  SSL证书：https://www.aimi.com.cn/ssl-buy?certId=24",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9111,7 +9111,7 @@
                               "type": "text",
                               "id": "PhdAW",
                               "fill": "#3F3F46",
-                              "content": "购买并完成过户后，在下方录入新一级域名（示例：sample.com）",
+                              "content": "先选择目标租户（当前环境），再录入一级域名（示例：sample.com）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9120,7 +9120,7 @@
                               "type": "text",
                               "id": "FAIsD",
                               "fill": "#777777",
-                              "content": "确认后该域名将用于步骤2-步骤6",
+                              "content": "步骤6 SQL 将自动带入该租户 tenant_id",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -9130,7 +9130,7 @@
                               "id": "CL2Su",
                               "name": "step1Label",
                               "fill": "#777777",
-                              "content": "新一级域名",
+                              "content": "目标租户（下拉）与新一级域名",
                               "fontFamily": "Inter",
                               "fontSize": 12,
                               "fontWeight": "normal"
@@ -9221,7 +9221,7 @@
                               "type": "text",
                               "id": "fswnF",
                               "fill": "#3F3F46",
-                              "content": "目标格式：aaanew.sample.com（自动拼接自步骤1域名）",
+                              "content": "目标格式：{随机前缀}.{步骤1域名}",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9239,7 +9239,7 @@
                               "type": "text",
                               "id": "tce4j",
                               "fill": "#3F3F46",
-                              "content": "生成示例：aaanew.sample.com，输出后需用户确认",
+                              "content": "示例：f0c15ebd6dc50f8.sample.com（前缀长度12~20，自动生成）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9276,7 +9276,7 @@
                                   "type": "text",
                                   "id": "KoaQd",
                                   "fill": "#0A0A0A",
-                                  "content": "aaanew.sample.com",
+                                  "content": "f0c15ebd6dc50f8.sample.com",
                                   "fontFamily": "JetBrains Mono",
                                   "fontSize": 12,
                                   "fontWeight": "normal"
@@ -9331,7 +9331,7 @@
                               "type": "text",
                               "id": "cFBtg",
                               "fill": "#0A0A0A",
-                              "content": "步骤3：阿里云国际 DCDN 配置",
+                              "content": "步骤3：阿里云国际 DCDN 自动创建 + HTTPS/WebSocket/WAF 自动化",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "600"
@@ -9340,7 +9340,7 @@
                               "type": "text",
                               "id": "zAt7s",
                               "fill": "#3F3F46",
-                              "content": "使用步骤2确认的子域名（如 aaanew.sample.com）进行配置",
+                              "content": "先创建/复用 DCDN 域名，再应用 HTTPS/WebSocket/WAF",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9349,7 +9349,7 @@
                               "type": "text",
                               "id": "OGQMX",
                               "fill": "#3F3F46",
-                              "content": "在 DCDN 中完成映射并记录返回的 CNAME",
+                              "content": "支持刷新域名状态并查看 CNAME、证书与安全状态",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9358,7 +9358,7 @@
                               "type": "text",
                               "id": "JM2eV",
                               "fill": "#3F3F46",
-                              "content": "预留输入项：线路域名 / CNAME / 备注",
+                              "content": "输入源站域名后即可执行创建；状态刷新可独立执行",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9445,7 +9445,7 @@
                               "type": "text",
                               "id": "wYWtA",
                               "fill": "#0A0A0A",
-                              "content": "步骤5：进入对应环境的超级后台登记线路",
+                              "content": "步骤5：超级后台登记与联通性检查",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "600"
@@ -9454,7 +9454,7 @@
                               "type": "text",
                               "id": "X4qBA",
                               "fill": "#3F3F46",
-                              "content": "同一个环境仅有一个超级后台，和租户无关",
+                              "content": "同一个环境仅有一个超级后台（与租户无关）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9463,7 +9463,7 @@
                               "type": "text",
                               "id": "X3Yro",
                               "fill": "#3F3F46",
-                              "content": "在该环境超级后台中添加步骤2生成的线路子域名",
+                              "content": "大管理端地址来自“环境管理”的 super_admin_url 配置",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9472,7 +9472,7 @@
                               "type": "text",
                               "id": "CyuAu",
                               "fill": "#3F3F46",
-                              "content": "- 执行联通性检查：https://{步骤2子域名}/pro/p/symbol/list",
+                              "content": "- 登记步骤2子域名后执行联通性检查：https://{步骤2子域名}/pro/p/symbol/list",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9511,7 +9511,7 @@
                               "type": "text",
                               "id": "qkSBr",
                               "fill": "#3F3F46",
-                              "content": "- SQL：INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (1, '{步骤2子域名}', 1, NOW())",
+                              "content": "- SQL：INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES ({步骤1租户ID}, '{步骤2子域名}', 1, NOW())",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9520,7 +9520,7 @@
                               "type": "text",
                               "id": "cHwpS",
                               "fill": "#3F3F46",
-                              "content": "- tenant_id 是当前环境对应租户ID（手工填写）",
+                              "content": "- tenant_id 自动取自步骤1已选择租户（无需手工输入）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9677,6 +9677,15 @@
           ]
         }
       ]
+    },
+    {
+      "type": "rectangle",
+      "id": "IX1A0",
+      "x": 1231,
+      "y": 17423,
+      "fill": "#CCCCCC",
+      "width": 1,
+      "height": 1
     }
   ]
 }

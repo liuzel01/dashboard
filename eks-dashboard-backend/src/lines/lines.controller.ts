@@ -44,6 +44,6 @@ export class LinesController {
   @Get('dcdn/cas-certificates')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   listCasCertificates(@Query() query: ListCasCertificatesDto) {
-    return this.linesService.listCasCertificates(query.rootDomain);
+    return this.linesService.listCasCertificates(query.rootDomain, query.targetDomain);
   }
 }

@@ -17,6 +17,7 @@ export class EnvironmentsController {
     return list.map((env) => ({
       id: env.id,
       name: env.name,
+      super_admin_url: env.super_admin_url,
       aws_region: env.aws_region,
       aws_profile: env.aws_profile,
       aws_access_key_id: env.aws_access_key_id,
@@ -38,6 +39,7 @@ export class EnvironmentsController {
     await this.environmentsService.upsertEnvironmentConfig({
       id: body.id,
       name: body.name,
+      super_admin_url: body.super_admin_url,
       aws_region: body.aws_region,
       aws_access_key_id: body.aws_access_key_id,
       aws_secret_access_key: body.aws_secret_access_key,

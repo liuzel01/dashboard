@@ -6,6 +6,7 @@
 
 - 将“新增线路”从人工散乱操作收敛为可执行向导。
 - 核心是步骤化编排：
+  - 选择目标租户并确认一级域名
   - 生成并确认线路子域名
   - 自动创建/复用 DCDN 域名
   - 自动配置 HTTPS / WebSocket / WAF
@@ -22,29 +23,33 @@
   - `eks-dashboard-backend/src/lines/dto/provision-dcdn-domain.dto.ts`
   - `eks-dashboard-backend/src/lines/dto/get-dcdn-domain-status.dto.ts`
   - `eks-dashboard-backend/src/lines/dto/apply-dcdn-security.dto.ts`
-- 设计稿：`dashboard.pen`（Page/LineOnboarding）
+  - `eks-dashboard-backend/src/lines/dto/list-cas-certificates.dto.ts`
+- 设计稿：`dashboard.pen`（`Page/LineOnboarding`）
 
 ## 3. 向导流程（前端）
 
-## 步骤1：录入一级域名
+### 步骤1：选择目标租户 + 录入一级域名
 
-- 用户填写一级域名（如 `sample.com`）并确认。
-- 页面保留域名购买与 SSL 购买链接。
+- 页面会按“左上角当前环境”自动加载租户列表（下拉选择）。
+- 页面保留域名与证书购买链接：
+  - `https://www.aimi.com.cn/`
+  - `https://www.aimi.com.cn/ssl-buy?certId=24`
+- 用户确认一级域名（如 `sample.com`）后，进入步骤2。
+- 步骤6的 SQL 会自动使用步骤1选中的 `tenant_id`。
 
-## 步骤2：生成并确认子域名
+### 步骤2：生成并确认子域名
 
-- 生成规则：随机前缀 + `new` + 步骤1域名。
-- 示例：`a1b2c3new.sample.com`。
+- 生成规则：随机前缀（12~20位十六进制）+ 步骤1域名。
+- 示例：`f0c15ebd6dc50f8.sample.com`。
 
-## 步骤3：DCDN 与安全配置（重点）
+### 步骤3：DCDN 与安全配置（重点）
 
 - 分两段：
   - `1) 创建/复用 DCDN 域名`
   - `2) 配置 HTTPS/WebSocket/WAF`
-- 先创建/复用，再做安全配置，避免用户误解。
-- “刷新域名状态”仅依赖已确认子域名，可单独用于状态查看。
+- “刷新域名状态”只依赖已确认子域名，可单独用于查看域名当前状态。
 
-### 步骤3-1 创建/复用 DCDN
+#### 步骤3-1 创建/复用 DCDN
 
 - 依赖输入：
   - 子域名（步骤2）
@@ -56,50 +61,62 @@
   - 权重：10
   - 加速区域：global
 
-### 步骤3-2 HTTPS/WebSocket/WAF
+#### 步骤3-2 HTTPS/WebSocket/WAF
 
 - 证书来源支持：
   - `CAS（推荐）`：上传到 CAS，再绑定到 DCDN（云盾 SSL 证书中心）
   - `直传（备用）`：直接上传证书私钥到 DCDN
-- 默认模式由后端环境变量控制（默认 CAS）。
 - CAS 模式下支持两种子模式：
-  - `复用已有 CAS 证书`：按步骤1根域名加载可复用证书并选择绑定
+  - `复用已有 CAS 证书`：按根域名 + 当前目标子域名查询可覆盖证书
   - `上传新证书到 CAS`：手工上传 `cert.crt` + `privkey.key`
+- 配置结果会回写到步骤3状态区（HTTPS/WebSocket/WAF、证书字段等）。
 
-## 步骤4：Ingress 手工应用
+### 步骤4：Ingress 手工应用
 
 - 页面仅输出命令，人工执行：
   - `cp ...`
   - `kubectl apply -f ...`
 
-## 步骤5：超级后台登记 + 联通性检查
+### 步骤5：超级后台登记 + 联通性检查
 
-- 检查 URL：
+- 大管理端地址来源：
+  - 在“环境管理”中为每个环境维护 `super_admin_url`
+  - 步骤5根据左上角当前环境自动展示并可跳转
+- 联通性检查地址：
   - `https://{子域名}/pro/p/symbol/list`
 
-## 步骤6：输出 SQL（人工执行）
+### 步骤6：输出 SQL（人工执行）
 
-- 输出模板：
-  - `INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (...)`
+- tenant_id 自动来源于步骤1的目标租户。
+- SQL 模板：
+  - `INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES ({步骤1租户ID}, '{步骤2子域名}', 1, NOW());`
 
-## 步骤7：外部 API 验收
+### 步骤7：外部 API 验收
 
 - 调用外部系统接口（非本系统）：
   - `http://172.31.29.3:3000/api/lines`
 
-## 4. 后端 API（/api/lines）
+## 4. 相关 API 清单
 
-- `GET /api/lines/external/check?lineUrl=...`
-  - 外部 API 验收检查
+### 4.1 本系统 API（供页面调用）
+
+- `GET /api/environments/{id}/tenants`
+  - 获取当前环境租户列表（步骤1租户下拉）
+- `GET /api/environments/config/{id}`
+  - 获取当前环境配置（步骤5展示 super admin URL）
 - `POST /api/lines/dcdn/provision`
   - 创建或复用 DCDN 域名
 - `GET /api/lines/dcdn/status?domainName=...`
   - 刷新 DCDN 状态快照
 - `POST /api/lines/dcdn/security/apply`
-  - 应用 HTTPS / WebSocket / WAF
-  - 支持 `certSource: cas | upload`
-- `GET /api/lines/dcdn/cas-certificates?rootDomain=...`
-  - 按根域名查询可复用的 CAS 证书列表（用于步骤3复用证书）
+  - 应用 HTTPS / WebSocket / WAF，支持 `certSource: cas | upload`
+- `GET /api/lines/dcdn/cas-certificates?rootDomain=...&targetDomain=...`
+  - 查询“可覆盖当前目标子域名”的 CAS 证书（精确匹配或泛域名匹配）
+
+### 4.2 外部系统 API（验收）
+
+- `GET /api/lines/external/check?lineUrl=...`
+  - 后端代理调用外部 `LINE_VERIFY_API_URL`，检查线路是否已出现在外部系统中
 
 ## 5. 环境变量（后端）
 
@@ -138,11 +155,12 @@
 
 - WebSocket 与 WAF 在部分场景可能互斥，后端会返回 warning，需以实际业务验证为准。
 - DCDN 与 DNS 状态存在传播延迟，步骤3建议多次刷新观察。
-- 刷新接口错误默认会下沉到页面提示，不一定会在后端控制台出现红色异常堆栈。
+- 步骤6仍是“输出 SQL + 手工执行”，尚未做数据库直连执行。
 
 ## 8. 推荐调试顺序
 
-1. 先执行 `1) 创建/复用 DCDN 域名`
-2. 再执行 `2) 配置 HTTPS/WebSocket/WAF`
-3. 点“刷新域名状态”观察关键字段
-4. 继续步骤4~7完成环境验收
+1. 步骤1先选择目标租户并确认一级域名
+2. 步骤2确认线路子域名
+3. 步骤3先创建/复用 DCDN，再配置 HTTPS/WebSocket/WAF
+4. 刷新域名状态，确认 CNAME / 证书 / 安全状态
+5. 继续步骤4~7完成验收

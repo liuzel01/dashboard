@@ -325,9 +325,9 @@ export const getDcdnDomainStatus = async (domainName: string) => {
   return response.data;
 };
 
-export const getDcdnCasCertificates = async (rootDomain: string) => {
+export const getDcdnCasCertificates = async (rootDomain: string, targetDomain?: string) => {
   const response = await api.get('/lines/dcdn/cas-certificates', {
-    params: { rootDomain, _ts: Date.now() },
+    params: { rootDomain, targetDomain, _ts: Date.now() },
   });
   return response.data;
 };

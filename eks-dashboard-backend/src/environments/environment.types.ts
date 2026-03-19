@@ -6,6 +6,7 @@ export interface Platform {
 export interface Environment {
   id: string;
   name: string;
+  super_admin_url?: string;
   aws_access_key_id?: string;
   aws_secret_access_key?: string;
   aws_profile?: string;

@@ -189,6 +189,40 @@ export class LinesService {
       .filter((item) => item.key);
   }
 
+  private extractOriginFromSources(sourcesPayload: any): string | null {
+    if (!sourcesPayload) return null;
+    const sources = Array.isArray(sourcesPayload)
+      ? sourcesPayload
+      : Array.isArray(sourcesPayload?.Source)
+        ? sourcesPayload.Source
+        : Array.isArray(sourcesPayload?.Sources)
+          ? sourcesPayload.Sources
+          : [];
+    const first = sources[0];
+    if (!first || typeof first !== 'object') return null;
+    const candidates = [
+      first.Content,
+      first.content,
+      first.Source,
+      first.source,
+      first.Address,
+      first.address,
+    ];
+    const value = candidates.find((item) => typeof item === 'string' && item.trim()) as
+      | string
+      | undefined;
+    return value ? value.trim() : null;
+  }
+
+  private extractOriginDomainFromDomainInfo(domainInfo: any, detailResp: any): string | null {
+    return (
+      this.extractOriginFromSources(detailResp?.DomainDetail?.Sources) ||
+      this.extractOriginFromSources(domainInfo?.Sources) ||
+      this.extractOriginFromSources(domainInfo?.Origin) ||
+      null
+    );
+  }
+
   private extractAliyunErrorMessage(error: any, fallback: string) {
     const code = String(error?.data?.Code || error?.code || '').trim();
     const message = String(error?.data?.Message || error?.message || fallback).trim();
@@ -248,25 +282,61 @@ export class LinesService {
     }
   }
 
-  private normalizeCertificateDomain(domainRaw: string): string {
-    const domain = String(domainRaw || '').trim().toLowerCase().replace(/^\*\./, '');
-    return domain;
+  private normalizeHostToken(domainRaw: string): string {
+    return String(domainRaw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\.$/, '');
+  }
+
+  private normalizeCertificatePattern(domainRaw: string): string {
+    const token = this.normalizeHostToken(domainRaw);
+    if (!token) return '';
+    if (token === '*') return '';
+    if (token.startsWith('*.')) {
+      return `*.${token.slice(2)}`;
+    }
+    return token;
   }
 
   private splitCertificateDomains(value: unknown): string[] {
     if (!value) return [];
     if (Array.isArray(value)) {
-      return value.map((item) => this.normalizeCertificateDomain(String(item))).filter(Boolean);
+      return value
+        .map((item) => this.normalizeCertificatePattern(String(item)))
+        .filter(Boolean);
     }
     return String(value)
       .split(/[,\s;|]+/)
-      .map((item) => this.normalizeCertificateDomain(item))
+      .map((item) => this.normalizeCertificatePattern(item))
       .filter(Boolean);
   }
 
-  private rootDomainMatched(rootDomain: string, certificateDomains: string[]): string[] {
-    const root = this.normalizeCertificateDomain(rootDomain);
-    return certificateDomains.filter((domain) => domain === root || domain.endsWith(`.${root}`));
+  private certificatePatternCoversHost(patternRaw: string, hostRaw: string): boolean {
+    const pattern = this.normalizeCertificatePattern(patternRaw);
+    const host = this.normalizeHostToken(hostRaw);
+    if (!pattern || !host) return false;
+    if (pattern === host) return true;
+    if (!pattern.startsWith('*.')) return false;
+
+    const suffix = pattern.slice(2);
+    if (!suffix || !host.endsWith(`.${suffix}`)) return false;
+
+    const hostLabels = host.split('.').length;
+    const suffixLabels = suffix.split('.').length;
+    return hostLabels === suffixLabels + 1;
+  }
+
+  private rootDomainMatched(rootDomainRaw: string, certificateDomains: string[]): string[] {
+    const root = this.normalizeHostToken(rootDomainRaw);
+    return certificateDomains.filter((patternRaw) => {
+      const pattern = this.normalizeCertificatePattern(patternRaw);
+      if (!pattern) return false;
+      if (pattern === root) return true;
+      if (pattern === `*.${root}`) return true;
+      return !pattern.startsWith('*.') && pattern.endsWith(`.${root}`);
+    });
   }
 
   private collectCasCertificateRecords(payload: unknown, output: any[]) {
@@ -457,6 +527,7 @@ export class LinesService {
     let httpsEnabled: boolean | null = null;
     let websocketEnabled: boolean | null = null;
     let wafEnabled: boolean | null = null;
+    let detailRespRaw: any = null;
     const warnings: string[] = [];
 
     try {
@@ -465,6 +536,7 @@ export class LinesService {
         { DomainName: domainName },
         { method: 'GET', timeout: 10000 },
       );
+      detailRespRaw = detailResp;
       httpsEnabled = this.extractHttpsEnabled(detailResp);
     } catch (error) {
       warnings.push(`读取 HTTPS 状态失败：${this.extractAliyunErrorMessage(error, 'unknown error')}`);
@@ -511,7 +583,15 @@ export class LinesService {
       warnings.push(`读取证书状态失败：${(certInfo as any).certInfoError}`);
     }
 
-    return { httpsEnabled, websocketEnabled, wafEnabled, warnings, ...cnameCheck, ...certInfo };
+    return {
+      httpsEnabled,
+      websocketEnabled,
+      wafEnabled,
+      warnings,
+      detailRespRaw,
+      ...cnameCheck,
+      ...certInfo,
+    };
   }
 
   private async getDcdnDomainStatusInternal(client: any, domainName: string) {
@@ -532,10 +612,12 @@ export class LinesService {
     const security = await this.getDcdnSecuritySnapshot(client, domainName);
     const derivedCertStatus =
       security.certStatus || (security.httpsEnabled && security.certName ? 'bound' : null);
+    const originDomain = this.extractOriginDomainFromDomainInfo(domainInfo, security.detailRespRaw);
 
     return {
       domainName,
       fetchedAt: new Date().toISOString(),
+      originDomain,
       cname: domainInfo?.Cname || domainInfo?.DomainCname || null,
       domainStatus: domainInfo?.DomainStatus || null,
       cnameCheckStatus: security.cnameCheckStatus,
@@ -694,8 +776,9 @@ export class LinesService {
     }
   }
 
-  async listCasCertificates(rootDomainRaw: string) {
+  async listCasCertificates(rootDomainRaw: string, targetDomainRaw?: string) {
     const rootDomain = this.normalizeToHost(rootDomainRaw);
+    const targetDomain = targetDomainRaw ? this.normalizeToHost(targetDomainRaw) : null;
     const casClient = this.createCasClient();
     const requestList = async (orderType: 'UPLOAD' | 'CERT') => {
       try {
@@ -729,9 +812,11 @@ export class LinesService {
       const name = String(item?.Name ?? item?.CertName ?? item?.CertificateName ?? '').trim();
       const commonName = String(item?.CommonName ?? item?.CertDomainName ?? item?.DomainName ?? '').trim();
       const sans = this.splitCertificateDomains(item?.Sans ?? item?.SubjectAlternativeName ?? item?.DomainList);
-      const common = this.normalizeCertificateDomain(commonName);
-      const domains = [common, ...sans].filter(Boolean);
-      const matchedDomains = this.rootDomainMatched(rootDomain, domains);
+      const common = this.normalizeCertificatePattern(commonName);
+      const domains = Array.from(new Set([common, ...sans].filter(Boolean)));
+      const matchedDomains = targetDomain
+        ? domains.filter((pattern) => this.certificatePatternCoversHost(pattern, targetDomain))
+        : this.rootDomainMatched(rootDomain, domains);
       if (matchedDomains.length === 0) return;
 
       const endDateRaw = item?.EndDate ?? item?.CertExpireTime ?? item?.ExpireDate ?? null;
@@ -744,6 +829,9 @@ export class LinesService {
           commonName: commonName || null,
           sans,
           matchedDomains,
+          wildcardMatched: targetDomain
+            ? matchedDomains.some((pattern) => pattern.startsWith('*.'))
+            : null,
           endDate,
           orderType: String(item?.OrderType || item?.ProductType || '').toUpperCase() || null,
         });
@@ -758,6 +846,7 @@ export class LinesService {
 
     return {
       rootDomain,
+      targetDomain,
       total: certificates.length,
       certificates,
       fetchedAt: new Date().toISOString(),

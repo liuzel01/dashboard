@@ -72,21 +72,25 @@ export class EnvironmentsDbService {
        FROM environments_config
        ORDER BY environment_id`,
     );
-    return rows.map((row) => ({
-      id: row.environment_id,
-      name: row.name,
-      aws_access_key_id: row.aws_access_key_id || undefined,
-      aws_secret_access_key: row.aws_secret_access_key || undefined,
-      aws_profile: row.aws_profile || undefined,
-      aws_region: row.aws_region,
-      kubeContext: row.kube_context || undefined,
-      database: this.parseJson(row.database_json),
-      redis: this.parseJson(row.redis_json),
-      jumpServer: this.parseJson(row.jump_server_json),
-      tenants: this.parseJson(row.tenants_json),
-      platforms: this.parseJson(row.platforms_json),
-      alerts: this.parseJson(row.alerts_json),
-    }));
+    return rows.map((row) => {
+      const alerts = this.parseJson(row.alerts_json);
+      return {
+        id: row.environment_id,
+        name: row.name,
+        super_admin_url: alerts?.super_admin_url || undefined,
+        aws_access_key_id: row.aws_access_key_id || undefined,
+        aws_secret_access_key: row.aws_secret_access_key || undefined,
+        aws_profile: row.aws_profile || undefined,
+        aws_region: row.aws_region,
+        kubeContext: row.kube_context || undefined,
+        database: this.parseJson(row.database_json),
+        redis: this.parseJson(row.redis_json),
+        jumpServer: this.parseJson(row.jump_server_json),
+        tenants: this.parseJson(row.tenants_json),
+        platforms: this.parseJson(row.platforms_json),
+        alerts,
+      };
+    });
   }
 
   async getEnvironmentConfigById(environmentId: string): Promise<any | null> {
@@ -101,9 +105,11 @@ export class EnvironmentsDbService {
     );
     const row = rows[0];
     if (!row) return null;
+    const alerts = this.parseJson(row.alerts_json);
     return {
       id: row.environment_id,
       name: row.name,
+      super_admin_url: alerts?.super_admin_url || undefined,
       aws_access_key_id: row.aws_access_key_id || undefined,
       aws_secret_access_key: row.aws_secret_access_key || undefined,
       aws_profile: row.aws_profile || undefined,
@@ -114,13 +120,14 @@ export class EnvironmentsDbService {
       jumpServer: this.parseJson(row.jump_server_json),
       tenants: this.parseJson(row.tenants_json),
       platforms: this.parseJson(row.platforms_json),
-      alerts: this.parseJson(row.alerts_json),
+      alerts,
     };
   }
 
   async upsertEnvironmentConfig(env: {
     id: string;
     name: string;
+    super_admin_url?: string;
     aws_access_key_id?: string;
     aws_secret_access_key?: string;
     aws_profile?: string;
@@ -136,6 +143,13 @@ export class EnvironmentsDbService {
     if (!(await this.ensureConfigAvailable())) {
       throw new Error('environments_config not available');
     }
+    const alerts = env.alerts && typeof env.alerts === 'object' ? { ...env.alerts } : {};
+    if (env.super_admin_url) {
+      alerts.super_admin_url = env.super_admin_url;
+    } else if ('super_admin_url' in alerts) {
+      delete alerts.super_admin_url;
+    }
+
     await this.db.query(
       `INSERT INTO environments_config
         (environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_region, kube_context,
@@ -169,7 +183,7 @@ export class EnvironmentsDbService {
         env.jumpServer ? JSON.stringify(env.jumpServer) : null,
         env.tenants ? JSON.stringify(env.tenants) : null,
         env.platforms ? JSON.stringify(env.platforms) : null,
-        env.alerts ? JSON.stringify(env.alerts) : null,
+        Object.keys(alerts).length > 0 ? JSON.stringify(alerts) : null,
       ],
     );
   }

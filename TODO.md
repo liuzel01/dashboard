@@ -132,3 +132,6 @@ This file outlines the current development tasks for the project.
 ## Medium Priority
 
 ## Low Priority
+
+1. 环境管理中增加“商户/租户管理”页面（独立菜单区块）
+   说明：当前 tenants 已有表结构，但前端尚未提供可视化管理入口；待环境管理稳定后推进。
