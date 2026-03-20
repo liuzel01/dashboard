@@ -5,11 +5,13 @@ import {
   Card,
   Divider,
   Input,
+  Modal,
   Radio,
   Select,
   Space,
   Steps,
   Switch,
+  Table,
   Tag,
   Typography,
   message,
@@ -20,7 +22,10 @@ import {
   getTenantsForEnvironment,
   getDcdnCasCertificates,
   getDcdnDomainStatus,
+  getIngressOriginCandidates,
+  getSuperAdminLines,
   provisionDcdnDomain,
+  registerSuperAdminLine,
   verifyExternalLine,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
@@ -96,6 +101,33 @@ type TenantOption = {
   name: string;
 };
 
+type SuperAdminRegisterResult = {
+  action: 'created' | 'unchanged' | 'conflict' | 'updated';
+  message: string;
+  differences?: Array<{ field: string; existing: any; incoming: any }>;
+  canUpdate?: boolean;
+};
+
+type SuperAdminLineItem = {
+  id?: number | string | null;
+  zh?: string;
+  en?: string;
+  lineUrl?: string;
+  otcUrl?: string;
+  status?: boolean | null;
+  tenantId?: number | null;
+};
+
+type IngressOriginCandidate = {
+  key: string;
+  namespace: string;
+  ingressName: string;
+  originDomain: string;
+  lbAddresses: string[];
+  ruleHosts: string[];
+  createdAt?: string | null;
+};
+
 const SOURCE_INGRESS = '/home/ubuntu/kylin-script/k8s-yaml/ingress/app-ingress-0313.yaml';
 const INGRESS_DIR = '/home/ubuntu/kylin-script/k8s-yaml/ingress';
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -146,6 +178,11 @@ const LineOnboardingPage: React.FC = () => {
   const [dcdnRefreshing, setDcdnRefreshing] = useState(false);
   const [dcdnLastRefreshAt, setDcdnLastRefreshAt] = useState<string | null>(null);
   const [dcdnSecurityApplying, setDcdnSecurityApplying] = useState(false);
+  const [ingressCandidatesOpen, setIngressCandidatesOpen] = useState(false);
+  const [ingressCandidatesLoading, setIngressCandidatesLoading] = useState(false);
+  const [ingressCandidatesError, setIngressCandidatesError] = useState<string | null>(null);
+  const [ingressCandidates, setIngressCandidates] = useState<IngressOriginCandidate[]>([]);
+  const [selectedIngressCandidateKey, setSelectedIngressCandidateKey] = useState<string | null>(null);
   const [dcdnConfirmed, setDcdnConfirmed] = useState(false);
   const [sslPubInput, setSslPubInput] = useState('');
   const [sslPriInput, setSslPriInput] = useState('');
@@ -161,6 +198,21 @@ const LineOnboardingPage: React.FC = () => {
   const [securityApplyError, setSecurityApplyError] = useState<string | null>(null);
 
   const [ingressApplied, setIngressApplied] = useState(false);
+  const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
+  const [superAdminLineZh, setSuperAdminLineZh] = useState('');
+  const [superAdminLineEn, setSuperAdminLineEn] = useState('');
+  const [superAdminLineStatus, setSuperAdminLineStatus] = useState(false);
+  const [superAdminRegistering, setSuperAdminRegistering] = useState(false);
+  const [superAdminRegisterError, setSuperAdminRegisterError] = useState<string | null>(null);
+  const [superAdminRegisterResult, setSuperAdminRegisterResult] = useState<SuperAdminRegisterResult | null>(null);
+  const [superAdminPendingUpdate, setSuperAdminPendingUpdate] = useState(false);
+  const [superAdminLinesOpen, setSuperAdminLinesOpen] = useState(false);
+  const [superAdminLinesLoading, setSuperAdminLinesLoading] = useState(false);
+  const [superAdminLinesError, setSuperAdminLinesError] = useState<string | null>(null);
+  const [superAdminLines, setSuperAdminLines] = useState<SuperAdminLineItem[]>([]);
+  const [superAdminLinesPage, setSuperAdminLinesPage] = useState(1);
+  const [superAdminLinesSize, setSuperAdminLinesSize] = useState(20);
+  const [superAdminLinesTotal, setSuperAdminLinesTotal] = useState(0);
   const [connectivityChecked, setConnectivityChecked] = useState(false);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [tenantLoading, setTenantLoading] = useState(false);
@@ -177,6 +229,8 @@ const LineOnboardingPage: React.FC = () => {
   const monthDay = useMemo(() => getMonthDay(), []);
   const targetIngress = `${INGRESS_DIR}/app-ingress-${monthDay}.yaml`;
   const applyCommand = `kubectl apply -f ${targetIngress}`;
+  const superAdminLineUrl = confirmedSubdomain ? `https://${confirmedSubdomain}` : '';
+  const superAdminOtcUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/otc` : '';
   const connectivityUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/pro/p/symbol/list` : '';
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId),
@@ -228,6 +282,10 @@ const LineOnboardingPage: React.FC = () => {
     setSqlConfirmed(false);
     setVerifyResult(null);
     setVerifyError(null);
+    setSuperAdminLines([]);
+    setSuperAdminLinesTotal(0);
+    setSuperAdminLinesError(null);
+    setSuperAdminLinesOpen(false);
     if (!envId) {
       setTenants([]);
       setSelectedTenantId(undefined);
@@ -272,6 +330,17 @@ const LineOnboardingPage: React.FC = () => {
       cancelled = true;
     };
   }, [currentEnvironment?.id]);
+
+  useEffect(() => {
+    if (!confirmedSubdomain) {
+      setSuperAdminLineZh('');
+      setSuperAdminLineEn('');
+      return;
+    }
+    const prefix = confirmedSubdomain.split('.')[0] || confirmedSubdomain;
+    setSuperAdminLineZh(`线路-${prefix}`);
+    setSuperAdminLineEn(prefix);
+  }, [confirmedSubdomain]);
   const toStatusText = (value: boolean | null | undefined) => {
     if (value === true) return '已开启';
     if (value === false) return '未开启';
@@ -333,6 +402,10 @@ const LineOnboardingPage: React.FC = () => {
     setDcdnCname('');
     setDcdnConfirmed(false);
     setIngressApplied(false);
+    setSuperAdminRegistered(false);
+    setSuperAdminRegisterError(null);
+    setSuperAdminRegisterResult(null);
+    setSuperAdminPendingUpdate(false);
     setConnectivityChecked(false);
     setSqlConfirmed(false);
     setVerifyResult(null);
@@ -341,6 +414,11 @@ const LineOnboardingPage: React.FC = () => {
 
   const resetFromStep3 = () => {
     setOriginDomainInput('');
+    setIngressCandidatesOpen(false);
+    setIngressCandidatesLoading(false);
+    setIngressCandidatesError(null);
+    setIngressCandidates([]);
+    setSelectedIngressCandidateKey(null);
     setDcdnCname('');
     setDcdnAutoResult(null);
     setDcdnAutoError(null);
@@ -362,6 +440,10 @@ const LineOnboardingPage: React.FC = () => {
     setSecurityApplyError(null);
     setDcdnConfirmed(false);
     setIngressApplied(false);
+    setSuperAdminRegistered(false);
+    setSuperAdminRegisterError(null);
+    setSuperAdminRegisterResult(null);
+    setSuperAdminPendingUpdate(false);
     setConnectivityChecked(false);
     setSqlConfirmed(false);
     setVerifyResult(null);
@@ -410,6 +492,11 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const resetStep3Runtime = () => {
+    setIngressCandidatesOpen(false);
+    setIngressCandidatesLoading(false);
+    setIngressCandidatesError(null);
+    setIngressCandidates([]);
+    setSelectedIngressCandidateKey(null);
     setDcdnAutoResult(null);
     setDcdnAutoError(null);
     setDcdnLastRefreshAt(null);
@@ -487,6 +574,78 @@ const LineOnboardingPage: React.FC = () => {
     } finally {
       setCasCertLoading(false);
     }
+  };
+
+  const handleLoadIngressOriginCandidates = async () => {
+    setIngressCandidatesLoading(true);
+    setIngressCandidatesError(null);
+    try {
+      const resp = (await getIngressOriginCandidates({
+        keyword: 'nginx-web-app',
+      })) as {
+        items?: Array<{
+          namespace: string;
+          name: string;
+          createdAt?: string | null;
+          lbAddresses?: string[];
+          ruleHosts?: string[];
+          originCandidates?: string[];
+        }>;
+      };
+      const deduped = new Map<string, IngressOriginCandidate>();
+      (resp?.items || []).forEach((item) => {
+        const key = `${item.namespace}/${item.name}`;
+        if (deduped.has(key)) return;
+        const lbAddresses = Array.isArray(item.lbAddresses) ? item.lbAddresses : [];
+        const ruleHosts = Array.isArray(item.ruleHosts) ? item.ruleHosts : [];
+        const originCandidates = Array.isArray(item.originCandidates) ? item.originCandidates : [];
+        const preferredOrigin = normalizeDomain(
+          lbAddresses[0] || ruleHosts[0] || originCandidates[0] || '',
+        );
+        if (!preferredOrigin) return;
+        deduped.set(key, {
+          key,
+          namespace: item.namespace,
+          ingressName: item.name,
+          originDomain: preferredOrigin,
+          lbAddresses,
+          ruleHosts,
+          createdAt: item.createdAt || null,
+        });
+      });
+      const rows = Array.from(deduped.values());
+
+      setIngressCandidates(rows);
+      setSelectedIngressCandidateKey(rows[0]?.key || null);
+      setIngressCandidatesOpen(true);
+      if (rows.length === 0) {
+        setIngressCandidatesError('未找到匹配 nginx-web-app 的 Ingress 源站候选');
+      }
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || '获取 Ingress 候选源站失败';
+      setIngressCandidates([]);
+      setSelectedIngressCandidateKey(null);
+      setIngressCandidatesError(msg);
+      setIngressCandidatesOpen(true);
+      message.error(msg);
+    } finally {
+      setIngressCandidatesLoading(false);
+    }
+  };
+
+  const handleUseSelectedIngressOrigin = () => {
+    const selected = ingressCandidates.find((item) => item.key === selectedIngressCandidateKey);
+    if (!selected) {
+      message.warning('请选择一个源站候选');
+      return;
+    }
+    setOriginDomainInput(selected.originDomain);
+    resetStep3Runtime();
+    setIngressCandidatesOpen(false);
+    message.success(`已选择源站域名：${selected.originDomain}`);
   };
 
   const handleProvisionDcdn = async () => {
@@ -708,6 +867,10 @@ const LineOnboardingPage: React.FC = () => {
     setDcdnAutoError(null);
     setDcdnConfirmed(true);
     setIngressApplied(false);
+    setSuperAdminRegistered(false);
+    setSuperAdminRegisterError(null);
+    setSuperAdminRegisterResult(null);
+    setSuperAdminPendingUpdate(false);
     setConnectivityChecked(false);
     setSqlConfirmed(false);
     setVerifyResult(null);
@@ -721,11 +884,122 @@ const LineOnboardingPage: React.FC = () => {
       return;
     }
     setIngressApplied(true);
+    setSuperAdminRegistered(false);
+    setSuperAdminRegisterError(null);
+    setSuperAdminRegisterResult(null);
+    setSuperAdminPendingUpdate(false);
     setConnectivityChecked(false);
     setSqlConfirmed(false);
     setVerifyResult(null);
     setVerifyError(null);
-    message.success('已标记 Ingress 已应用');
+    message.success('已确认执行 apply');
+  };
+
+  const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect') => {
+    if (!ingressApplied) {
+      message.warning('请先完成步骤4');
+      return;
+    }
+    if (!confirmedSubdomain) {
+      message.warning('请先完成步骤2并确认子域名');
+      return;
+    }
+    if (!selectedTenantId) {
+      message.warning('请先在步骤1选择目标租户');
+      return;
+    }
+    if (!superAdminLineZh.trim() || !superAdminLineEn.trim()) {
+      message.error('请先填写线路中文名和英文名');
+      return;
+    }
+
+    setSuperAdminRegistering(true);
+    setSuperAdminRegisterError(null);
+    if (mode !== 'update') {
+      setSuperAdminPendingUpdate(false);
+      setSuperAdminRegisterResult(null);
+    }
+    try {
+      const result = (await registerSuperAdminLine({
+        lineUrl: superAdminLineUrl,
+        otcUrl: superAdminOtcUrl,
+        zh: superAdminLineZh.trim(),
+        en: superAdminLineEn.trim(),
+        status: superAdminLineStatus,
+        tenantId: selectedTenantId,
+        mode,
+      })) as SuperAdminRegisterResult;
+
+      setSuperAdminRegisterResult(result);
+      if (result.action === 'conflict') {
+        setSuperAdminPendingUpdate(Boolean(result.canUpdate));
+        setSuperAdminRegistered(false);
+        message.warning(result.message || '检测到已存在差异配置，请确认是否更新');
+        return;
+      }
+
+      setSuperAdminPendingUpdate(false);
+      setSuperAdminRegistered(true);
+      setConnectivityChecked(false);
+      setSqlConfirmed(false);
+      setVerifyResult(null);
+      setVerifyError(null);
+      message.success(result.message || '超级后台登记成功');
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || '超级后台登记失败';
+      setSuperAdminRegisterError(msg);
+      setSuperAdminRegistered(false);
+      message.error(msg);
+    } finally {
+      setSuperAdminRegistering(false);
+    }
+  };
+
+  const handleConfirmSuperAdminRegistration = () => {
+    doSuperAdminRegistration('detect');
+  };
+
+  const handleUpdateSuperAdminRegistration = () => {
+    doSuperAdminRegistration('update');
+  };
+
+  const loadSuperAdminLines = async (page = 1, size = superAdminLinesSize) => {
+    if (!selectedTenantId) {
+      message.warning('请先在步骤1选择目标租户');
+      return;
+    }
+    setSuperAdminLinesLoading(true);
+    setSuperAdminLinesError(null);
+    try {
+      const result = (await getSuperAdminLines({
+        page,
+        size,
+        lineUrl: '',
+        tenantId: selectedTenantId,
+      })) as {
+        page?: number;
+        size?: number;
+        total?: number;
+        items?: SuperAdminLineItem[];
+      };
+      setSuperAdminLinesPage(result.page || page);
+      setSuperAdminLinesSize(result.size || size);
+      setSuperAdminLinesTotal(result.total || 0);
+      setSuperAdminLines(Array.isArray(result.items) ? result.items : []);
+      setSuperAdminLinesOpen(true);
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || '获取租户线路列表失败';
+      setSuperAdminLinesError(msg);
+      message.error(msg);
+    } finally {
+      setSuperAdminLinesLoading(false);
+    }
   };
 
   const handleConfirmConnectivity = () => {
@@ -733,11 +1007,15 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先完成步骤4');
       return;
     }
+    if (!superAdminRegistered) {
+      message.warning('请先完成步骤5-1：在超级后台登记新线路');
+      return;
+    }
     setConnectivityChecked(true);
     setSqlConfirmed(false);
     setVerifyResult(null);
     setVerifyError(null);
-    message.success('已标记联通性检查完成');
+    message.success('已确认联通性检查完成');
   };
 
   const handleConfirmSql = () => {
@@ -756,7 +1034,7 @@ const LineOnboardingPage: React.FC = () => {
     setSqlConfirmed(true);
     setVerifyResult(null);
     setVerifyError(null);
-    message.success('已确认 SQL（请在环境平台数据库手工执行）');
+    message.success('已确认完成执行 SQL');
   };
 
   const handleVerifyExternal = async () => {
@@ -828,6 +1106,14 @@ const LineOnboardingPage: React.FC = () => {
               value={selectedTenantId}
               onChange={(value) => {
                 setSelectedTenantId(value);
+                setSuperAdminRegistered(false);
+                setSuperAdminRegisterError(null);
+                setSuperAdminRegisterResult(null);
+                setSuperAdminPendingUpdate(false);
+                setSuperAdminLines([]);
+                setSuperAdminLinesTotal(0);
+                setSuperAdminLinesOpen(false);
+                setConnectivityChecked(false);
                 setSqlConfirmed(false);
                 setVerifyResult(null);
                 setVerifyError(null);
@@ -905,6 +1191,12 @@ const LineOnboardingPage: React.FC = () => {
             placeholder="输入源站域名（例如 origin.sample.com）"
             disabled={!confirmedSubdomain}
           />
+          <Space>
+            <Button onClick={handleLoadIngressOriginCandidates} disabled={!confirmedSubdomain} loading={ingressCandidatesLoading}>
+              查看 Ingress 候选源站
+            </Button>
+            <Text type="secondary">可通过当前环境 kubeContext 拉取 ingress（关键字：nginx-web-app）并选择源站。</Text>
+          </Space>
           <Alert
             type="info"
             showIcon
@@ -1196,7 +1488,7 @@ const LineOnboardingPage: React.FC = () => {
           <Text code>{applyCommand}</Text>
           <Space>
             <Button type="primary" onClick={handleConfirmIngressApplied} disabled={!dcdnConfirmed}>
-              标记已执行 apply
+              确认已执行 apply
             </Button>
             {ingressApplied ? <Tag color="green">已执行</Tag> : null}
           </Space>
@@ -1206,6 +1498,8 @@ const LineOnboardingPage: React.FC = () => {
       <Card title="步骤5：超级后台登记与联通性检查" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
+          <Text type="secondary">登记动作会通过当前环境 kubeContext 代理调用集群内超级后台接口。</Text>
+          <Text strong>1) 在超级后台登记新线路</Text>
           <Text>
             当前环境：<Text code>{currentEnvironment?.name || currentEnvironment?.id || '-'}</Text>
           </Text>
@@ -1225,19 +1519,106 @@ const LineOnboardingPage: React.FC = () => {
             联通性检查地址：
             <Text code>{connectivityUrl || 'https://{步骤2子域名}/pro/p/symbol/list'}</Text>
           </Text>
+          <Input value={superAdminLineUrl} placeholder="lineUrl（自动生成）" disabled />
+          <Input value={superAdminOtcUrl} placeholder="otcUrl（自动生成）" disabled />
+          <Input
+            value={superAdminLineZh}
+            onChange={(e) => {
+              setSuperAdminLineZh(e.target.value);
+              setSuperAdminRegistered(false);
+              setSuperAdminPendingUpdate(false);
+              setSuperAdminRegisterResult(null);
+            }}
+            placeholder="线路中文名（zh），例如：线路-l01"
+            disabled={!ingressApplied}
+          />
+          <Input
+            value={superAdminLineEn}
+            onChange={(e) => {
+              setSuperAdminLineEn(e.target.value);
+              setSuperAdminRegistered(false);
+              setSuperAdminPendingUpdate(false);
+              setSuperAdminRegisterResult(null);
+            }}
+            placeholder="线路英文名（en），例如：l01"
+            disabled={!ingressApplied}
+          />
+          <Space>
+            <Text>状态（status）</Text>
+            <Switch
+              checked={superAdminLineStatus}
+              checkedChildren="启用"
+              unCheckedChildren="停用"
+              onChange={(checked) => {
+                setSuperAdminLineStatus(checked);
+                setSuperAdminRegistered(false);
+                setSuperAdminPendingUpdate(false);
+                setSuperAdminRegisterResult(null);
+              }}
+              disabled={!ingressApplied}
+            />
+          </Space>
           <Space>
             <Button
-              onClick={() => {
-                if (!superAdminUrl) {
-                  message.warning('当前环境未配置大管理端地址');
-                  return;
-                }
-                window.open(superAdminUrl, '_blank', 'noopener,noreferrer');
-              }}
-              disabled={!superAdminUrl}
+              type="primary"
+              loading={superAdminRegistering}
+              onClick={handleConfirmSuperAdminRegistration}
+              disabled={!ingressApplied || !selectedTenantId || !confirmedSubdomain}
             >
-              打开大管理端
+              确认并自动登记新线路
             </Button>
+            <Button
+              loading={superAdminLinesLoading}
+              onClick={() => loadSuperAdminLines(1, superAdminLinesSize)}
+              disabled={!selectedTenantId}
+            >
+              查看当前租户全部线路
+            </Button>
+            {superAdminRegistered ? <Tag color="green">已登记</Tag> : null}
+          </Space>
+          {superAdminRegisterError ? <Alert type="error" showIcon message={superAdminRegisterError} /> : null}
+          {superAdminRegisterResult ? (
+            <Alert
+              type={superAdminRegisterResult.action === 'conflict' ? 'warning' : 'success'}
+              showIcon
+              message={superAdminRegisterResult.message}
+              description={
+                superAdminRegisterResult.action === 'conflict' && superAdminRegisterResult.differences?.length ? (
+                  <Space direction="vertical" size={4}>
+                    {superAdminRegisterResult.differences.map((item) => (
+                      <Text key={`line-diff-${item.field}`}>
+                        {item.field}: 现有=<Text code>{String(item.existing)}</Text>，目标=<Text code>{String(item.incoming)}</Text>
+                      </Text>
+                    ))}
+                    <Space>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={superAdminRegistering}
+                        onClick={handleUpdateSuperAdminRegistration}
+                        disabled={!superAdminPendingUpdate}
+                      >
+                        更新已有线路
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSuperAdminPendingUpdate(false);
+                          setSuperAdminRegisterResult(null);
+                        }}
+                      >
+                        取消
+                      </Button>
+                    </Space>
+                  </Space>
+                ) : null
+              }
+            />
+          ) : null}
+
+          <Divider style={{ margin: '4px 0' }} />
+          <Text strong>2) 线路联通性检查</Text>
+          <Space>
             <Button
               onClick={() => {
                 if (!connectivityUrl) {
@@ -1246,12 +1627,12 @@ const LineOnboardingPage: React.FC = () => {
                 }
                 window.open(connectivityUrl, '_blank', 'noopener,noreferrer');
               }}
-              disabled={!ingressApplied}
+              disabled={!ingressApplied || !superAdminRegistered}
             >
               打开检查地址
             </Button>
-            <Button type="primary" onClick={handleConfirmConnectivity} disabled={!ingressApplied}>
-              已完成联通性检查
+            <Button type="primary" onClick={handleConfirmConnectivity} disabled={!ingressApplied || !superAdminRegistered}>
+              确认已完成联通性检查
             </Button>
             {connectivityChecked ? <Tag color="green">已确认</Tag> : null}
           </Space>
@@ -1291,7 +1672,7 @@ const LineOnboardingPage: React.FC = () => {
               复制 SQL
             </Button>
             <Button type="primary" onClick={handleConfirmSql} disabled={!connectivityChecked || !selectedTenantId}>
-              已手工执行 SQL
+              确认已完成执行 SQL
             </Button>
             {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}
           </Space>
@@ -1336,6 +1717,100 @@ const LineOnboardingPage: React.FC = () => {
           ) : null}
         </Space>
       </Card>
+
+      <Modal
+        title="Ingress 候选源站"
+        open={ingressCandidatesOpen}
+        onCancel={() => setIngressCandidatesOpen(false)}
+        onOk={handleUseSelectedIngressOrigin}
+        okText="使用所选源站"
+        cancelText="取消"
+        width={1080}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {ingressCandidatesError ? <Alert type="warning" showIcon message={ingressCandidatesError} /> : null}
+          <Table<IngressOriginCandidate>
+            rowKey="key"
+            loading={ingressCandidatesLoading}
+            dataSource={ingressCandidates}
+            pagination={{ pageSize: 8, showSizeChanger: true }}
+            rowSelection={{
+              type: 'radio',
+              selectedRowKeys: selectedIngressCandidateKey ? [selectedIngressCandidateKey] : [],
+              onChange: (selectedRowKeys) =>
+                setSelectedIngressCandidateKey(selectedRowKeys[0] ? String(selectedRowKeys[0]) : null),
+            }}
+            columns={[
+              { title: 'Namespace', dataIndex: 'namespace', width: 120 },
+              { title: 'Ingress', dataIndex: 'ingressName', width: 200 },
+              { title: '建议源站', dataIndex: 'originDomain', width: 320, ellipsis: true },
+              {
+                title: 'LB Address',
+                dataIndex: 'lbAddresses',
+                width: 220,
+                render: (value: string[]) => (value && value.length ? value.join(', ') : '-'),
+              },
+              {
+                title: 'Rules Host',
+                dataIndex: 'ruleHosts',
+                width: 220,
+                render: (value: string[]) => (value && value.length ? value.join(', ') : '-'),
+              },
+              {
+                title: '创建时间',
+                dataIndex: 'createdAt',
+                width: 180,
+                render: (value: string | null | undefined) => (value ? toDisplayTime(value) : '-'),
+              },
+            ]}
+            size="small"
+            scroll={{ x: 1300 }}
+          />
+        </Space>
+      </Modal>
+
+      <Modal
+        title={`租户线路列表（tenantId=${selectedTenantId || '-'}）`}
+        open={superAdminLinesOpen}
+        onCancel={() => setSuperAdminLinesOpen(false)}
+        footer={null}
+        width={980}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {superAdminLinesError ? <Alert type="error" showIcon message={superAdminLinesError} /> : null}
+          <Table<SuperAdminLineItem>
+            rowKey={(record, index) => String(record.id || record.lineUrl || index)}
+            loading={superAdminLinesLoading}
+            dataSource={superAdminLines}
+            pagination={{
+              current: superAdminLinesPage,
+              pageSize: superAdminLinesSize,
+              total: superAdminLinesTotal,
+              showSizeChanger: true,
+              onChange: (page, pageSize) => {
+                loadSuperAdminLines(page, pageSize);
+              },
+            }}
+            columns={[
+              { title: 'ID', dataIndex: 'id', width: 90 },
+              { title: '租户ID', dataIndex: 'tenantId', width: 100 },
+              { title: '中文名', dataIndex: 'zh', width: 140 },
+              { title: '英文名', dataIndex: 'en', width: 140 },
+              { title: 'lineUrl', dataIndex: 'lineUrl', width: 240, ellipsis: true },
+              { title: 'otcUrl', dataIndex: 'otcUrl', width: 240, ellipsis: true },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                width: 100,
+                render: (value: boolean | null | undefined) =>
+                  value === true ? <Tag color="green">已开启</Tag> : <Tag>未开启</Tag>,
+              },
+            ]}
+            size="small"
+            scroll={{ x: 1100 }}
+          />
+        </Space>
+      </Modal>
     </div>
   );
 };

@@ -5,6 +5,9 @@ import { firstValueFrom } from 'rxjs';
 import { ListLineDto } from './dto/list-line.dto';
 import { ProvisionDcdnDomainDto } from './dto/provision-dcdn-domain.dto';
 import { ApplyDcdnSecurityDto } from './dto/apply-dcdn-security.dto';
+import { RegisterSuperAdminLineDto } from './dto/register-super-admin-line.dto';
+import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -49,10 +52,17 @@ export class LinesService {
   private readonly casApiVersion: string;
   private readonly dcdnCertRegion: string;
   private readonly dcdnCertSourceDefault: 'cas' | 'upload';
+  private readonly superAdminNamespace: string;
+  private readonly superAdminServiceName: string;
+  private readonly superAdminServicePort: number;
+  private readonly superAdminAddPath: string;
+  private readonly superAdminListPath: string;
+  private readonly superAdminUpdatePathCandidates: string[];
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly kubernetesService: KubernetesService,
   ) {
     // Make VLINK_API_URL optional at boot; validate when endpoint is called.
     const url = this.configService.get<string>('VLINK_API_URL');
@@ -74,6 +84,16 @@ export class LinesService {
         ? 'upload'
         : 'cas';
     this.dcdnCertSourceDefault = certSource;
+    this.superAdminNamespace = 'default';
+    this.superAdminServiceName = 'kylin-admin-kylin-admin-impl';
+    this.superAdminServicePort = 80;
+    this.superAdminAddPath = '/admin/app/line/url/add';
+    this.superAdminListPath = '/admin/app/line/url/list';
+    this.superAdminUpdatePathCandidates = [
+      '/admin/app/line/url/update',
+      '/admin/app/line/url/edit',
+      '/admin/app/line/url/modify',
+    ];
   }
 
   async getLines(query: ListLineDto) {
@@ -100,6 +120,14 @@ export class LinesService {
       console.error('Error fetching lines from VLINK API:', error);
       throw new Error('Failed to fetch lines.');
     }
+  }
+
+  async listIngressOriginCandidates(environmentId: string, keyword?: string) {
+    const result = await this.kubernetesService.listIngressOriginCandidates(
+      environmentId,
+      keyword || 'nginx-web-app',
+    );
+    return result;
   }
 
   private normalizeToHost(rawLineUrl: string) {
@@ -149,7 +177,13 @@ export class LinesService {
     const message = String(error?.message || '').toLowerCase();
     const dataCode = String(error?.data?.Code || '').toLowerCase();
     const combined = `${code} ${message} ${dataCode}`;
-    return combined.includes('already') || combined.includes('exist');
+    const rawMessage = String(error?.message || '') + String(error?.data?.Message || '');
+    return (
+      combined.includes('already') ||
+      combined.includes('exist') ||
+      rawMessage.includes('已存在') ||
+      rawMessage.includes('重复')
+    );
   }
 
   private extractCname(payload: any): string | null {
@@ -1017,6 +1051,367 @@ export class LinesService {
         errors.length === 0
           ? 'DCDN HTTPS/WebSocket/WAF 配置已完成'
           : 'DCDN 安全配置部分失败，请根据 errors 排查',
+    };
+  }
+
+  private normalizeAbsoluteHttpUrl(raw: string, fallbackPath = ''): string {
+    const host = this.normalizeToHost(raw);
+    const cleanPath = fallbackPath ? (fallbackPath.startsWith('/') ? fallbackPath : `/${fallbackPath}`) : '';
+    return `https://${host}${cleanPath}`;
+  }
+
+  private flattenLineRecords(payload: unknown, output: any[]) {
+    if (payload == null) return;
+    if (Array.isArray(payload)) {
+      payload.forEach((item) => this.flattenLineRecords(item, output));
+      return;
+    }
+    if (typeof payload !== 'object') return;
+
+    const obj = payload as Record<string, unknown>;
+    const hasLineShape =
+      'lineUrl' in obj || 'line_url' in obj || 'tenantId' in obj || 'tenant_id' in obj || 'zh' in obj || 'en' in obj;
+    if (hasLineShape) {
+      output.push(obj);
+    }
+    Object.values(obj).forEach((value) => this.flattenLineRecords(value, output));
+  }
+
+  private normalizeLineRecord(raw: any) {
+    const lineUrl = String(raw?.lineUrl ?? raw?.line_url ?? '').trim();
+    const otcUrl = String(raw?.otcUrl ?? raw?.otc_url ?? '').trim();
+    const zh = String(raw?.zh ?? raw?.nameZh ?? '').trim();
+    const en = String(raw?.en ?? raw?.nameEn ?? '').trim();
+    const tenantIdRaw = raw?.tenantId ?? raw?.tenant_id;
+    const tenantId = Number.isFinite(Number(tenantIdRaw)) ? Number(tenantIdRaw) : null;
+    const statusValue = raw?.status;
+    const status = typeof statusValue === 'boolean'
+      ? statusValue
+      : String(statusValue).trim() === '1'
+        ? true
+        : String(statusValue).trim() === '0'
+          ? false
+          : String(statusValue).toLowerCase() === 'true'
+            ? true
+            : String(statusValue).toLowerCase() === 'false'
+              ? false
+              : null;
+    const id = raw?.id ?? raw?.lineId ?? raw?.line_id ?? null;
+    return {
+      id,
+      lineUrl,
+      otcUrl,
+      zh,
+      en,
+      tenantId,
+      status,
+      raw,
+    };
+  }
+
+  private buildLineDiff(
+    existing: { lineUrl: string; otcUrl: string; zh: string; en: string; status: boolean | null },
+    incoming: { lineUrl: string; otcUrl: string; zh: string; en: string; status: boolean },
+  ) {
+    const differences: Array<{ field: string; existing: any; incoming: any }> = [];
+    const pushIfDifferent = (field: 'lineUrl' | 'otcUrl' | 'zh' | 'en' | 'status') => {
+      if (existing[field] !== incoming[field]) {
+        differences.push({
+          field,
+          existing: existing[field],
+          incoming: incoming[field],
+        });
+      }
+    };
+    pushIfDifferent('lineUrl');
+    pushIfDifferent('otcUrl');
+    pushIfDifferent('zh');
+    pushIfDifferent('en');
+    pushIfDifferent('status');
+    return differences;
+  }
+
+  private async callSuperAdminService(
+    environmentId: string,
+    method: 'GET' | 'POST',
+    path: string,
+    query?: Record<string, any>,
+    body?: any,
+  ) {
+    return await this.kubernetesService.requestServiceProxy(environmentId, {
+      namespace: this.superAdminNamespace,
+      serviceName: this.superAdminServiceName,
+      port: this.superAdminServicePort,
+      method,
+      path,
+      query,
+      body,
+      timeoutMs: 15000,
+    });
+  }
+
+  private extractProxyStatusCode(error: any): number | null {
+    const responseStatus = Number(error?.response?.status);
+    if (Number.isFinite(responseStatus) && responseStatus > 0) {
+      return responseStatus;
+    }
+    const message = String(error?.message || '');
+    const matched = message.match(/failed\s+\((\d{3})\)/i);
+    if (!matched) return null;
+    const status = Number(matched[1]);
+    return Number.isFinite(status) ? status : null;
+  }
+
+  private async fetchSuperAdminLineListRaw(
+    environmentId: string,
+    query: { page: number; size: number; lineUrl?: string; tenantId?: number },
+  ) {
+    return await this.callSuperAdminService(environmentId, 'GET', this.superAdminListPath, {
+      page: query.page,
+      size: query.size,
+      lineUrl: query.lineUrl || '',
+      tenantId: query.tenantId,
+    });
+  }
+
+  async listSuperAdminLines(environmentId: string, query: ListSuperAdminLinesDto) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const size = query.size && query.size > 0 ? Math.min(query.size, 200) : 20;
+    const lineUrl = query.lineUrl?.trim() || '';
+    const tenantId = query.tenantId && query.tenantId > 0 ? query.tenantId : undefined;
+
+    let response: { statusCode: number; body: any; headers: Record<string, any> };
+    try {
+      response = await this.fetchSuperAdminLineListRaw(environmentId, {
+        page,
+        size,
+        lineUrl,
+        tenantId,
+      });
+    } catch (error) {
+      const code = this.extractProxyStatusCode(error);
+      if (code === 401 || code === 403) {
+        throw new BadRequestException(
+          `查询线路接口无权限（${code}）。请确认当前环境(${environmentId})的 kubeContext 是否正确，且接口 ${this.superAdminListPath} 在该集群内允许访问。`,
+        );
+      }
+      throw error;
+    }
+    const records: any[] = [];
+    this.flattenLineRecords(response.body, records);
+
+    const items = records
+      .map((item) => this.normalizeLineRecord(item))
+      .filter((item) => item.lineUrl)
+      .filter((item) => (tenantId ? item.tenantId === tenantId : true))
+      .map((item) => ({
+        id: item.id,
+        zh: item.zh,
+        en: item.en,
+        lineUrl: item.lineUrl,
+        otcUrl: item.otcUrl,
+        status: item.status,
+        tenantId: item.tenantId,
+      }));
+
+    const totalCandidates = [
+      response.body?.total,
+      response.body?.count,
+      response.body?.data?.total,
+      response.body?.data?.count,
+      response.body?.data?.totalCount,
+      response.body?.pagination?.total,
+      response.body?.page?.total,
+    ];
+    const totalRaw = totalCandidates.find((item) => Number.isFinite(Number(item)));
+    const total = totalRaw ? Number(totalRaw) : items.length;
+
+    return {
+      page,
+      size,
+      total,
+      tenantId: tenantId || null,
+      lineUrl: lineUrl || null,
+      items,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  private async findExistingSuperAdminLine(
+    environmentId: string,
+    lineUrl: string,
+    tenantId: number,
+  ) {
+    try {
+      const listResult = await this.listSuperAdminLines(environmentId, {
+        page: 1,
+        size: 200,
+        lineUrl,
+        tenantId,
+      });
+      const records = listResult.items;
+      const lineHost = this.normalizeToHost(lineUrl);
+      const candidates = records
+        .map((item) => this.normalizeLineRecord(item))
+        .filter(
+          (item) =>
+            item.tenantId === tenantId &&
+            item.lineUrl &&
+            this.normalizeToHost(item.lineUrl) === lineHost,
+        );
+      return {
+        existing: candidates[0] || null,
+        detectionUnavailable: false,
+        detectionError: null,
+      };
+    } catch (error) {
+      const code = this.extractProxyStatusCode(error);
+      if (code === 401 || code === 403) {
+        return {
+          existing: null,
+          detectionUnavailable: true,
+          detectionError: `线路查询接口无权限（${code}）`,
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async tryUpdateSuperAdminLine(
+    environmentId: string,
+    existingId: string | number | null,
+    payload: any,
+  ) {
+    const updatePayload = existingId == null ? payload : { ...payload, id: existingId };
+    for (const path of this.superAdminUpdatePathCandidates) {
+      try {
+        await this.callSuperAdminService(environmentId, 'POST', path, undefined, updatePayload);
+        return { ok: true, path };
+      } catch (error) {
+        // try next candidate endpoint
+      }
+    }
+    return { ok: false, path: null };
+  }
+
+  async registerSuperAdminLine(environmentId: string, dto: RegisterSuperAdminLineDto) {
+    const normalizedLineUrl = this.normalizeAbsoluteHttpUrl(dto.lineUrl);
+    const normalizedOtcUrl = (() => {
+      if (!dto.otcUrl) return `${normalizedLineUrl}/otc`;
+      const value = dto.otcUrl.trim();
+      try {
+        const withSchema = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+        const parsed = new URL(withSchema);
+        const hostname = parsed.hostname.toLowerCase();
+        const pathname = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
+        const search = parsed.search || '';
+        return `https://${hostname}${pathname}${search}`;
+      } catch {
+        throw new BadRequestException('otcUrl format is invalid');
+      }
+    })();
+    const payload = {
+      zh: dto.zh.trim(),
+      en: dto.en.trim(),
+      lineUrl: normalizedLineUrl,
+      financialUrl: '',
+      csUrl: '',
+      otcUrl: normalizedOtcUrl,
+      status: dto.status,
+      tenantId: dto.tenantId,
+    };
+    const mode = dto.mode || 'detect';
+
+    const lookup = await this.findExistingSuperAdminLine(
+      environmentId,
+      normalizedLineUrl,
+      dto.tenantId,
+    );
+    const existing = lookup.existing;
+
+    if (lookup.detectionUnavailable) {
+      if (mode === 'update') {
+        throw new BadRequestException('无法查询已有线路，暂不支持自动更新，请改为人工处理。');
+      }
+      try {
+        await this.callSuperAdminService(environmentId, 'POST', this.superAdminAddPath, undefined, payload);
+        return {
+          action: 'created',
+          message: '超级后台线路登记成功（查询接口无权限，已直接尝试创建）',
+          payload,
+          warnings: [lookup.detectionError],
+        };
+      } catch (error) {
+        if (this.isDomainAlreadyExistsError(error)) {
+          return {
+            action: 'conflict',
+            message: '已存在同线路，但当前无查询权限，无法展示差异。请人工确认或开通查询权限后重试。',
+            payload,
+            canUpdate: false,
+          };
+        }
+        throw new BadRequestException(this.extractAliyunErrorMessage(error, '超级后台登记失败'));
+      }
+    }
+
+    if (!existing) {
+      await this.callSuperAdminService(environmentId, 'POST', this.superAdminAddPath, undefined, payload);
+      return {
+        action: 'created',
+        message: '超级后台线路登记成功',
+        payload,
+      };
+    }
+
+    const existingComparable = {
+      lineUrl: this.normalizeAbsoluteHttpUrl(existing.lineUrl),
+      otcUrl: existing.otcUrl || '',
+      zh: existing.zh || '',
+      en: existing.en || '',
+      status: existing.status === null ? false : existing.status,
+    };
+    const incomingComparable = {
+      lineUrl: payload.lineUrl,
+      otcUrl: payload.otcUrl,
+      zh: payload.zh,
+      en: payload.en,
+      status: payload.status,
+    };
+    const differences = this.buildLineDiff(existingComparable, incomingComparable);
+
+    if (differences.length === 0) {
+      return {
+        action: 'unchanged',
+        message: '超级后台已存在相同线路配置，无需更新',
+        existing: existing.raw,
+        payload,
+      };
+    }
+
+    if (mode !== 'update') {
+      return {
+        action: 'conflict',
+        message: '超级后台已存在同线路，但字段有差异，请确认是否更新',
+        existing: existing.raw,
+        payload,
+        differences,
+        canUpdate: true,
+      };
+    }
+
+    const updated = await this.tryUpdateSuperAdminLine(environmentId, existing.id, payload);
+    if (!updated.ok) {
+      throw new BadRequestException(
+        '检测到已有线路且存在差异，但自动更新失败（未匹配到可用更新接口）。请人工到超级后台修改。',
+      );
+    }
+
+    return {
+      action: 'updated',
+      message: `超级后台线路已更新（${updated.path}）`,
+      existing: existing.raw,
+      payload,
+      differences,
     };
   }
 

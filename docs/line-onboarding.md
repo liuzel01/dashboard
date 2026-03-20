@@ -53,13 +53,16 @@
 
 - 依赖输入：
   - 子域名（步骤2）
-  - 源站域名（用户输入）
+  - 源站域名（支持用户输入，也支持从 Ingress 候选中选择）
 - 创建参数：
   - 类型：源站域名
   - 端口：443
   - 优先级：主
   - 权重：10
   - 加速区域：global
+- 可选辅助：
+  - 点击“查看 Ingress 候选源站”后，后端会基于当前环境 `kubeContext` 查询 Ingress（关键字 `nginx-web-app`）
+  - 若返回多条候选，前端弹窗可选择其一回填到“源站域名”
 
 #### 步骤3-2 HTTPS/WebSocket/WAF
 
@@ -82,8 +85,28 @@
 - 大管理端地址来源：
   - 在“环境管理”中为每个环境维护 `super_admin_url`
   - 步骤5根据左上角当前环境自动展示并可跳转
-- 联通性检查地址：
-  - `https://{子域名}/pro/p/symbol/list`
+- 页面内分两段执行：
+  - `1) 在超级后台登记新线路`
+  - `2) 线路联通性检查`（打开检查地址并点“已完成联通性检查”）
+- 联通性检查地址：`https://{子域名}/pro/p/symbol/list`
+
+#### 步骤5-1 自动登记逻辑
+
+- 自动生成字段：
+  - `lineUrl = https://{步骤2子域名}`
+  - `otcUrl = https://{步骤2子域名}/otc`
+- 手工输入字段：
+  - `zh`（线路中文名）
+  - `en`（线路英文名）
+  - `status`（开关）
+- `tenantId` 使用步骤1已选租户。
+- 系统会先做“存在性检测”：
+  - 不存在：直接创建
+  - 已存在且一致：提示无需更新
+  - 已存在且有差异：返回差异清单，前端可选择“取消”或“更新已有线路”
+- 增加“查看当前租户全部线路”按钮：
+  - 弹窗展示当前步骤1租户下的线路列表（包含已开启与未开启）
+  - 支持分页查询
 
 ### 步骤6：输出 SQL（人工执行）
 
@@ -112,6 +135,19 @@
   - 应用 HTTPS / WebSocket / WAF，支持 `certSource: cas | upload`
 - `GET /api/lines/dcdn/cas-certificates?rootDomain=...&targetDomain=...`
   - 查询“可覆盖当前目标子域名”的 CAS 证书（精确匹配或泛域名匹配）
+- `POST /api/lines/super-admin/register`
+  - 通过当前环境 `kubeContext` 代理调用集群内超级后台接口登记线路
+  - 请求体：
+    - `lineUrl`, `otcUrl`, `zh`, `en`, `status`, `tenantId`
+    - `mode=detect|update`（默认 detect）
+- `GET /api/lines/super-admin/list`
+  - 通过当前环境 `kubeContext` 代理调用集群内 `GET /admin/app/line/url/list`
+  - 当直连 service-proxy 返回 401 时，后端会自动切换为 `kubectl proxy` 方式重试（仍为集群内调用）
+  - 支持参数：`page`、`size`、`lineUrl`、`tenantId`
+  - 返回后按 `tenantId` 在系统内再次过滤，确保弹窗只展示当前租户线路
+- `GET /api/lines/ingress/origin-candidates`
+  - 基于当前环境 `kubeContext` 获取 Ingress 候选源站列表
+  - 支持参数：`keyword`（默认 `nginx-web-app`）
 
 ### 4.2 外部系统 API（验收）
 

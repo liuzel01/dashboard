@@ -9445,7 +9445,7 @@
                               "type": "text",
                               "id": "wYWtA",
                               "fill": "#0A0A0A",
-                              "content": "步骤5：超级后台登记与联通性检查",
+                              "content": "步骤5：超级后台登记与联通性检查（1登记 2检查）",
                               "fontFamily": "Inter",
                               "fontSize": 14,
                               "fontWeight": "600"
@@ -9454,7 +9454,7 @@
                               "type": "text",
                               "id": "X4qBA",
                               "fill": "#3F3F46",
-                              "content": "同一个环境仅有一个超级后台（与租户无关）",
+                              "content": "1) 自动登记：lineUrl/otcUrl按步骤2子域名自动拼接，zh/en/status手工填写",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9463,7 +9463,7 @@
                               "type": "text",
                               "id": "X3Yro",
                               "fill": "#3F3F46",
-                              "content": "大管理端地址来自“环境管理”的 super_admin_url 配置",
+                              "content": "支持“查看当前租户全部线路”弹窗（含已开启/未开启）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"
@@ -9472,7 +9472,7 @@
                               "type": "text",
                               "id": "CyuAu",
                               "fill": "#3F3F46",
-                              "content": "- 登记步骤2子域名后执行联通性检查：https://{步骤2子域名}/pro/p/symbol/list",
+                              "content": "2) 联通性检查：https://{步骤2子域名}/pro/p/symbol/list（登记后执行）",
                               "fontFamily": "Inter",
                               "fontSize": 13,
                               "fontWeight": "normal"

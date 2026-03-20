@@ -309,6 +309,34 @@ export const verifyExternalLine = async (lineUrl: string) => {
   return response.data;
 };
 
+export const registerSuperAdminLine = async (data: {
+  lineUrl: string;
+  otcUrl?: string;
+  zh: string;
+  en: string;
+  status: boolean;
+  tenantId: number;
+  mode?: 'detect' | 'update';
+}) => {
+  const response = await api.post('/lines/super-admin/register', data);
+  return response.data;
+};
+
+export const getSuperAdminLines = async (params: {
+  page?: number;
+  size?: number;
+  lineUrl?: string;
+  tenantId?: number;
+}) => {
+  const response = await api.get('/lines/super-admin/list', { params });
+  return response.data;
+};
+
+export const getIngressOriginCandidates = async (params?: { keyword?: string }) => {
+  const response = await api.get('/lines/ingress/origin-candidates', { params });
+  return response.data;
+};
+
 export const provisionDcdnDomain = async (data: {
   domainName: string;
   originDomain: string;

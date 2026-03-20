@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { Table, Input, Button, App, Spin, Space, Alert } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
@@ -18,8 +18,10 @@ interface Deployment {
 const DeploymentListPage: React.FC = () => {
   const { modal, message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
+  const requestSeqRef = useRef(0);
 
   const [allDeployments, setAllDeployments] = useState<Deployment[]>([]);
+  const [filterInput, setFilterInput] = useState('kylin-price-kylin-price-impl');
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
   const [loading, setLoading] = useState(false);
   const [restarting, setRestarting] = useState<string | null>(null);
@@ -28,30 +30,51 @@ const DeploymentListPage: React.FC = () => {
   const [logViewerVisible, setLogViewerVisible] = useState(false);
   const [logTarget, setLogTarget] = useState<string | null>(null);
 
-  const fetchDeployments = useCallback(() => {
+  const fetchDeployments = useCallback((name: string) => {
     if (!currentEnvironment) {
       return;
     }
+    const requestSeq = ++requestSeqRef.current;
     setLoading(true);
-    getDeployments({ name: filter })
+    getDeployments({ name })
       .then((data) => {
+        if (requestSeq !== requestSeqRef.current) {
+          return;
+        }
         setAllDeployments(data);
       })
       .catch((error) => {
+        if (requestSeq !== requestSeqRef.current) {
+          return;
+        }
         console.error('获取应用列表失败:', error);
         const errorMessage = error.response?.data?.message || error.message;
         message.error(`获取应用列表失败: ${errorMessage}`);
       })
       .finally(() => {
-        setLoading(false);
+        if (requestSeq === requestSeqRef.current) {
+          setLoading(false);
+        }
       });
-  }, [currentEnvironment, filter, message]);
+  }, [currentEnvironment, message]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setFilter(filterInput);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [filterInput]);
 
   useEffect(() => {
     // 当环境或过滤器变化时重新获取
     if (currentEnvironment) {
-      fetchDeployments();
+      fetchDeployments(filter);
+      return;
     }
+    setAllDeployments([]);
   }, [fetchDeployments, currentEnvironment, filter]);
 
   // “查看日志”按钮点击处理
@@ -158,8 +181,8 @@ const DeploymentListPage: React.FC = () => {
       <Space style={{ marginBottom: 20 }}>
         <Input
           placeholder="按名称模糊筛选..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          value={filterInput}
+          onChange={(e) => setFilterInput(e.target.value)}
           style={{ width: 400 }}
           allowClear
         />
