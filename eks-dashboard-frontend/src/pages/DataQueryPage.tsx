@@ -2,6 +2,7 @@ import React, { useState, useContext, useEffect, useCallback } from 'react';
 import { useRef } from 'react';
 import {
   Input,
+  InputNumber,
   Tabs,
   Spin,
   Card,
@@ -21,6 +22,7 @@ import {
 import { DownOutlined } from '@ant-design/icons';
 import {
   aggregateQuery,
+  createRedisKey,
   updateUser,
   deactivateUser,
   deleteRedisKey,
@@ -58,7 +60,7 @@ type AggregateResult = {
 
 type RedisKeyResult = {
   key: string;
-  value?: string | null;
+  value?: string | object | null;
   ttlSeconds?: number;
   ttl?: number;
 };
@@ -89,6 +91,10 @@ const DataQueryPage: React.FC = () => {
   const currentTenantRef = useRef<number | undefined>(selectedTenantId);
   const [tenantsLoading, setTenantsLoading] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [isCreateRedisModalVisible, setIsCreateRedisModalVisible] = useState(false);
+  const [creatingRedisKey, setCreatingRedisKey] = useState(false);
+  const [redisMatchId, setRedisMatchId] = useState<string | null>(null);
+  const [redisCreateForm] = Form.useForm();
   const storedTab = typeof window !== 'undefined' ? sessionStorage.getItem('dataQueryActiveTab') : null;
   const [activeTabKey, setActiveTabKey] = useState<string>(storedTab ?? '1');
 
@@ -138,6 +144,7 @@ const DataQueryPage: React.FC = () => {
       return;
     }
     setLastSearchTerm(value);
+    setActiveTabKey('1');
     setLoading(true);
     setSearched(true);
     try {
@@ -145,11 +152,14 @@ const DataQueryPage: React.FC = () => {
       const isNumeric = /^\d+$/.test(value);
       if (isNumeric) {
         const uid = value.trim();
+        let mysqlUserId: string | number | null = null;
+        let redisKeyHints: RedisData[] = [];
         const tenantFromRef = currentTenantRef.current;
         if (!tenantFromRef) {
           message.error('查询前请先选择租户。');
           setUserInfo(null);
           setRedisData(null);
+          setRedisMatchId(null);
           setTraderInfo(null);
           setLoading(false);
           return;
@@ -158,7 +168,19 @@ const DataQueryPage: React.FC = () => {
         try {
           const results = await aggregateQuery(uid, 'UID', tenantFromRef);
           const res = results as unknown as AggregateResult;
-          setUserInfo(res.mysql?.data || null);
+          const mysqlData = res.mysql?.data || null;
+          setUserInfo(mysqlData);
+          const redisDataFromAggregate = res.redis?.data;
+          redisKeyHints = Array.isArray(redisDataFromAggregate) ? redisDataFromAggregate : [];
+          if (
+            mysqlData &&
+            typeof mysqlData === 'object' &&
+            'id' in mysqlData &&
+            (mysqlData as { id?: unknown }).id !== undefined &&
+            (mysqlData as { id?: unknown }).id !== null
+          ) {
+            mysqlUserId = (mysqlData as { id: string | number }).id;
+          }
         } catch {
           setUserInfo(null);
         }
@@ -184,32 +206,40 @@ const DataQueryPage: React.FC = () => {
             setTraderLoading(false);
           }
 
-        // Construct Redis key from tenant_user_id and fetch it
-        const key = `reset_pass_forbid_succ${uid}`;
-        try {
-          const redisRes = await getRedisKey(key);
-          const r = redisRes as unknown as RedisKeyResult;
-          const ttlVal = r.ttlSeconds ?? r.ttl ?? -2;
-          // If key does not exist, backend should return 404, but double-check here
-          if (ttlVal === -2) {
-            setRedisData([]);
-          } else {
-            setRedisData([
-              {
-                key: r.key,
-                ttl: ttlVal,
-                value: r.value ?? null,
-              },
-            ]);
-          }
-        } catch (err) {
-          // If API returns 404, treat as 'no key'
-          const e = err as { response?: { status?: number } };
-          if (e?.response?.status === 404) {
-            setRedisData([]);
-          } else {
-            setRedisData([]);
-          }
+        // Fetch known Redis keys related to this UID.
+        // Redis keys are resolved by matching all keys that contain MySQL user id.
+        if (mysqlUserId === undefined || mysqlUserId === null) {
+          setRedisMatchId(null);
+          setRedisData([]);
+        } else {
+          const matchId = String(mysqlUserId);
+          setRedisMatchId(matchId);
+          const redisItems = await Promise.all(
+            redisKeyHints.map(async (hint) => {
+              try {
+                const redisRes = await getRedisKey(hint.key);
+                const r = redisRes as unknown as RedisKeyResult;
+                const ttlVal = r.ttlSeconds ?? r.ttl ?? hint.ttl ?? -2;
+                if (ttlVal === -2) return null;
+                return {
+                  key: r.key || hint.key,
+                  ttl: ttlVal,
+                  value: r.value ?? null,
+                } as RedisData;
+              } catch (err) {
+                const e = err as { response?: { status?: number } };
+                // 404 means key disappeared between list/read. Skip it.
+                if (e?.response?.status === 404) return null;
+                // Keep item visible even if value fetch fails.
+                return {
+                  key: hint.key,
+                  ttl: hint.ttl,
+                  value: null,
+                } as RedisData;
+              }
+            }),
+          );
+          setRedisData(redisItems.filter((item): item is RedisData => item !== null));
         }
       } else {
         // 非数字，使用原 aggregateQuery 行为（兼顾旧流程）
@@ -218,6 +248,7 @@ const DataQueryPage: React.FC = () => {
   const res = results as unknown as AggregateResult;
   setUserInfo(res.mysql?.data || null);
   setRedisData(res.redis?.data || null);
+  setRedisMatchId(null);
       }
     } catch (err) {
       const errObj = err as { response?: { data?: { message?: string } }; message?: string };
@@ -314,17 +345,31 @@ const DataQueryPage: React.FC = () => {
     });
   };
 
-  const formatTtl = (ttlInSeconds: number): string => {
-    if (ttlInSeconds < 0) {
-      return '无过期时间';
-    }
-    if (ttlInSeconds === 0) {
-      return '已过期';
-    }
+  const formatDuration = (ttlInSeconds: number): string => {
+    if (ttlInSeconds === -2) return '键不存在';
+    if (ttlInSeconds === -1) return '无过期时间';
+    if (ttlInSeconds === 0) return '已过期';
     const hours = Math.floor(ttlInSeconds / 3600);
     const minutes = Math.floor((ttlInSeconds % 3600) / 60);
     const seconds = ttlInSeconds % 60;
     return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+  };
+
+  const formatGenericTtl = (ttlInSeconds: number): string => {
+    if (ttlInSeconds === -2) return '键不存在';
+    if (ttlInSeconds === -1) return '永久（无过期）';
+    if (ttlInSeconds === 0) return '已过期';
+    return `${ttlInSeconds} 秒`;
+  };
+
+  const isResetPassKey = (key: string): boolean =>
+    key.startsWith('reset_pass_forbid_succ');
+
+  const ttlDisplay = (item: RedisData): { label: string; text: string } => {
+    if (isResetPassKey(item.key)) {
+      return { label: '剩余时间', text: formatDuration(item.ttl) };
+    }
+    return { label: 'TTL', text: formatGenericTtl(item.ttl) };
   };
 
   const handleDeleteRedisKey = (key: string) => {
@@ -349,6 +394,31 @@ const DataQueryPage: React.FC = () => {
         }
       },
     });
+  };
+
+  const handleCreateRedisKey = async (values: {
+    key: string;
+    value: string;
+    ttlSeconds?: number;
+  }) => {
+    setCreatingRedisKey(true);
+    try {
+      const key = values.key.trim();
+      await createRedisKey(key, values.value, values.ttlSeconds);
+      message.success(`键 "${key}" 创建成功`);
+      setIsCreateRedisModalVisible(false);
+      redisCreateForm.resetFields();
+      if (lastSearchTerm.trim()) {
+        await onSearch(lastSearchTerm);
+        setActiveTabKey('2');
+      }
+    } catch (err) {
+      const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+      const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
+      message.error(`新增失败: ${errorMessage}`);
+    } finally {
+      setCreatingRedisKey(false);
+    }
   };
 
   const renderResults = () => {
@@ -470,8 +540,15 @@ const DataQueryPage: React.FC = () => {
           ) : ( <Empty description="无用户基本信息" /> )}
         </TabPane>
         <TabPane tab="缓存数据 (Redis)" key="2">
-          {redisData && redisData.length > 0 ? (
-            <Card title="解除OTC买币限制相关缓存键">
+          <Card
+            title={redisMatchId ? `包含 ID ${redisMatchId} 的缓存键` : '缓存键'}
+            extra={
+              <Button type="primary" onClick={() => setIsCreateRedisModalVisible(true)}>
+                新增缓存键
+              </Button>
+            }
+          >
+            {redisData && redisData.length > 0 ? (
               <Descriptions bordered column={1} size="small">
                 {redisData.map((item) => (
                   <Descriptions.Item key={item.key} label={item.key}>
@@ -479,6 +556,10 @@ const DataQueryPage: React.FC = () => {
                       <div style={{ flex: 1, marginRight: 12 }}>
                         {item.value == null ? (
                           <span style={{ color: '#888' }}>（空）</span>
+                        ) : Array.isArray(item.value) ? (
+                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
+                            {JSON.stringify(item.value, null, 2)}
+                          </pre>
                         ) : typeof item.value === 'object' ? (
                           // If object has few keys, render inline, else pretty-print JSON
                           Object.keys(item.value).length <= 5 ? (
@@ -498,7 +579,9 @@ const DataQueryPage: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Tag color={item.ttl > 0 ? 'blue' : 'default'}>剩余时间: {formatTtl(item.ttl)}</Tag>
+                          <Tag color={item.ttl > 0 ? 'blue' : item.ttl === -1 ? 'green' : 'default'}>
+                            {ttlDisplay(item).label}: {ttlDisplay(item).text}
+                          </Tag>
                           <span style={{ color: '#666', fontSize: 12 }}>({item.ttl} 秒)</span>
                         </div>
                         <Button
@@ -514,8 +597,10 @@ const DataQueryPage: React.FC = () => {
                   </Descriptions.Item>
                 ))}
               </Descriptions>
-            </Card>
-          ) : ( <Empty description="无缓存数据" /> )}
+            ) : (
+              <Empty description="无缓存数据" />
+            )}
+          </Card>
         </TabPane>
         <TabPane tab="其他信息 (Mongo)" key="3">
           <PlaceholderPage />
@@ -573,6 +658,43 @@ const DataQueryPage: React.FC = () => {
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={editLoading}>
               保存
+            </Button>
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title="新增 Redis 键"
+        open={isCreateRedisModalVisible}
+        onCancel={() => setIsCreateRedisModalVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Form
+          form={redisCreateForm}
+          layout="vertical"
+          onFinish={handleCreateRedisKey}
+          style={{ marginTop: 16 }}
+        >
+          <Form.Item
+            name="key"
+            label="Key"
+            rules={[{ required: true, message: '请输入 Redis key' }]}
+          >
+            <Input placeholder="例如: reset_pass_forbid_succ1039256" />
+          </Form.Item>
+          <Form.Item
+            name="value"
+            label="Value"
+            rules={[{ required: true, message: '请输入 Redis value' }]}
+          >
+            <Input.TextArea rows={4} placeholder="字符串内容（可填 JSON 字符串）" />
+          </Form.Item>
+          <Form.Item name="ttlSeconds" label="TTL（秒，可选）">
+            <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="不填则不过期" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={creatingRedisKey}>
+              确认新增
             </Button>
           </Form.Item>
         </Form>

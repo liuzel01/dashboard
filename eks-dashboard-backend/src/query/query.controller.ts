@@ -76,6 +76,40 @@ export class QueryController {
     return this.queryService.deactivateUser(environmentId, uid, body.tenantId);
   }
 
+  @Post('redis-key')
+  async createRedisKey(
+    @Headers('x-target-environment') environmentId: string,
+    @Body()
+    body: {
+      key?: string;
+      value?: string;
+      ttlSeconds?: number;
+    },
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (!body.key) {
+      throw new HttpException('Body field "key" is required.', HttpStatus.BAD_REQUEST);
+    }
+    if (body.value === undefined) {
+      throw new HttpException('Body field "value" is required.', HttpStatus.BAD_REQUEST);
+    }
+    if (
+      body.ttlSeconds !== undefined &&
+      (!Number.isFinite(body.ttlSeconds) || body.ttlSeconds <= 0)
+    ) {
+      throw new HttpException(
+        'Body field "ttlSeconds" must be a positive number when provided.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.queryService.createRedisKey(
+      environmentId,
+      body.key,
+      body.value,
+      body.ttlSeconds,
+    );
+  }
+
   @Delete('redis-key')
   async deleteRedisKey(
     @Headers('x-target-environment') environmentId: string,

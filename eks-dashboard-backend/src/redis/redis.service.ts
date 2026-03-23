@@ -191,6 +191,19 @@ export class RedisService implements OnModuleDestroy {
     return client.del(key);
   }
 
+  async setKey(
+    environmentId: string,
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ): Promise<'OK' | null> {
+    const client = await this.getClient(environmentId);
+    if (ttlSeconds !== undefined && ttlSeconds !== null && ttlSeconds > 0) {
+      return client.set(key, value, 'EX', Math.floor(ttlSeconds));
+    }
+    return client.set(key, value);
+  }
+
   // Get a single key's value and TTL (seconds). TTL semantics:
   // -2 => key does not exist
   // -1 => key exists but has no expire
@@ -199,33 +212,71 @@ export class RedisService implements OnModuleDestroy {
     key: string,
   ): Promise<{ key: string; value: string | object | null; ttl: number }> {
     const client = await this.getClient(environmentId);
-    // Use pipeline to reduce round-trips
-    const pipeline = client.pipeline();
-    pipeline.get(key);
-    pipeline.ttl(key);
-    const res = await pipeline.exec();
-    // res is array like [[null, value], [null, ttl]]
-    const rawValue = res?.[0]?.[1];
-    let value: any | null;
-    if (rawValue == null) {
-      value = null;
-    } else if (typeof rawValue === 'string') {
-      // try to parse JSON if possible
-      try {
-        const parsed = JSON.parse(rawValue);
-        value =
-          typeof parsed === 'object' && parsed !== null
-            ? parsed
-            : String(parsed);
-      } catch {
-        value = rawValue;
-      }
-    } else {
-      // if it's buffer or other type, coerce to string
-      value = String(rawValue);
-    }
-    const rawTtl = res?.[1]?.[1];
+    const metaPipeline = client.pipeline();
+    metaPipeline.type(key);
+    metaPipeline.ttl(key);
+    const meta = await metaPipeline.exec();
+
+    const rawType = meta?.[0]?.[1];
+    const redisType =
+      typeof rawType === 'string' ? rawType : String(rawType ?? 'none');
+    const rawTtl = meta?.[1]?.[1];
     const ttl = typeof rawTtl === 'number' ? rawTtl : Number(rawTtl ?? -2);
+
+    if (redisType === 'none' || ttl === -2) {
+      return { key, value: null, ttl: -2 };
+    }
+
+    const parseStringValue = (raw: unknown): string | object | null => {
+      if (raw == null) return null;
+      if (typeof raw !== 'string') return String(raw);
+      try {
+        const parsed = JSON.parse(raw);
+        return typeof parsed === 'object' && parsed !== null
+          ? parsed
+          : String(parsed);
+      } catch {
+        return raw;
+      }
+    };
+
+    let value: string | object | null = null;
+    switch (redisType) {
+      case 'string': {
+        const raw = await client.get(key);
+        value = parseStringValue(raw);
+        break;
+      }
+      case 'hash': {
+        value = await client.hgetall(key);
+        break;
+      }
+      case 'set': {
+        value = await client.smembers(key);
+        break;
+      }
+      case 'list': {
+        value = await client.lrange(key, 0, -1);
+        break;
+      }
+      case 'zset': {
+        const rows = await client.zrange(key, 0, -1, 'WITHSCORES');
+        const zset: Array<{ member: string; score: number }> = [];
+        for (let i = 0; i < rows.length; i += 2) {
+          zset.push({
+            member: rows[i],
+            score: Number(rows[i + 1]),
+          });
+        }
+        value = zset;
+        break;
+      }
+      default: {
+        value = { redisType };
+        break;
+      }
+    }
+
     return { key, value, ttl };
   }
 }

@@ -312,6 +312,34 @@ export class QueryService {
     }
   }
 
+  async createRedisKey(
+    environmentId: string,
+    key: string,
+    value: string,
+    ttlSeconds?: number,
+  ) {
+    try {
+      const result = await this.redisService.setKey(
+        environmentId,
+        key,
+        value,
+        ttlSeconds,
+      );
+      return { message: `Key "${key}" created successfully.`, result };
+    } catch (error) {
+      this.logger.error(
+        `Error creating Redis key "${key}" in env ${environmentId}:`,
+        error,
+      );
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Failed to create key: ${error.message}`,
+      );
+    }
+  }
+
   /**
    * 根据 tbl_user.tenant_user_id 查询对应的 tiger.copy_trade_user_info 记录并返回所有字段
    */

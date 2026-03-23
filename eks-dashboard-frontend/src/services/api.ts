@@ -106,6 +106,24 @@ export const deleteRedisKey = async (key: string) => {
 };
 
 /**
+ * 新增一个 Redis 键（字符串值）
+ * @param key - 键名
+ * @param value - 键值
+ * @param ttlSeconds - 可选，过期秒数
+ */
+export const createRedisKey = async (key: string, value: string, ttlSeconds?: number) => {
+  if (!_environmentId) {
+    throw new Error('Environment ID has not been set.');
+  }
+  const payload: { key: string; value: string; ttlSeconds?: number } = { key, value };
+  if (ttlSeconds !== undefined && ttlSeconds !== null) {
+    payload.ttlSeconds = ttlSeconds;
+  }
+  const response = await api.post('/query/redis-key', payload);
+  return response.data;
+};
+
+/**
  * 获取单个 Redis 键的信息（value + ttl）
  * @param key - 要查询的 Redis 键名
  */
