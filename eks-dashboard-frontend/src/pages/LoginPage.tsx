@@ -30,8 +30,7 @@ const LoginPage: React.FC = () => {
     load();
   }, []);
 
-  const handleSubmit = async () => {
-    const values = await form.validateFields();
+  const handleSubmit = async (values: { username: string; password: string }) => {
     try {
       await login(values.username, values.password);
       navigate('/', { replace: true });
@@ -75,14 +74,25 @@ const LoginPage: React.FC = () => {
         </div>
 
         {showLocal && (
-          <Form form={form} layout="vertical" style={{ marginTop: 12, textAlign: 'left' }}>
+          <Form
+            form={form}
+            layout="vertical"
+            style={{ marginTop: 12, textAlign: 'left' }}
+            onFinish={handleSubmit}
+          >
             <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
-              <Input autoComplete="username" />
+              <Input
+                autoComplete="username"
+                onPressEnter={() => form.submit()}
+              />
             </Form.Item>
             <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-              <Input.Password autoComplete="current-password" />
+              <Input.Password
+                autoComplete="current-password"
+                onPressEnter={() => form.submit()}
+              />
             </Form.Item>
-            <Button type="default" block onClick={handleSubmit}>
+            <Button type="default" block htmlType="submit">
               管理员登录
             </Button>
           </Form>
