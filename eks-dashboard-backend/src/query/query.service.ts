@@ -9,6 +9,7 @@ import {
 import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { KubernetesService } from '../kubernetes/kubernetes.service';
 
 // --- 模拟的数据服务，请替换为你自己的真实服务 ---
 /*@Injectable()
@@ -39,11 +40,17 @@ export class MongoDataService {
 @Injectable()
 export class QueryService {
   private readonly logger = new Logger(QueryService.name);
+  private readonly superAdminNamespace = 'default';
+  private readonly superAdminServiceName = 'kylin-admin-kylin-admin-impl';
+  private readonly superAdminServicePort = 80;
+  private readonly superAdminUserQueryPath = '/admin/trade/user/1/25';
+  private readonly superAdminUidQueryType = 5;
 
   constructor(
     private readonly databaseService: DatabaseService,
     private readonly redisService: RedisService,
     private readonly mongoService: MongoDataService,
+    private readonly kubernetesService: KubernetesService,
   ) {}
 
   // Helper to fetch a single redis key and return TTL and formatted TTL
@@ -82,6 +89,163 @@ export class QueryService {
     return `${hours}小时${minutes}分钟${seconds}秒`;
   }
 
+  private normalizeSuperAdminUserRecord(
+    raw: Record<string, unknown>,
+    uid: string,
+    tenantId?: number,
+  ): Record<string, unknown> {
+    const userId = raw.userId ?? raw.id ?? null;
+    return {
+      ...raw,
+      id: userId,
+      tenant_user_id: raw.tenantUserId ?? raw.tenant_user_id ?? uid,
+      tenant_id: raw.tenantId ?? raw.tenant_id ?? tenantId ?? null,
+      tel_country_code: raw.telCountryCode ?? raw.tel_country_code ?? null,
+      email: raw.email ?? null,
+      tel: raw.tel ?? null,
+    };
+  }
+
+  private extractSuperAdminUserList(body: any): Record<string, unknown>[] {
+    const listCandidates = [
+      body?.data?.list,
+      body?.list,
+      body?.data?.records,
+      body?.records,
+      body?.data?.rows,
+      body?.rows,
+      body?.data?.items,
+      body?.items,
+    ];
+    const list = listCandidates.find((item) => Array.isArray(item));
+    if (!Array.isArray(list)) return [];
+    return list.filter(
+      (item): item is Record<string, unknown> =>
+        item && typeof item === 'object',
+    );
+  }
+
+  private parseSuperAdminTotalCount(body: any): number | null {
+    const candidates = [
+      body?.data?.totalCount,
+      body?.totalCount,
+      body?.data?.total,
+      body?.total,
+      body?.data?.count,
+      body?.count,
+    ];
+    const value = candidates.find((item) => Number.isFinite(Number(item)));
+    if (value === undefined || value === null) return null;
+    return Number(value);
+  }
+
+  private summarizeSuperAdminFirstRecord(records: Record<string, unknown>[]) {
+    const first = records[0];
+    if (!first) {
+      return {
+        tenantName: null,
+        tenantId: null,
+        tenantUserId: null,
+        userId: null,
+      };
+    }
+    return {
+      tenantName: String(first.tenantName ?? first.tenant_name ?? ''),
+      tenantId: first.tenantId ?? first.tenant_id ?? null,
+      tenantUserId: first.tenantUserId ?? first.tenant_user_id ?? null,
+      userId: first.userId ?? first.id ?? null,
+    };
+  }
+
+  private async querySuperAdminUsers(
+    environmentId: string,
+    uid: string,
+    tenantId?: number,
+  ): Promise<{ response: { statusCode: number; body: any }; records: Record<string, unknown>[] }> {
+    const query: Record<string, unknown> = {
+      queryType: this.superAdminUidQueryType,
+      queryValue: uid,
+      realName: '',
+      userStatus: '',
+      userType: '',
+    };
+    if (tenantId !== undefined && tenantId !== null) {
+      query.tenantId = tenantId;
+    }
+
+    const response = await this.kubernetesService.requestServiceProxy(
+      environmentId,
+      {
+        namespace: this.superAdminNamespace,
+        serviceName: this.superAdminServiceName,
+        port: this.superAdminServicePort,
+        method: 'GET',
+        path: this.superAdminUserQueryPath,
+        query,
+        timeoutMs: 15000,
+      },
+    );
+    const records = this.extractSuperAdminUserList(response?.body);
+    const totalCount = this.parseSuperAdminTotalCount(response?.body);
+    const first = this.summarizeSuperAdminFirstRecord(records);
+    this.logger.log(
+      `[QueryCenter] super-admin user query env=${environmentId} uid=${uid} tenantId=${tenantId ?? 'none'} http=${response?.statusCode ?? 'n/a'} code=${response?.body?.code ?? 'n/a'} totalCount=${totalCount ?? 'n/a'} listLen=${records.length} firstTenantName=${first.tenantName ?? ''} firstTenantId=${first.tenantId ?? ''} firstTenantUserId=${first.tenantUserId ?? ''} firstUserId=${first.userId ?? ''}`,
+    );
+    return { response, records };
+  }
+
+  private async findUserByUidViaSuperAdmin(
+    environmentId: string,
+    uid: string,
+    tenantId?: number,
+  ): Promise<Record<string, unknown> | null> {
+    const { response, records } = await this.querySuperAdminUsers(
+      environmentId,
+      uid,
+      tenantId,
+    );
+    const body = response?.body;
+    if (
+      body &&
+      typeof body === 'object' &&
+      'code' in body &&
+      Number((body as { code?: number }).code) !== 0
+    ) {
+      const msg = (body as { msg?: string }).msg || 'super-admin query failed';
+      throw new Error(msg);
+    }
+    if (records.length === 0) {
+      // 诊断日志：当按 tenantId 查询为空时，对照一次不带 tenantId 的结果，
+      // 用于快速判断“租户过滤”是否为根因，不改变现有业务返回。
+      if (tenantId !== undefined && tenantId !== null) {
+        try {
+          const fallback = await this.querySuperAdminUsers(environmentId, uid);
+          if (fallback.records.length > 0) {
+            const first = this.summarizeSuperAdminFirstRecord(fallback.records);
+            this.logger.warn(
+              `[QueryCenter] tenant-filter mismatch suspected env=${environmentId} uid=${uid} requestedTenantId=${tenantId} fallbackFirstTenantName=${first.tenantName ?? ''} fallbackFirstTenantId=${first.tenantId ?? ''} fallbackFirstTenantUserId=${first.tenantUserId ?? ''} fallbackFirstUserId=${first.userId ?? ''}`,
+            );
+          } else {
+            this.logger.warn(
+              `[QueryCenter] user not found in super-admin even without tenantId env=${environmentId} uid=${uid}`,
+            );
+          }
+        } catch (diagError) {
+          this.logger.warn(
+            `[QueryCenter] fallback diagnostic query failed env=${environmentId} uid=${uid}: ${String(diagError)}`,
+          );
+        }
+      }
+      return null;
+    }
+    const matched =
+      records.find(
+        (item) =>
+          String(item.tenantUserId ?? item.tenant_user_id ?? '') === uid,
+      ) || records[0];
+    return this.normalizeSuperAdminUserRecord(matched, uid, tenantId);
+  }
+
   async aggregate(
     environmentId: string,
     identifier: string,
@@ -93,15 +257,35 @@ export class QueryService {
     );
     const uid = identifier; // 简化处理，真实应用中可能需要转换
 
-    // 步骤 1: 从 MySQL 获取用户以找到数据库 ID
-    const user = await this.databaseService.findUserByUid(
-      environmentId,
-      uid,
-      tenantId,
-    );
+    let user: Record<string, unknown> | null = null;
+    let mysqlError: string | null = null;
+    // 步骤 1: 通过 EKS 集群内 super-admin 接口获取用户数据并定位数据库 ID
+    try {
+      user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
+    } catch (e) {
+      mysqlError = e instanceof Error ? e.message : String(e);
+      this.logger.error(
+        `Super-admin user query failed for uid ${uid} in env ${environmentId}: ${mysqlError}`,
+      );
+    }
+
+    if (mysqlError) {
+      return {
+        mysql: { status: 'error', error: mysqlError },
+        redis: { status: 'not_found', error: '依赖用户信息，未执行缓存查询' },
+        mongo: { status: 'not_found', error: '依赖用户信息，未执行活动日志查询' },
+      };
+    }
+    if (!user) {
+      return {
+        mysql: { status: 'not_found', error: '未找到用户信息' },
+        redis: { status: 'not_found', error: '未找到缓存数据' },
+        mongo: { status: 'not_found', error: '未找到活动日志' },
+      };
+    }
 
     // 步骤 2: 根据用户 ID 查询 Redis 和 Mongo
-    const redisPromise = user?.id
+    const redisPromise = user.id
       ? (async () => {
           // Wrap Redis call with a short timeout so slow/unavailable Redis won't
           // block the whole aggregation. If it times out, return not found.
@@ -120,16 +304,14 @@ export class QueryService {
             return [];
           }
         })()
-      : Promise.resolve([]); // 如果没有用户，则不查询 redis
+      : Promise.resolve([]); // 用户存在但无 ID 时，视为无缓存数据
 
     const mongoPromise = this.mongoService.findActivityByUid(uid);
 
     const results = await Promise.allSettled([redisPromise, mongoPromise]);
 
     return {
-      mysql: user
-        ? { status: 'success', data: user }
-        : { status: 'not_found', error: '未找到用户信息' },
+      mysql: { status: 'success', data: user },
       redis: this.formatSettledResult(results[0], '未找到缓存数据'),
       mongo: this.formatSettledResult(results[1], '未找到活动日志'),
     };

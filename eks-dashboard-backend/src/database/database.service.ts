@@ -35,18 +35,35 @@ export class DatabaseService implements OnModuleDestroy {
     let dbConfig = env.database!;
     // If jump server exists, request a tunnel via TunnelManager
     if (env.jumpServer) {
-      const forwards = [
+      const forwards: Array<{ name: string; dstHost: string; dstPort: number }> = [
         {
           name: 'mysql',
           dstHost: env.database!.host,
           dstPort: env.database!.port,
         },
       ];
-      const tunnel = await this.tunnelManager.getTunnel(
-        environmentId,
-        forwards,
-      );
-      const localPort = tunnel.localPorts['mysql'];
+      // Request Redis forward at the same time when available, so the shared
+      // tunnel cache contains both ports for downstream Redis operations.
+      if (env.redis?.host && env.redis?.port) {
+        forwards.push({
+          name: 'redis',
+          dstHost: env.redis.host,
+          dstPort: env.redis.port,
+        });
+      }
+      let tunnel = await this.tunnelManager.getTunnel(environmentId, forwards);
+      let localPort = tunnel.localPorts['mysql'];
+      // self-heal: if an old cached tunnel misses mysql mapping, rebuild once
+      if (!localPort) {
+        await this.tunnelManager.invalidate(environmentId);
+        tunnel = await this.tunnelManager.getTunnel(environmentId, forwards);
+        localPort = tunnel.localPorts['mysql'];
+      }
+      if (!localPort) {
+        throw new Error(
+          `SSH tunnel for env "${environmentId}" did not expose mysql local port.`,
+        );
+      }
       dbConfig = { ...dbConfig, host: tunnel.localHost, port: localPort };
     }
 

@@ -71,6 +71,24 @@ cd <project-folder>
   3. 两者都没有，则走默认 AWS 凭证链（如 EC2 Role / IRSA）
 - **Kube Context**：访问集群仍依赖 `kubeContext`，即使 AK/SK 正确也需要配置该字段。
 
+#### 通过 EKS 集群内网代理调用接口（后续可复用）
+
+当目标系统接口只在集群/VPC 内可达（例如超级后台内部接口），而部署 Dashboard 的主机无法直接公网访问时，可采用“基于 `kubeContext` 的集群内代理调用”模式。
+
+- 适用场景：
+  - 接口是 HTTP/HTTPS 服务接口，已在集群内有 Service 可访问。
+  - 外网或当前服务器直连会 401/超时/网络不可达，但 Pod 内访问正常。
+- 当前项目已有实践：
+  - 线路模块的 `super-admin` 查询/登记接口，已通过 `kubeContext` 走 service-proxy 调用。
+  - 当直连 service-proxy 鉴权失败时，会自动回退到 `kubectl proxy` 重试。
+- 使用前提：
+  - 环境配置中 `kubeContext` 正确且可用。
+  - 后端运行机具备 kubeconfig 与对应 RBAC 权限。
+  - 后端运行机安装 `kubectl`（用于 fallback）。
+- 边界说明：
+  - 该模式主要用于“集群内 HTTP 接口代理调用”。
+  - 对于 MySQL/Redis 这类数据库连接，优先使用跳板机 SSH 隧道（`jumpServer`）方案。
+
 #### 数据库表与字段概览（便于运维/AI 快速理解）
 
 以下为当前项目已使用的核心表（MySQL 5.7）与用途概览，字段以实际表为准：

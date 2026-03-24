@@ -435,11 +435,6 @@ const DataQueryPage: React.FC = () => {
       return <Alert message="请输入UID、手机号或邮箱等标识符进行统一查询。" type="info" showIcon />;
     }
 
-    // 搜索后无结果
-    if (searched && !loading && !userInfo && (!redisData || redisData.length === 0) && !error) {
-        return <Empty description="未找到与查询条件相关的任何数据。" />;
-    }
-
     const userActionsMenu = (
       <Menu>
         <Menu.Item key="edit" onClick={showEditModal}>

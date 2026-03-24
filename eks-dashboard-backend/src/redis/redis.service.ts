@@ -42,19 +42,37 @@ export class RedisService implements OnModuleDestroy {
     const useTls = !!env.redis!.ssl;
 
     if (env.jumpServer) {
-      const forwards = [
+      const forwards: Array<{ name: string; dstHost: string; dstPort: number }> = [
         {
           name: 'redis',
           dstHost: redisHost,
           dstPort: redisPort,
         },
       ];
-      const tunnel = await this.tunnelManager.getTunnel(
-        environmentId,
-        forwards,
-      );
+      // Request MySQL forward at the same time when available, so the shared
+      // tunnel cache contains both ports for upstream DB operations.
+      if (env.database?.host && env.database?.port) {
+        forwards.push({
+          name: 'mysql',
+          dstHost: env.database.host,
+          dstPort: env.database.port,
+        });
+      }
+      let tunnel = await this.tunnelManager.getTunnel(environmentId, forwards);
+      let localRedisPort = tunnel.localPorts['redis'];
+      // self-heal: if an old cached tunnel misses redis mapping, rebuild once
+      if (!localRedisPort) {
+        await this.tunnelManager.invalidate(environmentId);
+        tunnel = await this.tunnelManager.getTunnel(environmentId, forwards);
+        localRedisPort = tunnel.localPorts['redis'];
+      }
+      if (!localRedisPort) {
+        throw new Error(
+          `SSH tunnel for env "${environmentId}" did not expose redis local port.`,
+        );
+      }
       redisHost = tunnel.localHost;
-      redisPort = tunnel.localPorts['redis'];
+      redisPort = localRedisPort;
     }
 
     const options: RedisOptions = {
