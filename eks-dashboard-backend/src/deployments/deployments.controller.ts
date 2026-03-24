@@ -59,6 +59,27 @@ export class DeploymentsController {
         namespace: d.metadata?.namespace,
         replicas: d.spec?.replicas,
         availableReplicas: d.status?.availableReplicas || 0,
+        readyReplicas: d.status?.readyReplicas || 0,
+        updatedReplicas: d.status?.updatedReplicas || 0,
+        unavailableReplicas: d.status?.unavailableReplicas || 0,
+        generation: d.metadata?.generation || 0,
+        observedGeneration: d.status?.observedGeneration || 0,
+        progressingStatus:
+          d.status?.conditions?.find((c) => c.type === 'Progressing')?.status ||
+          null,
+        progressingReason:
+          d.status?.conditions?.find((c) => c.type === 'Progressing')?.reason ||
+          null,
+        availableStatus:
+          d.status?.conditions?.find((c) => c.type === 'Available')?.status ||
+          null,
+        availableReason:
+          d.status?.conditions?.find((c) => c.type === 'Available')?.reason ||
+          null,
+        lastRestartAt:
+          d.spec?.template?.metadata?.annotations?.[
+            'kubectl.kubernetes.io/restartedAt'
+          ] || null,
         creationTimestamp: d.metadata?.creationTimestamp,
         images:
           d.spec?.template?.spec?.containers?.map((c) => c.image).join(', ') ??
