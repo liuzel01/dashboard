@@ -4,10 +4,13 @@ import { CentralDatabaseService } from '../site-monitor/central-database.service
 @Injectable()
 export class EnvironmentsDbService {
   private readonly logger = new Logger(EnvironmentsDbService.name);
+  private static readonly RETRY_COOLDOWN_MS = 30_000;
   private _availableChecked = false;
   private _available = false;
+  private _availableRetryAt = 0;
   private _configChecked = false;
   private _configAvailable = false;
+  private _configRetryAt = 0;
 
   constructor(private readonly db: CentralDatabaseService) {}
 
@@ -23,27 +26,71 @@ export class EnvironmentsDbService {
   }
 
   private async ensureAvailable() {
-    if (this._availableChecked) return this._available;
-    this._availableChecked = true;
+    if (this._availableChecked && this._available) return true;
+    if (
+      this._availableChecked &&
+      !this._available &&
+      Date.now() < this._availableRetryAt
+    ) {
+      return false;
+    }
     try {
       await this.db.query('SELECT 1 FROM environments_meta LIMIT 1');
+      this._availableChecked = true;
       this._available = true;
+      this._availableRetryAt = 0;
     } catch (e) {
-      this.logger.warn('environments_meta not found in DB, fallback to JSON file.');
+      this._availableChecked = true;
       this._available = false;
+      this._availableRetryAt =
+        Date.now() + EnvironmentsDbService.RETRY_COOLDOWN_MS;
+      const err = e as { code?: string; message?: string };
+      const code = err?.code || 'UNKNOWN';
+      const msg = err?.message || String(e);
+      if (code === 'ER_NO_SUCH_TABLE' || /doesn't exist/i.test(msg)) {
+        this.logger.warn(
+          'environments_meta table does not exist in DB, fallback to JSON file.',
+        );
+      } else {
+        this.logger.warn(
+          `environments_meta check failed (${code}): ${msg}. Fallback to JSON for now, will retry.`,
+        );
+      }
     }
     return this._available;
   }
 
   private async ensureConfigAvailable() {
-    if (this._configChecked) return this._configAvailable;
-    this._configChecked = true;
+    if (this._configChecked && this._configAvailable) return true;
+    if (
+      this._configChecked &&
+      !this._configAvailable &&
+      Date.now() < this._configRetryAt
+    ) {
+      return false;
+    }
     try {
       await this.db.query('SELECT 1 FROM environments_config LIMIT 1');
+      this._configChecked = true;
       this._configAvailable = true;
+      this._configRetryAt = 0;
     } catch (e) {
-      this.logger.warn('environments_config not found in DB, fallback to JSON file.');
+      this._configChecked = true;
       this._configAvailable = false;
+      this._configRetryAt =
+        Date.now() + EnvironmentsDbService.RETRY_COOLDOWN_MS;
+      const err = e as { code?: string; message?: string };
+      const code = err?.code || 'UNKNOWN';
+      const msg = err?.message || String(e);
+      if (code === 'ER_NO_SUCH_TABLE' || /doesn't exist/i.test(msg)) {
+        this.logger.warn(
+          'environments_config table does not exist in DB, fallback to JSON file.',
+        );
+      } else {
+        this.logger.warn(
+          `environments_config check failed (${code}): ${msg}. Fallback to JSON for now, will retry.`,
+        );
+      }
     }
     return this._configAvailable;
   }
