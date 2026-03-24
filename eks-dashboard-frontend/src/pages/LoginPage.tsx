@@ -14,6 +14,7 @@ const LoginPage: React.FC = () => {
   const [ssoReady, setSsoReady] = useState(false);
   const [ssoError, setSsoError] = useState<string | null>(null);
   const [showLocal, setShowLocal] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [config, setConfig] = useState<{ redirectUri: string } | null>(null);
 
   useEffect(() => {
@@ -31,11 +32,15 @@ const LoginPage: React.FC = () => {
   }, []);
 
   const handleSubmit = async (values: { username: string; password: string }) => {
+    if (loggingIn) return;
+    setLoggingIn(true);
     try {
       await login(values.username, values.password);
       navigate('/', { replace: true });
     } catch (err: any) {
       message.error(err?.response?.data?.message || err?.message || '登录失败');
+    } finally {
+      setLoggingIn(false);
     }
   };
 
@@ -79,20 +84,21 @@ const LoginPage: React.FC = () => {
             layout="vertical"
             style={{ marginTop: 12, textAlign: 'left' }}
             onFinish={handleSubmit}
+            disabled={loggingIn}
           >
             <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
               <Input
                 autoComplete="username"
-                onPressEnter={() => form.submit()}
+                onPressEnter={() => !loggingIn && form.submit()}
               />
             </Form.Item>
             <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
               <Input.Password
                 autoComplete="current-password"
-                onPressEnter={() => form.submit()}
+                onPressEnter={() => !loggingIn && form.submit()}
               />
             </Form.Item>
-            <Button type="default" block htmlType="submit">
+            <Button type="default" block htmlType="submit" loading={loggingIn}>
               管理员登录
             </Button>
           </Form>
