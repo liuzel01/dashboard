@@ -16,8 +16,14 @@ export class LinesController {
 
   @Get()
   @UsePipes(new ValidationPipe({ transform: true }))
-  findAll(@Query() query: ListLineDto) {
-    return this.linesService.getLines(query);
+  findAll(
+    @Headers('x-target-environment') environmentId: string,
+    @Query() query: ListLineDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.getLines(environmentId, query);
   }
 
   @Get('external/check')

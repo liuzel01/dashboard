@@ -23,12 +23,12 @@ import {
   getDcdnCasCertificates,
   getDcdnDomainStatus,
   getIngressOriginCandidates,
-  getSuperAdminLines,
   provisionDcdnDomain,
   registerSuperAdminLine,
   verifyExternalLine,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import TenantLinesTable from '../components/TenantLinesTable';
 
 const { Text, Paragraph, Link } = Typography;
 
@@ -106,16 +106,6 @@ type SuperAdminRegisterResult = {
   message: string;
   differences?: Array<{ field: string; existing: any; incoming: any }>;
   canUpdate?: boolean;
-};
-
-type SuperAdminLineItem = {
-  id?: number | string | null;
-  zh?: string;
-  en?: string;
-  lineUrl?: string;
-  otcUrl?: string;
-  status?: boolean | null;
-  tenantId?: number | null;
 };
 
 type IngressOriginCandidate = {
@@ -207,12 +197,7 @@ const LineOnboardingPage: React.FC = () => {
   const [superAdminRegisterResult, setSuperAdminRegisterResult] = useState<SuperAdminRegisterResult | null>(null);
   const [superAdminPendingUpdate, setSuperAdminPendingUpdate] = useState(false);
   const [superAdminLinesOpen, setSuperAdminLinesOpen] = useState(false);
-  const [superAdminLinesLoading, setSuperAdminLinesLoading] = useState(false);
-  const [superAdminLinesError, setSuperAdminLinesError] = useState<string | null>(null);
-  const [superAdminLines, setSuperAdminLines] = useState<SuperAdminLineItem[]>([]);
-  const [superAdminLinesPage, setSuperAdminLinesPage] = useState(1);
-  const [superAdminLinesSize, setSuperAdminLinesSize] = useState(20);
-  const [superAdminLinesTotal, setSuperAdminLinesTotal] = useState(0);
+  const [superAdminLinesReloadKey, setSuperAdminLinesReloadKey] = useState(0);
   const [connectivityChecked, setConnectivityChecked] = useState(false);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [tenantLoading, setTenantLoading] = useState(false);
@@ -282,9 +267,6 @@ const LineOnboardingPage: React.FC = () => {
     setSqlConfirmed(false);
     setVerifyResult(null);
     setVerifyError(null);
-    setSuperAdminLines([]);
-    setSuperAdminLinesTotal(0);
-    setSuperAdminLinesError(null);
     setSuperAdminLinesOpen(false);
     if (!envId) {
       setTenants([]);
@@ -966,42 +948,6 @@ const LineOnboardingPage: React.FC = () => {
     doSuperAdminRegistration('update');
   };
 
-  const loadSuperAdminLines = async (page = 1, size = superAdminLinesSize) => {
-    if (!selectedTenantId) {
-      message.warning('请先在步骤1选择目标租户');
-      return;
-    }
-    setSuperAdminLinesLoading(true);
-    setSuperAdminLinesError(null);
-    try {
-      const result = (await getSuperAdminLines({
-        page,
-        size,
-        lineUrl: '',
-        tenantId: selectedTenantId,
-      })) as {
-        page?: number;
-        size?: number;
-        total?: number;
-        items?: SuperAdminLineItem[];
-      };
-      setSuperAdminLinesPage(result.page || page);
-      setSuperAdminLinesSize(result.size || size);
-      setSuperAdminLinesTotal(result.total || 0);
-      setSuperAdminLines(Array.isArray(result.items) ? result.items : []);
-      setSuperAdminLinesOpen(true);
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
-      const msg = Array.isArray(backendMsg)
-        ? backendMsg.join('; ')
-        : backendMsg || '获取租户线路列表失败';
-      setSuperAdminLinesError(msg);
-      message.error(msg);
-    } finally {
-      setSuperAdminLinesLoading(false);
-    }
-  };
-
   const handleConfirmConnectivity = () => {
     if (!ingressApplied) {
       message.warning('请先完成步骤4');
@@ -1110,8 +1056,6 @@ const LineOnboardingPage: React.FC = () => {
                 setSuperAdminRegisterError(null);
                 setSuperAdminRegisterResult(null);
                 setSuperAdminPendingUpdate(false);
-                setSuperAdminLines([]);
-                setSuperAdminLinesTotal(0);
                 setSuperAdminLinesOpen(false);
                 setConnectivityChecked(false);
                 setSqlConfirmed(false);
@@ -1568,8 +1512,14 @@ const LineOnboardingPage: React.FC = () => {
               确认并自动登记新线路
             </Button>
             <Button
-              loading={superAdminLinesLoading}
-              onClick={() => loadSuperAdminLines(1, superAdminLinesSize)}
+              onClick={() => {
+                if (!selectedTenantId) {
+                  message.warning('请先在步骤1选择目标租户');
+                  return;
+                }
+                setSuperAdminLinesReloadKey((prev) => prev + 1);
+                setSuperAdminLinesOpen(true);
+              }}
               disabled={!selectedTenantId}
             >
               查看当前租户全部线路
@@ -1776,40 +1726,12 @@ const LineOnboardingPage: React.FC = () => {
         footer={null}
         width={980}
       >
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          {superAdminLinesError ? <Alert type="error" showIcon message={superAdminLinesError} /> : null}
-          <Table<SuperAdminLineItem>
-            rowKey={(record, index) => String(record.id || record.lineUrl || index)}
-            loading={superAdminLinesLoading}
-            dataSource={superAdminLines}
-            pagination={{
-              current: superAdminLinesPage,
-              pageSize: superAdminLinesSize,
-              total: superAdminLinesTotal,
-              showSizeChanger: true,
-              onChange: (page, pageSize) => {
-                loadSuperAdminLines(page, pageSize);
-              },
-            }}
-            columns={[
-              { title: 'ID', dataIndex: 'id', width: 90 },
-              { title: '租户ID', dataIndex: 'tenantId', width: 100 },
-              { title: '中文名', dataIndex: 'zh', width: 140 },
-              { title: '英文名', dataIndex: 'en', width: 140 },
-              { title: 'lineUrl', dataIndex: 'lineUrl', width: 240, ellipsis: true },
-              { title: 'otcUrl', dataIndex: 'otcUrl', width: 240, ellipsis: true },
-              {
-                title: '状态',
-                dataIndex: 'status',
-                width: 100,
-                render: (value: boolean | null | undefined) =>
-                  value === true ? <Tag color="green">已开启</Tag> : <Tag>未开启</Tag>,
-              },
-            ]}
-            size="small"
-            scroll={{ x: 1100 }}
-          />
-        </Space>
+        <TenantLinesTable
+          tenantId={selectedTenantId}
+          enabled={superAdminLinesOpen}
+          reloadKey={superAdminLinesReloadKey}
+          initialPageSize={20}
+        />
       </Modal>
     </div>
   );

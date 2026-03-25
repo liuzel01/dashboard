@@ -42,7 +42,6 @@ type DcdnProvisionResult = {
 
 @Injectable()
 export class LinesService {
-  private readonly vlinkApiUrl: string;
   private readonly lineVerifyApiUrl: string;
   private readonly dcdnEndpoint: string;
   private readonly dcdnAccessKeyId: string;
@@ -64,9 +63,6 @@ export class LinesService {
     private readonly configService: ConfigService,
     private readonly kubernetesService: KubernetesService,
   ) {
-    // Make VLINK_API_URL optional at boot; validate when endpoint is called.
-    const url = this.configService.get<string>('VLINK_API_URL');
-    this.vlinkApiUrl = url || '';
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
       'http://172.31.29.3:3000/api/lines';
@@ -96,30 +92,29 @@ export class LinesService {
     ];
   }
 
-  async getLines(query: ListLineDto) {
-    if (!this.vlinkApiUrl) {
-      throw new Error('VLINK_API_URL is not configured in environment variables');
-    }
-    const { lineUrl = '', page, size, tenantId } = query;
-    const url = `${this.vlinkApiUrl}/admin/app/line/url/list`;
+  async getLines(environmentId: string, query: ListLineDto) {
+    const parsedPage = Number(query.page);
+    const parsedSize = Number(query.size);
+    const parsedTenantId = Number(query.tenantId);
+    const lineUrl = query.lineUrl?.trim() || '';
 
-    // Here you might need to add authentication headers required by the target API
-    // For example: const headers = { 'Authorization': 'Bearer YOUR_TOKEN' };
-    const headers = {};
+    const result = await this.listSuperAdminLines(environmentId, {
+      page: Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1,
+      size: Number.isFinite(parsedSize) && parsedSize > 0 ? Math.floor(parsedSize) : 10,
+      lineUrl,
+      tenantId: Number.isFinite(parsedTenantId) && parsedTenantId > 0 ? Math.floor(parsedTenantId) : undefined,
+    });
 
-    try {
-      const response = await firstValueFrom(
-        this.httpService.get(url, {
-          params: { lineUrl, page, size, tenantId },
-          headers,
-        }),
-      );
-      return response.data;
-    } catch (error) {
-      // It's good practice to log the error and maybe throw a more specific exception
-      console.error('Error fetching lines from VLINK API:', error);
-      throw new Error('Failed to fetch lines.');
-    }
+    return {
+      code: 0,
+      message: 'ok',
+      data: {
+        list: result.items,
+        totalCount: result.total,
+        page: result.page,
+        size: result.size,
+      },
+    };
   }
 
   async listIngressOriginCandidates(environmentId: string, keyword?: string) {

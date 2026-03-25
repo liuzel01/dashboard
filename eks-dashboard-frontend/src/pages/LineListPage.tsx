@@ -1,99 +1,108 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { Table, Form, Input, Button, Select, message, Spin, Alert, Pagination } from 'antd';
-import { getLines, getTenantsForEnvironment } from '../services/api';
+import React, { useContext, useEffect, useState } from 'react';
+import { Alert, Button, Form, Input, Select, Space, Typography, message } from 'antd';
+import { getTenantsForEnvironment } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import TenantLinesTable from '../components/TenantLinesTable';
 
-const { Option } = Select;
+type TenantOption = {
+  id: number;
+  name: string;
+};
+
+type QueryState = {
+  tenantId?: number;
+  lineUrl: string;
+  reloadKey: number;
+};
+
+const { Text } = Typography;
 
 const LineListPage: React.FC = () => {
   const [form] = Form.useForm();
-  const [lines, setLines] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [tenants, setTenants] = useState<{ id: number; name: string }[]>([]);
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
-
+  const [tenantLoading, setTenantLoading] = useState(false);
+  const [tenantLoadError, setTenantLoadError] = useState<string | null>(null);
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [query, setQuery] = useState<QueryState>({ lineUrl: '', reloadKey: 0 });
+  const [searched, setSearched] = useState(false);
   const { currentEnvironment } = useContext(EnvironmentContext);
 
   useEffect(() => {
-    if (currentEnvironment) {
-      const fetchTenants = async () => {
-        try {
-          const tenantsData = await getTenantsForEnvironment();
-          setTenants(tenantsData);
-        } catch (err) {
-          message.error('无法加载租户列表');
-        }
-      };
-      fetchTenants();
-    }
-  }, [currentEnvironment]);
-
-  const fetchLines = async (values: { tenantId: number; lineUrl?: string }, page = 1, pageSize = 10) => {
-    if (!values.tenantId) {
-      message.error('请先选择一个租户');
+    const envId = currentEnvironment?.id;
+    if (!envId) {
+      setTenants([]);
+      setTenantLoadError(null);
+      setQuery({ lineUrl: '', reloadKey: 0 });
+      setSearched(false);
+      form.resetFields();
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    let cancelled = false;
+    const loadTenants = async () => {
+      setTenantLoading(true);
+      setTenantLoadError(null);
+      try {
+        const data = (await getTenantsForEnvironment()) as TenantOption[];
+        if (cancelled) return;
+        const normalized = Array.isArray(data)
+          ? data
+              .map((item) => ({
+                id: Number(item.id),
+                name: String(item.name || ''),
+              }))
+              .filter((item) => Number.isInteger(item.id) && item.id > 0)
+          : [];
+        setTenants(normalized);
+      } catch (error: any) {
+        if (cancelled) return;
+        setTenants([]);
+        const backendMsg = error?.response?.data?.message;
+        const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '加载租户列表失败';
+        setTenantLoadError(msg);
+      } finally {
+        if (!cancelled) {
+          setTenantLoading(false);
+        }
+      }
+    };
 
-    try {
-      const data = await getLines({ ...values, page, size: pageSize });
-      // The API response seems to have a nested structure
-      setLines(data.data?.list || []);
-      setPagination({
-        current: page,
-        pageSize: pageSize,
-        total: data.data?.totalCount || 0,
-      });
-    } catch (err) {
-      setError('获取线路列表失败，请检查后端服务和配置。');
-      message.error('获取线路列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+    void loadTenants();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEnvironment?.id, form]);
 
   const handleSearch = (values: { tenantId: number; lineUrl?: string }) => {
-    setPagination({ ...pagination, current: 1 }); // Reset to first page on new search
-    fetchLines(values, 1, pagination.pageSize);
-  };
+    if (!values.tenantId) {
+      message.warning('请先选择一个租户');
+      return;
+    }
 
-  const handleTableChange = (page: number, pageSize?: number) => {
-    const values = form.getFieldsValue();
-    fetchLines(values, page, pageSize || pagination.pageSize);
+    setSearched(true);
+    setQuery((prev) => ({
+      tenantId: values.tenantId,
+      lineUrl: values.lineUrl?.trim() || '',
+      reloadKey: prev.reloadKey + 1,
+    }));
   };
-
-  const columns = [
-    { title: 'ID', dataIndex: 'id', key: 'id' },
-    { title: '线路地址', dataIndex: 'lineUrl', key: 'lineUrl' },
-    { title: '备注', dataIndex: 'remark', key: 'remark' },
-    { title: '创建时间', dataIndex: 'createTime', key: 'createTime' },
-  ];
 
   return (
     <div>
       <h2>线路列表</h2>
-      <Form
-        form={form}
-        layout="inline"
-        onFinish={handleSearch}
-        style={{ marginBottom: 24 }}
-      >
-        <Form.Item
-          name="tenantId"
-          label="租户"
-          rules={[{ required: true, message: '请选择租户' }]}
-        >
-          <Select style={{ width: 150 }} placeholder="选择租户">
-            {tenants.map(tenant => (
-              <Option key={tenant.id} value={tenant.id}>{tenant.name}</Option>
-            ))}
-          </Select>
+      <Form form={form} layout="inline" onFinish={handleSearch} style={{ marginBottom: 16 }}>
+        <Form.Item name="tenantId" label="租户" rules={[{ required: true, message: '请选择租户' }]}>
+          <Select
+            style={{ width: 220 }}
+            placeholder={tenantLoading ? '加载中...' : '选择租户'}
+            loading={tenantLoading}
+            options={tenants.map((tenant) => ({
+              value: tenant.id,
+              label: `${tenant.id} - ${tenant.name}`,
+            }))}
+          />
         </Form.Item>
         <Form.Item name="lineUrl" label="线路地址">
-          <Input placeholder="可选，用于模糊搜索" />
+          <Input placeholder="可选：按 lineUrl 过滤" style={{ width: 280 }} />
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit">
@@ -102,25 +111,21 @@ const LineListPage: React.FC = () => {
         </Form.Item>
       </Form>
 
-      {error && <Alert message={error} type="error" style={{ marginBottom: 24 }} />}
+      {tenantLoadError ? <Alert type="error" showIcon message={tenantLoadError} style={{ marginBottom: 12 }} /> : null}
 
-      <Spin spinning={loading}>
-        <Table
-          columns={columns}
-          dataSource={lines}
-          rowKey="id"
-          pagination={false} // Use custom pagination component
+      {!searched ? (
+        <Space direction="vertical" size={4}>
+          <Text type="secondary">请选择租户并点击“查询”后查看线路数据。</Text>
+        </Space>
+      ) : (
+        <TenantLinesTable
+          tenantId={query.tenantId}
+          lineUrl={query.lineUrl}
+          enabled={searched}
+          reloadKey={query.reloadKey}
+          initialPageSize={10}
         />
-      </Spin>
-
-      <Pagination
-        style={{ marginTop: 16, textAlign: 'right' }}
-        current={pagination.current}
-        pageSize={pagination.pageSize}
-        total={pagination.total}
-        onChange={handleTableChange}
-        showSizeChanger
-      />
+      )}
     </div>
   );
 };

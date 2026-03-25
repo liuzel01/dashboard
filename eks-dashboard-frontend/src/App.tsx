@@ -6,7 +6,6 @@ import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
 import SecurityGroupPage from './pages/SecurityGroupPage';
-import LineListPage from './pages/LineListPage';
 import SiteMonitorPage from './pages/SiteMonitorPage';
 import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import S3UploadPage from './pages/S3UploadPage';
@@ -83,7 +82,6 @@ const AppLayout: React.FC = () => {
     { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
     { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
     { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
-    { key: '/lines', label: '线路列表', icon: <GlobalOutlined />, permission: 'menu:lines' },
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
@@ -154,7 +152,14 @@ const AppLayout: React.FC = () => {
               <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
               <Route path="/data-query" element={<ProtectedRoute required={['menu:data-query']}><DataQueryPage /></ProtectedRoute>} />
               <Route path="/security-groups" element={<ProtectedRoute required={['menu:security-groups']}><SecurityGroupPage /></ProtectedRoute>} />
-              <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
+              <Route
+                path="/lines"
+                element={
+                  <ProtectedRoute requiredAny={['menu:line-onboarding', 'menu:lines']}>
+                    <Navigate to="/line-onboarding" replace />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="/line-onboarding" element={<ProtectedRoute requiredAny={['menu:line-onboarding', 'menu:lines']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />

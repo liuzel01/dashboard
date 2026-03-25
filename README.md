@@ -54,7 +54,6 @@ cd <project-folder>
    DB_USER=root
    DB_PASSWORD=password
    DB_DATABASE=spot
-   VLINK_API_URL=https://vlink2-yyds.vlink1tenant.shop
    ```
 
 3. 在 `eks-dashboard-backend` 根目录创建 `environments.json`（可参考 `environments.json-example`）。
