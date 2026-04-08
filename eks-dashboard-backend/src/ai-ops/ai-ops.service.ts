@@ -49,9 +49,30 @@ type OpenClawConfig = {
   model: string;
 };
 
+type SchemaColumnRow = {
+  tableSchema: string;
+  tableName: string;
+  columnName: string;
+  ordinalPosition: number;
+};
+
+type SchemaTableSummary = {
+  database: string;
+  table: string;
+  columns: string[];
+};
+
 @Injectable()
 export class AiOpsService {
   private readonly logger = new Logger(AiOpsService.name);
+  private readonly schemaCache = new Map<
+    string,
+    { expiresAt: number; tables: SchemaTableSummary[] }
+  >();
+  private readonly schemaCacheTtlMs = 5 * 60 * 1000;
+  private readonly schemaPromptMaxTables = 24;
+  private readonly schemaPromptMaxColumns = 20;
+  private readonly sqlRewriteMaxAttempts = 3;
 
   constructor(
     private readonly config: ConfigService,
@@ -104,7 +125,7 @@ export class AiOpsService {
     let actionId: number | null = null;
     let prepared: PreparedSql | null = null;
     try {
-      prepared = await this.prepareSql(body, policy, llmSessionKey);
+      prepared = await this.prepareSql(environmentId, body, policy, llmSessionKey);
 
       actionId = await this.safeInsertAction({
         environmentId,
@@ -174,7 +195,7 @@ export class AiOpsService {
     let prepared: PreparedSql | null = null;
     let rowCount = 0;
     try {
-      prepared = await this.prepareSql(body, policy, llmSessionKey);
+      prepared = await this.prepareSql(environmentId, body, policy, llmSessionKey);
 
       const [rows] = await this.database.runQuery(environmentId, prepared.executedSql);
       if (!Array.isArray(rows)) {
@@ -529,6 +550,7 @@ export class AiOpsService {
   }
 
   private async prepareSql(
+    environmentId: string,
     body: { question?: string; sql?: string },
     policy: SqlPolicy,
     llmSessionKey: string,
@@ -541,13 +563,19 @@ export class AiOpsService {
     }
 
     const generatedFromQuestion = !sqlInput;
-    const rawSql = generatedFromQuestion
-      ? await this.generateSqlFromQuestion(question, policy, llmSessionKey)
-      : sqlInput;
+    if (generatedFromQuestion) {
+      return this.prepareGeneratedSqlFromQuestion(
+        environmentId,
+        question,
+        policy,
+        llmSessionKey,
+      );
+    }
 
+    const rawSql = sqlInput;
     const normalizedSql = this.normalizeSql(rawSql);
     this.validateReadOnlySql(normalizedSql, policy, {
-      requireQualifiedTableRefs: generatedFromQuestion,
+      requireQualifiedTableRefs: false,
     });
 
     const { sql: limitedSql, appliedLimit } = this.enforceLimit(normalizedSql, policy);
@@ -560,6 +588,60 @@ export class AiOpsService {
       appliedLimit,
       generatedFromQuestion,
     };
+  }
+
+  private async prepareGeneratedSqlFromQuestion(
+    environmentId: string,
+    question: string,
+    policy: SqlPolicy,
+    llmSessionKey: string,
+  ): Promise<PreparedSql> {
+    const schemaContext = await this.buildSchemaContext(environmentId, policy, question);
+
+    let lastValidationMessage = '';
+    let lastGeneratedSql = '';
+    for (let attempt = 1; attempt <= this.sqlRewriteMaxAttempts; attempt += 1) {
+      const rawSql = await this.generateSqlFromQuestion(
+        question,
+        policy,
+        llmSessionKey,
+        schemaContext,
+        attempt > 1 ? lastValidationMessage : undefined,
+        attempt > 1 ? lastGeneratedSql : undefined,
+      );
+
+      try {
+        const normalizedSql = this.normalizeSql(rawSql);
+        this.validateReadOnlySql(normalizedSql, policy, {
+          requireQualifiedTableRefs: true,
+        });
+
+        const { sql: limitedSql, appliedLimit } = this.enforceLimit(
+          normalizedSql,
+          policy,
+        );
+        const executedSql = this.attachExecutionHint(limitedSql, policy.timeoutMs);
+
+        return {
+          rawSql,
+          normalizedSql,
+          executedSql,
+          appliedLimit,
+          generatedFromQuestion: true,
+        };
+      } catch (error) {
+        if (!(error instanceof BadRequestException) || attempt >= this.sqlRewriteMaxAttempts) {
+          throw error;
+        }
+        lastValidationMessage = this.errorMessage(error);
+        lastGeneratedSql = rawSql;
+        this.logger.warn(
+          `NL2SQL validation failed, retrying (${attempt}/${this.sqlRewriteMaxAttempts}): ${lastValidationMessage}`,
+        );
+      }
+    }
+
+    throw new BadRequestException('Failed to generate valid SQL.');
   }
 
   private normalizeSql(sql: string) {
@@ -807,6 +889,9 @@ export class AiOpsService {
     question: string,
     policy: SqlPolicy,
     llmSessionKey: string,
+    schemaContext?: string,
+    retryReason?: string,
+    previousSql?: string,
   ) {
     if (!question) {
       throw new BadRequestException('question is empty.');
@@ -832,26 +917,48 @@ export class AiOpsService {
       tableHint,
       `Always include LIMIT and keep it <= ${policy.maxLimit}.`,
       'Do not include markdown fences or comments.',
+      'If previous SQL was rejected, strictly fix according to the validator reason.',
     ].join('\n');
 
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/chat/completions`;
     let resp: { data: any };
     try {
+      const messages: Array<{ role: 'system' | 'user'; content: string }> = [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+      ];
+      if (schemaContext) {
+        messages.push({
+          role: 'system',
+          content: `Schema context (use only these references):\n${schemaContext}`,
+        });
+      }
+      messages.push({
+        role: 'user',
+        content: question,
+      });
+      if (retryReason) {
+        const retryParts = [
+          `Validator rejection reason: ${retryReason}`,
+          previousSql ? `Rejected SQL: ${previousSql}` : '',
+          'Rewrite and return one corrected SQL only.',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        messages.push({
+          role: 'user',
+          content: retryParts,
+        });
+      }
+
       resp = await axios.post(
         endpoint,
         {
           model: llm.model,
           user: llmSessionKey,
-          messages: [
-            {
-              role: 'system',
-              content: systemPrompt,
-            },
-            {
-              role: 'user',
-              content: question,
-            },
-          ],
+          messages,
           temperature: 0,
           max_tokens: 400,
         },
@@ -876,6 +983,222 @@ export class AiOpsService {
     }
 
     return this.stripCodeFence(outputText);
+  }
+
+  private async buildSchemaContext(
+    environmentId: string,
+    policy: SqlPolicy,
+    question: string,
+  ): Promise<string> {
+    const allTables = await this.getSchemaTablesFromCache(environmentId, policy);
+    if (allTables.length === 0) {
+      return '';
+    }
+
+    const ranked = this.rankTablesForQuestion(allTables, question);
+    const withScore = ranked.filter((item) => item.score > 0);
+    const picked = (withScore.length > 0 ? withScore : ranked)
+      .slice(0, this.schemaPromptMaxTables)
+      .map((item) => item.table);
+
+    const lines = picked.map((item) => {
+      const cols = item.columns.slice(0, this.schemaPromptMaxColumns);
+      const remaining = Math.max(0, item.columns.length - cols.length);
+      const suffix = remaining > 0 ? `, ...(+${remaining})` : '';
+      return `- ${item.database}.${item.table}: ${cols.join(', ')}${suffix}`;
+    });
+
+    if (lines.length === 0) {
+      return '';
+    }
+
+    const omitted = Math.max(0, allTables.length - picked.length);
+    const note =
+      omitted > 0
+        ? `\n- ...(omitted ${omitted} additional allowed tables for brevity)`
+        : '';
+    return `Known schema references:\n${lines.join('\n')}${note}`;
+  }
+
+  private async getSchemaTablesFromCache(
+    environmentId: string,
+    policy: SqlPolicy,
+  ): Promise<SchemaTableSummary[]> {
+    const cacheKey = this.buildSchemaCacheKey(environmentId, policy);
+    const now = Date.now();
+    const cached = this.schemaCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.tables;
+    }
+
+    const tables = await this.loadSchemaTables(environmentId, policy);
+    this.schemaCache.set(cacheKey, {
+      tables,
+      expiresAt: now + this.schemaCacheTtlMs,
+    });
+    return tables;
+  }
+
+  private buildSchemaCacheKey(environmentId: string, policy: SqlPolicy): string {
+    const dbPart = [...policy.whitelistDatabases].map((v) => v.trim().toLowerCase()).sort().join(',');
+    const tablePart = [...policy.whitelistTables].map((v) => v.trim().toLowerCase()).sort().join(',');
+    return `${environmentId}::db=${dbPart}::tbl=${tablePart}`;
+  }
+
+  private async loadSchemaTables(
+    environmentId: string,
+    policy: SqlPolicy,
+  ): Promise<SchemaTableSummary[]> {
+    const sql = `
+      SELECT
+        TABLE_SCHEMA AS tableSchema,
+        TABLE_NAME AS tableName,
+        COLUMN_NAME AS columnName,
+        ORDINAL_POSITION AS ordinalPosition
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+      ORDER BY TABLE_SCHEMA ASC, TABLE_NAME ASC, ORDINAL_POSITION ASC
+      LIMIT 12000
+    `;
+
+    try {
+      const [rows] = await this.database.runQuery(environmentId, sql);
+      if (!Array.isArray(rows)) return [];
+
+      const byTable = new Map<string, SchemaTableSummary>();
+      for (const row of rows as SchemaColumnRow[]) {
+        const database = String(row.tableSchema || '').trim().toLowerCase();
+        const table = String(row.tableName || '').trim().toLowerCase();
+        const column = String(row.columnName || '').trim().toLowerCase();
+        if (!database || !table || !column) continue;
+        if (!this.isTableAllowedByPolicy(database, table, policy)) continue;
+
+        const key = `${database}.${table}`;
+        const existing = byTable.get(key);
+        if (!existing) {
+          byTable.set(key, {
+            database,
+            table,
+            columns: [column],
+          });
+          continue;
+        }
+        if (!existing.columns.includes(column)) {
+          existing.columns.push(column);
+        }
+      }
+
+      return Array.from(byTable.values()).sort((a, b) =>
+        `${a.database}.${a.table}`.localeCompare(`${b.database}.${b.table}`),
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to load schema metadata: ${this.errorMessage(error)}`);
+      return [];
+    }
+  }
+
+  private isTableAllowedByPolicy(database: string, table: string, policy: SqlPolicy): boolean {
+    const target = {
+      database,
+      table,
+      raw: `${database}.${table}`,
+    };
+
+    if (policy.whitelistTables.length > 0) {
+      const matched = policy.whitelistTables.some((pattern) =>
+        this.matchTablePattern(pattern, target),
+      );
+      if (!matched) return false;
+    }
+
+    if (policy.whitelistDatabases.length > 0) {
+      const matchedDb = policy.whitelistDatabases.some((pattern) =>
+        this.matchDatabasePattern(pattern, database),
+      );
+      if (!matchedDb) return false;
+    }
+
+    return true;
+  }
+
+  private rankTablesForQuestion(
+    tables: SchemaTableSummary[],
+    question: string,
+  ): Array<{ table: SchemaTableSummary; score: number }> {
+    const tokens = this.extractQuestionTokens(question);
+    const explicitRefs = this.extractExplicitQuestionRefs(question);
+
+    return tables
+      .map((table) => ({
+        table,
+        score: this.scoreTableForQuestion(table, tokens, explicitRefs),
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return `${a.table.database}.${a.table.table}`.localeCompare(
+          `${b.table.database}.${b.table.table}`,
+        );
+      });
+  }
+
+  private scoreTableForQuestion(
+    table: SchemaTableSummary,
+    tokens: string[],
+    explicitRefs: Set<string>,
+  ): number {
+    const fullName = `${table.database}.${table.table}`;
+    let score = explicitRefs.has(fullName) ? 100 : 0;
+
+    for (const token of tokens) {
+      if (token === table.table) score += 24;
+      else if (table.table.includes(token)) score += 8;
+
+      if (token === table.database) score += 12;
+      else if (table.database.includes(token)) score += 4;
+
+      for (const col of table.columns) {
+        if (token === col) {
+          score += 5;
+          break;
+        }
+        if (col.includes(token)) {
+          score += 2;
+          break;
+        }
+      }
+    }
+
+    return score;
+  }
+
+  private extractQuestionTokens(question: string): string[] {
+    const text = String(question || '').toLowerCase();
+    const matches = text.match(/[a-z_][a-z0-9_]{1,63}/g) || [];
+    const stopWords = new Set([
+      'select',
+      'from',
+      'where',
+      'join',
+      'limit',
+      'count',
+      'and',
+      'or',
+      'with',
+      'show',
+      'explain',
+    ]);
+    return Array.from(new Set(matches.filter((token) => !stopWords.has(token))));
+  }
+
+  private extractExplicitQuestionRefs(question: string): Set<string> {
+    const refs = new Set<string>();
+    const text = String(question || '').toLowerCase();
+    const regex = /\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      refs.add(`${match[1]}.${match[2]}`);
+    }
+    return refs;
   }
 
   private buildLlmSessionKey(
