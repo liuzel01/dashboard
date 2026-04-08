@@ -47,7 +47,7 @@ const hashPassword = (password) => {
 
 async function main() {
   const username = (parseArg('--username') || 'admin').trim();
-  const roleName = (parseArg('--role') || '管理员').trim();
+  const roleName = (parseArg('--role') || 'admin').trim();
   let password = parseArg('--password');
   const force = hasFlag('--force');
 
