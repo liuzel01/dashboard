@@ -150,6 +150,22 @@ export const updateTraderNickName = async (uid: string, nickName: string, tenant
   const response = await api.patch(`/query/users/${uid}/trader`, { nick_name: nickName, tenantId });
   return response.data;
 };
+
+export const previewAiOpsSql = async (data: { question?: string; sql?: string; maxRows?: number }) => {
+  const response = await api.post('/ai-ops/sql/preview', data);
+  return response.data;
+};
+
+export const executeAiOpsSql = async (data: { question?: string; sql?: string; maxRows?: number }) => {
+  const response = await api.post('/ai-ops/sql/execute', data);
+  return response.data;
+};
+
+export const getAiOpsSqlAudit = async (page = 1, size = 20) => {
+  const response = await api.get('/ai-ops/audit/sql', { params: { page, size } });
+  return response.data;
+};
+
 /**
  * 获取当前环境的所有可管理平台
  */

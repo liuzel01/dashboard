@@ -1,0 +1,81 @@
+CREATE TABLE IF NOT EXISTS `aiops_sessions` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `external_session_id` varchar(128) DEFAULT NULL,
+  `environment_id` varchar(64) NOT NULL,
+  `actor_user_id` bigint(20) unsigned DEFAULT NULL,
+  `actor_username` varchar(64) DEFAULT NULL,
+  `title` varchar(255) DEFAULT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'active',
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_aiops_sessions_env` (`environment_id`),
+  KEY `idx_aiops_sessions_actor` (`actor_user_id`),
+  KEY `idx_aiops_sessions_created` (`created_at`),
+  KEY `idx_aiops_sessions_external` (`external_session_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aiops_actions` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `session_id` bigint(20) unsigned DEFAULT NULL,
+  `environment_id` varchar(64) NOT NULL,
+  `actor_user_id` bigint(20) unsigned DEFAULT NULL,
+  `actor_username` varchar(64) DEFAULT NULL,
+  `action_type` varchar(64) NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'ok',
+  `request_json` json DEFAULT NULL,
+  `response_json` json DEFAULT NULL,
+  `error_message` varchar(1024) DEFAULT NULL,
+  `duration_ms` int(10) unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_aiops_actions_session` (`session_id`),
+  KEY `idx_aiops_actions_env` (`environment_id`),
+  KEY `idx_aiops_actions_actor` (`actor_user_id`),
+  KEY `idx_aiops_actions_type` (`action_type`),
+  KEY `idx_aiops_actions_created` (`created_at`),
+  CONSTRAINT `fk_aiops_actions_session` FOREIGN KEY (`session_id`) REFERENCES `aiops_sessions` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aiops_sql_audit` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `action_id` bigint(20) unsigned DEFAULT NULL,
+  `environment_id` varchar(64) NOT NULL,
+  `actor_user_id` bigint(20) unsigned DEFAULT NULL,
+  `actor_username` varchar(64) DEFAULT NULL,
+  `question` text,
+  `generated_sql` text,
+  `executed_sql` text,
+  `limit_applied` int(10) unsigned DEFAULT NULL,
+  `max_execution_time_ms` int(10) unsigned DEFAULT NULL,
+  `row_count` int(10) unsigned DEFAULT NULL,
+  `status` varchar(16) NOT NULL,
+  `error_message` varchar(1024) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_aiops_sql_audit_action` (`action_id`),
+  KEY `idx_aiops_sql_audit_env` (`environment_id`),
+  KEY `idx_aiops_sql_audit_status` (`status`),
+  KEY `idx_aiops_sql_audit_created` (`created_at`),
+  CONSTRAINT `fk_aiops_sql_audit_action` FOREIGN KEY (`action_id`) REFERENCES `aiops_actions` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aiops_ingest_events` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `environment_id` varchar(64) NOT NULL,
+  `event_type` varchar(64) NOT NULL,
+  `source` varchar(64) NOT NULL,
+  `dedupe_key` varchar(255) NOT NULL,
+  `severity` varchar(32) DEFAULT NULL,
+  `resource_id` varchar(255) DEFAULT NULL,
+  `alarm_name` varchar(255) DEFAULT NULL,
+  `occurred_at` datetime DEFAULT NULL,
+  `payload_json` json NOT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_aiops_event_dedupe` (`event_type`, `dedupe_key`),
+  KEY `idx_aiops_events_env` (`environment_id`),
+  KEY `idx_aiops_events_created` (`created_at`),
+  KEY `idx_aiops_events_occurred` (`occurred_at`),
+  KEY `idx_aiops_events_source` (`source`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

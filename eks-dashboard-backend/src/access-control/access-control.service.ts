@@ -15,10 +15,16 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:jump-servers', name: 'Windows 跳板机' },
   { key: 'menu:data-query', name: '查询中心' },
   { key: 'menu:security-groups', name: '安全组管理' },
-  { key: 'menu:lines', name: '线路列表' },
   { key: 'menu:line-onboarding', name: '新增线路向导' },
   { key: 'menu:site-monitors', name: '站点监控' },
   { key: 'menu:access-control', name: '账号管理' },
+  { key: 'menu:ai-ops', name: 'AI 运维' },
+  { key: 'aiops:qa', name: 'AI 问答' },
+  { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
+  { key: 'aiops:sql:execute', name: 'AI SQL 执行' },
+  { key: 'aiops:incident:analyze', name: '故障定位分析' },
+  { key: 'aiops:slowlog:analyze', name: '慢查询分析' },
+  { key: 'aiops:notify:lark', name: 'AI 告警推送 Lark' },
 ];
 
 const generatePassword = () => {
@@ -88,7 +94,8 @@ export class AccessControlService {
   async listPermissions() {
     await this.ensureDefaultPermissions();
     return this.db.query(
-      'SELECT id, `key`, name, created_at, updated_at FROM permissions ORDER BY id ASC',
+      'SELECT id, `key`, name, created_at, updated_at FROM permissions WHERE `key` <> ? ORDER BY id ASC',
+      ['menu:lines'],
     );
   }
 

@@ -17,6 +17,7 @@ import { SiteMonitorModule } from './site-monitor/site-monitor.module';
 import { S3Module } from './s3/s3.module';
 import { AccessControlModule } from './access-control/access-control.module';
 import { AuthModule } from './auth/auth.module';
+import { AiOpsModule } from './ai-ops/ai-ops.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { AuthModule } from './auth/auth.module';
     S3Module,
     AccessControlModule,
     AuthModule,
+    AiOpsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

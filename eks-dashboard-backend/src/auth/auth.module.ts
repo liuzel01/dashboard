@@ -8,5 +8,6 @@ import { AccessControlModule } from '../access-control/access-control.module';
   imports: [AccessControlModule],
   providers: [AuthService],
   controllers: [AuthController, MeController],
+  exports: [AuthService],
 })
 export class AuthModule {}

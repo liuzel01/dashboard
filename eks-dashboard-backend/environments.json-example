@@ -10,7 +10,14 @@
       "port": 3306,
       "user": "root",
       "password": "Passwd",
-      "database": "spot"
+      "database": "spot",
+      "aiops": {
+        "whitelist_databases": ["spot"],
+        "whitelist_tables": ["tbl_user", "copy_trade_user_info"],
+        "default_limit": 200,
+        "max_limit": 1000,
+        "timeout_ms": 5000
+      }
     },
     "redis": {
       "host": "18.11",
