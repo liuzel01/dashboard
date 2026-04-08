@@ -13,7 +13,7 @@
       "database": "spot",
       "aiops": {
         "whitelist_databases": ["spot"],
-        "whitelist_tables": ["tbl_user", "copy_trade_user_info"],
+        "whitelist_tables": ["spot.*", "tiger.*"],
         "default_limit": 200,
         "max_limit": 1000,
         "timeout_ms": 5000

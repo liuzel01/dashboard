@@ -99,13 +99,14 @@ export class AiOpsService {
     this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:sql:generate']);
     const actionStartedAt = Date.now();
     const policy = this.getSqlPolicy(environmentId, body.maxRows);
+    const llmSessionKey = this.buildLlmSessionKey(environmentId, actor, body.sessionId);
 
     let actionId: number | null = null;
     let prepared: PreparedSql | null = null;
     try {
-      prepared = await this.prepareSql(body, policy);
+      prepared = await this.prepareSql(body, policy, llmSessionKey);
 
-      actionId = await this.insertAction({
+      actionId = await this.safeInsertAction({
         environmentId,
         actor,
         sessionId: body.sessionId,
@@ -120,7 +121,7 @@ export class AiOpsService {
         durationMs: Date.now() - actionStartedAt,
       });
 
-      await this.insertSqlAudit({
+      await this.safeInsertSqlAudit({
         actionId,
         environmentId,
         actor,
@@ -142,7 +143,7 @@ export class AiOpsService {
         timeoutMs: policy.timeoutMs,
       };
     } catch (error) {
-      await this.insertAction({
+      await this.safeInsertAction({
         environmentId,
         actor,
         sessionId: body.sessionId,
@@ -167,12 +168,13 @@ export class AiOpsService {
     this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:sql:execute']);
     const actionStartedAt = Date.now();
     const policy = this.getSqlPolicy(environmentId, body.maxRows);
+    const llmSessionKey = this.buildLlmSessionKey(environmentId, actor, body.sessionId);
 
     let actionId: number | null = null;
     let prepared: PreparedSql | null = null;
     let rowCount = 0;
     try {
-      prepared = await this.prepareSql(body, policy);
+      prepared = await this.prepareSql(body, policy, llmSessionKey);
 
       const [rows] = await this.database.runQuery(environmentId, prepared.executedSql);
       if (!Array.isArray(rows)) {
@@ -181,7 +183,7 @@ export class AiOpsService {
 
       rowCount = rows.length;
 
-      actionId = await this.insertAction({
+      actionId = await this.safeInsertAction({
         environmentId,
         actor,
         sessionId: body.sessionId,
@@ -196,7 +198,7 @@ export class AiOpsService {
         durationMs: Date.now() - actionStartedAt,
       });
 
-      await this.insertSqlAudit({
+      await this.safeInsertSqlAudit({
         actionId,
         environmentId,
         actor,
@@ -218,7 +220,7 @@ export class AiOpsService {
         rows,
       };
     } catch (error) {
-      actionId = await this.insertAction({
+      actionId = await this.safeInsertAction({
         environmentId,
         actor,
         sessionId: body.sessionId,
@@ -236,7 +238,7 @@ export class AiOpsService {
         durationMs: Date.now() - actionStartedAt,
       });
 
-      await this.insertSqlAudit({
+      await this.safeInsertSqlAudit({
         actionId,
         environmentId,
         actor,
@@ -529,6 +531,7 @@ export class AiOpsService {
   private async prepareSql(
     body: { question?: string; sql?: string },
     policy: SqlPolicy,
+    llmSessionKey: string,
   ): Promise<PreparedSql> {
     const question = String(body.question || '').trim();
     const sqlInput = String(body.sql || '').trim();
@@ -539,11 +542,13 @@ export class AiOpsService {
 
     const generatedFromQuestion = !sqlInput;
     const rawSql = generatedFromQuestion
-      ? await this.generateSqlFromQuestion(question, policy)
+      ? await this.generateSqlFromQuestion(question, policy, llmSessionKey)
       : sqlInput;
 
     const normalizedSql = this.normalizeSql(rawSql);
-    this.validateReadOnlySql(normalizedSql, policy);
+    this.validateReadOnlySql(normalizedSql, policy, {
+      requireQualifiedTableRefs: generatedFromQuestion,
+    });
 
     const { sql: limitedSql, appliedLimit } = this.enforceLimit(normalizedSql, policy);
     const executedSql = this.attachExecutionHint(limitedSql, policy.timeoutMs);
@@ -586,7 +591,11 @@ export class AiOpsService {
     return match ? match[1].trim() : trimmed;
   }
 
-  private validateReadOnlySql(sql: string, policy: SqlPolicy) {
+  private validateReadOnlySql(
+    sql: string,
+    policy: SqlPolicy,
+    options?: { requireQualifiedTableRefs?: boolean },
+  ) {
     if (!/^(select|show|explain|with)\b/i.test(sql)) {
       throw new BadRequestException('Only SELECT/SHOW/EXPLAIN/CTE queries are allowed.');
     }
@@ -603,27 +612,76 @@ export class AiOpsService {
       throw new BadRequestException('Locking clauses are not allowed.');
     }
 
-    const tableRefs = this.extractTableRefs(sql);
+    const tableRefs = this.filterPhysicalTableRefs(this.extractTableRefs(sql), sql);
+    if (options?.requireQualifiedTableRefs) {
+      const unqualifiedRefs = tableRefs.filter((ref) => !this.parseTableRef(ref).database);
+      if (unqualifiedRefs.length > 0) {
+        throw new BadRequestException(
+          `Generated SQL must use fully qualified table names (db.table). Missing database for: ${unqualifiedRefs.join(', ')}`,
+        );
+      }
+    }
+
     if (policy.whitelistTables.length > 0) {
-      const allowed = new Set(policy.whitelistTables.map((v) => v.toLowerCase()));
+      const patterns = policy.whitelistTables
+        .map((v) => v.trim().toLowerCase())
+        .filter(Boolean);
       for (const ref of tableRefs) {
-        const normalized = ref.toLowerCase();
-        const tableOnly = normalized.split('.').pop() || normalized;
-        if (!allowed.has(normalized) && !allowed.has(tableOnly)) {
+        const target = this.parseTableRef(ref);
+        const matched = patterns.some((pattern) =>
+          this.matchTablePattern(pattern, target),
+        );
+        if (!matched) {
           throw new BadRequestException(`Table is not in whitelist: ${ref}`);
         }
       }
     }
 
     if (policy.whitelistDatabases.length > 0) {
-      const allowedDb = new Set(policy.whitelistDatabases.map((v) => v.toLowerCase()));
+      const dbPatterns = policy.whitelistDatabases
+        .map((v) => v.trim().toLowerCase())
+        .filter(Boolean);
       for (const ref of tableRefs) {
-        const [dbName] = ref.toLowerCase().split('.');
-        if (ref.includes('.') && !allowedDb.has(dbName)) {
-          throw new BadRequestException(`Database is not in whitelist: ${dbName}`);
+        const target = this.parseTableRef(ref);
+        if (!target.database) continue;
+        const matched = dbPatterns.some((pattern) =>
+          this.matchDatabasePattern(pattern, target.database!),
+        );
+        if (!matched) {
+          throw new BadRequestException(
+            `Database is not in whitelist: ${target.database}`,
+          );
         }
       }
     }
+  }
+
+  private filterPhysicalTableRefs(tableRefs: string[], sql: string): string[] {
+    const cteNames = this.extractCteNames(sql);
+    return tableRefs.filter((ref) => {
+      const target = this.parseTableRef(ref);
+      if (target.database) return true;
+      if (target.table === 'dual') return false;
+      return !cteNames.has(target.table);
+    });
+  }
+
+  private extractCteNames(sql: string): Set<string> {
+    const names = new Set<string>();
+    if (!/^\s*with\b/i.test(sql)) {
+      return names;
+    }
+
+    const regex = /(?:\bwith\b|,)\s*([`"]?[\w$]+[`"]?)\s+as\s*\(/gi;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(sql)) !== null) {
+      const cleaned = String(match[1] || '')
+        .replace(/[`"]/g, '')
+        .trim()
+        .toLowerCase();
+      if (cleaned) names.add(cleaned);
+    }
+    return names;
   }
 
   private extractTableRefs(sql: string): string[] {
@@ -642,6 +700,66 @@ export class AiOpsService {
     }
 
     return Array.from(refs);
+  }
+
+  private parseTableRef(ref: string): { database: string | null; table: string; raw: string } {
+    const cleaned = String(ref || '').trim().replace(/[`"']/g, '');
+    const parts = cleaned.split('.').map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return {
+        database: parts[0].toLowerCase(),
+        table: parts[parts.length - 1].toLowerCase(),
+        raw: cleaned.toLowerCase(),
+      };
+    }
+    return {
+      database: null,
+      table: cleaned.toLowerCase(),
+      raw: cleaned.toLowerCase(),
+    };
+  }
+
+  private matchTablePattern(
+    pattern: string,
+    target: { database: string | null; table: string; raw: string },
+  ): boolean {
+    const p = String(pattern || '').trim().toLowerCase();
+    if (!p) return false;
+    if (p === '*') return true;
+    if (p === target.table || p === target.raw) return true;
+
+    // spot.* / tiger.*
+    if (p.endsWith('.*')) {
+      const db = p.slice(0, -2);
+      return !!target.database && target.database === db;
+    }
+
+    // *.table
+    if (p.startsWith('*.')) {
+      const table = p.slice(2);
+      return target.table === table;
+    }
+
+    // db.table
+    if (p.includes('.')) {
+      const parts = p.split('.').map((v) => v.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const db = parts[0];
+        const table = parts[parts.length - 1];
+        return !!target.database && target.database === db && target.table === table;
+      }
+    }
+    return false;
+  }
+
+  private matchDatabasePattern(pattern: string, database: string): boolean {
+    const p = String(pattern || '').trim().toLowerCase();
+    if (!p) return false;
+    if (p === '*') return true;
+    if (p.endsWith('.*')) {
+      return database === p.slice(0, -2);
+    }
+    return database === p;
   }
 
   private enforceLimit(sql: string, policy: SqlPolicy): { sql: string; appliedLimit: number | null } {
@@ -685,7 +803,11 @@ export class AiOpsService {
     return sql;
   }
 
-  private async generateSqlFromQuestion(question: string, policy: SqlPolicy) {
+  private async generateSqlFromQuestion(
+    question: string,
+    policy: SqlPolicy,
+    llmSessionKey: string,
+  ) {
     if (!question) {
       throw new BadRequestException('question is empty.');
     }
@@ -695,43 +817,58 @@ export class AiOpsService {
     const tableHint = policy.whitelistTables.length > 0
       ? `Allowed tables: ${policy.whitelistTables.join(', ')}`
       : 'Allowed tables: use only business read-only tables configured for the environment.';
+    const databaseHint = policy.whitelistDatabases.length > 0
+      ? `Allowed databases: ${policy.whitelistDatabases.join(', ')}`
+      : 'Allowed databases: use only databases configured for the selected environment.';
 
     const systemPrompt = [
       'You are a SQL assistant for operations engineers.',
       'Return exactly one SQL statement and nothing else.',
       'Only generate read-only MySQL SQL using SELECT, SHOW, EXPLAIN, or WITH + SELECT.',
       'Never generate INSERT/UPDATE/DELETE/DDL commands.',
+      'Always use fully qualified table names in the form db.table (example: spot.users).',
+      'Never generate SQL with unqualified table names like FROM users.',
+      databaseHint,
       tableHint,
       `Always include LIMIT and keep it <= ${policy.maxLimit}.`,
       'Do not include markdown fences or comments.',
     ].join('\n');
 
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-    const resp = await axios.post(
-      endpoint,
-      {
-        model: llm.model,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          {
-            role: 'user',
-            content: question,
-          },
-        ],
-        temperature: 0,
-        max_tokens: 400,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${llm.token}`,
-          'Content-Type': 'application/json',
+    let resp: { data: any };
+    try {
+      resp = await axios.post(
+        endpoint,
+        {
+          model: llm.model,
+          user: llmSessionKey,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt,
+            },
+            {
+              role: 'user',
+              content: question,
+            },
+          ],
+          temperature: 0,
+          max_tokens: 400,
         },
-        timeout: 20000,
-      },
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${llm.token}`,
+            'Content-Type': 'application/json',
+            'x-openclaw-session-key': llmSessionKey,
+          },
+          timeout: 20000,
+        },
+      );
+    } catch (error) {
+      throw new BadGatewayException(
+        `OpenClaw request failed: ${this.errorMessage(error)}`,
+      );
+    }
 
     const outputText = this.extractOpenClawText(resp.data);
     if (!outputText) {
@@ -739,6 +876,31 @@ export class AiOpsService {
     }
 
     return this.stripCodeFence(outputText);
+  }
+
+  private buildLlmSessionKey(
+    environmentId: string,
+    actor: ActorContext,
+    externalSessionId?: string,
+  ): string {
+    const ext = String(externalSessionId || '').trim();
+    if (ext) {
+      return `dashboard:aiops:${this.normalizeSessionPart(environmentId)}:${this.normalizeSessionPart(ext)}`;
+    }
+    const actorPart = actor.userId
+      ? `uid-${actor.userId}`
+      : this.normalizeSessionPart(actor.username || 'anonymous');
+    return `dashboard:aiops:${this.normalizeSessionPart(environmentId)}:${actorPart}`;
+  }
+
+  private normalizeSessionPart(value: string): string {
+    const normalized = String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9:_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    return normalized || 'default';
   }
 
   private getOpenClawConfig(): OpenClawConfig {
@@ -944,6 +1106,27 @@ export class AiOpsService {
     return Number((result as any).insertId || 0);
   }
 
+  private async safeInsertAction(params: {
+    environmentId: string;
+    actor: ActorContext;
+    sessionId?: string;
+    actionType: string;
+    status: 'ok' | 'error';
+    requestPayload?: unknown;
+    responsePayload?: unknown;
+    errorMessage?: string;
+    durationMs?: number;
+  }) {
+    try {
+      return await this.insertAction(params);
+    } catch (error) {
+      this.logger.warn(
+        `Audit action insert failed (${params.actionType}): ${this.errorMessage(error)}`,
+      );
+      return null;
+    }
+  }
+
   private async insertSqlAudit(params: {
     actionId: number | null;
     environmentId: string;
@@ -978,6 +1161,28 @@ export class AiOpsService {
         params.errorMessage || null,
       ],
     );
+  }
+
+  private async safeInsertSqlAudit(params: {
+    actionId: number | null;
+    environmentId: string;
+    actor: ActorContext;
+    question?: string;
+    generatedSql?: string | null;
+    executedSql?: string | null;
+    limitApplied?: number | null;
+    maxExecutionTimeMs: number;
+    rowCount?: number | null;
+    status: string;
+    errorMessage?: string;
+  }) {
+    try {
+      await this.insertSqlAudit(params);
+    } catch (error) {
+      this.logger.warn(
+        `SQL audit insert failed (${params.status}): ${this.errorMessage(error)}`,
+      );
+    }
   }
 
   private async insertIngestEvent(params: {

@@ -85,8 +85,8 @@ const AppLayout: React.FC = () => {
     { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
-    { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
+    { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
 
   const visibleMenuItems = authLoading
