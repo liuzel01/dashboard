@@ -2,11 +2,11 @@
 
 本文档用于评审并落地 dashboard 新增 AI 菜单页，定位为“管理端 + 工具端”。
 
-## 0. 当前进度（截至 2026-04-08）
+## 0. 当前进度（截至 2026-04-09）
 
 已完成：
 - M0 基础骨架已完成：`/ai-ops` 菜单页、后端模块、权限 key、审计表 SQL 脚本。
-- M1 部分能力已完成：受控 SQL `preview/execute`、白名单/LIMIT/只读限制、SQL 审计回放。
+- M1 部分能力已完成：受控 SQL `preview`、白名单/LIMIT/只读限制、SQL 审计回放。
 - CloudWatch 与 Lambda 慢查询 webhook 已接入并做事件归一化入库。
 - LLM 已切换为 OpenClaw gateway 模式（默认 `openclaw/default`）。
 - 新增 LLM 探活接口：`GET /api/ai-ops/health/llm`（检查 gateway 连通性与模型列表）。
@@ -39,8 +39,9 @@
 
 首期边界（必须坚持）：
 
-- 仅支持只读查询（禁止 DDL/DML）。
-- 不做自动执行处置，默认“人工确认后执行”。
+- dashboard 仅提供 SQL 生成、预览、分析，不提供 SQL 执行能力。
+- 禁止在 dashboard 内执行任何 SQL（包括只读 SQL）；真实执行统一在外部专用系统（如 `abd.com`）完成。
+- 不做自动执行处置，默认“建议输出 + 人工外部执行”。
 - 模型输出必须绑定证据来源与审计记录。
 
 ## 3. 能力分层（优化后）
@@ -53,7 +54,7 @@
 
 ### 3.2 自然语言转 SQL（受控）
 
-- 流程：NL 意图 -> SQL 草案 -> AST 校验 -> 安全重写（LIMIT）-> 执行。
+- 流程：NL 意图 -> SQL 草案 -> AST 校验 -> 安全重写（LIMIT）-> 预览/解释。
 - 强约束：
   - 只读账号（强制）
   - 白名单库/表
@@ -104,10 +105,10 @@
 - `parse(sql)`：AST 解析
 - `validate(ast)`：仅允许 `SELECT/SHOW/EXPLAIN`
 - `enforce(sql)`：自动补 LIMIT、超时、行数上限
-- `execute(sql)`：只读连接执行
+- `preview(sql)`：仅返回校验后 SQL，不连接业务库执行
 - `audit(...)`：记录请求、用户、环境、原始问题、最终 SQL、耗时、结果行数
 
-注意：不信任 LLM 生成 SQL，必须二次校验后才能执行。
+注意：不信任 LLM 生成 SQL，必须二次校验后才能预览输出；执行动作在系统边界外完成。
 
 ### 4.3 RAG 质量控制
 
@@ -147,7 +148,7 @@
 - `menu:ai-ops`
 - `aiops:qa`
 - `aiops:sql:generate`
-- `aiops:sql:execute`
+- `aiops:sql:execute`（待下线）
 - `aiops:incident:analyze`
 - `aiops:slowlog:analyze`
 - `aiops:notify:lark`
@@ -169,7 +170,7 @@
 
 - `POST /api/ai-ops/chat`（统一入口，按意图路由）
 - `POST /api/ai-ops/sql/preview`（生成 + 校验，不执行）
-- `POST /api/ai-ops/sql/execute`（执行受控 SQL）
+- `POST /api/ai-ops/sql/execute`（待下线，目标为禁用）
 - `GET /api/ai-ops/audit/sql`
 - `GET /api/ai-ops/health/llm`（OpenClaw gateway 探活）
 - `POST /api/ai-ops/events/cloudwatch`
@@ -195,30 +196,31 @@
 - 无权限用户不可见菜单且不可调接口。
 - 每次调用都可在审计表追踪到用户/环境/动作。
 
-### M1（1~2 周）：受控 NL2SQL MVP
+### M1（1~2 周）：受控 NL2SQL 预览 MVP
 
 状态：进行中（已完成核心链路）
 
 交付：
 
-- NL -> SQL（只读）能力。
+- NL -> SQL 预览能力（不执行）。
 - SQL AST 校验、白名单、LIMIT/超时/行数限制。
-- `preview + execute` 双接口。
+- `preview` 接口与审计回放。
 
 验收标准：
 
 - DDL/DML/多语句全部被拒绝。
-- 结果默认分页且单次查询可控。
-- 审计可回放“自然语言 -> SQL -> 结果摘要”。
+- 生成 SQL 默认带 LIMIT 且单次返回可控。
+- 审计可回放“自然语言 -> SQL 预览结果”。
 
 已完成项（当前）：
-- SQL preview / execute API。
+- SQL preview API 与 SQL 预览审计。
 - OpenClaw gateway 模型调用链路。
 - SQL 审计入库与查询。
 
 剩余项（M1 收尾）：
 - AST 级校验增强与回归测试。
-- 更细粒度权限策略（生成与执行分离验证）。
+- 下线 `sql/execute` 接口与 `aiops:sql:execute` 权限（或统一禁用）。
+- 更细粒度权限策略（生成/分析能力分离验证）。
 
 ### M1 增强（最小可用优先，新增）
 
@@ -234,7 +236,7 @@
 实施边界（M1 增强阶段）：
 
 - 不引入向量库，不引入文档检索链路（避免与 M2 范围重叠）。
-- 仅围绕 NL2SQL 质量和稳定性改进，保持接口契约不变。
+- 仅围绕 NL2SQL 预览质量和稳定性改进，保持 `sql/preview` 接口契约稳定，不引入 dashboard 内执行能力。
 
 后续增强顺序（保持不变）：
 
