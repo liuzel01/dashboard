@@ -186,94 +186,12 @@ export class AiOpsService {
   }
 
   async executeSql(environmentId: string, actor: ActorContext, body: SqlExecuteDto) {
-    this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:sql:execute']);
-    const actionStartedAt = Date.now();
-    const policy = this.getSqlPolicy(environmentId, body.maxRows);
-    const llmSessionKey = this.buildLlmSessionKey(environmentId, actor, body.sessionId);
-
-    let actionId: number | null = null;
-    let prepared: PreparedSql | null = null;
-    let rowCount = 0;
-    try {
-      prepared = await this.prepareSql(environmentId, body, policy, llmSessionKey);
-
-      const [rows] = await this.database.runQuery(environmentId, prepared.executedSql);
-      if (!Array.isArray(rows)) {
-        throw new BadRequestException('Only read-only queries are allowed.');
-      }
-
-      rowCount = rows.length;
-
-      actionId = await this.safeInsertAction({
-        environmentId,
-        actor,
-        sessionId: body.sessionId,
-        actionType: 'sql.execute',
-        status: 'ok',
-        requestPayload: { question: body.question, sql: body.sql, maxRows: body.maxRows },
-        responsePayload: {
-          normalizedSql: prepared.normalizedSql,
-          executedSql: prepared.executedSql,
-          rowCount,
-        },
-        durationMs: Date.now() - actionStartedAt,
-      });
-
-      await this.safeInsertSqlAudit({
-        actionId,
-        environmentId,
-        actor,
-        question: body.question,
-        generatedSql: prepared.generatedFromQuestion ? prepared.rawSql : null,
-        executedSql: prepared.executedSql,
-        limitApplied: prepared.appliedLimit,
-        maxExecutionTimeMs: policy.timeoutMs,
-        rowCount,
-        status: 'executed',
-      });
-
-      return {
-        ok: true,
-        source: prepared.generatedFromQuestion ? 'question' : 'sql',
-        executedSql: prepared.executedSql,
-        appliedLimit: prepared.appliedLimit,
-        rowCount,
-        rows,
-      };
-    } catch (error) {
-      actionId = await this.safeInsertAction({
-        environmentId,
-        actor,
-        sessionId: body.sessionId,
-        actionType: 'sql.execute',
-        status: 'error',
-        requestPayload: { question: body.question, sql: body.sql, maxRows: body.maxRows },
-        responsePayload: prepared
-          ? {
-              normalizedSql: prepared.normalizedSql,
-              executedSql: prepared.executedSql,
-              rowCount,
-            }
-          : null,
-        errorMessage: this.errorMessage(error),
-        durationMs: Date.now() - actionStartedAt,
-      });
-
-      await this.safeInsertSqlAudit({
-        actionId,
-        environmentId,
-        actor,
-        question: body.question,
-        generatedSql: prepared?.generatedFromQuestion ? prepared.rawSql : null,
-        executedSql: prepared?.executedSql,
-        limitApplied: prepared?.appliedLimit ?? null,
-        maxExecutionTimeMs: policy.timeoutMs,
-        rowCount,
-        status: 'error',
-        errorMessage: this.errorMessage(error),
-      });
-      throw error;
-    }
+    void environmentId;
+    void actor;
+    void body;
+    throw new BadRequestException(
+      'SQL execute is disabled in dashboard. Please run SQL in external system (for example: abd.com).',
+    );
   }
 
   async listSqlAudit(environmentId: string, actor: ActorContext, page = 1, size = 20) {
