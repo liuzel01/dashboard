@@ -21,7 +21,6 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:ai-ops', name: 'AI 运维' },
   { key: 'aiops:qa', name: 'AI 问答' },
   { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
-  { key: 'aiops:sql:execute', name: 'AI SQL 执行' },
   { key: 'aiops:incident:analyze', name: '故障定位分析' },
   { key: 'aiops:slowlog:analyze', name: '慢查询分析' },
   { key: 'aiops:notify:lark', name: 'AI 告警推送 Lark' },
@@ -94,8 +93,8 @@ export class AccessControlService {
   async listPermissions() {
     await this.ensureDefaultPermissions();
     return this.db.query(
-      'SELECT id, `key`, name, created_at, updated_at FROM permissions WHERE `key` <> ? ORDER BY id ASC',
-      ['menu:lines'],
+      'SELECT id, `key`, name, created_at, updated_at FROM permissions WHERE `key` NOT IN (?, ?) ORDER BY id ASC',
+      ['menu:lines', 'aiops:sql:execute'],
     );
   }
 

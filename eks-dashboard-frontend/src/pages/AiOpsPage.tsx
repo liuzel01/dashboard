@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, Button, Card, Form, Input, Space, Table, Tag, Typography, App } from 'antd';
 import {
-  executeAiOpsSql,
   getAiOpsSqlAudit,
   previewAiOpsSql,
 } from '../services/api';
@@ -18,15 +17,6 @@ type PreviewResponse = {
   timeoutMs: number;
 };
 
-type ExecuteResponse = {
-  ok: boolean;
-  source: 'question' | 'sql';
-  executedSql: string;
-  appliedLimit: number;
-  rowCount: number;
-  rows: Record<string, unknown>[];
-};
-
 type AuditItem = {
   id: number;
   status: string;
@@ -41,7 +31,6 @@ const AiOpsPage: React.FC = () => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
-  const [executeResult, setExecuteResult] = useState<ExecuteResponse | null>(null);
   const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
 
   const [form] = Form.useForm();
@@ -59,24 +48,6 @@ const AiOpsPage: React.FC = () => {
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
       message.error(err?.response?.data?.message || err?.message || 'SQL 预览失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onExecute = async () => {
-    const values = await form.validateFields();
-    setLoading(true);
-    try {
-      const resp = await executeAiOpsSql({
-        question: values.question?.trim() || undefined,
-        sql: values.sql?.trim() || undefined,
-      });
-      setExecuteResult(resp);
-      message.success(`执行成功，返回 ${resp.rowCount} 行`);
-    } catch (error) {
-      const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || 'SQL 执行失败');
     } finally {
       setLoading(false);
     }
@@ -100,7 +71,7 @@ const AiOpsPage: React.FC = () => {
       <Alert
         type="info"
         showIcon
-        message="M0 + M1(部分)：已接入受控 SQL 预览/执行。仅允许只读 SQL，且会自动审计。"
+        message="当前仅支持 SQL 预览与分析，不在 dashboard 内执行 SQL。真实执行请在外部系统（如 abd.com）完成。"
       />
 
       <Card title="AI SQL 助手（受控）">
@@ -123,7 +94,6 @@ const AiOpsPage: React.FC = () => {
 
           <Space>
             <Button onClick={onPreview} loading={loading}>预览 SQL</Button>
-            <Button type="primary" onClick={onExecute} loading={loading}>执行 SQL</Button>
             <Button onClick={onLoadAudit} loading={loading}>刷新审计</Button>
           </Space>
         </Form>
@@ -132,21 +102,12 @@ const AiOpsPage: React.FC = () => {
       {preview && (
         <Card title="预览结果">
           <p><Text strong>来源：</Text>{preview.source}</p>
-          <p><Text strong>执行 SQL：</Text></p>
+          <p><Text strong>预览 SQL：</Text></p>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{preview.executedSql}</pre>
           <p>
             <Tag color="blue">LIMIT {preview.appliedLimit}</Tag>
             <Tag color="purple">超时 {preview.timeoutMs}ms</Tag>
           </p>
-        </Card>
-      )}
-
-      {executeResult && (
-        <Card title="执行结果">
-          <p><Text strong>行数：</Text>{executeResult.rowCount}</p>
-          <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto' }}>
-            {JSON.stringify(executeResult.rows, null, 2)}
-          </pre>
         </Card>
       )}
 

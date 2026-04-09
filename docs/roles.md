@@ -60,7 +60,6 @@
 - `menu:ai-ops`
 - `aiops:qa`
 - `aiops:sql:generate`
-- `aiops:sql:execute`
 - `aiops:incident:analyze`
 - `aiops:slowlog:analyze`
 - `aiops:notify:lark`

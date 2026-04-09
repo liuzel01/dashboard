@@ -16,7 +16,6 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:ai-ops', name: 'AI 运维' },
   { key: 'aiops:qa', name: 'AI 问答' },
   { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
-  { key: 'aiops:sql:execute', name: 'AI SQL 执行' },
   { key: 'aiops:incident:analyze', name: '故障定位分析' },
   { key: 'aiops:slowlog:analyze', name: '慢查询分析' },
   { key: 'aiops:notify:lark', name: 'AI 告警推送 Lark' },

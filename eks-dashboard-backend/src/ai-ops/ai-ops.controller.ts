@@ -46,8 +46,12 @@ export class AiOpsController {
     @Body(new ValidationPipe({ transform: true })) body: SqlExecuteDto,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
-    return this.service.executeSql(environmentId, actor, body);
+    await this.service.resolveActorFromAuthorization(authorization);
+    void body;
+    throw new HttpException(
+      'SQL execute is disabled in dashboard. Please run SQL in external system (for example: abd.com).',
+      HttpStatus.GONE,
+    );
   }
 
   @Get('audit/sql')
