@@ -1,0 +1,2 @@
+database_name（库名）,collection_name（集合名）,field_path（字段路径）,bson_type（BSON类型）,is_required（必填字段）,is_indexed（有索引）,is_join_key（关联键）,is_filter_hot（高频过滤字段）,business_meaning（业务含义）,sample_values（示例值）,pii_level（敏感级别）,aliases（别名）,owner（责任人）,last_updated（最后更新）,notes（备注）
+spot,users,uid,number,YES,YES,YES,YES,"用户唯一ID","2822112",none,"user_id",dba_team,2026-04-10,"示例行，后续请替换"

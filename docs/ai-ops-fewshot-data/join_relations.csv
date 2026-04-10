@@ -1,0 +1,2 @@
+relation_id（关系ID）,left_database（左库）,left_table（左表）,left_column（左列）,right_database（右库）,right_table（右表）,right_column（右列）,join_type（JOIN类型）,relation_cardinality（基数关系）,typical_query_purpose（典型用途）,review_status（评审状态）,owner（责任人）,last_updated（最后更新）,notes（备注）
+REL_001,spot,users,uid,tiger,copy_trade_user_info,uid,INNER,1_to_1,"查询用户及跟单信息",draft,dba_team,2026-04-09,"示例行，后续请替换"

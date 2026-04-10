@@ -1,0 +1,2 @@
+relation_id（关系ID）,left_database（左库）,left_collection（左集合）,left_field_path（左字段路径）,right_database（右库）,right_collection（右集合）,right_field_path（右字段路径）,relation_type（关系类型）,preferred_pattern（推荐模式）,typical_query_purpose（典型用途）,review_status（评审状态）,owner（责任人）,last_updated（最后更新）,notes（备注）
+MONGO_REL_001,spot,users,uid,tiger,copy_trade_user_info,uid,reference,application_join,"查询用户及跟单信息",draft,dba_team,2026-04-10,"示例行，后续请替换"

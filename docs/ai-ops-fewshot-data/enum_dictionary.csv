@@ -1,0 +1,2 @@
+enum_id（枚举ID）,database_name（库名）,table_name（表名）,column_name（列名称）,enum_value（枚举值）,enum_label（枚举标签）,business_description（业务说明）,is_active（是否生效）,owner（责任人）,last_updated（最后更新）,notes（备注）
+ENUM_001,spot,users,status,1,active,"用户可用状态",true,product_ops,2026-04-09,"示例行，后续请替换"
