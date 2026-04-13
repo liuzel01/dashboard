@@ -13,7 +13,7 @@ type PreviewResponse = {
   source: 'question' | 'sql';
   normalizedSql: string;
   executedSql: string;
-  appliedLimit: number;
+  appliedLimit: number | null;
   timeoutMs: number;
   sqlType?: 'read' | 'write' | 'ddl' | 'unknown';
   riskLevel?: 'low' | 'medium' | 'high' | 'critical';
@@ -110,7 +110,9 @@ const AiOpsPage: React.FC = () => {
           <p><Text strong>预览 SQL：</Text></p>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{preview.executedSql}</pre>
           <p>
-            <Tag color="blue">LIMIT {preview.appliedLimit}</Tag>
+            {typeof preview.appliedLimit === 'number' && (
+              <Tag color="blue">LIMIT {preview.appliedLimit}</Tag>
+            )}
             <Tag color="purple">超时 {preview.timeoutMs}ms</Tag>
             {preview.sqlType && (
               <Tag color="geekblue">类型 {preview.sqlType}</Tag>

@@ -168,6 +168,25 @@ describe('AiOpsService previewSql security', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('allows write SQL preview generation', async () => {
+    const { service } = createService();
+    mockedAxios.post.mockResolvedValue({
+      data: {
+        choices: [{ message: { content: "DELETE FROM spot.tbl_tx_mock WHERE user_id = 1 AND id = '2'" } }],
+      },
+    } as any);
+
+    const result = await service.previewSql('test-env', actor as any, {
+      question: '删除 user_id=1 且 id=2 的模拟交易记录',
+    } as any);
+
+    expect(result.ok).toBe(true);
+    expect(result.executedSql).toContain('DELETE FROM spot.tbl_tx_mock');
+    expect(result.appliedLimit).toBeNull();
+    expect(result.sqlType).toBe('write');
+    expect(result.riskLevel).toBe('high');
+  });
+
   it('injects few-shot context when csv is configured', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aiops-fewshot-'));
     const csvPath = path.join(dir, 'nl2sql_fewshot_cases.csv');

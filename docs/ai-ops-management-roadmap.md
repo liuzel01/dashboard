@@ -2,17 +2,23 @@
 
 本文档用于评审并落地 dashboard 新增 AI 菜单页，定位为“管理端 + 工具端”。
 
-## 0. 当前进度（截至 2026-04-09）
+## 0. 当前进度（截至 2026-04-13）
 
 已完成：
 - M0 基础骨架已完成：`/ai-ops` 菜单页、后端模块、权限 key、审计表 SQL 脚本。
-- M1 部分能力已完成：受控 SQL `preview`、白名单/LIMIT/只读限制、SQL 审计回放。
+- M1 核心链路已可用：受控 SQL `preview`、白名单、库表全限定名校验、SQL 审计回放。
+- SQL 预览策略已调整为“可生成读写 SQL 草稿（DML），但 dashboard 永不执行 SQL”。
+- 生成后校验 + 重写闭环已落地（不合规 SQL 自动重试修正）。
+- Schema 上下文注入已落地（`db.table + columns` 注入提示词）。
+- few-shot 基础能力已落地（从 `nl2sql_fewshot_cases.csv` 加载样例）。
+- CSV 清洗脚本已提供，支持生成可导入文件到 `docs/ai-ops-fewshot-data/import/`。
 - CloudWatch 与 Lambda 慢查询 webhook 已接入并做事件归一化入库。
 - LLM 已切换为 OpenClaw gateway 模式（默认 `openclaw/default`）。
 - 新增 LLM 探活接口：`GET /api/ai-ops/health/llm`（检查 gateway 连通性与模型列表）。
+- SQL 审计字段 `sql_type/risk_level` 已纳入（含 MySQL 5.7 可执行迁移脚本）。
 
 待完成（当前阶段）：
-- M1 收尾：补齐 SQL 安全策略细节（更严格 AST、关键字规则回归测试）。
+- M1 收尾：补齐 SQL 安全策略细节（AST 级校验、规则回归测试、运维手册化）。
 - M2 起步：RAG 文档导入与引用链路。
 - M3 起步：慢查询分析报告生成（索引建议/执行计划解释）。
 
@@ -57,12 +63,12 @@
 
 - 流程：NL 意图 -> SQL 草案 -> AST 校验 -> 安全重写（LIMIT）-> 预览/解释。
 - 强约束：
-  - 只读账号（强制）
   - 白名单库/表
   - 单语句限制
-  - 自动 `LIMIT`（默认 200，上限 1000）
-  - 超时限制（例如 5s）
-  - 危险关键词与语法拦截
+  - 读 SQL 自动 `LIMIT`（默认 200，上限 1000）
+  - 读 SQL 超时提示（例如 5s）
+  - 禁止 DDL 与危险关键词
+  - 仅预览、不执行（执行动作在系统边界外）
 
 ### 3.3 慢查询分析
 
@@ -104,9 +110,9 @@
 建议落在后端新模块中，独立于模型层：
 
 - `parse(sql)`：AST 解析
-- `validate(ast)`：仅允许 `SELECT/SHOW/EXPLAIN`
-- `enforce(sql)`：自动补 LIMIT、超时、行数上限
-- `preview(sql)`：仅返回校验后 SQL，不连接业务库执行
+- `validate(ast)`：允许读写草稿 SQL（DML），禁止 DDL/危险语句/多语句
+- `enforce(sql)`：读 SQL 自动补 LIMIT 与超时提示；写 SQL 仅做规则校验与审计标记
+- `preview(sql)`：仅返回校验后 SQL，不在 dashboard 执行
 - `audit(...)`：记录请求、用户、环境、原始问题、最终 SQL、耗时、结果行数
 
 注意：不信任 LLM 生成 SQL，必须二次校验后才能预览输出；执行动作在系统边界外完成。
@@ -171,7 +177,7 @@
 
 - `POST /api/ai-ops/chat`（统一入口，按意图路由）
 - `POST /api/ai-ops/sql/preview`（生成 + 校验，不执行）
-- `POST /api/ai-ops/sql/execute`（待下线，目标为禁用）
+- `POST /api/ai-ops/sql/execute`（已禁用，固定返回“请在外部系统执行”）
 - `GET /api/ai-ops/audit/sql`
 - `GET /api/ai-ops/health/llm`（OpenClaw gateway 探活）
 - `POST /api/ai-ops/events/cloudwatch`
@@ -199,7 +205,7 @@
 
 ### M1（1~2 周）：受控 NL2SQL 预览 MVP
 
-状态：进行中（已完成核心链路）
+状态：进行中（核心链路已完成，进入收尾）
 
 交付：
 
@@ -209,9 +215,9 @@
 
 验收标准：
 
-- DDL/DML/多语句全部被拒绝。
-- 生成 SQL 默认带 LIMIT 且单次返回可控。
-- 审计可回放“自然语言 -> SQL 预览结果”。
+- DDL/多语句被拒绝，DML 可生成草稿但不可在 dashboard 执行。
+- 读 SQL 默认带 LIMIT 且单次返回可控。
+- 审计可回放“自然语言 -> SQL 预览结果”，并标记 `sql_type/risk_level`。
 
 已完成项（当前）：
 - SQL preview API 与 SQL 预览审计。
@@ -220,7 +226,7 @@
 
 剩余项（M1 收尾）：
 - AST 级校验增强与回归测试。
-- 下线 `sql/execute` 接口与 `aiops:sql:execute` 权限（或统一禁用）。
+- `sql/execute` 保持禁用并补齐接口文档/错误码说明。
 - 权限拆分与规则分层暂缓，先以“执行接口禁用 + 审计增强”作为当前阶段基线。
 
 ### M1 增强（最小可用优先，新增）
@@ -244,17 +250,17 @@
 - 方案3（few-shot 示例库）：低成本高收益，建议在 M1.5 补齐。
 - 方案4（数据字典 RAG）：建设成本最高，放在 M2/M2+ 逐步推进。
 
-### M1.6（增量改造，后续计划）：变更建议工具模式（仅生成，不执行）
+### M1.6（增量改造，已落地）：变更建议工具模式（仅生成，不执行）
 
 目标：
 
 - 在保持 `sql/execute` 禁用的前提下，允许生成 `INSERT/UPDATE/DELETE` 草稿语句，辅助人工在外部系统执行。
 
-本阶段策略（按讨论结论）：
+当前实现（按讨论结论）：
 
-- 暂不做权限拆分（不新增 `generate:readonly/generate:change` 细粒度权限）。
-- 暂不做规则分层（读写双链路）实现，先保持单链路并标记高风险输出。
-- 继续禁止 DDL（`DROP/ALTER/TRUNCATE/CREATE` 等）生成，先仅考虑 DML 草稿。
+- 不做权限拆分（不新增 `generate:readonly/generate:change` 细粒度权限）。
+- 不做规则分层（读写双链路）实现，保持单链路并标记高风险输出。
+- 继续禁止 DDL（`DROP/ALTER/TRUNCATE/CREATE` 等）生成，仅支持 DML 草稿。
 
 最低安全线（必须）：
 
@@ -267,6 +273,12 @@
 - 权限细分（按角色区分只读草稿/变更草稿）。
 - 规则分层（只读链路与变更草稿链路隔离）。
 - 更完善的变更审批与多人复核流程。
+
+## 9. 下一步建议（按计划）
+
+1. M1 收尾：引入 AST 解析器增强校验（重点覆盖 `JOIN/子查询/CTE/UPDATE...JOIN`），补回归用例。
+2. M1 收尾：补“运维可执行手册”文档（环境变量、CSV 清洗、迁移脚本、故障排查 SOP）。
+3. M2 启动：优先做 RAG 文档导入最小链路（先支持 SOP/故障手册 + 引用返回）。
 
 ### M2（1~2 周）：RAG 问答 MVP
 

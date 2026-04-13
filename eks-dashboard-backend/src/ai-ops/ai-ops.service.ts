@@ -244,7 +244,6 @@ export class AiOpsService {
     const safePage = Math.max(1, Math.floor(page));
     const safeSize = Math.min(100, Math.max(1, Math.floor(size)));
     const offset = (safePage - 1) * safeSize;
-
     const rows = await this.platformDb.query<any[]>(
       `SELECT id, action_id, environment_id, actor_user_id, actor_username,
               question, generated_sql, executed_sql, limit_applied,
@@ -526,6 +525,7 @@ export class AiOpsService {
     }
 
     const generatedFromQuestion = !sqlInput;
+
     if (generatedFromQuestion) {
       return this.prepareGeneratedSqlFromQuestion(
         environmentId,
@@ -537,12 +537,10 @@ export class AiOpsService {
 
     const rawSql = sqlInput;
     const normalizedSql = this.normalizeSql(rawSql);
-    this.validateReadOnlySql(normalizedSql, policy, {
+    this.validatePreviewSql(normalizedSql, policy, {
       requireQualifiedTableRefs: false,
     });
-
-    const { sql: limitedSql, appliedLimit } = this.enforceLimit(normalizedSql, policy);
-    const executedSql = this.attachExecutionHint(limitedSql, policy.timeoutMs);
+    const { executedSql, appliedLimit } = this.applyPreviewPolicy(normalizedSql, policy);
 
     return {
       rawSql,
@@ -577,15 +575,10 @@ export class AiOpsService {
 
       try {
         const normalizedSql = this.normalizeSql(rawSql);
-        this.validateReadOnlySql(normalizedSql, policy, {
+        this.validatePreviewSql(normalizedSql, policy, {
           requireQualifiedTableRefs: true,
         });
-
-        const { sql: limitedSql, appliedLimit } = this.enforceLimit(
-          normalizedSql,
-          policy,
-        );
-        const executedSql = this.attachExecutionHint(limitedSql, policy.timeoutMs);
+        const { executedSql, appliedLimit } = this.applyPreviewPolicy(normalizedSql, policy);
 
         return {
           rawSql,
@@ -638,21 +631,23 @@ export class AiOpsService {
     return match ? match[1].trim() : trimmed;
   }
 
-  private validateReadOnlySql(
+  private validatePreviewSql(
     sql: string,
     policy: SqlPolicy,
     options?: { requireQualifiedTableRefs?: boolean },
   ) {
-    if (!/^(select|show|explain|with)\b/i.test(sql)) {
-      throw new BadRequestException('Only SELECT/SHOW/EXPLAIN/CTE queries are allowed.');
+    const sqlType = this.classifySql(sql).sqlType;
+
+    if (!['read', 'write'].includes(sqlType)) {
+      throw new BadRequestException('Only read/write SQL is allowed in preview. DDL is not allowed.');
     }
 
     if (
-      /\b(insert|update|delete|replace|truncate|drop|alter|create|grant|revoke|merge|call|execute|handler|load\s+data|outfile|infile|optimize|repair|rename|set\s+)\b/i.test(
+      /\b(truncate|drop|alter|create|grant|revoke|merge|call|execute|handler|load\s+data|outfile|infile|optimize|repair|rename)\b/i.test(
         sql,
       )
     ) {
-      throw new BadRequestException('Detected non-read-only SQL keywords.');
+      throw new BadRequestException('Detected dangerous SQL keywords.');
     }
 
     if (/\bfor\s+update\b|\block\s+in\s+share\s+mode\b/i.test(sql)) {
@@ -733,7 +728,7 @@ export class AiOpsService {
 
   private extractTableRefs(sql: string): string[] {
     const refs = new Set<string>();
-    const regex = /\b(?:from|join)\s+([`"'\w$.-]+)/gi;
+    const regex = /\b(?:from|join|update|into)\s+([`"'\w$.-]+)/gi;
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(sql)) !== null) {
@@ -850,6 +845,24 @@ export class AiOpsService {
     return sql;
   }
 
+  private applyPreviewPolicy(
+    normalizedSql: string,
+    policy: SqlPolicy,
+  ): { executedSql: string; appliedLimit: number | null } {
+    const type = this.classifySql(normalizedSql).sqlType;
+    if (type === 'read') {
+      const { sql: limitedSql, appliedLimit } = this.enforceLimit(normalizedSql, policy);
+      return {
+        executedSql: this.attachExecutionHint(limitedSql, policy.timeoutMs),
+        appliedLimit,
+      };
+    }
+    return {
+      executedSql: normalizedSql,
+      appliedLimit: null,
+    };
+  }
+
   private async generateSqlFromQuestion(
     question: string,
     policy: SqlPolicy,
@@ -867,7 +880,7 @@ export class AiOpsService {
 
     const tableHint = policy.whitelistTables.length > 0
       ? `Allowed tables: ${policy.whitelistTables.join(', ')}`
-      : 'Allowed tables: use only business read-only tables configured for the environment.';
+      : 'Allowed tables: use only business tables configured for the environment.';
     const databaseHint = policy.whitelistDatabases.length > 0
       ? `Allowed databases: ${policy.whitelistDatabases.join(', ')}`
       : 'Allowed databases: use only databases configured for the selected environment.';
@@ -875,13 +888,15 @@ export class AiOpsService {
     const systemPrompt = [
       'You are a SQL assistant for operations engineers.',
       'Return exactly one SQL statement and nothing else.',
-      'Only generate read-only MySQL SQL using SELECT, SHOW, EXPLAIN, or WITH + SELECT.',
-      'Never generate INSERT/UPDATE/DELETE/DDL commands.',
+      'You can generate read or write MySQL SQL.',
+      'Allowed statement types: SELECT, SHOW, EXPLAIN, WITH+SELECT, INSERT, UPDATE, DELETE, REPLACE.',
+      'Never generate DDL commands (CREATE/ALTER/DROP/TRUNCATE/RENAME/GRANT/REVOKE).',
+      'Do not rewrite write intents into SELECT if user explicitly asks for update/delete/insert.',
+      `For read SQL, include LIMIT and keep it <= ${policy.maxLimit}.`,
       'Always use fully qualified table names in the form db.table (example: spot.users).',
       'Never generate SQL with unqualified table names like FROM users.',
       databaseHint,
       tableHint,
-      `Always include LIMIT and keep it <= ${policy.maxLimit}.`,
       'Do not include markdown fences or comments.',
       'If previous SQL was rejected, strictly fix according to the validator reason.',
     ].join('\n');
@@ -1173,7 +1188,10 @@ export class AiOpsService {
     return refs;
   }
 
-  private async buildFewshotContext(question: string, policy: SqlPolicy): Promise<string> {
+  private async buildFewshotContext(
+    question: string,
+    policy: SqlPolicy,
+  ): Promise<string> {
     const rows = await this.getFewshotRows();
     if (rows.length === 0) {
       return '';
@@ -1184,13 +1202,17 @@ export class AiOpsService {
     const questionNumbers = this.extractNumericTokens(question);
 
     const strictRows = rows.filter((row) =>
-      this.isFewshotCaseCompatible(row, policy, { allowUnqualifiedRefs: false }),
+      this.isFewshotCaseCompatible(row, policy, {
+        allowUnqualifiedRefs: false,
+      }),
     );
     const candidateRows =
       strictRows.length > 0
         ? strictRows
         : rows.filter((row) =>
-            this.isFewshotCaseCompatible(row, policy, { allowUnqualifiedRefs: true }),
+            this.isFewshotCaseCompatible(row, policy, {
+              allowUnqualifiedRefs: true,
+            }),
           );
 
     const scored = candidateRows
@@ -1218,7 +1240,7 @@ export class AiOpsService {
 
     const lines: string[] = [
       'Few-shot SQL examples (for style/reference only, do not copy literals blindly):',
-      'Hard rule: output SQL must still satisfy current whitelist + use db.table + include LIMIT.',
+      'Hard rule: output SQL must satisfy whitelist + use db.table. LIMIT is mandatory for read SQL.',
     ];
     for (const row of picked) {
       lines.push(`[${row.caseId}] Q: ${row.userQuestion}`);
@@ -1442,7 +1464,8 @@ export class AiOpsService {
       return false;
     }
 
-    if (!/^(select|show|explain|with)\b/i.test(row.expectedSql)) {
+    const sqlType = this.classifySql(row.expectedSql).sqlType;
+    if (!['read', 'write'].includes(sqlType)) {
       return false;
     }
 
