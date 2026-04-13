@@ -1,0 +1,2 @@
+case_id,priority,business_domain,intent_type,user_question,expected_mongo_statement,expected_output_shape,must_conditions,forbidden_patterns,allowed_databases,allowed_collections,default_limit,max_limit,time_range_hint,review_status,owner,reviewer,last_updated,notes
+MONGO_CASE_001,P0,user,lookup,查询 uid=2822112 的用户基本信息,"db.users.find({ uid: 2822112 }, { uid: 1, email: 1, status: 1, _id: 0 }).limit(1)",single_doc,must_have_limit;must_filter_by_uid,no_update_delete_insert;no_unbounded_query,spot,users,1,100,none,draft,alice,bob,2026-04-10,示例行，后续请替换

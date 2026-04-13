@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import axios from 'axios';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { AiOpsService } from './ai-ops.service';
 
 jest.mock('axios');
@@ -25,12 +28,13 @@ const envConfig = {
   },
 };
 
-const createService = () => {
+const createService = (overrides?: Record<string, string>) => {
   const configValues: Record<string, string> = {
     AIOPS_LLM_PROVIDER: 'openclaw',
     AIOPS_OPENCLAW_BASE_URL: 'http://openclaw.local/v1',
     AIOPS_OPENCLAW_TOKEN: 'test-token',
     AIOPS_OPENCLAW_MODEL: 'openclaw/default',
+    ...(overrides || {}),
   };
   const config = {
     get: jest.fn((key: string) => configValues[key]),
@@ -103,6 +107,8 @@ describe('AiOpsService previewSql security', () => {
     expect(result.executedSql).toContain('MAX_EXECUTION_TIME(5000)');
     expect(result.executedSql).toContain('FROM spot.users LIMIT 200');
     expect(result.source).toBe('sql');
+    expect(result.sqlType).toBe('read');
+    expect(result.riskLevel).toBe('low');
   });
 
   it('rejects disallowed table by whitelist', async () => {
@@ -151,5 +157,54 @@ describe('AiOpsService previewSql security', () => {
       } as any),
     ).rejects.toThrow(BadRequestException);
     expect(mockedAxios.post).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps executeSql disabled at service layer', async () => {
+    const { service } = createService();
+    await expect(
+      service.executeSql('test-env', actor as any, {
+        sql: 'SELECT 1',
+      } as any),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('injects few-shot context when csv is configured', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aiops-fewshot-'));
+    const csvPath = path.join(dir, 'nl2sql_fewshot_cases.csv');
+    await fs.writeFile(
+      csvPath,
+      [
+        'case_id,priority,business_domain,intent_type,user_question,expected_sql,expected_output_shape,must_conditions,forbidden_patterns,allowed_databases,allowed_tables,default_limit,max_limit,time_range_hint,review_status,owner,reviewer,last_updated,notes',
+        'CASE_001,P0,user,lookup,查询用户uid,SELECT uid FROM spot.users WHERE uid = 1 LIMIT 1,,, ,spot,spot.users,,,none,approved,,,,',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      const { service } = createService({
+        AIOPS_NL2SQL_FEWSHOT_CASES_PATH: csvPath,
+      });
+      mockedAxios.post.mockResolvedValue({
+        data: {
+          choices: [{ message: { content: 'SELECT uid FROM spot.users WHERE uid = 1 LIMIT 1' } }],
+        },
+      } as any);
+
+      const result = await service.previewSql('test-env', actor as any, {
+        question: '查询 uid = 1 的用户',
+      } as any);
+
+      expect(result.ok).toBe(true);
+      const payload = mockedAxios.post.mock.calls[0]?.[1] as
+        | { messages?: Array<{ role: string; content: string }> }
+        | undefined;
+      const messages = payload?.messages || [];
+      const joined = messages.map((m) => m.content).join('\n');
+      expect(joined).toContain('Few-shot SQL examples');
+      expect(joined).toContain('CASE_001');
+      expect(joined).toContain('SELECT uid FROM spot.users');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

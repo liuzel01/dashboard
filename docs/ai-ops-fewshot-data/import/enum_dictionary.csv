@@ -1,0 +1,2 @@
+enum_id,database_name,table_name,column_name,enum_value,enum_label,business_description,notes
+ENUM_001,spot,users,status,1,active,用户可用状态,示例行，后续请替换

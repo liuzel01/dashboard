@@ -1,0 +1,105 @@
+{
+  "generatedAt": "2026-04-13T05:09:17.140Z",
+  "inDir": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data",
+  "outDir": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import",
+  "files": [
+    {
+      "file": "nl2sql_fewshot_cases.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/nl2sql_fewshot_cases.csv",
+      "exists": true,
+      "rowCountInput": 19,
+      "rowCountOutput": 18,
+      "droppedEmptyRows": 1,
+      "warnings": [
+        "line 7: expected_sql is not read-only SQL",
+        "line 9: expected_sql is not read-only SQL",
+        "line 10: expected_sql is not read-only SQL",
+        "line 11: expected_sql is not read-only SQL",
+        "line 15: expected_sql is not read-only SQL",
+        "line 16: expected_sql is not read-only SQL",
+        "line 17: expected_sql is not read-only SQL"
+      ],
+      "skipped": false
+    },
+    {
+      "file": "table_dictionary.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/table_dictionary.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/table_dictionary.csv",
+      "exists": true,
+      "rowCountInput": 19,
+      "rowCountOutput": 18,
+      "droppedEmptyRows": 1,
+      "warnings": [],
+      "skipped": false
+    },
+    {
+      "file": "join_relations.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/join_relations.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/join_relations.csv",
+      "exists": true,
+      "rowCountInput": 1,
+      "rowCountOutput": 1,
+      "droppedEmptyRows": 0,
+      "warnings": [],
+      "skipped": false
+    },
+    {
+      "file": "enum_dictionary.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/enum_dictionary.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/enum_dictionary.csv",
+      "exists": true,
+      "rowCountInput": 1,
+      "rowCountOutput": 1,
+      "droppedEmptyRows": 0,
+      "warnings": [],
+      "skipped": false
+    },
+    {
+      "file": "nl2mongo_fewshot_cases.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/nl2mongo_fewshot_cases.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/nl2mongo_fewshot_cases.csv",
+      "exists": true,
+      "rowCountInput": 1,
+      "rowCountOutput": 1,
+      "droppedEmptyRows": 0,
+      "warnings": [],
+      "skipped": false
+    },
+    {
+      "file": "mongo_collection_dictionary.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/mongo_collection_dictionary.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/mongo_collection_dictionary.csv",
+      "exists": true,
+      "rowCountInput": 1,
+      "rowCountOutput": 1,
+      "droppedEmptyRows": 0,
+      "warnings": [
+        "missing header(s): is_nullable"
+      ],
+      "skipped": false
+    },
+    {
+      "file": "mongo_relations.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/mongo_relations.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/mongo_relations.csv",
+      "exists": true,
+      "rowCountInput": 1,
+      "rowCountOutput": 1,
+      "droppedEmptyRows": 0,
+      "warnings": [],
+      "skipped": false
+    },
+    {
+      "file": "mongo_enum_dictionary.csv",
+      "inputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/mongo_enum_dictionary.csv",
+      "outputPath": "/Users/liuzelin/github/dashboard/docs/ai-ops-fewshot-data/import/mongo_enum_dictionary.csv",
+      "exists": true,
+      "rowCountInput": 1,
+      "rowCountOutput": 1,
+      "droppedEmptyRows": 0,
+      "warnings": [],
+      "skipped": false
+    }
+  ]
+}

@@ -15,11 +15,15 @@ type PreviewResponse = {
   executedSql: string;
   appliedLimit: number;
   timeoutMs: number;
+  sqlType?: 'read' | 'write' | 'ddl' | 'unknown';
+  riskLevel?: 'low' | 'medium' | 'high' | 'critical';
 };
 
 type AuditItem = {
   id: number;
   status: string;
+  sql_type?: 'read' | 'write' | 'ddl' | 'unknown';
+  risk_level?: 'low' | 'medium' | 'high' | 'critical';
   actor_username?: string;
   question?: string;
   executed_sql?: string;
@@ -71,7 +75,8 @@ const AiOpsPage: React.FC = () => {
       <Alert
         type="info"
         showIcon
-        message="当前仅支持 SQL 预览与分析，不在 dashboard 内执行 SQL。真实执行请在外部系统（如 abd.com）完成。"
+        message="当前仅支持 SQL 预览与分析，不在 dashboard 内执行 SQL。"
+        description="页面中的 SQL 结果仅作为草稿建议，未在本系统执行。任何真实变更请在外部系统（如 abd.com）完成，并执行人工复核。"
       />
 
       <Card title="AI SQL 助手（受控）">
@@ -107,7 +112,30 @@ const AiOpsPage: React.FC = () => {
           <p>
             <Tag color="blue">LIMIT {preview.appliedLimit}</Tag>
             <Tag color="purple">超时 {preview.timeoutMs}ms</Tag>
+            {preview.sqlType && (
+              <Tag color="geekblue">类型 {preview.sqlType}</Tag>
+            )}
+            {preview.riskLevel && (
+              <Tag color={
+                preview.riskLevel === 'critical'
+                  ? 'red'
+                  : preview.riskLevel === 'high'
+                    ? 'volcano'
+                    : preview.riskLevel === 'medium'
+                      ? 'gold'
+                      : 'green'
+              }
+              >
+                风险 {preview.riskLevel}
+              </Tag>
+            )}
           </p>
+          <Alert
+            type="warning"
+            showIcon
+            message="仅草稿预览，未执行"
+            description="请勿直接将结果视作已生效变更。若需执行，请在外部系统完成审批与复核。"
+          />
         </Card>
       )}
 
@@ -125,10 +153,33 @@ const AiOpsPage: React.FC = () => {
               dataIndex: 'status',
               width: 100,
               render: (value: string) => (
-                <Tag color={value === 'executed' ? 'green' : value === 'error' ? 'red' : 'blue'}>
+                <Tag color={value === 'previewed' ? 'blue' : value === 'error' ? 'red' : 'default'}>
                   {value}
                 </Tag>
               ),
+            },
+            {
+              title: 'SQL类型',
+              dataIndex: 'sql_type',
+              width: 100,
+              render: (value?: string) => value ? <Tag color="geekblue">{value}</Tag> : '-',
+            },
+            {
+              title: '风险',
+              dataIndex: 'risk_level',
+              width: 100,
+              render: (value?: string) => {
+                if (!value) return '-';
+                const color =
+                  value === 'critical'
+                    ? 'red'
+                    : value === 'high'
+                      ? 'volcano'
+                      : value === 'medium'
+                        ? 'gold'
+                        : 'green';
+                return <Tag color={color}>{value}</Tag>;
+              },
             },
             { title: '问题', dataIndex: 'question', ellipsis: true },
             { title: '返回行数', dataIndex: 'row_count', width: 100 },

@@ -24,6 +24,30 @@
 - `mongo_enum_dictionary.csv`（后续规划）
   - 目的：沉淀 Mongo 枚举值含义。
 
+## 推荐工作流（原始采集 + 清洗导入）
+
+建议把当前目录下的 CSV 作为“原始采集文件”，每次导入前先跑一次清洗脚本，把可导入版本写到 `import/` 目录。
+
+- 清洗命令（仓库根目录执行）：
+
+```bash
+node scripts/clean-aiops-fewshot-csv.js
+```
+
+- 指定输入/输出目录：
+
+```bash
+node scripts/clean-aiops-fewshot-csv.js --in docs/ai-ops-fewshot-data --out docs/ai-ops-fewshot-data/import
+```
+
+- 仅清洗 SQL 两张核心表：
+
+```bash
+node scripts/clean-aiops-fewshot-csv.js --only nl2sql_fewshot_cases.csv,table_dictionary.csv
+```
+
+脚本会同时输出 `docs/ai-ops-fewshot-data/import/clean-report.json`，用于查看缺失字段、可疑 SQL、未带库名前缀等告警。
+
 ## 先填什么（建议顺序）
 
 1. 先填 `nl2sql_fewshot_cases.csv`（至少 20 条）。
@@ -48,6 +72,7 @@
 - 默认带 `LIMIT`，并注明业务上合理范围。
 - 问句尽量贴近真实运维同学输入，而不是“教科书式描述”。
 - 每条样本都建议写上 `review_status`（`draft/reviewed/approved`）。
+- CSV 第一行表头请保持当前纯英文键，不要改成中文或“英文+中文注释”。
 
 ## 字段填写说明（给不熟悉数据库的同学）
 
@@ -176,10 +201,10 @@
 
 ## 表头格式提醒（重要）
 
-当前 CSV 表头采用 `英文键（中文注释）`，目的是方便人工采集与沟通。
+当前 CSV 表头已统一为纯英文键（例如 `case_id`、`expected_sql`、`table_name`）。
 
-- 若后续要由程序自动读取 CSV（例如训练样本导入、校验脚本），需要先做“字段名标准化映射”。
-- 建议在导入脚本中将表头映射回纯英文键（例如 `column_name（列名称）` -> `column_name`），再进行后续处理。
+- 为避免导入失败，请不要修改首行表头文本。
+- 需要写中文说明时，请写在 `notes` 字段，不要改表头。
 
 ## 最小可用采集量（MVP）
 

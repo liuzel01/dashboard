@@ -9,7 +9,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as crypto from 'crypto';
+import { promises as fs } from 'fs';
 import type * as mysql from 'mysql2/promise';
+import * as path from 'path';
 import { DatabaseService } from '../database/database.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuthService } from '../auth/auth.service';
@@ -62,6 +64,22 @@ type SchemaTableSummary = {
   columns: string[];
 };
 
+type SqlType = 'read' | 'write' | 'ddl' | 'unknown';
+type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+type FewshotCaseRow = {
+  caseId: string;
+  priority: string;
+  intentType: string;
+  userQuestion: string;
+  expectedSql: string;
+  mustConditions: string;
+  forbiddenPatterns: string;
+  allowedDatabases: string[];
+  allowedTables: string[];
+  reviewStatus: string;
+};
+
 @Injectable()
 export class AiOpsService {
   private readonly logger = new Logger(AiOpsService.name);
@@ -73,6 +91,11 @@ export class AiOpsService {
   private readonly schemaPromptMaxTables = 24;
   private readonly schemaPromptMaxColumns = 20;
   private readonly sqlRewriteMaxAttempts = 3;
+  private readonly fewshotCacheTtlMs = 2 * 60 * 1000;
+  private readonly fewshotPromptMaxCases = 6;
+  private readonly fewshotPromptMaxChars = 5000;
+  private fewshotCache: { expiresAt: number; sourcePath: string; rows: FewshotCaseRow[] } | null =
+    null;
 
   constructor(
     private readonly config: ConfigService,
@@ -126,6 +149,7 @@ export class AiOpsService {
     let prepared: PreparedSql | null = null;
     try {
       prepared = await this.prepareSql(environmentId, body, policy, llmSessionKey);
+      const sqlMeta = this.classifySql(prepared.normalizedSql);
 
       actionId = await this.safeInsertAction({
         environmentId,
@@ -152,6 +176,8 @@ export class AiOpsService {
         limitApplied: prepared.appliedLimit,
         maxExecutionTimeMs: policy.timeoutMs,
         rowCount: null,
+        sqlType: sqlMeta.sqlType,
+        riskLevel: sqlMeta.riskLevel,
         status: 'previewed',
       });
 
@@ -162,8 +188,12 @@ export class AiOpsService {
         executedSql: prepared.executedSql,
         appliedLimit: prepared.appliedLimit,
         timeoutMs: policy.timeoutMs,
+        sqlType: sqlMeta.sqlType,
+        riskLevel: sqlMeta.riskLevel,
       };
     } catch (error) {
+      const fallbackSql = prepared?.normalizedSql || String(body.sql || '').trim();
+      const sqlMeta = this.classifySql(fallbackSql);
       await this.safeInsertAction({
         environmentId,
         actor,
@@ -180,6 +210,21 @@ export class AiOpsService {
           : null,
         errorMessage: this.errorMessage(error),
         durationMs: Date.now() - actionStartedAt,
+      });
+      await this.safeInsertSqlAudit({
+        actionId,
+        environmentId,
+        actor,
+        question: body.question,
+        generatedSql: prepared?.generatedFromQuestion ? prepared.rawSql : null,
+        executedSql: prepared?.executedSql || null,
+        limitApplied: prepared?.appliedLimit ?? null,
+        maxExecutionTimeMs: policy.timeoutMs,
+        rowCount: null,
+        sqlType: sqlMeta.sqlType,
+        riskLevel: sqlMeta.riskLevel,
+        status: 'error',
+        errorMessage: this.errorMessage(error),
       });
       throw error;
     }
@@ -203,7 +248,7 @@ export class AiOpsService {
     const rows = await this.platformDb.query<any[]>(
       `SELECT id, action_id, environment_id, actor_user_id, actor_username,
               question, generated_sql, executed_sql, limit_applied,
-              max_execution_time_ms, row_count, status, error_message, created_at
+              max_execution_time_ms, row_count, sql_type, risk_level, status, error_message, created_at
        FROM aiops_sql_audit
        WHERE environment_id = ?
        ORDER BY id DESC
@@ -515,6 +560,7 @@ export class AiOpsService {
     llmSessionKey: string,
   ): Promise<PreparedSql> {
     const schemaContext = await this.buildSchemaContext(environmentId, policy, question);
+    const fewshotContext = await this.buildFewshotContext(question, policy);
 
     let lastValidationMessage = '';
     let lastGeneratedSql = '';
@@ -524,6 +570,7 @@ export class AiOpsService {
         policy,
         llmSessionKey,
         schemaContext,
+        fewshotContext,
         attempt > 1 ? lastValidationMessage : undefined,
         attempt > 1 ? lastGeneratedSql : undefined,
       );
@@ -808,6 +855,7 @@ export class AiOpsService {
     policy: SqlPolicy,
     llmSessionKey: string,
     schemaContext?: string,
+    fewshotContext?: string,
     retryReason?: string,
     previousSql?: string,
   ) {
@@ -851,6 +899,12 @@ export class AiOpsService {
         messages.push({
           role: 'system',
           content: `Schema context (use only these references):\n${schemaContext}`,
+        });
+      }
+      if (fewshotContext) {
+        messages.push({
+          role: 'system',
+          content: fewshotContext,
         });
       }
       messages.push({
@@ -1119,6 +1173,383 @@ export class AiOpsService {
     return refs;
   }
 
+  private async buildFewshotContext(question: string, policy: SqlPolicy): Promise<string> {
+    const rows = await this.getFewshotRows();
+    if (rows.length === 0) {
+      return '';
+    }
+
+    const normalizedQuestion = String(question || '').trim().toLowerCase();
+    const questionTokens = this.extractQuestionTokens(question);
+    const questionNumbers = this.extractNumericTokens(question);
+
+    const strictRows = rows.filter((row) =>
+      this.isFewshotCaseCompatible(row, policy, { allowUnqualifiedRefs: false }),
+    );
+    const candidateRows =
+      strictRows.length > 0
+        ? strictRows
+        : rows.filter((row) =>
+            this.isFewshotCaseCompatible(row, policy, { allowUnqualifiedRefs: true }),
+          );
+
+    const scored = candidateRows
+      .map((row) => ({
+        row,
+        score: this.scoreFewshotCase(row, normalizedQuestion, questionTokens, questionNumbers),
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return this.scorePriority(b.row.priority) - this.scorePriority(a.row.priority);
+      });
+
+    if (scored.length === 0) {
+      return '';
+    }
+
+    const withScore = scored.filter((item) => item.score > 0);
+    const maxCases = this.getFewshotMaxCases();
+    const picked = (withScore.length > 0 ? withScore : scored)
+      .slice(0, maxCases)
+      .map((item) => item.row);
+    if (picked.length === 0) {
+      return '';
+    }
+
+    const lines: string[] = [
+      'Few-shot SQL examples (for style/reference only, do not copy literals blindly):',
+      'Hard rule: output SQL must still satisfy current whitelist + use db.table + include LIMIT.',
+    ];
+    for (const row of picked) {
+      lines.push(`[${row.caseId}] Q: ${row.userQuestion}`);
+      lines.push(`SQL: ${row.expectedSql}`);
+      if (row.mustConditions) {
+        lines.push(`Must: ${row.mustConditions}`);
+      }
+      if (row.forbiddenPatterns) {
+        lines.push(`Avoid: ${row.forbiddenPatterns}`);
+      }
+    }
+
+    const text = lines.join('\n');
+    if (text.length <= this.fewshotPromptMaxChars) {
+      return text;
+    }
+    return `${text.slice(0, this.fewshotPromptMaxChars)}\n...(few-shot context truncated)`;
+  }
+
+  private getFewshotMaxCases(): number {
+    const configured = Number(
+      String(this.config.get<string>('AIOPS_NL2SQL_FEWSHOT_MAX_CASES') || '').trim(),
+    );
+    if (Number.isFinite(configured) && configured > 0) {
+      return Math.min(12, Math.floor(configured));
+    }
+    return this.fewshotPromptMaxCases;
+  }
+
+  private async getFewshotRows(): Promise<FewshotCaseRow[]> {
+    const sourcePath = await this.resolveFewshotCasesPath();
+    if (!sourcePath) {
+      return [];
+    }
+
+    const now = Date.now();
+    if (
+      this.fewshotCache &&
+      this.fewshotCache.sourcePath === sourcePath &&
+      this.fewshotCache.expiresAt > now
+    ) {
+      return this.fewshotCache.rows;
+    }
+
+    let content = '';
+    try {
+      content = await fs.readFile(sourcePath, 'utf8');
+    } catch (error) {
+      this.logger.warn(`Failed to read few-shot CSV: ${this.errorMessage(error)}`);
+      return [];
+    }
+
+    const rows = this.parseFewshotRows(content);
+    this.fewshotCache = {
+      sourcePath,
+      rows,
+      expiresAt: now + this.fewshotCacheTtlMs,
+    };
+    return rows;
+  }
+
+  private async resolveFewshotCasesPath(): Promise<string | null> {
+    const configured = String(
+      this.config.get<string>('AIOPS_NL2SQL_FEWSHOT_CASES_PATH') || '',
+    ).trim();
+    const candidates = [
+      configured ? path.resolve(configured) : '',
+      path.resolve(process.cwd(), 'docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv'),
+      path.resolve(process.cwd(), '../docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv'),
+      path.resolve(__dirname, '../../../docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv'),
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  private parseFewshotRows(csvText: string): FewshotCaseRow[] {
+    const rows = this.parseCsvRows(csvText);
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const header = rows[0].map((name) => this.normalizeFewshotHeader(name));
+    const headerLen = header.length;
+    if (headerLen === 0) {
+      return [];
+    }
+
+    const indexByName = new Map<string, number>();
+    header.forEach((name, idx) => {
+      indexByName.set(name, idx);
+    });
+    const expectedSqlIdx = indexByName.get('expected_sql') ?? -1;
+
+    const result: FewshotCaseRow[] = [];
+    for (let i = 1; i < rows.length; i += 1) {
+      const rawRow = rows[i];
+      if (!rawRow || rawRow.length === 0) continue;
+
+      let row = rawRow.map((v) => String(v || '').trim());
+      if (row.every((v) => !v)) continue;
+
+      if (row.length > headerLen && expectedSqlIdx >= 0) {
+        const overflow = row.length - headerLen;
+        row = [
+          ...row.slice(0, expectedSqlIdx),
+          row.slice(expectedSqlIdx, expectedSqlIdx + overflow + 1).join(','),
+          ...row.slice(expectedSqlIdx + overflow + 1),
+        ];
+      }
+      if (row.length < headerLen) {
+        row = [...row, ...Array(headerLen - row.length).fill('')];
+      }
+
+      const get = (name: string): string => {
+        const idx = indexByName.get(name);
+        if (typeof idx !== 'number' || idx < 0) return '';
+        return String(row[idx] || '').trim();
+      };
+
+      const userQuestion = get('user_question');
+      const expectedSql = get('expected_sql');
+      if (!userQuestion || !expectedSql) continue;
+
+      result.push({
+        caseId: get('case_id') || `ROW_${i}`,
+        priority: get('priority'),
+        intentType: get('intent_type'),
+        userQuestion,
+        expectedSql,
+        mustConditions: get('must_conditions'),
+        forbiddenPatterns: get('forbidden_patterns'),
+        allowedDatabases: this.parseDelimitedValues(get('allowed_databases')),
+        allowedTables: this.parseDelimitedValues(get('allowed_tables')),
+        reviewStatus: get('review_status').toLowerCase(),
+      });
+    }
+    return result;
+  }
+
+  private normalizeFewshotHeader(header: string): string {
+    return String(header || '')
+      .replace(/^\uFEFF/, '')
+      .replace(/（[^）]*）/g, '')
+      .replace(/\([^)]*\)/g, '')
+      .replace(/\s+/g, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  private parseCsvRows(csvText: string): string[][] {
+    const text = String(csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let cell = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') {
+            cell += '"';
+            i += 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          cell += ch;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inQuotes = true;
+        continue;
+      }
+      if (ch === ',') {
+        row.push(cell);
+        cell = '';
+        continue;
+      }
+      if (ch === '\n') {
+        row.push(cell);
+        rows.push(row);
+        row = [];
+        cell = '';
+        continue;
+      }
+      cell += ch;
+    }
+
+    if (cell.length > 0 || row.length > 0) {
+      row.push(cell);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private parseDelimitedValues(raw: string): string[] {
+    return String(raw || '')
+      .split(/[;,]/)
+      .map((v) => v.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  private isFewshotCaseCompatible(
+    row: FewshotCaseRow,
+    policy: SqlPolicy,
+    options?: { allowUnqualifiedRefs?: boolean },
+  ): boolean {
+    const status = row.reviewStatus;
+    if (status && !['approved', 'reviewed'].includes(status)) {
+      return false;
+    }
+
+    if (!/^(select|show|explain|with)\b/i.test(row.expectedSql)) {
+      return false;
+    }
+
+    if (!options?.allowUnqualifiedRefs) {
+      const refs = this.filterPhysicalTableRefs(
+        this.extractTableRefs(row.expectedSql),
+        row.expectedSql,
+      );
+      const hasUnqualified = refs.some((ref) => !this.parseTableRef(ref).database);
+      if (hasUnqualified) {
+        return false;
+      }
+    }
+
+    if (policy.whitelistDatabases.length > 0 && row.allowedDatabases.length > 0) {
+      const dbMatched = row.allowedDatabases.some((db) =>
+        policy.whitelistDatabases.some((pattern) => this.matchDatabasePattern(pattern, db)),
+      );
+      if (!dbMatched) return false;
+    }
+
+    if (policy.whitelistTables.length > 0 && row.allowedTables.length > 0) {
+      const tableMatched = row.allowedTables.some((tablePattern) =>
+        this.isFewshotTablePatternAllowed(tablePattern, policy.whitelistTables),
+      );
+      if (!tableMatched) return false;
+    }
+
+    return true;
+  }
+
+  private isFewshotTablePatternAllowed(tablePattern: string, policyPatterns: string[]): boolean {
+    const normalized = String(tablePattern || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (normalized === '*') {
+      return policyPatterns.some((pattern) => String(pattern || '').trim().toLowerCase() === '*');
+    }
+    if (normalized.endsWith('.*')) {
+      const db = normalized.slice(0, -2);
+      return policyPatterns.some((pattern) => {
+        const p = String(pattern || '').trim().toLowerCase();
+        return p === '*' || p === `${db}.*` || p.startsWith(`${db}.`);
+      });
+    }
+    if (normalized.includes('.')) {
+      const target = this.parseTableRef(normalized);
+      return policyPatterns.some((pattern) => this.matchTablePattern(pattern, target));
+    }
+    return policyPatterns.some((pattern) => {
+      const p = String(pattern || '').trim().toLowerCase();
+      return p === '*' || p === normalized || p === `*.${normalized}`;
+    });
+  }
+
+  private scoreFewshotCase(
+    row: FewshotCaseRow,
+    normalizedQuestion: string,
+    questionTokens: string[],
+    questionNumbers: string[],
+  ): number {
+    const rowQuestion = row.userQuestion.toLowerCase();
+    const rowSql = row.expectedSql.toLowerCase();
+    const compactQuestion = normalizedQuestion.replace(/\s+/g, '');
+    const compactRowQuestion = rowQuestion.replace(/\s+/g, '');
+    let score = this.scorePriority(row.priority);
+
+    if (row.reviewStatus === 'approved') score += 4;
+    else if (row.reviewStatus === 'reviewed') score += 2;
+
+    if (compactQuestion && compactRowQuestion) {
+      if (compactRowQuestion.includes(compactQuestion)) score += 40;
+      else if (compactQuestion.includes(compactRowQuestion)) score += 30;
+    }
+
+    const rowTokens = new Set([
+      ...this.extractQuestionTokens(row.userQuestion),
+      ...this.extractQuestionTokens(row.expectedSql),
+    ]);
+    for (const token of questionTokens) {
+      if (rowTokens.has(token)) score += 6;
+      else if (rowQuestion.includes(token) || rowSql.includes(token)) score += 2;
+    }
+
+    const rowNumbers = new Set(this.extractNumericTokens(`${row.userQuestion} ${row.expectedSql}`));
+    for (const num of questionNumbers) {
+      if (rowNumbers.has(num)) score += 8;
+    }
+
+    if (row.intentType && normalizedQuestion.includes(row.intentType.toLowerCase())) {
+      score += 4;
+    }
+    return score;
+  }
+
+  private extractNumericTokens(text: string): string[] {
+    const matches = String(text || '').match(/\b\d{3,}\b/g) || [];
+    return Array.from(new Set(matches));
+  }
+
+  private scorePriority(priority: string): number {
+    const p = String(priority || '').trim().toLowerCase();
+    if (p === 'p0') return 5;
+    if (p === 'p1') return 3;
+    if (p === 'p2') return 1;
+    return 0;
+  }
+
   private buildLlmSessionKey(
     environmentId: string,
     actor: ActorContext,
@@ -1378,6 +1809,8 @@ export class AiOpsService {
     limitApplied?: number | null;
     maxExecutionTimeMs: number;
     rowCount?: number | null;
+    sqlType?: SqlType;
+    riskLevel?: RiskLevel;
     status: string;
     errorMessage?: string;
   }) {
@@ -1385,8 +1818,8 @@ export class AiOpsService {
       `INSERT INTO aiops_sql_audit
         (action_id, environment_id, actor_user_id, actor_username,
          question, generated_sql, executed_sql, limit_applied,
-         max_execution_time_ms, row_count, status, error_message, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+         max_execution_time_ms, row_count, sql_type, risk_level, status, error_message, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
       [
         params.actionId,
         params.environmentId,
@@ -1398,6 +1831,8 @@ export class AiOpsService {
         params.limitApplied ?? null,
         params.maxExecutionTimeMs,
         params.rowCount ?? null,
+        params.sqlType || null,
+        params.riskLevel || null,
         params.status,
         params.errorMessage || null,
       ],
@@ -1414,6 +1849,8 @@ export class AiOpsService {
     limitApplied?: number | null;
     maxExecutionTimeMs: number;
     rowCount?: number | null;
+    sqlType?: SqlType;
+    riskLevel?: RiskLevel;
     status: string;
     errorMessage?: string;
   }) {
@@ -1424,6 +1861,30 @@ export class AiOpsService {
         `SQL audit insert failed (${params.status}): ${this.errorMessage(error)}`,
       );
     }
+  }
+
+  private classifySql(sql: string | null | undefined): { sqlType: SqlType; riskLevel: RiskLevel } {
+    const text = String(sql || '').trim().toLowerCase();
+    if (!text) {
+      return { sqlType: 'unknown', riskLevel: 'medium' };
+    }
+
+    if (/^(create|alter|drop|truncate|rename|grant|revoke)\b/.test(text)) {
+      return { sqlType: 'ddl', riskLevel: 'critical' };
+    }
+    if (/^(insert|update|delete|replace|merge)\b/.test(text)) {
+      return { sqlType: 'write', riskLevel: 'high' };
+    }
+    if (/^(select|show|explain|with)\b/.test(text)) {
+      return { sqlType: 'read', riskLevel: 'low' };
+    }
+    if (/\b(create|alter|drop|truncate|rename|grant|revoke)\b/.test(text)) {
+      return { sqlType: 'ddl', riskLevel: 'critical' };
+    }
+    if (/\b(insert|update|delete|replace|merge)\b/.test(text)) {
+      return { sqlType: 'write', riskLevel: 'high' };
+    }
+    return { sqlType: 'unknown', riskLevel: 'medium' };
   }
 
   private async insertIngestEvent(params: {

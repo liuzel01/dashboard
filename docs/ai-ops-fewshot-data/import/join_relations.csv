@@ -1,0 +1,2 @@
+relation_id,left_database,left_table,left_column,right_database,right_table,right_column,join_type,typical_query_purpose,notes
+REL_001,spot,users,uid,tiger,copy_trade_user_info,uid,inner,查询用户及跟单信息,示例行，后续请替换

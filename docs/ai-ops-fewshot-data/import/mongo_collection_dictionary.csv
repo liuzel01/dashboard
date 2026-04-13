@@ -1,0 +1,2 @@
+database_name,collection_name,field_path,bson_type,is_nullable,is_indexed,is_filter_hot,business_meaning,sample_values,pii_level,aliases,owner,last_updated,notes
+spot,users,uid,number,,YES,YES,用户唯一ID,2822112,none,user_id,dba_team,2026-04-10,示例行，后续请替换

@@ -1,0 +1,2 @@
+relation_id,left_database,left_collection,left_field_path,right_database,right_collection,right_field_path,relation_type,preferred_pattern,typical_query_purpose,notes
+MONGO_REL_001,spot,users,uid,tiger,copy_trade_user_info,uid,reference,application_join,查询用户及跟单信息,示例行，后续请替换
