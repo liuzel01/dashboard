@@ -190,7 +190,14 @@ export class AccessControlService {
        FROM roles r
        LEFT JOIN user_roles ur ON ur.role_id = r.id
        GROUP BY r.id
-       ORDER BY r.id DESC`,
+       ORDER BY
+         CASE
+           WHEN LOWER(r.name) = 'admin' THEN 0
+           WHEN r.name = '管理员' THEN 1
+           WHEN r.name = '运维' THEN 2
+           ELSE 3
+         END ASC,
+         r.id ASC`,
     );
 
     const perms = await this.db.query<{ role_id: number; permission_id: number }[]>(
