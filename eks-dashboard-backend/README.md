@@ -60,6 +60,15 @@ GET /api/ai-ops/health/llm
 
 返回中会包含 `configuredModel`、`modelAvailable`、`models` 等字段。
 
+### OpenClaw 会话清理策略（运维侧）
+
+当前已在 OpenClaw 侧启用会话定期维护策略（由运维配置）：
+
+- 每天 04:00 执行会话重置/清理维护
+- 会话保留期为 30 天
+
+这意味着 dashboard 侧无需额外实现会话长期留存清理，也能避免会话无限积累。
+
 ## Project setup
 
 ```bash
