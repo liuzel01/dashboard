@@ -252,12 +252,14 @@ export class AiOpsService {
     const offset = (safePage - 1) * safeSize;
     const scope = this.buildSqlAuditScope(environmentId, actor);
     const rows = await this.platformDb.query<any[]>(
-      `SELECT id, action_id, environment_id, actor_user_id, actor_username,
-              question, generated_sql, executed_sql, limit_applied,
-              max_execution_time_ms, row_count, sql_type, risk_level, status, error_message, created_at
-       FROM aiops_sql_audit
+      `SELECT a.id, a.action_id, a.environment_id, a.actor_user_id, a.actor_username,
+              COALESCE(NULLIF(u.display_name, ''), u.username, a.actor_username) AS actor_display_name,
+              a.question, a.generated_sql, a.executed_sql, a.limit_applied,
+              a.max_execution_time_ms, a.row_count, a.sql_type, a.risk_level, a.status, a.error_message, a.created_at
+       FROM aiops_sql_audit a
+       LEFT JOIN users u ON u.id = a.actor_user_id
        WHERE ${scope.whereSql}
-       ORDER BY id DESC
+       ORDER BY a.id DESC
        LIMIT ? OFFSET ?`,
       [...scope.params, safeSize, offset],
     );

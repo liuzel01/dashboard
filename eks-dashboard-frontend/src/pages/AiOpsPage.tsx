@@ -24,6 +24,7 @@ type AuditItem = {
   status: string;
   sql_type?: 'read' | 'write' | 'ddl' | 'unknown';
   risk_level?: 'low' | 'medium' | 'high' | 'critical';
+  actor_display_name?: string;
   actor_username?: string;
   question?: string;
   executed_sql?: string;
@@ -149,7 +150,11 @@ const AiOpsPage: React.FC = () => {
           dataSource={auditItems}
           columns={[
             { title: 'ID', dataIndex: 'id', width: 80 },
-            { title: '用户', dataIndex: 'actor_username', width: 120 },
+            {
+              title: '用户',
+              width: 160,
+              render: (_: unknown, row: AuditItem) => row.actor_display_name || row.actor_username || '-',
+            },
             {
               title: '状态',
               dataIndex: 'status',
