@@ -26,6 +26,7 @@ type ActorContext = {
   userId: number | null;
   username: string;
   permissions: string[];
+  roles: string[];
 };
 
 type SqlPolicy = {
@@ -129,6 +130,11 @@ export class AiOpsService {
       userId: me.id || null,
       username: me.username || payload.username,
       permissions: Array.isArray(me.permissions) ? me.permissions : [],
+      roles: Array.isArray(me.roles)
+        ? me.roles
+            .map((role: any) => String(role?.name || '').trim())
+            .filter(Boolean)
+        : [],
     };
   }
 
@@ -244,20 +250,21 @@ export class AiOpsService {
     const safePage = Math.max(1, Math.floor(page));
     const safeSize = Math.min(100, Math.max(1, Math.floor(size)));
     const offset = (safePage - 1) * safeSize;
+    const scope = this.buildSqlAuditScope(environmentId, actor);
     const rows = await this.platformDb.query<any[]>(
       `SELECT id, action_id, environment_id, actor_user_id, actor_username,
               question, generated_sql, executed_sql, limit_applied,
               max_execution_time_ms, row_count, sql_type, risk_level, status, error_message, created_at
        FROM aiops_sql_audit
-       WHERE environment_id = ?
+       WHERE ${scope.whereSql}
        ORDER BY id DESC
        LIMIT ? OFFSET ?`,
-      [environmentId, safeSize, offset],
+      [...scope.params, safeSize, offset],
     );
 
     const totalRows = await this.platformDb.query<{ total: number }[]>(
-      'SELECT COUNT(1) AS total FROM aiops_sql_audit WHERE environment_id = ?',
-      [environmentId],
+      `SELECT COUNT(1) AS total FROM aiops_sql_audit WHERE ${scope.whereSql}`,
+      scope.params,
     );
 
     return {
@@ -265,6 +272,35 @@ export class AiOpsService {
       size: safeSize,
       total: Number(totalRows?.[0]?.total || 0),
       items: rows,
+    };
+  }
+
+  private isAdminActor(actor: ActorContext): boolean {
+    const roleNames = (actor.roles || [])
+      .map((role: any) => String(role?.name || role || '').trim().toLowerCase())
+      .filter(Boolean);
+    return roleNames.includes('admin') || roleNames.includes('管理员');
+  }
+
+  private buildSqlAuditScope(
+    environmentId: string,
+    actor: ActorContext,
+  ): { whereSql: string; params: Array<string | number> } {
+    if (this.isAdminActor(actor)) {
+      return {
+        whereSql: 'environment_id = ?',
+        params: [environmentId],
+      };
+    }
+    if (actor.userId) {
+      return {
+        whereSql: 'environment_id = ? AND actor_user_id = ?',
+        params: [environmentId, actor.userId],
+      };
+    }
+    return {
+      whereSql: 'environment_id = ? AND actor_username = ?',
+      params: [environmentId, actor.username],
     };
   }
 

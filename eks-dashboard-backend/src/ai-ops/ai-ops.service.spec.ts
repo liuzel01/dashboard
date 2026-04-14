@@ -13,6 +13,7 @@ const actor = {
   userId: 1,
   username: 'tester',
   permissions: ['menu:ai-ops', 'aiops:sql:generate'],
+  roles: [{ name: '运维' }],
 };
 
 const envConfig = {
@@ -225,5 +226,46 @@ describe('AiOpsService previewSql security', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it('lists sql audit only for current user when actor is non-admin', async () => {
+    const { service, platformDb } = createService();
+    platformDb.query.mockReset();
+    platformDb.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    await service.listSqlAudit('test-env', actor as any, 1, 20);
+
+    const listCall = platformDb.query.mock.calls[0];
+    const totalCall = platformDb.query.mock.calls[1];
+    expect(String(listCall[0])).toContain('environment_id = ? AND actor_user_id = ?');
+    expect(listCall[1]).toEqual(['test-env', 1, 20, 0]);
+    expect(String(totalCall[0])).toContain('environment_id = ? AND actor_user_id = ?');
+    expect(totalCall[1]).toEqual(['test-env', 1]);
+  });
+
+  it('lists sql audit for all users when actor has admin role', async () => {
+    const { service, platformDb } = createService();
+    platformDb.query.mockReset();
+    platformDb.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ total: 0 }]);
+
+    const adminActor = {
+      ...actor,
+      userId: 99,
+      username: 'admin-user',
+      roles: [{ name: 'admin' }],
+    };
+    await service.listSqlAudit('test-env', adminActor as any, 1, 20);
+
+    const listCall = platformDb.query.mock.calls[0];
+    const totalCall = platformDb.query.mock.calls[1];
+    expect(String(listCall[0])).toContain('WHERE environment_id = ?');
+    expect(String(listCall[0])).not.toContain('AND actor_user_id = ?');
+    expect(listCall[1]).toEqual(['test-env', 20, 0]);
+    expect(String(totalCall[0])).toContain('WHERE environment_id = ?');
+    expect(totalCall[1]).toEqual(['test-env']);
   });
 });
