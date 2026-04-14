@@ -23,6 +23,43 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## AI Ops LLM 配置说明（OpenClaw）
+
+当前 `AI 运维` 模块仅支持通过 OpenClaw gateway 调用模型，不直接调用 OpenAI API。
+
+### 必填环境变量
+
+在 `eks-dashboard-backend/.env` 中配置：
+
+```dotenv
+AIOPS_LLM_PROVIDER=openclaw
+AIOPS_OPENCLAW_BASE_URL=http://127.0.0.1:18949/v1
+AIOPS_OPENCLAW_TOKEN=replace-with-openclaw-gateway-token
+AIOPS_OPENCLAW_MODEL=openclaw/default
+```
+
+含义：
+
+- `AIOPS_LLM_PROVIDER`：当前仅支持 `openclaw`。
+- `AIOPS_OPENCLAW_BASE_URL`：OpenClaw gateway 地址（通常以 `/v1` 结尾）。
+- `AIOPS_OPENCLAW_TOKEN`：gateway 鉴权 token（由 OpenClaw 管理员发放）。
+- `AIOPS_OPENCLAW_MODEL`：网关暴露的模型标识（如 `openclaw/default`）。
+
+### 关于“使用哪个账号”
+
+Dashboard 后端只使用 `AIOPS_OPENCLAW_TOKEN` 调 OpenClaw，不直接感知底层 ChatGPT/OpenAI 账号。
+底层使用哪个组织/seat/额度，取决于你们 OpenClaw 服务端该 token 绑定的上游凭据。
+
+### 连接检查（探活）
+
+可调用以下接口验证 gateway 连通性与模型可见性：
+
+```http
+GET /api/ai-ops/health/llm
+```
+
+返回中会包含 `configuredModel`、`modelAvailable`、`models` 等字段。
+
 ## Project setup
 
 ```bash
