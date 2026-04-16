@@ -10,6 +10,7 @@ type TenantOption = {
 
 type InventoryQuery = {
   tenantId?: number;
+  status?: boolean;
   lineUrl: string;
   provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
   availability?: 'up' | 'down' | 'unknown';
@@ -28,6 +29,11 @@ type InventoryItem = {
   availability?: 'up' | 'down' | 'unknown';
   lastCheckedAt?: string | null;
   error?: string | null;
+  availabilityScore?: number | null;
+  successRegions?: number;
+  failedRegions?: number;
+  unknownRegions?: number;
+  totalRegions?: number;
 };
 
 type InventoryResponse = {
@@ -38,14 +44,14 @@ type InventoryResponse = {
   warning?: string;
 };
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 const LineListPage: React.FC = () => {
   const [form] = Form.useForm();
   const [tenantLoading, setTenantLoading] = useState(false);
   const [tenantLoadError, setTenantLoadError] = useState<string | null>(null);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
-  const [query, setQuery] = useState<InventoryQuery>({ lineUrl: '' });
+  const [query, setQuery] = useState<InventoryQuery>({ lineUrl: '', status: true });
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -61,7 +67,7 @@ const LineListPage: React.FC = () => {
     if (!envId) {
       setTenants([]);
       setTenantLoadError(null);
-      setQuery({ lineUrl: '' });
+      setQuery({ lineUrl: '', status: true });
       setSearched(false);
       setItems([]);
       setWarning(null);
@@ -122,6 +128,7 @@ const LineListPage: React.FC = () => {
           page: nextPage,
           size: nextSize,
           tenantId: filters.tenantId,
+          status: typeof filters.status === 'boolean' ? filters.status : undefined,
           lineUrl: filters.lineUrl || undefined,
           provider: filters.provider,
           availability: filters.availability,
@@ -149,12 +156,14 @@ const LineListPage: React.FC = () => {
 
   const handleSearch = (values: {
     tenantId?: number;
+    status?: boolean;
     lineUrl?: string;
     provider?: InventoryQuery['provider'];
     availability?: InventoryQuery['availability'];
   }) => {
     const nextQuery: InventoryQuery = {
       tenantId: values.tenantId,
+      status: typeof values.status === 'boolean' ? values.status : undefined,
       lineUrl: values.lineUrl?.trim() || '',
       provider: values.provider,
       availability: values.availability,
@@ -205,14 +214,33 @@ const LineListPage: React.FC = () => {
     return String(value);
   };
 
+  const toDisplayScore = (value?: number | null) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+    return `${value.toFixed(2)}%`;
+  };
+
+  const toSampleText = (record: InventoryItem) => {
+    const success = record.successRegions ?? 0;
+    const failed = record.failedRegions ?? 0;
+    const unknown = record.unknownRegions ?? 0;
+    const total = record.totalRegions ?? success + failed + unknown;
+    if (total <= 0) return '-';
+    return `${success}/${failed}/${unknown}`;
+  };
+
   const selectedTenantText = query.tenantId
     ? `${query.tenantId} - ${tenants.find((item) => item.id === query.tenantId)?.name || '未知租户'}`
     : '全部租户';
 
   return (
     <div>
-      <Title level={3} style={{ marginBottom: 12 }}>线路总览</Title>
-      <Form form={form} layout="inline" onFinish={handleSearch} style={{ marginBottom: 16 }}>
+      <Form
+        form={form}
+        layout="inline"
+        initialValues={{ status: true }}
+        onFinish={handleSearch}
+        style={{ marginBottom: 16 }}
+      >
         <Form.Item name="tenantId" label="租户">
           <Select
             allowClear
@@ -238,6 +266,17 @@ const LineListPage: React.FC = () => {
               { value: 'aws_global', label: 'AWS Global' },
               { value: 'aliyun_esa', label: 'Aliyun ESA' },
               { value: 'unknown', label: 'Unknown' },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item name="status" label="是否启用">
+          <Select
+            allowClear
+            style={{ width: 140 }}
+            placeholder="全部"
+            options={[
+              { value: true, label: '启用' },
+              { value: false, label: '未启用' },
             ]}
           />
         </Form.Item>
@@ -302,6 +341,17 @@ const LineListPage: React.FC = () => {
               { title: 'Provider', dataIndex: 'provider', width: 140, render: renderProviderTag },
               { title: '可用性', dataIndex: 'availability', width: 110, render: renderAvailabilityTag },
               {
+                title: '可用率',
+                dataIndex: 'availabilityScore',
+                width: 110,
+                render: (value: number | null | undefined) => toDisplayScore(value),
+              },
+              {
+                title: '区域样本(成/败/未知)',
+                width: 170,
+                render: (_, record) => toSampleText(record),
+              },
+              {
                 title: '证书到期',
                 dataIndex: 'sslExpireAt',
                 width: 180,
@@ -322,7 +372,7 @@ const LineListPage: React.FC = () => {
               { title: '错误摘要', dataIndex: 'error', width: 140, render: (value) => value || '-' },
             ]}
             size="small"
-            scroll={{ x: 1680 }}
+            scroll={{ x: 1880 }}
             locale={{ emptyText: '暂无线路数据' }}
           />
         </>

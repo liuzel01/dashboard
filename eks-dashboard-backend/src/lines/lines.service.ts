@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException } from '@
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import * as dns from 'dns/promises';
 import { ListLineDto } from './dto/list-line.dto';
 import { ProvisionDcdnDomainDto } from './dto/provision-dcdn-domain.dto';
 import { ApplyDcdnSecurityDto } from './dto/apply-dcdn-security.dto';
@@ -69,6 +70,33 @@ type LineInventoryItem = {
   availability: LineInventoryAvailability;
   lastCheckedAt: string | null;
   error: LineInventoryErrorCode;
+  availabilityScore: number | null;
+  successRegions: number;
+  failedRegions: number;
+  unknownRegions: number;
+  totalRegions: number;
+};
+
+type ProviderRule = {
+  name: string;
+  provider: LineInventoryProvider;
+  pattern: RegExp;
+};
+
+type ProbeRecord = {
+  host: string;
+  region: string;
+  ok: boolean | null;
+  statusCode: number | null;
+  errorText: string;
+  checkedAt: Date | null;
+};
+
+type ProbeSnapshot = {
+  records: ProbeRecord[];
+  fetchedAt: string;
+  sourceApi: string;
+  warning?: string;
 };
 
 @Injectable()
@@ -88,6 +116,18 @@ export class LinesService {
   private readonly superAdminAddPath: string;
   private readonly superAdminListPath: string;
   private readonly superAdminUpdatePathCandidates: string[];
+  private readonly lineInventoryProbeApiUrl: string;
+  private readonly availabilityWindowMs: number;
+  private readonly availabilityCacheTtlMs: number;
+  private readonly availabilityHttpTimeoutMs: number;
+  private readonly availabilityUpThreshold: number;
+  private readonly providerCacheTtlMs: number;
+  private readonly providerRules: ProviderRule[];
+  private probeSnapshotCache: { expiresAt: number; snapshot: ProbeSnapshot } | null = null;
+  private readonly providerCache = new Map<
+    string,
+    { provider: LineInventoryProvider; expiresAt: number; cnameValues: string[] }
+  >();
 
   constructor(
     private readonly httpService: HttpService,
@@ -121,6 +161,33 @@ export class LinesService {
       '/admin/app/line/url/edit',
       '/admin/app/line/url/modify',
     ];
+    this.lineInventoryProbeApiUrl =
+      this.configService.get<string>('LINE_INVENTORY_PROBE_API_URL') ||
+      this.configService.get<string>('LINE_PROBE_LATEST_API_URL') ||
+      this.deriveProbeApiFromLineVerify(this.lineVerifyApiUrl);
+    this.availabilityWindowMs = this.parsePositiveInt(
+      this.configService.get<string>('LINE_AVAILABILITY_WINDOW_MS'),
+      120000,
+    );
+    this.availabilityCacheTtlMs = this.parsePositiveInt(
+      this.configService.get<string>('LINE_AVAILABILITY_CACHE_TTL_MS'),
+      15000,
+    );
+    this.availabilityHttpTimeoutMs = this.parsePositiveInt(
+      this.configService.get<string>('LINE_AVAILABILITY_HTTP_TIMEOUT_MS'),
+      3000,
+    );
+    this.availabilityUpThreshold = this.parsePositiveFloat(
+      this.configService.get<string>('LINE_AVAILABILITY_UP_THRESHOLD'),
+      0.8,
+    );
+    this.providerCacheTtlMs = this.parsePositiveInt(
+      this.configService.get<string>('LINE_PROVIDER_CACHE_TTL_MS'),
+      3600000,
+    );
+    this.providerRules = this.buildProviderRules(
+      this.configService.get<string>('LINE_PROVIDER_RULES_JSON'),
+    );
   }
 
   async getLines(environmentId: string, query: ListLineDto) {
@@ -153,6 +220,7 @@ export class LinesService {
     const size = query.size && query.size > 0 ? Math.min(query.size, 200) : 20;
     const lineUrl = query.lineUrl?.trim() || '';
     const tenantId = query.tenantId && query.tenantId > 0 ? query.tenantId : undefined;
+    const forceRefresh = query.refresh === true;
 
     const base = await this.listSuperAdminLines(environmentId, {
       page,
@@ -161,45 +229,500 @@ export class LinesService {
       tenantId,
     });
 
-    const items: LineInventoryItem[] = base.items.map((item) => ({
-      id: item.id ?? null,
-      tenantId: item.tenantId ?? null,
-      zh: item.zh || '',
-      en: item.en || '',
-      lineUrl: item.lineUrl || '',
-      status: item.status ?? null,
-      provider: 'unknown',
-      sslExpireAt: null,
-      sslDaysLeft: null,
-      availability: 'unknown',
-      lastCheckedAt: null,
-      error: 'no_data',
-    }));
+    let probeSnapshot: ProbeSnapshot = {
+      records: [],
+      fetchedAt: new Date().toISOString(),
+      sourceApi: this.lineInventoryProbeApiUrl || '(not configured)',
+      warning: '未获取探测快照',
+    };
+    let probeSourceUnavailable = false;
+    try {
+      probeSnapshot = await this.getLatestProbeSnapshot(forceRefresh);
+    } catch (error: any) {
+      probeSourceUnavailable = true;
+      probeSnapshot = {
+        records: [],
+        fetchedAt: new Date().toISOString(),
+        sourceApi: this.lineInventoryProbeApiUrl || '(not configured)',
+        warning: error?.message || '探测接口不可用',
+      };
+    }
 
-    const ignoredFilters: string[] = [];
-    if (query.provider) ignoredFilters.push('provider');
-    if (query.availability) ignoredFilters.push('availability');
-    if (typeof query.certExpireDaysLt === 'number') ignoredFilters.push('certExpireDaysLt');
+    const uniqueHosts = Array.from(
+      new Set(
+        base.items
+          .map((item) => this.safeNormalizeToHost(item.lineUrl || ''))
+          .filter((host): host is string => Boolean(host)),
+      ),
+    );
+    const providerMap = await this.resolveProvidersByHosts(uniqueHosts, forceRefresh);
+
+    let items: LineInventoryItem[] = base.items.map((item) => {
+      const host = this.safeNormalizeToHost(item.lineUrl || '');
+      const providerInfo = host ? providerMap.get(host) : null;
+      const availabilitySummary = host
+        ? this.buildAvailabilitySummaryByHost(host, probeSnapshot.records, probeSourceUnavailable)
+        : {
+            availability: 'unknown' as LineInventoryAvailability,
+            error: 'unknown_error' as LineInventoryErrorCode,
+            lastCheckedAt: null,
+            availabilityScore: null,
+            successRegions: 0,
+            failedRegions: 0,
+            unknownRegions: 0,
+            totalRegions: 0,
+          };
+
+      return {
+        id: item.id ?? null,
+        tenantId: item.tenantId ?? null,
+        zh: item.zh || '',
+        en: item.en || '',
+        lineUrl: item.lineUrl || '',
+        status: item.status ?? null,
+        provider: providerInfo?.provider || 'unknown',
+        sslExpireAt: null,
+        sslDaysLeft: null,
+        availability: availabilitySummary.availability,
+        lastCheckedAt: availabilitySummary.lastCheckedAt,
+        error: availabilitySummary.error,
+        availabilityScore: availabilitySummary.availabilityScore,
+        successRegions: availabilitySummary.successRegions,
+        failedRegions: availabilitySummary.failedRegions,
+        unknownRegions: availabilitySummary.unknownRegions,
+        totalRegions: availabilitySummary.totalRegions,
+      };
+    });
+
+    const postFilterWarnings: string[] = [];
+    if (typeof query.status === 'boolean') {
+      items = items.filter((item) => item.status === query.status);
+      postFilterWarnings.push('status');
+    }
+    if (query.provider) {
+      items = items.filter((item) => item.provider === query.provider);
+      postFilterWarnings.push('provider');
+    }
+    if (query.availability) {
+      items = items.filter((item) => item.availability === query.availability);
+      postFilterWarnings.push('availability');
+    }
+    if (typeof query.certExpireDaysLt === 'number') {
+      items = items.filter(
+        (item) => typeof item.sslDaysLeft === 'number' && item.sslDaysLeft <= query.certExpireDaysLt!,
+      );
+      postFilterWarnings.push('certExpireDaysLt');
+    }
+
+    const warningParts: string[] = [];
+    if (probeSnapshot.warning) warningParts.push(probeSnapshot.warning);
+    if (postFilterWarnings.length > 0) {
+      warningParts.push(`当前 ${postFilterWarnings.join(', ')} 过滤仅基于本页数据`);
+    }
 
     return {
       page: base.page,
       size: base.size,
-      total: base.total,
+      total: postFilterWarnings.length > 0 ? items.length : base.total,
       tenantId: base.tenantId,
       lineUrl: base.lineUrl,
       filters: {
+        status: typeof query.status === 'boolean' ? query.status : null,
         provider: query.provider || null,
         availability: query.availability || null,
         certExpireDaysLt:
           typeof query.certExpireDaysLt === 'number' ? query.certExpireDaysLt : null,
-        refresh: query.refresh === true,
+        refresh: forceRefresh,
       },
       items,
-      fetchedAt: new Date().toISOString(),
-      warning:
-        ignoredFilters.length > 0
-          ? `当前为骨架实现，暂未应用过滤条件: ${ignoredFilters.join(', ')}`
-          : '当前为骨架实现，provider/availability/error 为占位字段',
+      probeSnapshot: {
+        fetchedAt: probeSnapshot.fetchedAt,
+        sourceApi: probeSnapshot.sourceApi,
+      },
+      fetchedAt: probeSnapshot.fetchedAt || new Date().toISOString(),
+      warning: warningParts.length > 0 ? warningParts.join('；') : null,
+    };
+  }
+
+  private parsePositiveInt(raw: string | undefined, fallback: number): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return fallback;
+    return Math.floor(value);
+  }
+
+  private parsePositiveFloat(raw: string | undefined, fallback: number): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return fallback;
+    if (value > 1 && value <= 100) return value / 100;
+    if (value > 100) return fallback;
+    return value;
+  }
+
+  private deriveProbeApiFromLineVerify(lineVerifyApiUrl: string): string {
+    try {
+      const parsed = new URL(lineVerifyApiUrl);
+      if (parsed.pathname === '/api/lines') {
+        parsed.pathname = '/api/probes/latest';
+      } else if (parsed.pathname === '/api/latest') {
+        return parsed.toString();
+      } else if (!parsed.pathname || parsed.pathname === '/') {
+        parsed.pathname = '/api/probes/latest';
+      }
+      return parsed.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  private buildProviderRules(rawJson: string | undefined): ProviderRule[] {
+    const builtinRules: ProviderRule[] = [
+      { name: 'aws-cloudfront', provider: 'aws_global', pattern: /\.cloudfront\.net$/i },
+      {
+        name: 'aws-global-accelerator',
+        provider: 'aws_global',
+        pattern: /\.awsglobalaccelerator\.com$/i,
+      },
+      { name: 'aws-elb', provider: 'aws_global', pattern: /\.elb\.amazonaws\.com$/i },
+      { name: 'aliyun-dcdn', provider: 'aliyun_dcdn', pattern: /dcdn|kunlun/i },
+      { name: 'aliyun-esa', provider: 'aliyun_esa', pattern: /esa|edge\.aliyun/i },
+    ];
+
+    if (!rawJson?.trim()) return builtinRules;
+
+    try {
+      const parsed = JSON.parse(rawJson);
+      if (!Array.isArray(parsed)) return builtinRules;
+      const envRules: ProviderRule[] = parsed
+        .map((item, index) => {
+          const provider = String(item?.provider || '').trim() as LineInventoryProvider;
+          const patternRaw = String(item?.pattern || '').trim();
+          const flags = String(item?.flags || '').trim();
+          const name = String(item?.name || `env-rule-${index + 1}`).trim();
+          if (!provider || !patternRaw) return null;
+          if (!['aliyun_dcdn', 'aws_global', 'aliyun_esa', 'unknown'].includes(provider)) {
+            return null;
+          }
+          return {
+            provider,
+            name,
+            pattern: new RegExp(patternRaw, flags),
+          } as ProviderRule;
+        })
+        .filter((item): item is ProviderRule => Boolean(item));
+      return builtinRules.concat(envRules);
+    } catch {
+      return builtinRules;
+    }
+  }
+
+  private safeNormalizeToHost(rawValue: string): string | null {
+    const value = String(rawValue || '').trim();
+    if (!value) return null;
+    try {
+      return this.normalizeToHost(value);
+    } catch {
+      return null;
+    }
+  }
+
+  private flattenProbeRecords(payload: unknown, output: any[]) {
+    if (payload == null) return;
+    if (Array.isArray(payload)) {
+      payload.forEach((item) => this.flattenProbeRecords(item, output));
+      return;
+    }
+    if (typeof payload !== 'object') return;
+
+    const obj = payload as Record<string, unknown>;
+    const hasProbeShape =
+      'line_url' in obj ||
+      'lineUrl' in obj ||
+      'ok' in obj ||
+      'http_status' in obj ||
+      'httpStatus' in obj;
+    if (hasProbeShape) {
+      output.push(obj);
+    }
+    Object.values(obj).forEach((value) => this.flattenProbeRecords(value, output));
+  }
+
+  private toProbeDate(value: unknown): Date | null {
+    if (value == null) return null;
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
+  }
+
+  private normalizeProbeRecord(raw: any): ProbeRecord | null {
+    const host = this.safeNormalizeToHost(
+      String(raw?.line_url || raw?.lineUrl || raw?.url || raw?.lineUrlHost || ''),
+    );
+    if (!host) return null;
+
+    const regionRaw = String(raw?.region || raw?.agentRegion || raw?.agent || 'unknown')
+      .trim()
+      .toLowerCase();
+    const region = regionRaw || 'unknown';
+    const statusRaw = raw?.http_status ?? raw?.httpStatus ?? raw?.status ?? null;
+    const statusCode = Number.isFinite(Number(statusRaw)) ? Number(statusRaw) : null;
+    const okRaw = raw?.ok;
+    let ok: boolean | null = null;
+    if (typeof okRaw === 'boolean') {
+      ok = okRaw;
+    } else if (String(okRaw).toLowerCase() === 'true') {
+      ok = true;
+    } else if (String(okRaw).toLowerCase() === 'false') {
+      ok = false;
+    } else if (statusCode != null) {
+      ok = statusCode >= 200 && statusCode < 400;
+    }
+
+    return {
+      host,
+      region,
+      ok,
+      statusCode,
+      errorText: String(raw?.error || raw?.err || '').trim(),
+      checkedAt: this.toProbeDate(raw?.time ?? raw?.checkedAt ?? raw?.timestamp ?? raw?.updatedAt),
+    };
+  }
+
+  private async getLatestProbeSnapshot(forceRefresh: boolean): Promise<ProbeSnapshot> {
+    const now = Date.now();
+    if (!forceRefresh && this.probeSnapshotCache && this.probeSnapshotCache.expiresAt > now) {
+      return this.probeSnapshotCache.snapshot;
+    }
+    if (!this.lineInventoryProbeApiUrl) {
+      return {
+        records: [],
+        fetchedAt: new Date().toISOString(),
+        sourceApi: '(not configured)',
+        warning: '未配置线路探测聚合接口',
+      };
+    }
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(this.lineInventoryProbeApiUrl, {
+          timeout: this.availabilityHttpTimeoutMs,
+        }),
+      );
+      const rawRecords: any[] = [];
+      this.flattenProbeRecords(response.data, rawRecords);
+      const latestByHostRegion = new Map<string, ProbeRecord>();
+      rawRecords.forEach((raw) => {
+        const normalized = this.normalizeProbeRecord(raw);
+        if (!normalized) return;
+        const key = `${normalized.host}#${normalized.region}`;
+        const existing = latestByHostRegion.get(key);
+        const currentTs = normalized.checkedAt?.getTime() ?? 0;
+        const existingTs = existing?.checkedAt?.getTime() ?? 0;
+        if (!existing || currentTs >= existingTs) {
+          latestByHostRegion.set(key, normalized);
+        }
+      });
+      const snapshot: ProbeSnapshot = {
+        records: Array.from(latestByHostRegion.values()),
+        fetchedAt: new Date().toISOString(),
+        sourceApi: this.lineInventoryProbeApiUrl,
+      };
+      this.probeSnapshotCache = {
+        expiresAt: now + this.availabilityCacheTtlMs,
+        snapshot,
+      };
+      return snapshot;
+    } catch (error: any) {
+      if (this.probeSnapshotCache) {
+        return {
+          ...this.probeSnapshotCache.snapshot,
+          warning: '探测接口请求失败，已回退到缓存快照',
+        };
+      }
+      throw new InternalServerErrorException(
+        `探测接口请求失败: ${error?.message || 'unknown error'}`,
+      );
+    }
+  }
+
+  private async resolveProvidersByHosts(
+    hosts: string[],
+    forceRefresh: boolean,
+  ): Promise<Map<string, { provider: LineInventoryProvider; cnameValues: string[] }>> {
+    const result = new Map<string, { provider: LineInventoryProvider; cnameValues: string[] }>();
+    await Promise.all(
+      hosts.map(async (host) => {
+        const resolved = await this.resolveProviderForHost(host, forceRefresh);
+        result.set(host, resolved);
+      }),
+    );
+    return result;
+  }
+
+  private async resolveProviderForHost(
+    host: string,
+    forceRefresh: boolean,
+  ): Promise<{ provider: LineInventoryProvider; cnameValues: string[] }> {
+    const now = Date.now();
+    const cached = this.providerCache.get(host);
+    if (!forceRefresh && cached && cached.expiresAt > now) {
+      return { provider: cached.provider, cnameValues: cached.cnameValues };
+    }
+
+    const cnameValues = await this.resolveCnameValues(host);
+    const candidates = [host, ...cnameValues].map((item) => item.toLowerCase());
+    let provider: LineInventoryProvider = 'unknown';
+    for (const rule of this.providerRules) {
+      if (candidates.some((candidate) => rule.pattern.test(candidate))) {
+        provider = rule.provider;
+        break;
+      }
+    }
+
+    this.providerCache.set(host, {
+      provider,
+      cnameValues,
+      expiresAt: now + this.providerCacheTtlMs,
+    });
+    return { provider, cnameValues };
+  }
+
+  private async resolveCnameValues(host: string): Promise<string[]> {
+    const results: string[] = [];
+    let currentLevel = [host];
+    const visited = new Set<string>([host]);
+    for (let depth = 0; depth < 3; depth += 1) {
+      const nextLevel: string[] = [];
+      await Promise.all(
+        currentLevel.map(async (domain) => {
+          try {
+            const aliases = await dns.resolveCname(domain);
+            aliases.forEach((alias) => {
+              const normalized = alias.trim().toLowerCase().replace(/\.$/, '');
+              if (!normalized) return;
+              if (!visited.has(normalized)) {
+                visited.add(normalized);
+                results.push(normalized);
+                nextLevel.push(normalized);
+              }
+            });
+          } catch {
+            // ignore DNS failures; provider fallback will be unknown
+          }
+        }),
+      );
+      if (nextLevel.length === 0) break;
+      currentLevel = nextLevel;
+    }
+    return results;
+  }
+
+  private mapErrorFromProbe(
+    failures: ProbeRecord[],
+    sourceUnavailable: boolean,
+  ): LineInventoryErrorCode {
+    if (sourceUnavailable && failures.length === 0) return 'probe_unreachable';
+    for (const failure of failures) {
+      if (failure.statusCode != null) {
+        if (failure.statusCode >= 500) return 'http_5xx';
+        if (failure.statusCode >= 400) return 'http_4xx';
+      }
+      const text = failure.errorText.toLowerCase();
+      if (text.includes('timeout')) return 'timeout';
+      if (text.includes('dns') || text.includes('enotfound') || text.includes('nxdomain')) return 'dns_error';
+      if (text.includes('ssl') || text.includes('certificate') || text.includes('tls')) return 'ssl_error';
+      if (text.includes('tcp') || text.includes('connect') || text.includes('refused')) return 'tcp_error';
+    }
+    return failures.length > 0 ? 'unknown_error' : 'no_data';
+  }
+
+  private buildAvailabilitySummaryByHost(
+    host: string,
+    records: ProbeRecord[],
+    sourceUnavailable: boolean,
+  ): {
+    availability: LineInventoryAvailability;
+    error: LineInventoryErrorCode;
+    lastCheckedAt: string | null;
+    availabilityScore: number | null;
+    successRegions: number;
+    failedRegions: number;
+    unknownRegions: number;
+    totalRegions: number;
+  } {
+    const hostRecords = records.filter((record) => record.host === host);
+    if (hostRecords.length === 0) {
+      return {
+        availability: 'unknown',
+        error: sourceUnavailable ? 'probe_unreachable' : 'no_data',
+        lastCheckedAt: null,
+        availabilityScore: null,
+        successRegions: 0,
+        failedRegions: 0,
+        unknownRegions: 0,
+        totalRegions: 0,
+      };
+    }
+
+    const latestCheckedAt = hostRecords
+      .map((record) => record.checkedAt?.getTime() ?? 0)
+      .reduce((prev, current) => Math.max(prev, current), 0);
+    const now = Date.now();
+    const freshRecords = hostRecords.filter((record) => {
+      const ts = record.checkedAt?.getTime();
+      return typeof ts === 'number' && ts > 0 && now - ts <= this.availabilityWindowMs;
+    });
+    if (freshRecords.length === 0) {
+      return {
+        availability: 'unknown',
+        error: 'stale_data',
+        lastCheckedAt: latestCheckedAt > 0 ? new Date(latestCheckedAt).toISOString() : null,
+        availabilityScore: null,
+        successRegions: 0,
+        failedRegions: 0,
+        unknownRegions: hostRecords.length,
+        totalRegions: hostRecords.length,
+      };
+    }
+
+    let successRegions = 0;
+    let failedRegions = 0;
+    let unknownRegions = 0;
+    const failures: ProbeRecord[] = [];
+    freshRecords.forEach((record) => {
+      if (record.ok === true) {
+        successRegions += 1;
+      } else if (record.ok === false) {
+        failedRegions += 1;
+        failures.push(record);
+      } else {
+        unknownRegions += 1;
+      }
+    });
+    const effectiveRegions = successRegions + failedRegions;
+    if (effectiveRegions === 0) {
+      return {
+        availability: 'unknown',
+        error: 'no_data',
+        lastCheckedAt: latestCheckedAt > 0 ? new Date(latestCheckedAt).toISOString() : null,
+        availabilityScore: null,
+        successRegions,
+        failedRegions,
+        unknownRegions,
+        totalRegions: freshRecords.length,
+      };
+    }
+
+    const availabilityScore = Number(((successRegions / effectiveRegions) * 100).toFixed(2));
+    const isUp = availabilityScore >= this.availabilityUpThreshold * 100;
+    return {
+      availability: isUp ? 'up' : 'down',
+      error: isUp ? 'none' : this.mapErrorFromProbe(failures, sourceUnavailable),
+      lastCheckedAt: latestCheckedAt > 0 ? new Date(latestCheckedAt).toISOString() : null,
+      availabilityScore,
+      successRegions,
+      failedRegions,
+      unknownRegions,
+      totalRegions: freshRecords.length,
     };
   }
 

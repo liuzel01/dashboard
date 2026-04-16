@@ -217,7 +217,12 @@ GET /api/lines/inventory?page=1&size=20&tenantId=1001&provider=aliyun_dcdn&refre
       "sslDaysLeft": 75,
       "availability": "up",
       "lastCheckedAt": "2026-04-16T03:00:00Z",
-      "error": "none"
+      "error": "none",
+      "availabilityScore": 99.5,
+      "successRegions": 199,
+      "failedRegions": 1,
+      "unknownRegions": 0,
+      "totalRegions": 200
     }
   ],
   "fetchedAt": "2026-04-16T03:00:05Z"
@@ -231,6 +236,9 @@ GET /api/lines/inventory?page=1&size=20&tenantId=1001&provider=aliyun_dcdn&refre
 - 枚举约束：
   - `availability ∈ {up, down, unknown}`
   - `error ∈ {none, timeout, http_4xx, http_5xx, dns_error, tcp_error, ssl_error, probe_unreachable, stale_data, no_data, unknown_error}`
+- 摘要统计字段：
+  - `availabilityScore`：可用率百分比（`success/(success+failed)*100`）
+  - `successRegions/failedRegions/unknownRegions/totalRegions`：region 聚合统计，仅用于摘要展示
 
 ## 7. 迭代计划
 
@@ -276,3 +284,74 @@ GET /api/lines/inventory?page=1&size=20&tenantId=1001&provider=aliyun_dcdn&refre
 - [ ] 确认 Provider 规则样本（AWS/DCDN/ESA）
 - [ ] 确认前端字段与排序展示规则
 - [ ] 确认测试样本（多租户、异常线路、证书临期线路）
+
+## 11. 后续优化与配置治理（待办）
+
+本节为 MVP 之后的优化方向，当前版本可先不实现。
+
+### 11.1 配置分层建议
+
+- `.env` 仅保留“技术参数”：
+  - 探测接口地址、超时、缓存 TTL、默认阈值等。
+- 页面配置（落库）承载“业务策略”：
+  - Provider 识别规则（域名特征 -> provider）。
+  - 可用性判定阈值（例如 `up` 阈值、有效时间窗）。
+  - 覆盖策略（全局默认/环境级/线路级）。
+
+### 11.2 建议新增配置表（后续）
+
+可按需增加以下配置表，用于替代频繁改 `.env` 的方式。
+
+1. `line_provider_rules`（Provider 识别规则）
+
+- 用途：维护“匹配规则 -> provider”映射，支持按优先级匹配。
+- 建议字段：`environment_id`、`name`、`pattern`、`match_type(regex|contains|suffix)`、`provider`、`priority`、`enabled`、`updated_by`。
+
+2. `line_inventory_policies`（可用性策略）
+
+- 用途：维护可用性判定阈值和窗口配置。
+- 建议字段：`environment_id`、`availability_window_ms`、`up_threshold`、`min_effective_regions`、`cache_ttl_ms`、`probe_timeout_ms`、`enabled`、`updated_by`。
+
+### 11.3 可选 SQL 草案（后续使用）
+
+```sql
+CREATE TABLE IF NOT EXISTS line_provider_rules (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  environment_id VARCHAR(64) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  pattern VARCHAR(512) NOT NULL,
+  match_type ENUM('regex','contains','suffix') NOT NULL DEFAULT 'regex',
+  provider ENUM('aliyun_dcdn','aws_global','aliyun_esa','unknown') NOT NULL,
+  priority INT NOT NULL DEFAULT 100,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  updated_by VARCHAR(64) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_env_enabled_priority (environment_id, enabled, priority)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS line_inventory_policies (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  environment_id VARCHAR(64) NOT NULL,
+  availability_window_ms INT NOT NULL DEFAULT 120000,
+  up_threshold DECIMAL(5,4) NOT NULL DEFAULT 0.8000,
+  min_effective_regions INT NOT NULL DEFAULT 1,
+  cache_ttl_ms INT NOT NULL DEFAULT 15000,
+  probe_timeout_ms INT NOT NULL DEFAULT 3000,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  updated_by VARCHAR(64) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_env (environment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+### 11.4 页面化配置建议（后续）
+
+- 在线路总览页增加“规则设置”入口（仅管理员可见）。
+- 支持：
+  - Provider 规则 CRUD、排序、启停、正则校验。
+  - 可用性阈值配置与实时预览（配置后立即生效）。
+- 配置变更保留审计日志（谁在什么时间改了什么）。

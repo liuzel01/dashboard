@@ -335,6 +335,7 @@ export const getLineInventory = async (params: {
   page?: number;
   size?: number;
   tenantId?: number;
+  status?: boolean;
   lineUrl?: string;
   provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
   availability?: 'up' | 'down' | 'unknown';
