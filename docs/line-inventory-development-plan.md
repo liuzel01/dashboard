@@ -111,6 +111,7 @@
 - 仅当 `now - lastCheckedAt <= 有效时间窗` 时，探测结果可用于判定 `up/down`。
 - 当最新探测时间超出有效时间窗时，统一降级为 `unknown`，`error` 置为 `stale_data`。
 - 若探测源不可达（接口错误/超时）且无可用缓存，同样返回 `unknown`。
+- 默认可用阈值：`0.8`（可配置，配置项：`LINE_AVAILABILITY_UP_THRESHOLD`，支持 `0~1` 或 `1~100` 写法，例如 `0.8` 或 `80`）。
 
 #### 4.4.2 `availability` 与 `error` 枚举规范（建议）
 
@@ -136,6 +137,28 @@
 - `/lines/inventory` 仅返回上述摘要枚举，不返回原始错误堆栈/明细数组。
 - 后端内部可保留 `errorMessage` 用于日志诊断，但默认不对前端透出。
 
+#### 4.4.3 区域样本（成/败/未知）统计口径
+
+`区域样本(成/败/未知)` 对应接口字段：
+
+- `successRegions/failedRegions/unknownRegions/totalRegions`
+
+统计规则：
+
+- 先按 `host + region` 聚合探测记录，同一 `host+region` 仅保留最新一条样本。
+- 仅统计“有效时间窗内”的样本（默认 `LINE_AVAILABILITY_WINDOW_MS=120000` 毫秒）。
+- 样本状态判定：
+  - `success`：`ok === true`
+  - `failed`：`ok === false`
+  - `unknown`：`ok` 不是 `true/false`（例如 `null`、缺失）
+- `totalRegions = successRegions + failedRegions + unknownRegions`（针对有效窗口内样本）。
+
+边界情况：
+
+- 无任何探测记录：`0/0/0`，前端展示为 `-`。
+- 有历史记录但都超出有效时间窗：`0/0/N`（`N` 为该线路历史 region 样本数），并返回 `availability=unknown`、`error=stale_data`。
+- 若有效窗口内仅有 `unknown` 样本（`success+failed=0`），返回 `availability=unknown`、`error=no_data`。
+
 ### 4.5 性能与稳定性
 
 - 并发限制：建议 10（可配置）。
@@ -148,6 +171,31 @@
 
 - 接口耗时、探测成功率、provider 命中率、错误分布。
 - 关键日志字段：environmentId、tenantId、lineUrl、provider、availability、errorCode。
+
+### 4.7 环境变量配置（MVP）
+
+建议至少补齐以下变量：
+
+- `LINE_INVENTORY_PROBE_API_URL`：线路探测聚合接口地址（推荐显式配置）。未配置时会尝试从 `LINE_VERIFY_API_URL` 推导。
+- `LINE_AVAILABILITY_WINDOW_MS`：可用性有效时间窗（毫秒），默认 `120000`。
+- `LINE_AVAILABILITY_CACHE_TTL_MS`：探测快照缓存 TTL（毫秒），默认 `15000`。
+- `LINE_AVAILABILITY_HTTP_TIMEOUT_MS`：调用探测接口超时（毫秒），默认 `3000`。
+- `LINE_AVAILABILITY_UP_THRESHOLD`：可用判定阈值，默认 `0.8`。支持 `0~1` 或百分比（如 `80`）。
+- `LINE_PROVIDER_CACHE_TTL_MS`：provider 识别缓存 TTL（毫秒），默认 `3600000`。
+- `LINE_PROVIDER_RULES_JSON`：provider 规则扩展（JSON 数组）。与内置规则合并使用。
+
+`LINE_PROVIDER_RULES_JSON` 规则格式（单条）：
+
+- `name`：规则名（可选，便于排查）。
+- `provider`：`aliyun_dcdn | aws_global | aliyun_esa | unknown`。
+- `pattern`：正则表达式主体（不要写两侧 `/`）。
+- `flags`：正则 flags（可选，如 `i`）。
+
+示例：
+
+```env
+LINE_PROVIDER_RULES_JSON=[{"name":"custom-aws-cdn","provider":"aws_global","pattern":"\\.example-aws-cdn\\.com$","flags":"i"},{"name":"custom-aliyun-esa","provider":"aliyun_esa","pattern":"\\.edge\\.example\\.aliyun\\.com$","flags":"i"}]
+```
 
 ## 5. 前端任务清单
 
@@ -355,3 +403,49 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
   - Provider 规则 CRUD、排序、启停、正则校验。
   - 可用性阈值配置与实时预览（配置后立即生效）。
 - 配置变更保留审计日志（谁在什么时间改了什么）。
+
+## 12. 截至目前进度与后续计划（2026-04-16）
+
+### 12.1 当前进度（已完成）
+
+- 已启用 `/lines` 页面，并接入线路总览查询接口。
+- 已上线 `GET /api/lines/inventory` 聚合接口（分页、`tenantId`、`lineUrl`、`provider`、`status`、`availability`、`refresh`）。
+- 已实现可用性聚合（`up/down/unknown`）与可用率计算（`availabilityScore`）。
+- 已实现区域样本聚合统计（`successRegions/failedRegions/unknownRegions/totalRegions`）。
+- 已实现“查询”和“强制刷新”分离：
+  - 查询优先使用短缓存快照。
+  - 强制刷新绕过缓存直连探测源（失败时回退缓存）。
+- 已实现 Provider 识别 MVP：
+  - 内置规则（AWS/DCDN/ESA）+ CNAME 链匹配。
+  - 支持 `LINE_PROVIDER_RULES_JSON` 扩展规则。
+- 前端筛选已支持“是否启用”，默认值为“启用”。
+- 已补齐文档与 `.env-example` 中的核心配置项（包括 `LINE_AVAILABILITY_UP_THRESHOLD`、`LINE_PROVIDER_RULES_JSON`）。
+
+### 12.2 当前差距（未完成/待优化）
+
+- 证书字段尚未完成真实聚合：`sslExpireAt`、`sslDaysLeft` 当前仍可能为空，`certExpireDaysLt` 过滤价值受限。
+- Provider 识别仍有 `unknown` 占比，规则命中率需继续提升（样本库与后缀规则需补充）。
+- 缺少面向运维的指标与面板（命中率、错误码分布、刷新耗时、探测源可达性）。
+- 缺少自动化测试覆盖（接口契约、聚合边界、规则匹配回归）。
+
+### 12.3 后续任务（建议执行顺序）
+
+1. 完成证书信息聚合（P1）
+- 在 `/api/lines/inventory` 中补齐 `sslExpireAt`、`sslDaysLeft` 的真实值。
+- 打通 `certExpireDaysLt` 过滤并补充边界测试（临期、过期、无证书）。
+
+2. 提升 Provider 识别准确率（P1）
+- 按线上样本补充 `LINE_PROVIDER_RULES_JSON`（后缀优先、规则命名标准化）。
+- 增加“判定可观测字段”（日志或调试开关），用于定位 `unknown` 原因。
+
+3. 补齐可观测性与稳定性（P2）
+- 增加聚合接口关键指标：请求耗时、探测回退次数、错误码分布、provider 命中率。
+- 明确告警阈值（探测源不可达、`unknown` 占比异常上升）。
+
+4. 补齐测试与验收脚本（P2）
+- 后端：`buildAvailabilitySummaryByHost`、provider 规则匹配、缓存/强刷行为单测。
+- 前端：筛选参数透传、区域样本展示、空状态与错误提示。
+
+5. 配置治理与页面化（P3）
+- 评估将规则与阈值从 `.env` 迁移到配置表（见 11.2/11.3）。
+- 规划“线路总览-规则设置”页面（管理员可见，带审计日志）。
