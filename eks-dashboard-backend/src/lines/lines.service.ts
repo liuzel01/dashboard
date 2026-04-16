@@ -8,6 +8,7 @@ import { ApplyDcdnSecurityDto } from './dto/apply-dcdn-security.dto';
 import { RegisterSuperAdminLineDto } from './dto/register-super-admin-line.dto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
+import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -38,6 +39,36 @@ type DcdnProvisionResult = {
   verifyRequired?: boolean;
   warnings?: string[];
   message: string;
+};
+
+type LineInventoryProvider = 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
+type LineInventoryAvailability = 'up' | 'down' | 'unknown';
+type LineInventoryErrorCode =
+  | 'none'
+  | 'timeout'
+  | 'http_4xx'
+  | 'http_5xx'
+  | 'dns_error'
+  | 'tcp_error'
+  | 'ssl_error'
+  | 'probe_unreachable'
+  | 'stale_data'
+  | 'no_data'
+  | 'unknown_error';
+
+type LineInventoryItem = {
+  id: number | string | null;
+  tenantId: number | null;
+  zh: string;
+  en: string;
+  lineUrl: string;
+  status: boolean | null;
+  provider: LineInventoryProvider;
+  sslExpireAt: string | null;
+  sslDaysLeft: number | null;
+  availability: LineInventoryAvailability;
+  lastCheckedAt: string | null;
+  error: LineInventoryErrorCode;
 };
 
 @Injectable()
@@ -114,6 +145,61 @@ export class LinesService {
         page: result.page,
         size: result.size,
       },
+    };
+  }
+
+  async getLineInventory(environmentId: string, query: ListLineInventoryDto) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const size = query.size && query.size > 0 ? Math.min(query.size, 200) : 20;
+    const lineUrl = query.lineUrl?.trim() || '';
+    const tenantId = query.tenantId && query.tenantId > 0 ? query.tenantId : undefined;
+
+    const base = await this.listSuperAdminLines(environmentId, {
+      page,
+      size,
+      lineUrl,
+      tenantId,
+    });
+
+    const items: LineInventoryItem[] = base.items.map((item) => ({
+      id: item.id ?? null,
+      tenantId: item.tenantId ?? null,
+      zh: item.zh || '',
+      en: item.en || '',
+      lineUrl: item.lineUrl || '',
+      status: item.status ?? null,
+      provider: 'unknown',
+      sslExpireAt: null,
+      sslDaysLeft: null,
+      availability: 'unknown',
+      lastCheckedAt: null,
+      error: 'no_data',
+    }));
+
+    const ignoredFilters: string[] = [];
+    if (query.provider) ignoredFilters.push('provider');
+    if (query.availability) ignoredFilters.push('availability');
+    if (typeof query.certExpireDaysLt === 'number') ignoredFilters.push('certExpireDaysLt');
+
+    return {
+      page: base.page,
+      size: base.size,
+      total: base.total,
+      tenantId: base.tenantId,
+      lineUrl: base.lineUrl,
+      filters: {
+        provider: query.provider || null,
+        availability: query.availability || null,
+        certExpireDaysLt:
+          typeof query.certExpireDaysLt === 'number' ? query.certExpireDaysLt : null,
+        refresh: query.refresh === true,
+      },
+      items,
+      fetchedAt: new Date().toISOString(),
+      warning:
+        ignoredFilters.length > 0
+          ? `当前为骨架实现，暂未应用过滤条件: ${ignoredFilters.join(', ')}`
+          : '当前为骨架实现，provider/availability/error 为占位字段',
     };
   }
 

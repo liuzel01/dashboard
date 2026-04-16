@@ -11,6 +11,7 @@ import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import S3UploadPage from './pages/S3UploadPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import LineOnboardingPage from './pages/LineOnboardingPage';
+import LineListPage from './pages/LineListPage';
 import ForbiddenPage from './pages/ForbiddenPage';
 import LoginPage from './pages/LoginPage';
 import SsoCallbackPage from './pages/SsoCallbackPage';
@@ -83,6 +84,7 @@ const AppLayout: React.FC = () => {
     { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
     { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
     { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
+    { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
@@ -158,7 +160,7 @@ const AppLayout: React.FC = () => {
                 path="/lines"
                 element={
                   <ProtectedRoute requiredAny={['menu:line-onboarding', 'menu:lines']}>
-                    <Navigate to="/line-onboarding" replace />
+                    <LineListPage />
                   </ProtectedRoute>
                 }
               />

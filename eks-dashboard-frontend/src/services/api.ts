@@ -331,6 +331,20 @@ export const getLines = async (params: { page: number; size: number; tenantId: n
   return response.data;
 };
 
+export const getLineInventory = async (params: {
+  page?: number;
+  size?: number;
+  tenantId?: number;
+  lineUrl?: string;
+  provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
+  availability?: 'up' | 'down' | 'unknown';
+  certExpireDaysLt?: number;
+  refresh?: boolean;
+}) => {
+  const response = await api.get('/lines/inventory', { params });
+  return response.data;
+};
+
 export const verifyExternalLine = async (lineUrl: string) => {
   const response = await api.get('/lines/external/check', {
     params: { lineUrl },

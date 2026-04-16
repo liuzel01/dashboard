@@ -9,6 +9,7 @@ import { ListCasCertificatesDto } from './dto/list-cas-certificates.dto';
 import { RegisterSuperAdminLineDto } from './dto/register-super-admin-line.dto';
 import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
 import { ListIngressOriginCandidatesDto } from './dto/list-ingress-origin-candidates.dto';
+import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 
 @Controller('lines')
 export class LinesController {
@@ -24,6 +25,18 @@ export class LinesController {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
     }
     return this.linesService.getLines(environmentId, query);
+  }
+
+  @Get('inventory')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  getInventory(
+    @Headers('x-target-environment') environmentId: string,
+    @Query() query: ListLineInventoryDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.getLineInventory(environmentId, query);
   }
 
   @Get('external/check')
