@@ -15,6 +15,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:jump-servers', name: 'Windows 跳板机' },
   { key: 'menu:data-query', name: '查询中心' },
   { key: 'menu:security-groups', name: '安全组管理' },
+  { key: 'menu:lines', name: '线路总览' },
   { key: 'menu:line-onboarding', name: '新增线路向导' },
   { key: 'menu:site-monitors', name: '站点监控' },
   { key: 'menu:access-control', name: '账号管理' },
@@ -93,8 +94,8 @@ export class AccessControlService {
   async listPermissions() {
     await this.ensureDefaultPermissions();
     return this.db.query(
-      'SELECT id, `key`, name, created_at, updated_at FROM permissions WHERE `key` NOT IN (?, ?) ORDER BY id ASC',
-      ['menu:lines', 'aiops:sql:execute'],
+      'SELECT id, `key`, name, created_at, updated_at FROM permissions WHERE `key` <> ? ORDER BY id ASC',
+      ['aiops:sql:execute'],
     );
   }
 
