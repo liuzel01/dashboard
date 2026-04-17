@@ -36,6 +36,8 @@ AIOPS_LLM_PROVIDER=openclaw
 AIOPS_OPENCLAW_BASE_URL=http://127.0.0.1:18949/v1
 AIOPS_OPENCLAW_TOKEN=replace-with-openclaw-gateway-token
 AIOPS_OPENCLAW_MODEL=openclaw/default
+# 可选：OpenClaw chat/completions 请求超时（毫秒，默认 20000）
+AIOPS_OPENCLAW_TIMEOUT_MS=20000
 ```
 
 含义：
@@ -44,6 +46,7 @@ AIOPS_OPENCLAW_MODEL=openclaw/default
 - `AIOPS_OPENCLAW_BASE_URL`：OpenClaw gateway 地址（通常以 `/v1` 结尾）。
 - `AIOPS_OPENCLAW_TOKEN`：gateway 鉴权 token（由 OpenClaw 管理员发放）。
 - `AIOPS_OPENCLAW_MODEL`：网关暴露的模型标识（如 `openclaw/default`）。
+- `AIOPS_OPENCLAW_TIMEOUT_MS`：调用 `/chat/completions` 的请求超时（可选，默认 `20000` 毫秒，建议在网关高负载时适当调大）。
 
 ### 关于“使用哪个账号”
 

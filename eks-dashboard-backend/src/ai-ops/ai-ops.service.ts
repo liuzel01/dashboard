@@ -95,6 +95,7 @@ export class AiOpsService {
   private readonly fewshotCacheTtlMs = 2 * 60 * 1000;
   private readonly fewshotPromptMaxCases = 6;
   private readonly fewshotPromptMaxChars = 5000;
+  private readonly openClawRequestTimeoutMs: number;
   private fewshotCache: { expiresAt: number; sourcePath: string; rows: FewshotCaseRow[] } | null =
     null;
 
@@ -105,7 +106,17 @@ export class AiOpsService {
     private readonly authService: AuthService,
     private readonly accessControl: AccessControlService,
     private readonly environments: EnvironmentsService,
-  ) {}
+  ) {
+    const openClawTimeoutMs = Number(
+      this.config.get<string>('AIOPS_OPENCLAW_TIMEOUT_MS') || 20000,
+    );
+    this.openClawRequestTimeoutMs = this.boundNumber(
+      openClawTimeoutMs,
+      1000,
+      120000,
+      20000,
+    );
+  }
 
   async resolveActorFromAuthorization(authorization?: string): Promise<ActorContext> {
     const auth = String(authorization || '');
@@ -940,6 +951,7 @@ export class AiOpsService {
     ].join('\n');
 
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const requestStartedAt = Date.now();
     let resp: { data: any };
     try {
       const messages: Array<{ role: 'system' | 'user'; content: string }> = [
@@ -993,12 +1005,13 @@ export class AiOpsService {
             'Content-Type': 'application/json',
             'x-openclaw-session-key': llmSessionKey,
           },
-          timeout: 20000,
+          timeout: this.openClawRequestTimeoutMs,
         },
       );
     } catch (error) {
+      const elapsedMs = Date.now() - requestStartedAt;
       throw new BadGatewayException(
-        `OpenClaw request failed: ${this.errorMessage(error)}`,
+        `OpenClaw request failed (endpoint=${endpoint}, model=${llm.model}, timeoutMs=${this.openClawRequestTimeoutMs}, elapsedMs=${elapsedMs}): ${this.errorMessage(error)}`,
       );
     }
 
