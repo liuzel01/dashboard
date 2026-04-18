@@ -3,6 +3,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import * as dns from 'dns/promises';
+import * as tls from 'tls';
 import { ListLineDto } from './dto/list-line.dto';
 import { ProvisionDcdnDomainDto } from './dto/provision-dcdn-domain.dto';
 import { ApplyDcdnSecurityDto } from './dto/apply-dcdn-security.dto';
@@ -99,6 +100,11 @@ type ProbeSnapshot = {
   warning?: string;
 };
 
+type LineSslSummary = {
+  sslExpireAt: string | null;
+  sslDaysLeft: number | null;
+};
+
 type SuperAdminLineItem = {
   id: number | string | null;
   zh: string;
@@ -132,11 +138,18 @@ export class LinesService {
   private readonly availabilityHttpTimeoutMs: number;
   private readonly availabilityUpThreshold: number;
   private readonly providerCacheTtlMs: number;
+  private readonly sslCacheTtlMs: number;
+  private readonly sslTlsTimeoutMs: number;
+  private readonly sslResolveConcurrency: number;
   private readonly providerRules: ProviderRule[];
   private probeSnapshotCache: { expiresAt: number; snapshot: ProbeSnapshot } | null = null;
   private readonly providerCache = new Map<
     string,
     { provider: LineInventoryProvider; expiresAt: number; cnameValues: string[] }
+  >();
+  private readonly sslSummaryCache = new Map<
+    string,
+    { summary: LineSslSummary; expiresAt: number }
   >();
 
   constructor(
@@ -194,6 +207,18 @@ export class LinesService {
     this.providerCacheTtlMs = this.parsePositiveInt(
       this.configService.get<string>('LINE_PROVIDER_CACHE_TTL_MS'),
       3600000,
+    );
+    this.sslCacheTtlMs = this.parsePositiveInt(
+      this.configService.get<string>('LINE_SSL_CACHE_TTL_MS'),
+      300000,
+    );
+    this.sslTlsTimeoutMs = this.parsePositiveInt(
+      this.configService.get<string>('LINE_SSL_TLS_TIMEOUT_MS'),
+      5000,
+    );
+    this.sslResolveConcurrency = this.parsePositiveInt(
+      this.configService.get<string>('LINE_SSL_RESOLVE_CONCURRENCY'),
+      8,
     );
     this.providerRules = this.buildProviderRules(
       this.configService.get<string>('LINE_PROVIDER_RULES_JSON'),
@@ -281,10 +306,12 @@ export class LinesService {
       ),
     );
     const providerMap = await this.resolveProvidersByHosts(uniqueHosts, forceRefresh);
+    const sslMap = await this.resolveSslSummaryByHosts(uniqueHosts, providerMap, forceRefresh);
 
     let items: LineInventoryItem[] = sourceItems.map((item) => {
       const host = this.safeNormalizeToHost(item.lineUrl || '');
       const providerInfo = host ? providerMap.get(host) : null;
+      const sslSummary = host ? sslMap.get(host) : null;
       const availabilitySummary = host
         ? this.buildAvailabilitySummaryByHost(host, probeSnapshot.records, probeSourceUnavailable)
         : {
@@ -306,8 +333,8 @@ export class LinesService {
         lineUrl: item.lineUrl || '',
         status: item.status ?? null,
         provider: providerInfo?.provider || 'unknown',
-        sslExpireAt: null,
-        sslDaysLeft: null,
+        sslExpireAt: sslSummary?.sslExpireAt ?? null,
+        sslDaysLeft: sslSummary?.sslDaysLeft ?? null,
         availability: availabilitySummary.availability,
         lastCheckedAt: availabilitySummary.lastCheckedAt,
         error: availabilitySummary.error,
@@ -699,6 +726,154 @@ export class LinesService {
       currentLevel = nextLevel;
     }
     return results;
+  }
+
+  private hasAliyunCredentials(): boolean {
+    return Boolean(this.dcdnAccessKeyId && this.dcdnAccessKeySecret);
+  }
+
+  private async resolveSslSummaryByHosts(
+    hosts: string[],
+    providerMap: Map<string, { provider: LineInventoryProvider; cnameValues: string[] }>,
+    forceRefresh: boolean,
+  ): Promise<Map<string, LineSslSummary>> {
+    const result = new Map<string, LineSslSummary>();
+    if (!hosts.length) return result;
+
+    const needDcdn = hosts.some((host) => providerMap.get(host)?.provider === 'aliyun_dcdn');
+    const dcdnClient = needDcdn && this.hasAliyunCredentials() ? this.createDcdnClient() : null;
+    const batchSize = Math.max(1, Math.min(this.sslResolveConcurrency, 50));
+
+    for (let i = 0; i < hosts.length; i += batchSize) {
+      const batch = hosts.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (host) => {
+          const provider = providerMap.get(host)?.provider || 'unknown';
+          const summary = await this.resolveSslSummaryForHost(
+            host,
+            provider,
+            forceRefresh,
+            dcdnClient,
+          );
+          result.set(host, summary);
+        }),
+      );
+    }
+    return result;
+  }
+
+  private async resolveSslSummaryForHost(
+    host: string,
+    provider: LineInventoryProvider,
+    forceRefresh: boolean,
+    dcdnClient: any | null,
+  ): Promise<LineSslSummary> {
+    const now = Date.now();
+    const cached = this.sslSummaryCache.get(host);
+    if (!forceRefresh && cached && cached.expiresAt > now) {
+      return cached.summary;
+    }
+
+    let expireAt: string | null = null;
+    if (provider === 'aliyun_dcdn') {
+      expireAt = await this.tryResolveDcdnCertExpireAt(dcdnClient, host);
+    }
+    if (!expireAt) {
+      expireAt = await this.tryResolveTlsCertExpireAt(host);
+    }
+
+    const summary: LineSslSummary = {
+      sslExpireAt: expireAt,
+      sslDaysLeft: this.computeSslDaysLeft(expireAt),
+    };
+    this.sslSummaryCache.set(host, {
+      summary,
+      expiresAt: now + this.sslCacheTtlMs,
+    });
+    return summary;
+  }
+
+  private async tryResolveDcdnCertExpireAt(client: any | null, domainName: string): Promise<string | null> {
+    if (!client) return null;
+    try {
+      const info = await this.getDcdnCertificateInfo(client, domainName);
+      return this.toIsoTime(info.certExpireTime);
+    } catch {
+      return null;
+    }
+  }
+
+  private async tryResolveTlsCertExpireAt(host: string): Promise<string | null> {
+    try {
+      const cert = await this.fetchTlsCertificate(host, 443, this.sslTlsTimeoutMs);
+      return cert.notAfter ? cert.notAfter.toISOString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private toIsoTime(raw: unknown): string | null {
+    if (raw == null) return null;
+    const value = String(raw).trim();
+    if (!value) return null;
+
+    const formatted = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/.test(value)
+      ? `${value.replace(/\s+/, 'T')}Z`
+      : value;
+    const date = new Date(formatted);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString();
+  }
+
+  private computeSslDaysLeft(expireAtIso: string | null): number | null {
+    if (!expireAtIso) return null;
+    const ts = new Date(expireAtIso).getTime();
+    if (!Number.isFinite(ts)) return null;
+    return Math.floor((ts - Date.now()) / (24 * 60 * 60 * 1000));
+  }
+
+  private fetchTlsCertificate(
+    host: string,
+    port: number,
+    timeoutMs: number,
+  ): Promise<{ notAfter: Date | null }> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
+
+      const socket = tls.connect(
+        { host, port, servername: host, rejectUnauthorized: false, timeout: timeoutMs },
+        () => {
+          settle(() => {
+            try {
+              const cert: any = socket.getPeerCertificate();
+              const notAfter = cert?.valid_to ? new Date(cert.valid_to) : null;
+              resolve({
+                notAfter:
+                  notAfter && !Number.isNaN(notAfter.getTime()) ? notAfter : null,
+              });
+            } catch (error) {
+              reject(error);
+            } finally {
+              socket.end();
+            }
+          });
+        },
+      );
+      socket.on('error', (error) => {
+        settle(() => reject(error));
+      });
+      socket.setTimeout(timeoutMs, () => {
+        settle(() => {
+          socket.destroy();
+          reject(new Error('TLS timeout'));
+        });
+      });
+    });
   }
 
   private mapErrorFromProbe(

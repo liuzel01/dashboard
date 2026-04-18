@@ -185,6 +185,9 @@
 - `LINE_AVAILABILITY_UP_THRESHOLD`：可用判定阈值，默认 `0.8`。支持 `0~1` 或百分比（如 `80`）。
 - `LINE_PROVIDER_CACHE_TTL_MS`：provider 识别缓存 TTL（毫秒），默认 `3600000`。
 - `LINE_PROVIDER_RULES_JSON`：provider 规则扩展（JSON 数组）。与内置规则合并使用。
+- `LINE_SSL_CACHE_TTL_MS`：线路证书聚合缓存 TTL（毫秒），默认 `300000`。
+- `LINE_SSL_TLS_TIMEOUT_MS`：TLS 证书探测超时（毫秒），默认 `5000`。
+- `LINE_SSL_RESOLVE_CONCURRENCY`：线路证书并发探测数，默认 `8`。
 
 `LINE_PROVIDER_RULES_JSON` 规则格式（单条）：
 
@@ -364,6 +367,11 @@ GET /api/lines/inventory?page=1&size=20&tenantId=1001&provider=aliyun_dcdn&refre
 - 用途：维护可用性判定阈值和窗口配置。
 - 建议字段：`environment_id`、`availability_window_ms`、`up_threshold`、`min_effective_regions`、`cache_ttl_ms`、`probe_timeout_ms`、`enabled`、`updated_by`。
 
+1. `line_inventory_ssl_cache`（线路证书缓存）
+
+- 用途：持久化线路证书到期聚合结果，支持跨实例共享缓存与审计排查。
+- 建议字段：`environment_id`、`host`、`provider`、`ssl_expire_at`、`ssl_days_left`、`source`、`last_checked_at`、`expires_at`、`last_error`。
+
 ### 11.3 可选 SQL 草案（后续使用）
 
 ```sql
@@ -400,7 +408,30 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-### 11.4 页面化配置建议（后续）
+补充：`line_inventory_ssl_cache` 的独立 SQL 文件已提供，路径：
+
+- `eks-dashboard-backend/scripts/sql/2026-04-18_line_inventory_ssl_cache.sql`
+
+### 11.4 `line_inventory_ssl_cache` 字段说明
+
+- `id`：主键，自增 ID。
+- `environment_id`：环境 ID，和页面环境上下文一致。
+- `host`：标准化后的线路主机名（不含协议、路径、端口）。
+- `provider`：provider 快照（`aliyun_dcdn` / `aws_global` / `aliyun_esa` / `unknown`）。
+- `ssl_expire_at`：证书到期时间（UTC）。
+- `ssl_days_left`：剩余天数（按当前时间计算，允许负值表示已过期）。
+- `source`：证书信息来源（`dcdn_api` / `tls_probe` / `unknown`）。
+- `last_checked_at`：最近一次成功或失败采集时间。
+- `expires_at`：缓存过期时间；查询可优先命中 `expires_at > NOW()` 的记录。
+- `last_error`：最近一次采集失败摘要，便于排查。
+- `created_at` / `updated_at`：记录创建/更新时间。
+
+建议治理策略：
+
+- 定时清理 `expires_at` 过久且长期未更新的数据（例如 7~30 天）。
+- 刷新策略使用 UPSERT（按 `environment_id + host` 唯一键更新）。
+
+### 11.5 页面化配置建议（后续）
 
 - 在线路总览页增加“规则设置”入口（仅管理员可见）。
 - 支持：
@@ -422,6 +453,10 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 - 已实现 Provider 识别 MVP：
   - 内置规则（AWS/DCDN/ESA）+ CNAME 链匹配。
   - 支持 `LINE_PROVIDER_RULES_JSON` 扩展规则。
+- 已实现证书信息聚合（MVP）：
+  - DCDN 线路优先通过阿里云接口读取证书到期时间。
+  - 其他线路（以及 DCDN 接口失败场景）回退 TLS 探测证书到期时间。
+  - 返回 `sslExpireAt`、`sslDaysLeft`，并支持短缓存与并发控制。
 - 前端筛选已支持“是否启用”，默认值为“启用”。
 - 已补齐文档与 `.env-example` 中的核心配置项（包括 `LINE_AVAILABILITY_UP_THRESHOLD`、`LINE_PROVIDER_RULES_JSON`）。
 - 已完成全量过滤语义（`status/provider/availability/certExpireDaysLt`）与分页 `total` 严格一致：
@@ -430,7 +465,6 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 
 ### 12.2 当前差距（未完成/待优化）
 
-- 证书字段尚未完成真实聚合：`sslExpireAt`、`sslDaysLeft` 当前仍可能为空，`certExpireDaysLt` 过滤价值受限。
 - 前端尚未提供 `certExpireDaysLt` 查询输入与参数透传，无法在页面直接按证书剩余天数筛选。
 - Provider 识别仍有 `unknown` 占比，规则命中率需继续提升（样本库与后缀规则需补充）。
 - “查看探测详情”外链尚未在表格行内落地，定位问题仍需手工跳转探测系统。
@@ -450,6 +484,8 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 
 - 在 `/api/lines/inventory` 中补齐 `sslExpireAt`、`sslDaysLeft` 的真实值。
 - 打通 `certExpireDaysLt` 过滤并补充边界测试（临期、过期、无证书）。
+
+当前状态：后端已完成（2026-04-18），前端筛选输入与测试待补齐。
 
 1. 补齐前端筛选与跳转能力（P1）
 
