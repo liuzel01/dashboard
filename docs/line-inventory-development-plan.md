@@ -515,6 +515,13 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 - 评估将规则与阈值从 `.env` 迁移到配置表（见 11.2/11.3）。
 - 规划“线路总览-规则设置”页面（管理员可见，带审计日志）。
 
+1. 探测详情外链环境化改造（P2）
+
+- 现状：外链已可用，默认通过 `VITE_PROBE_DASHBOARD_URL`（未配置时展示 `-`）。
+- 后续建议：将外链升级为“按环境动态生成”，优先读取环境配置（如 `probe_detail_url_template` 或 `probe_dashboard_url`），其次回退 `super_admin_url` 规则拼接。
+- 参考现有逻辑：`/line-onboarding` 页面已按环境读取并展示“大管理端地址（super_admin_url）”。
+- 目标：适配多环境登录入口差异，减少前端全局变量依赖，避免跨环境链接错误。
+
 ### 12.4 性能优化专项（可插队）
 
 以下任务用于改善“首次点击查询较慢”的问题，可按业务压力决定是否插队到 P1。
