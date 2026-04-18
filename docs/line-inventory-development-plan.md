@@ -32,7 +32,7 @@
 - 支持单租户与全部租户视角。
 - 线路字段：`tenantId`、`zh`、`en`、`lineUrl`、`status`。
 - 健康字段：`provider`、`sslExpireAt`、`sslDaysLeft`、`availability`、`lastCheckedAt`、`error`。
-- 手动刷新与强制刷新（绕过缓存）。
+- 查询刷新与强制刷新（绕过缓存）。
 
 ### 2.2 Out of Scope（本期不做）
 
@@ -71,6 +71,8 @@
   - `availability`（可选：`up | down | unknown`）
   - `certExpireDaysLt`（可选，证书剩余天数阈值）
   - `refresh`（可选，`true` 时强制刷新）
+- 筛选口径要求：
+  - `status/provider/availability/certExpireDaysLt` 必须作用于“全量查询结果”，不应仅在当前页做后置过滤。
 
 ### 4.2 聚合流程
 
@@ -214,8 +216,10 @@ LINE_PROVIDER_RULES_JSON=[{"name":"custom-aws-cdn","provider":"aws_global","patt
   - 可用性
   - 证书剩余天数阈值
 - 新增按钮：
-  - 刷新当前页
+  - 查询（刷新当前筛选结果）
   - 强制刷新（触发后端 `refresh=true`）
+- 说明：
+  - “刷新当前页”按钮属于可选增强，不是必需能力。若“查询”已可刷新当前条件结果，可不单独提供该按钮。
 
 ### 5.3 表格列建议
 
@@ -355,7 +359,7 @@ GET /api/lines/inventory?page=1&size=20&tenantId=1001&provider=aliyun_dcdn&refre
 - 用途：维护“匹配规则 -> provider”映射，支持按优先级匹配。
 - 建议字段：`environment_id`、`name`、`pattern`、`match_type(regex|contains|suffix)`、`provider`、`priority`、`enabled`、`updated_by`。
 
-2. `line_inventory_policies`（可用性策略）
+1. `line_inventory_policies`（可用性策略）
 
 - 用途：维护可用性判定阈值和窗口配置。
 - 建议字段：`environment_id`、`availability_window_ms`、`up_threshold`、`min_effective_regions`、`cache_ttl_ms`、`probe_timeout_ms`、`enabled`、`updated_by`。
@@ -404,7 +408,7 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
   - 可用性阈值配置与实时预览（配置后立即生效）。
 - 配置变更保留审计日志（谁在什么时间改了什么）。
 
-## 12. 截至目前进度与后续计划（2026-04-16）
+## 12. 截至目前进度与后续计划（2026-04-18）
 
 ### 12.1 当前进度（已完成）
 
@@ -420,32 +424,54 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
   - 支持 `LINE_PROVIDER_RULES_JSON` 扩展规则。
 - 前端筛选已支持“是否启用”，默认值为“启用”。
 - 已补齐文档与 `.env-example` 中的核心配置项（包括 `LINE_AVAILABILITY_UP_THRESHOLD`、`LINE_PROVIDER_RULES_JSON`）。
+- 已完成全量过滤语义（`status/provider/availability/certExpireDaysLt`）与分页 `total` 严格一致：
+  - 命中过滤条件时，后端先全量拉取线路，再过滤、再分页。
+  - 返回 `total` 为过滤后的真实总数，前端分页器与结果一致。
 
 ### 12.2 当前差距（未完成/待优化）
 
 - 证书字段尚未完成真实聚合：`sslExpireAt`、`sslDaysLeft` 当前仍可能为空，`certExpireDaysLt` 过滤价值受限。
+- 前端尚未提供 `certExpireDaysLt` 查询输入与参数透传，无法在页面直接按证书剩余天数筛选。
 - Provider 识别仍有 `unknown` 占比，规则命中率需继续提升（样本库与后缀规则需补充）。
+- “查看探测详情”外链尚未在表格行内落地，定位问题仍需手工跳转探测系统。
 - 缺少面向运维的指标与面板（命中率、错误码分布、刷新耗时、探测源可达性）。
 - 缺少自动化测试覆盖（接口契约、聚合边界、规则匹配回归）。
 
 ### 12.3 后续任务（建议执行顺序）
 
+1. 实现全量过滤语义（P1）
+
+- 将 `status/provider/availability/certExpireDaysLt` 下推到全量查询链路，避免“仅当前页过滤”。
+- 对应返回的 `total` 与分页器保持严格一致，不出现跨页偏差。
+
+当前状态：已完成（2026-04-18）。
+
 1. 完成证书信息聚合（P1）
+
 - 在 `/api/lines/inventory` 中补齐 `sslExpireAt`、`sslDaysLeft` 的真实值。
 - 打通 `certExpireDaysLt` 过滤并补充边界测试（临期、过期、无证书）。
 
-2. 提升 Provider 识别准确率（P1）
+1. 补齐前端筛选与跳转能力（P1）
+
+- 在线路总览查询区增加“证书剩余天数阈值”输入，并透传 `certExpireDaysLt`。
+- 在线路列表增加“查看探测详情”外链列（跳转探测系统对应页面）。
+
+1. 提升 Provider 识别准确率（P1）
+
 - 按线上样本补充 `LINE_PROVIDER_RULES_JSON`（后缀优先、规则命名标准化）。
 - 增加“判定可观测字段”（日志或调试开关），用于定位 `unknown` 原因。
 
-3. 补齐可观测性与稳定性（P2）
+1. 补齐可观测性与稳定性（P2）
+
 - 增加聚合接口关键指标：请求耗时、探测回退次数、错误码分布、provider 命中率。
 - 明确告警阈值（探测源不可达、`unknown` 占比异常上升）。
 
-4. 补齐测试与验收脚本（P2）
+1. 补齐测试与验收脚本（P2）
+
 - 后端：`buildAvailabilitySummaryByHost`、provider 规则匹配、缓存/强刷行为单测。
 - 前端：筛选参数透传、区域样本展示、空状态与错误提示。
 
-5. 配置治理与页面化（P3）
+1. 配置治理与页面化（P3）
+
 - 评估将规则与阈值从 `.env` 迁移到配置表（见 11.2/11.3）。
 - 规划“线路总览-规则设置”页面（管理员可见，带审计日志）。

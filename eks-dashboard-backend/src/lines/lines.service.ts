@@ -99,6 +99,16 @@ type ProbeSnapshot = {
   warning?: string;
 };
 
+type SuperAdminLineItem = {
+  id: number | string | null;
+  zh: string;
+  en: string;
+  lineUrl: string;
+  otcUrl: string;
+  status: boolean | null;
+  tenantId: number | null;
+};
+
 @Injectable()
 export class LinesService {
   private readonly lineVerifyApiUrl: string;
@@ -221,13 +231,28 @@ export class LinesService {
     const lineUrl = query.lineUrl?.trim() || '';
     const tenantId = query.tenantId && query.tenantId > 0 ? query.tenantId : undefined;
     const forceRefresh = query.refresh === true;
-
-    const base = await this.listSuperAdminLines(environmentId, {
-      page,
-      size,
-      lineUrl,
-      tenantId,
-    });
+    const shouldUseFullScan = this.shouldUseFullInventoryScan(query);
+    let listFetchWarning: string | null = null;
+    let sourceItems: SuperAdminLineItem[] = [];
+    let sourceTotal = 0;
+    if (shouldUseFullScan) {
+      const fullList = await this.listAllSuperAdminLinesForInventory(environmentId, {
+        lineUrl,
+        tenantId,
+      });
+      sourceItems = fullList.items;
+      sourceTotal = sourceItems.length;
+      listFetchWarning = fullList.warning;
+    } else {
+      const base = await this.listSuperAdminLines(environmentId, {
+        page,
+        size,
+        lineUrl,
+        tenantId,
+      });
+      sourceItems = base.items;
+      sourceTotal = base.total;
+    }
 
     let probeSnapshot: ProbeSnapshot = {
       records: [],
@@ -250,14 +275,14 @@ export class LinesService {
 
     const uniqueHosts = Array.from(
       new Set(
-        base.items
+        sourceItems
           .map((item) => this.safeNormalizeToHost(item.lineUrl || ''))
           .filter((host): host is string => Boolean(host)),
       ),
     );
     const providerMap = await this.resolveProvidersByHosts(uniqueHosts, forceRefresh);
 
-    let items: LineInventoryItem[] = base.items.map((item) => {
+    let items: LineInventoryItem[] = sourceItems.map((item) => {
       const host = this.safeNormalizeToHost(item.lineUrl || '');
       const providerInfo = host ? providerMap.get(host) : null;
       const availabilitySummary = host
@@ -293,39 +318,22 @@ export class LinesService {
         totalRegions: availabilitySummary.totalRegions,
       };
     });
-
-    const postFilterWarnings: string[] = [];
-    if (typeof query.status === 'boolean') {
-      items = items.filter((item) => item.status === query.status);
-      postFilterWarnings.push('status');
-    }
-    if (query.provider) {
-      items = items.filter((item) => item.provider === query.provider);
-      postFilterWarnings.push('provider');
-    }
-    if (query.availability) {
-      items = items.filter((item) => item.availability === query.availability);
-      postFilterWarnings.push('availability');
-    }
-    if (typeof query.certExpireDaysLt === 'number') {
-      items = items.filter(
-        (item) => typeof item.sslDaysLeft === 'number' && item.sslDaysLeft <= query.certExpireDaysLt!,
-      );
-      postFilterWarnings.push('certExpireDaysLt');
-    }
+    items = this.applyLineInventoryFilters(items, query);
+    const total = shouldUseFullScan ? items.length : sourceTotal;
+    const pagedItems = shouldUseFullScan
+      ? items.slice((page - 1) * size, (page - 1) * size + size)
+      : items;
 
     const warningParts: string[] = [];
     if (probeSnapshot.warning) warningParts.push(probeSnapshot.warning);
-    if (postFilterWarnings.length > 0) {
-      warningParts.push(`当前 ${postFilterWarnings.join(', ')} 过滤仅基于本页数据`);
-    }
+    if (listFetchWarning) warningParts.push(listFetchWarning);
 
     return {
-      page: base.page,
-      size: base.size,
-      total: base.total,
-      tenantId: base.tenantId,
-      lineUrl: base.lineUrl,
+      page,
+      size,
+      total,
+      tenantId: tenantId || null,
+      lineUrl: lineUrl || null,
       filters: {
         status: typeof query.status === 'boolean' ? query.status : null,
         provider: query.provider || null,
@@ -334,13 +342,90 @@ export class LinesService {
           typeof query.certExpireDaysLt === 'number' ? query.certExpireDaysLt : null,
         refresh: forceRefresh,
       },
-      items,
+      items: pagedItems,
       probeSnapshot: {
         fetchedAt: probeSnapshot.fetchedAt,
         sourceApi: probeSnapshot.sourceApi,
       },
       fetchedAt: probeSnapshot.fetchedAt || new Date().toISOString(),
       warning: warningParts.length > 0 ? warningParts.join('；') : null,
+    };
+  }
+
+  private shouldUseFullInventoryScan(query: ListLineInventoryDto): boolean {
+    return (
+      typeof query.status === 'boolean' ||
+      Boolean(query.provider) ||
+      Boolean(query.availability) ||
+      typeof query.certExpireDaysLt === 'number'
+    );
+  }
+
+  private applyLineInventoryFilters(
+    items: LineInventoryItem[],
+    query: ListLineInventoryDto,
+  ): LineInventoryItem[] {
+    let filtered = items;
+    if (typeof query.status === 'boolean') {
+      filtered = filtered.filter((item) => item.status === query.status);
+    }
+    if (query.provider) {
+      filtered = filtered.filter((item) => item.provider === query.provider);
+    }
+    if (query.availability) {
+      filtered = filtered.filter((item) => item.availability === query.availability);
+    }
+    if (typeof query.certExpireDaysLt === 'number') {
+      filtered = filtered.filter(
+        (item) => typeof item.sslDaysLeft === 'number' && item.sslDaysLeft <= query.certExpireDaysLt!,
+      );
+    }
+    return filtered;
+  }
+
+  private async listAllSuperAdminLinesForInventory(
+    environmentId: string,
+    query: { lineUrl: string; tenantId?: number },
+  ): Promise<{ items: SuperAdminLineItem[]; warning: string | null }> {
+    const pageSize = 200;
+    const maxPages = 200;
+    const items: SuperAdminLineItem[] = [];
+    let page = 1;
+    let expectedTotal: number | null = null;
+    let truncated = false;
+
+    while (page <= maxPages) {
+      const current = await this.listSuperAdminLines(environmentId, {
+        page,
+        size: pageSize,
+        lineUrl: query.lineUrl,
+        tenantId: query.tenantId,
+      });
+      if (page === 1) {
+        const firstTotal = Number(current.total);
+        if (Number.isFinite(firstTotal) && firstTotal > pageSize) {
+          expectedTotal = firstTotal;
+        }
+      }
+      if (!current.items.length) break;
+      items.push(...current.items);
+
+      const reachedExpectedTotal = expectedTotal !== null && items.length >= expectedTotal;
+      const reachedLastPage = current.items.length < pageSize;
+      if (reachedExpectedTotal || reachedLastPage) break;
+
+      if (page === maxPages) {
+        truncated = true;
+        break;
+      }
+      page += 1;
+    }
+
+    return {
+      items,
+      warning: truncated
+        ? `线路列表全量拉取已达到安全上限（${maxPages} 页，${items.length} 条），结果可能不完整`
+        : null,
     };
   }
 
@@ -1804,7 +1889,7 @@ export class LinesService {
     const records: any[] = [];
     this.flattenLineRecords(response.body, records);
 
-    const items = records
+    const items: SuperAdminLineItem[] = records
       .map((item) => this.normalizeLineRecord(item))
       .filter((item) => item.lineUrl)
       .filter((item) => (tenantId ? item.tenantId === tenantId : true))
