@@ -554,3 +554,38 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 
 - 引入定时预聚合快照（provider/ssl/availability），`/lines` 查询优先读快照。
 - 目标：在大规模线路场景下获得稳定查询时延和更高可用性。
+
+### 12.5 封版前建议收尾项（简版）
+
+1. 配置与联通性复核
+
+- 核对生产环境变量：`LINE_INVENTORY_PROBE_API_URL`、`LINE_AVAILABILITY_*`、`LINE_SSL_*`、`LINE_PROVIDER_RULES_JSON`。
+- 核对数据库表 `line_inventory_ssl_cache` 已建表，且应用账号具备 `SELECT/INSERT/UPDATE` 权限。
+
+1. 基础冒烟验证
+
+- 在“线路总览”分别验证：默认“启用”筛选、分页总数、`查询` 与 `强制刷新` 行为。
+- 抽样验证 3 类线路：DCDN、ESA、AWS/unknown，确认 provider 与可用性展示符合预期。
+- 抽样验证证书字段：`sslExpireAt`、`sslDaysLeft` 能回填，未启用线路显示 `-`。
+
+1. 运行态观察
+
+- 上线后观察 1~2 天：接口耗时、`unknown provider` 占比、`upsertSslSummaryCacheRows` 错误日志是否清零。
+- 若首次查询仍偏慢，优先调优 `LINE_SSL_RESOLVE_CONCURRENCY` 与 `LINE_SSL_CACHE_TTL_MS`。
+
+### 12.6 封版后可继续优化项（简版）
+
+1. Provider 规则治理（P1）
+
+- 将高频 `unknown` 样本沉淀为规则库，按“后缀优先、正则兜底”迭代 `LINE_PROVIDER_RULES_JSON`。
+- 后续可落库成可视化规则管理（替代频繁改 `.env`）。
+
+1. 证书聚合链路优化（P1）
+
+- 仅对“启用线路”做证书与 provider 富化（现已执行），进一步引入后台预热降低首查时延。
+- 对探测失败增加失败退避与短期失败缓存，减少重复外呼。
+
+1. 可观测与测试补齐（P2）
+
+- 增加 inventory 接口指标：P95 耗时、刷新回退次数、错误码分布、provider 命中率。
+- 补齐单元测试与接口回归用例，固定边界行为（过期数据、无样本、分页与 total 一致性）。
