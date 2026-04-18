@@ -456,7 +456,8 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 - 已实现证书信息聚合（MVP）：
   - DCDN 线路优先通过阿里云接口读取证书到期时间。
   - 其他线路（以及 DCDN 接口失败场景）回退 TLS 探测证书到期时间。
-  - 返回 `sslExpireAt`、`sslDaysLeft`，并支持短缓存与并发控制。
+  - 仅对“已开启（status=true）”线路执行证书检查，未开启线路保持 `-`。
+  - 返回 `sslExpireAt`、`sslDaysLeft`，并支持内存缓存 + `line_inventory_ssl_cache` 持久化缓存。
 - 前端筛选已支持“是否启用”，默认值为“启用”。
 - 已补齐文档与 `.env-example` 中的核心配置项（包括 `LINE_AVAILABILITY_UP_THRESHOLD`、`LINE_PROVIDER_RULES_JSON`）。
 - 已完成全量过滤语义（`status/provider/availability/certExpireDaysLt`）与分页 `total` 严格一致：

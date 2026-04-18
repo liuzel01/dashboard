@@ -11,6 +11,7 @@ import { RegisterSuperAdminLineDto } from './dto/register-super-admin-line.dto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
 import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
+import { CentralDatabaseService } from '../site-monitor/central-database.service';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -105,6 +106,14 @@ type LineSslSummary = {
   sslDaysLeft: number | null;
 };
 
+type LineSslSource = 'dcdn_api' | 'tls_probe' | 'unknown';
+
+type LineSslResolvePayload = {
+  summary: LineSslSummary;
+  source: LineSslSource;
+  lastError: string | null;
+};
+
 type SuperAdminLineItem = {
   id: number | string | null;
   zh: string;
@@ -156,6 +165,7 @@ export class LinesService {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
     private readonly kubernetesService: KubernetesService,
+    private readonly centralDb: CentralDatabaseService,
   ) {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
@@ -305,8 +315,21 @@ export class LinesService {
           .filter((host): host is string => Boolean(host)),
       ),
     );
+    const activeHosts = Array.from(
+      new Set(
+        sourceItems
+          .filter((item) => item.status === true)
+          .map((item) => this.safeNormalizeToHost(item.lineUrl || ''))
+          .filter((host): host is string => Boolean(host)),
+      ),
+    );
     const providerMap = await this.resolveProvidersByHosts(uniqueHosts, forceRefresh);
-    const sslMap = await this.resolveSslSummaryByHosts(uniqueHosts, providerMap, forceRefresh);
+    const sslMap = await this.resolveSslSummaryByHosts(
+      environmentId,
+      activeHosts,
+      providerMap,
+      forceRefresh,
+    );
 
     let items: LineInventoryItem[] = sourceItems.map((item) => {
       const host = this.safeNormalizeToHost(item.lineUrl || '');
@@ -732,7 +755,12 @@ export class LinesService {
     return Boolean(this.dcdnAccessKeyId && this.dcdnAccessKeySecret);
   }
 
+  private buildSslCacheKey(environmentId: string, host: string): string {
+    return `${environmentId}#${host}`;
+  }
+
   private async resolveSslSummaryByHosts(
+    environmentId: string,
     hosts: string[],
     providerMap: Map<string, { provider: LineInventoryProvider; cnameValues: string[] }>,
     forceRefresh: boolean,
@@ -740,75 +768,244 @@ export class LinesService {
     const result = new Map<string, LineSslSummary>();
     if (!hosts.length) return result;
 
-    const needDcdn = hosts.some((host) => providerMap.get(host)?.provider === 'aliyun_dcdn');
+    const now = Date.now();
+    let pendingHosts = hosts;
+    if (!forceRefresh) {
+      pendingHosts = hosts.filter((host) => {
+        const cacheKey = this.buildSslCacheKey(environmentId, host);
+        const cached = this.sslSummaryCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+          result.set(host, cached.summary);
+          return false;
+        }
+        return true;
+      });
+      if (pendingHosts.length > 0) {
+        const dbCached = await this.loadSslSummaryFromDbCache(environmentId, pendingHosts);
+        dbCached.forEach((summary, host) => {
+          result.set(host, summary);
+          const cacheKey = this.buildSslCacheKey(environmentId, host);
+          this.sslSummaryCache.set(cacheKey, {
+            summary,
+            expiresAt: now + this.sslCacheTtlMs,
+          });
+        });
+        pendingHosts = pendingHosts.filter((host) => !dbCached.has(host));
+      }
+    }
+
+    if (!pendingHosts.length) return result;
+
+    const needDcdn = pendingHosts.some((host) => providerMap.get(host)?.provider === 'aliyun_dcdn');
     const dcdnClient = needDcdn && this.hasAliyunCredentials() ? this.createDcdnClient() : null;
     const batchSize = Math.max(1, Math.min(this.sslResolveConcurrency, 50));
+    const upsertRows: Array<{
+      host: string;
+      provider: LineInventoryProvider;
+      summary: LineSslSummary;
+      source: LineSslSource;
+      lastError: string | null;
+    }> = [];
 
-    for (let i = 0; i < hosts.length; i += batchSize) {
-      const batch = hosts.slice(i, i + batchSize);
+    for (let i = 0; i < pendingHosts.length; i += batchSize) {
+      const batch = pendingHosts.slice(i, i + batchSize);
       await Promise.all(
         batch.map(async (host) => {
           const provider = providerMap.get(host)?.provider || 'unknown';
-          const summary = await this.resolveSslSummaryForHost(
+          const resolved = await this.resolveSslSummaryForHost(
+            environmentId,
             host,
             provider,
             forceRefresh,
             dcdnClient,
           );
-          result.set(host, summary);
+          result.set(host, resolved.summary);
+          upsertRows.push({
+            host,
+            provider,
+            summary: resolved.summary,
+            source: resolved.source,
+            lastError: resolved.lastError,
+          });
         }),
       );
+    }
+
+    if (upsertRows.length > 0) {
+      await this.upsertSslSummaryCacheRows(environmentId, upsertRows);
     }
     return result;
   }
 
+  private async loadSslSummaryFromDbCache(
+    environmentId: string,
+    hosts: string[],
+  ): Promise<Map<string, LineSslSummary>> {
+    const result = new Map<string, LineSslSummary>();
+    if (!hosts.length) return result;
+
+    try {
+      const placeholders = hosts.map(() => '?').join(',');
+      const rows = await this.centralDb.query<
+        Array<{ host: string; ssl_expire_at: string | null; ssl_days_left: number | string | null }>
+      >(
+        `SELECT host, ssl_expire_at, ssl_days_left
+         FROM line_inventory_ssl_cache
+         WHERE environment_id = ?
+           AND host IN (${placeholders})
+           AND expires_at > UTC_TIMESTAMP()`,
+        [environmentId, ...hosts],
+      );
+      rows.forEach((row) => {
+        const host = String(row?.host || '').trim().toLowerCase();
+        if (!host) return;
+        const sslExpireAt = this.toIsoTime(row?.ssl_expire_at);
+        const numericDays = Number(row?.ssl_days_left);
+        const sslDaysLeft =
+          Number.isFinite(numericDays) ? Math.floor(numericDays) : this.computeSslDaysLeft(sslExpireAt);
+        result.set(host, {
+          sslExpireAt,
+          sslDaysLeft,
+        });
+      });
+    } catch (error: any) {
+      // DB cache read failure should not block inventory response.
+      console.warn('loadSslSummaryFromDbCache failed:', error?.message || error);
+    }
+    return result;
+  }
+
+  private async upsertSslSummaryCacheRows(
+    environmentId: string,
+    rows: Array<{
+      host: string;
+      provider: LineInventoryProvider;
+      summary: LineSslSummary;
+      source: LineSslSource;
+      lastError: string | null;
+    }>,
+  ): Promise<void> {
+    if (!rows.length) return;
+    try {
+      const valuesSql = rows
+        .map(
+          () =>
+            '(?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND), ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())',
+        )
+        .join(',');
+      const sql = `
+        INSERT INTO line_inventory_ssl_cache (
+          environment_id, host, provider, ssl_expire_at, ssl_days_left, source, last_checked_at, expires_at, last_error, created_at, updated_at
+        ) VALUES ${valuesSql}
+        ON DUPLICATE KEY UPDATE
+          provider = VALUES(provider),
+          ssl_expire_at = VALUES(ssl_expire_at),
+          ssl_days_left = VALUES(ssl_days_left),
+          source = VALUES(source),
+          last_checked_at = VALUES(last_checked_at),
+          expires_at = VALUES(expires_at),
+          last_error = VALUES(last_error),
+          updated_at = UTC_TIMESTAMP()
+      `;
+      const ttlSeconds = Math.max(1, Math.floor(this.sslCacheTtlMs / 1000));
+      const params: any[] = [];
+      rows.forEach((row) => {
+        params.push(
+          environmentId,
+          row.host,
+          row.provider,
+          row.summary.sslExpireAt,
+          row.summary.sslDaysLeft,
+          row.source,
+          ttlSeconds,
+          row.lastError,
+        );
+      });
+      await this.centralDb.query(sql, params);
+    } catch (error: any) {
+      // DB cache write failure should not block inventory response.
+      console.warn('upsertSslSummaryCacheRows failed:', error?.message || error);
+    }
+  }
+
   private async resolveSslSummaryForHost(
+    environmentId: string,
     host: string,
     provider: LineInventoryProvider,
     forceRefresh: boolean,
     dcdnClient: any | null,
-  ): Promise<LineSslSummary> {
+  ): Promise<LineSslResolvePayload> {
     const now = Date.now();
-    const cached = this.sslSummaryCache.get(host);
+    const cacheKey = this.buildSslCacheKey(environmentId, host);
+    const cached = this.sslSummaryCache.get(cacheKey);
     if (!forceRefresh && cached && cached.expiresAt > now) {
-      return cached.summary;
+      return {
+        summary: cached.summary,
+        source: 'unknown',
+        lastError: null,
+      };
     }
 
     let expireAt: string | null = null;
+    let source: LineSslSource = 'unknown';
+    let lastError: string | null = null;
     if (provider === 'aliyun_dcdn') {
-      expireAt = await this.tryResolveDcdnCertExpireAt(dcdnClient, host);
+      const dcdnResult = await this.tryResolveDcdnCertExpireAt(dcdnClient, host);
+      expireAt = dcdnResult.expireAt;
+      if (dcdnResult.expireAt) {
+        source = 'dcdn_api';
+        lastError = null;
+      } else {
+        lastError = dcdnResult.error;
+      }
     }
     if (!expireAt) {
-      expireAt = await this.tryResolveTlsCertExpireAt(host);
+      const tlsResult = await this.tryResolveTlsCertExpireAt(host);
+      expireAt = tlsResult.expireAt;
+      if (tlsResult.expireAt) {
+        source = 'tls_probe';
+        lastError = null;
+      } else {
+        lastError = tlsResult.error || lastError;
+      }
     }
 
     const summary: LineSslSummary = {
       sslExpireAt: expireAt,
       sslDaysLeft: this.computeSslDaysLeft(expireAt),
     };
-    this.sslSummaryCache.set(host, {
+    this.sslSummaryCache.set(cacheKey, {
       summary,
       expiresAt: now + this.sslCacheTtlMs,
     });
-    return summary;
+    return {
+      summary,
+      source,
+      lastError,
+    };
   }
 
-  private async tryResolveDcdnCertExpireAt(client: any | null, domainName: string): Promise<string | null> {
-    if (!client) return null;
+  private async tryResolveDcdnCertExpireAt(
+    client: any | null,
+    domainName: string,
+  ): Promise<{ expireAt: string | null; error: string | null }> {
+    if (!client) return { expireAt: null, error: 'dcdn client unavailable' };
     try {
       const info = await this.getDcdnCertificateInfo(client, domainName);
-      return this.toIsoTime(info.certExpireTime);
-    } catch {
-      return null;
+      return { expireAt: this.toIsoTime(info.certExpireTime), error: null };
+    } catch (error: any) {
+      return { expireAt: null, error: error?.message || 'resolve dcdn certificate failed' };
     }
   }
 
-  private async tryResolveTlsCertExpireAt(host: string): Promise<string | null> {
+  private async tryResolveTlsCertExpireAt(
+    host: string,
+  ): Promise<{ expireAt: string | null; error: string | null }> {
     try {
       const cert = await this.fetchTlsCertificate(host, 443, this.sslTlsTimeoutMs);
-      return cert.notAfter ? cert.notAfter.toISOString() : null;
-    } catch {
-      return null;
+      return { expireAt: cert.notAfter ? cert.notAfter.toISOString() : null, error: null };
+    } catch (error: any) {
+      return { expireAt: null, error: error?.message || 'resolve tls certificate failed' };
     }
   }
 

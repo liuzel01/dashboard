@@ -12,5 +12,6 @@ import { EnvironmentsModule } from '../environments/environments.module';
   imports: [ScheduleModule.forRoot(), EnvironmentsModule],
   providers: [CentralDatabaseService, SiteMonitorService, MonitorScheduler, AlertsService],
   controllers: [SiteMonitorController, AlertsController],
+  exports: [CentralDatabaseService],
 })
 export class SiteMonitorModule {}
