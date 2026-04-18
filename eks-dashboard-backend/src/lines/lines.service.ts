@@ -323,7 +323,7 @@ export class LinesService {
     return {
       page: base.page,
       size: base.size,
-      total: postFilterWarnings.length > 0 ? items.length : base.total,
+      total: base.total,
       tenantId: base.tenantId,
       lineUrl: base.lineUrl,
       filters: {
