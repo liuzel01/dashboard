@@ -289,6 +289,15 @@ export class LinesService {
       sourceTotal = base.total;
     }
 
+    const fullEnrichmentRequired = this.shouldEnrichAllForFilters(query);
+    const baseFilteredItems = this.applyLineInventoryBaseFilters(sourceItems, query);
+    let total = shouldUseFullScan ? baseFilteredItems.length : sourceTotal;
+    let itemsToEnrich = baseFilteredItems;
+    if (shouldUseFullScan && !fullEnrichmentRequired) {
+      const start = (page - 1) * size;
+      itemsToEnrich = baseFilteredItems.slice(start, start + size);
+    }
+
     let probeSnapshot: ProbeSnapshot = {
       records: [],
       fetchedAt: new Date().toISOString(),
@@ -310,7 +319,7 @@ export class LinesService {
 
     const activeHosts = Array.from(
       new Set(
-        sourceItems
+        itemsToEnrich
           .filter((item) => item.status === true)
           .map((item) => this.safeNormalizeToHost(item.lineUrl || ''))
           .filter((host): host is string => Boolean(host)),
@@ -324,7 +333,7 @@ export class LinesService {
       forceRefresh,
     );
 
-    let items: LineInventoryItem[] = sourceItems.map((item) => {
+    let enrichedItems: LineInventoryItem[] = itemsToEnrich.map((item) => {
       const host = this.safeNormalizeToHost(item.lineUrl || '');
       const providerInfo = host ? providerMap.get(host) : null;
       const sslSummary = host ? sslMap.get(host) : null;
@@ -361,11 +370,14 @@ export class LinesService {
         totalRegions: availabilitySummary.totalRegions,
       };
     });
-    items = this.applyLineInventoryFilters(items, query);
-    const total = shouldUseFullScan ? items.length : sourceTotal;
-    const pagedItems = shouldUseFullScan
-      ? items.slice((page - 1) * size, (page - 1) * size + size)
-      : items;
+    let pagedItems = enrichedItems;
+    if (fullEnrichmentRequired) {
+      enrichedItems = this.applyLineInventoryEnrichmentFilters(enrichedItems, query);
+      total = shouldUseFullScan ? enrichedItems.length : total;
+      pagedItems = shouldUseFullScan
+        ? enrichedItems.slice((page - 1) * size, (page - 1) * size + size)
+        : enrichedItems;
+    }
 
     const warningParts: string[] = [];
     if (probeSnapshot.warning) warningParts.push(probeSnapshot.warning);
@@ -404,14 +416,30 @@ export class LinesService {
     );
   }
 
-  private applyLineInventoryFilters(
-    items: LineInventoryItem[],
+  private shouldEnrichAllForFilters(query: ListLineInventoryDto): boolean {
+    return (
+      Boolean(query.provider) ||
+      Boolean(query.availability) ||
+      typeof query.certExpireDaysLt === 'number'
+    );
+  }
+
+  private applyLineInventoryBaseFilters(
+    items: SuperAdminLineItem[],
     query: ListLineInventoryDto,
-  ): LineInventoryItem[] {
+  ): SuperAdminLineItem[] {
     let filtered = items;
     if (typeof query.status === 'boolean') {
       filtered = filtered.filter((item) => item.status === query.status);
     }
+    return filtered;
+  }
+
+  private applyLineInventoryEnrichmentFilters(
+    items: LineInventoryItem[],
+    query: ListLineInventoryDto,
+  ): LineInventoryItem[] {
+    let filtered = items;
     if (query.provider) {
       filtered = filtered.filter((item) => item.provider === query.provider);
     }

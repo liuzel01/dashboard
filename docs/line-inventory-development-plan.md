@@ -532,6 +532,8 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 - 当未使用 `provider/availability/certExpireDaysLt` 过滤时，仅富化当前分页数据，避免每次查询都富化全量线路。
 - 目标：默认查询从“全量富化”降为“页内富化”，显著降低首查耗时。
 
+当前状态：已完成（2026-04-18，后端已实现状态前置过滤与按需全量富化）。
+
 1. Provider 持久化缓存（P1）
 
 - 增加 provider 的 DB 缓存（可新增 `line_inventory_provider_cache`，或复用统一缓存策略）。
