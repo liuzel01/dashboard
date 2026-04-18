@@ -78,7 +78,6 @@ const AppLayout: React.FC = () => {
   };
 
   const menuItems = [
-    { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     { key: '/s3-upload', label: 'S3 上传', icon: <CloudUploadOutlined />, permission: 'menu:s3-upload' },
     { key: '/deployments', label: 'EKS 部署', icon: <DeploymentUnitOutlined />, permission: 'menu:deployments' },
     { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
@@ -88,6 +87,7 @@ const AppLayout: React.FC = () => {
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
+    { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
 

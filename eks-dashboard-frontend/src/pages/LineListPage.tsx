@@ -326,6 +326,7 @@ const LineListPage: React.FC = () => {
               pageSize: size,
               total,
               showSizeChanger: true,
+              showTotal: (totalCount, range) => `${range[0]}-${range[1]} of ${totalCount} items`,
               onChange: (nextPage, nextSize) => {
                 const resolvedSize = nextSize || size;
                 void loadInventory(nextPage, resolvedSize, query, false);
