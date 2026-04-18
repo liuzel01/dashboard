@@ -453,6 +453,7 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 - 已实现 Provider 识别 MVP：
   - 内置规则（AWS/DCDN/ESA）+ CNAME 链匹配。
   - 支持 `LINE_PROVIDER_RULES_JSON` 扩展规则。
+  - 仅对“已开启（status=true）”线路执行 provider 识别，未开启线路展示为 `-`。
 - 已实现证书信息聚合（MVP）：
   - DCDN 线路优先通过阿里云接口读取证书到期时间。
   - 其他线路（以及 DCDN 接口失败场景）回退 TLS 探测证书到期时间。
@@ -512,3 +513,34 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 
 - 评估将规则与阈值从 `.env` 迁移到配置表（见 11.2/11.3）。
 - 规划“线路总览-规则设置”页面（管理员可见，带审计日志）。
+
+### 12.4 性能优化专项（可插队）
+
+以下任务用于改善“首次点击查询较慢”的问题，可按业务压力决定是否插队到 P1。
+
+1. 过滤前置 + 延迟富化（P1，优先级最高）
+
+- 在聚合链路中尽早应用 `status` 过滤，再执行 provider/ssl/availability 富化。
+- 当未使用 `provider/availability/certExpireDaysLt` 过滤时，仅富化当前分页数据，避免每次查询都富化全量线路。
+- 目标：默认查询从“全量富化”降为“页内富化”，显著降低首查耗时。
+
+1. Provider 持久化缓存（P1）
+
+- 增加 provider 的 DB 缓存（可新增 `line_inventory_provider_cache`，或复用统一缓存策略）。
+- 查询链路改为：内存缓存 -> DB 缓存 -> 实时 DNS/CNAME 解析 -> 回写 DB。
+- 目标：降低冷启动与多实例场景下的重复解析开销。
+
+1. 缓存参数调优（P1）
+
+- 结合线上流量调优以下参数：`LINE_AVAILABILITY_CACHE_TTL_MS`、`LINE_SSL_CACHE_TTL_MS`、`LINE_SSL_RESOLVE_CONCURRENCY`。
+- 目标：在数据新鲜度可接受前提下，减少重复外部调用与页面抖动。
+
+1. 强制刷新异步化（P2）
+
+- 将“强制刷新”从同步接口等待改为后台任务触发（轮询/推送刷新状态）。
+- 目标：优化交互体验，避免用户请求长时间阻塞。
+
+1. 线路总览快照化（P3）
+
+- 引入定时预聚合快照（provider/ssl/availability），`/lines` 查询优先读快照。
+- 目标：在大规模线路场景下获得稳定查询时延和更高可用性。

@@ -23,7 +23,7 @@ type InventoryItem = {
   en?: string;
   lineUrl?: string;
   status?: boolean | null;
-  provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
+  provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown' | null;
   sslExpireAt?: string | null;
   sslDaysLeft?: number | null;
   availability?: 'up' | 'down' | 'unknown';
@@ -188,6 +188,7 @@ const LineListPage: React.FC = () => {
   };
 
   const renderProviderTag = (value: InventoryItem['provider']) => {
+    if (!value) return '-';
     if (value === 'aliyun_dcdn') return <Tag color="blue">Aliyun DCDN</Tag>;
     if (value === 'aws_global') return <Tag color="geekblue">AWS Global</Tag>;
     if (value === 'aliyun_esa') return <Tag color="purple">Aliyun ESA</Tag>;

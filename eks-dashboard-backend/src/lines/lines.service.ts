@@ -66,7 +66,7 @@ type LineInventoryItem = {
   en: string;
   lineUrl: string;
   status: boolean | null;
-  provider: LineInventoryProvider;
+  provider: LineInventoryProvider | null;
   sslExpireAt: string | null;
   sslDaysLeft: number | null;
   availability: LineInventoryAvailability;
@@ -308,13 +308,6 @@ export class LinesService {
       };
     }
 
-    const uniqueHosts = Array.from(
-      new Set(
-        sourceItems
-          .map((item) => this.safeNormalizeToHost(item.lineUrl || ''))
-          .filter((host): host is string => Boolean(host)),
-      ),
-    );
     const activeHosts = Array.from(
       new Set(
         sourceItems
@@ -323,7 +316,7 @@ export class LinesService {
           .filter((host): host is string => Boolean(host)),
       ),
     );
-    const providerMap = await this.resolveProvidersByHosts(uniqueHosts, forceRefresh);
+    const providerMap = await this.resolveProvidersByHosts(activeHosts, forceRefresh);
     const sslMap = await this.resolveSslSummaryByHosts(
       environmentId,
       activeHosts,
@@ -355,7 +348,7 @@ export class LinesService {
         en: item.en || '',
         lineUrl: item.lineUrl || '',
         status: item.status ?? null,
-        provider: providerInfo?.provider || 'unknown',
+        provider: item.status === true ? providerInfo?.provider || 'unknown' : null,
         sslExpireAt: sslSummary?.sslExpireAt ?? null,
         sslDaysLeft: sslSummary?.sslDaysLeft ?? null,
         availability: availabilitySummary.availability,
