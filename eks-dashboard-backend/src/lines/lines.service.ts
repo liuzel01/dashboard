@@ -935,7 +935,7 @@ export class LinesService {
           environmentId,
           row.host,
           row.provider,
-          row.summary.sslExpireAt,
+          this.toMysqlDatetime(row.summary.sslExpireAt),
           row.summary.sslDaysLeft,
           row.source,
           ttlSeconds,
@@ -1041,6 +1041,21 @@ export class LinesService {
     const date = new Date(formatted);
     if (Number.isNaN(date.getTime())) return null;
     return date.toISOString();
+  }
+
+  private toMysqlDatetime(rawIso: string | null): string | null {
+    if (!rawIso) return null;
+    const date = new Date(rawIso);
+    if (Number.isNaN(date.getTime())) return null;
+
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const year = date.getUTCFullYear();
+    const month = pad(date.getUTCMonth() + 1);
+    const day = pad(date.getUTCDate());
+    const hour = pad(date.getUTCHours());
+    const minute = pad(date.getUTCMinutes());
+    const second = pad(date.getUTCSeconds());
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
   }
 
   private computeSslDaysLeft(expireAtIso: string | null): number | null {
