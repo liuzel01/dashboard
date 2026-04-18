@@ -83,8 +83,8 @@ const AppLayout: React.FC = () => {
     { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
     { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
     { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
-    { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
-    { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: ['menu:line-onboarding', 'menu:lines'] },
+    { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines' },
+    { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
@@ -159,12 +159,12 @@ const AppLayout: React.FC = () => {
               <Route
                 path="/lines"
                 element={
-                  <ProtectedRoute requiredAny={['menu:line-onboarding', 'menu:lines']}>
+                  <ProtectedRoute required={['menu:lines']}>
                     <LineListPage />
                   </ProtectedRoute>
                 }
               />
-              <Route path="/line-onboarding" element={<ProtectedRoute requiredAny={['menu:line-onboarding', 'menu:lines']}><LineOnboardingPage /></ProtectedRoute>} />
+              <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
