@@ -244,6 +244,7 @@ LINE_PROVIDER_RULES_JSON=[{"name":"custom-aws-cdn","provider":"aws_global","patt
 - `sslDaysLeft <= 7` 高亮告警，`<= 0` 标红。
 - 列表加载失败展示错误提示，不吞错。
 - 每行可提供“查看探测详情”外链（跳转到探测项目），但不在本页内展开延迟明细。
+- 外链地址建议通过前端变量 `VITE_PROBE_DASHBOARD_URL` 配置；未配置时可展示为 `-`。
 
 ## 6. 接口契约建议（草案）
 
@@ -467,9 +468,7 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 
 ### 12.2 当前差距（未完成/待优化）
 
-- 前端尚未提供 `certExpireDaysLt` 查询输入与参数透传，无法在页面直接按证书剩余天数筛选。
 - Provider 识别仍有 `unknown` 占比，规则命中率需继续提升（样本库与后缀规则需补充）。
-- “查看探测详情”外链尚未在表格行内落地，定位问题仍需手工跳转探测系统。
 - 缺少面向运维的指标与面板（命中率、错误码分布、刷新耗时、探测源可达性）。
 - 缺少自动化测试覆盖（接口契约、聚合边界、规则匹配回归）。
 
@@ -493,6 +492,8 @@ CREATE TABLE IF NOT EXISTS line_inventory_policies (
 
 - 在线路总览查询区增加“证书剩余天数阈值”输入，并透传 `certExpireDaysLt`。
 - 在线路列表增加“查看探测详情”外链列（跳转探测系统对应页面）。
+
+当前状态：已完成（2026-04-18，外链支持 `VITE_PROBE_DASHBOARD_URL` 配置；未配置时展示 `-`）。
 
 1. 提升 Provider 识别准确率（P1）
 

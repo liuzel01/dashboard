@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Alert, Button, Form, Input, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { getLineInventory, getTenantsForEnvironment } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
@@ -14,6 +14,7 @@ type InventoryQuery = {
   lineUrl: string;
   provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
   availability?: 'up' | 'down' | 'unknown';
+  certExpireDaysLt?: number;
 };
 
 type InventoryItem = {
@@ -42,9 +43,14 @@ type InventoryResponse = {
   total?: number;
   items?: InventoryItem[];
   warning?: string;
+  probeSnapshot?: {
+    sourceApi?: string;
+  };
 };
 
 const { Text } = Typography;
+const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
+const probeDashboardBaseUrl = String(viteEnv.VITE_PROBE_DASHBOARD_URL || '').trim();
 
 const LineListPage: React.FC = () => {
   const [form] = Form.useForm();
@@ -57,6 +63,7 @@ const LineListPage: React.FC = () => {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [probeSourceApi, setProbeSourceApi] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -132,6 +139,8 @@ const LineListPage: React.FC = () => {
           lineUrl: filters.lineUrl || undefined,
           provider: filters.provider,
           availability: filters.availability,
+          certExpireDaysLt:
+            typeof filters.certExpireDaysLt === 'number' ? filters.certExpireDaysLt : undefined,
           refresh,
         })) as InventoryResponse;
         setPage(resp.page || nextPage);
@@ -139,6 +148,7 @@ const LineListPage: React.FC = () => {
         setTotal(resp.total || 0);
         setItems(Array.isArray(resp.items) ? resp.items : []);
         setWarning(resp.warning || null);
+        setProbeSourceApi(resp.probeSnapshot?.sourceApi || null);
       } catch (error: any) {
         const backendMsg = error?.response?.data?.message;
         const msg = Array.isArray(backendMsg)
@@ -147,6 +157,7 @@ const LineListPage: React.FC = () => {
         setRequestError(msg);
         setItems([]);
         setTotal(0);
+        setProbeSourceApi(null);
       } finally {
         setLoading(false);
       }
@@ -160,6 +171,7 @@ const LineListPage: React.FC = () => {
     lineUrl?: string;
     provider?: InventoryQuery['provider'];
     availability?: InventoryQuery['availability'];
+    certExpireDaysLt?: number;
   }) => {
     const nextQuery: InventoryQuery = {
       tenantId: values.tenantId,
@@ -167,6 +179,10 @@ const LineListPage: React.FC = () => {
       lineUrl: values.lineUrl?.trim() || '',
       provider: values.provider,
       availability: values.availability,
+      certExpireDaysLt:
+        typeof values.certExpireDaysLt === 'number' && Number.isFinite(values.certExpireDaysLt)
+          ? values.certExpireDaysLt
+          : undefined,
     };
     setQuery(nextQuery);
     setSearched(true);
@@ -227,6 +243,32 @@ const LineListPage: React.FC = () => {
     const total = record.totalRegions ?? success + failed + unknown;
     if (total <= 0) return '-';
     return `${success}/${failed}/${unknown}`;
+  };
+
+  const getProbeDetailBaseUrl = () => {
+    if (probeDashboardBaseUrl) return probeDashboardBaseUrl;
+    if (probeSourceApi) {
+      try {
+        const parsed = new URL(probeSourceApi);
+        return `${parsed.protocol}//${parsed.host}`;
+      } catch {
+        // ignore invalid source api
+      }
+    }
+    return '';
+  };
+
+  const buildProbeDetailUrl = (lineUrl?: string | null) => {
+    if (!lineUrl) return null;
+    const base = getProbeDetailBaseUrl();
+    if (!base) return null;
+    try {
+      const url = new URL(base);
+      url.searchParams.set('lineUrl', lineUrl);
+      return url.toString();
+    } catch {
+      return `${base}${base.includes('?') ? '&' : '?'}lineUrl=${encodeURIComponent(lineUrl)}`;
+    }
   };
 
   const selectedTenantText = query.tenantId
@@ -292,6 +334,9 @@ const LineListPage: React.FC = () => {
               { value: 'unknown', label: '未知' },
             ]}
           />
+        </Form.Item>
+        <Form.Item name="certExpireDaysLt" label="证书剩余天数≤">
+          <InputNumber min={0} precision={0} style={{ width: 160 }} placeholder="例如 30" />
         </Form.Item>
         <Form.Item>
           <Space>
@@ -372,9 +417,22 @@ const LineListPage: React.FC = () => {
                 render: (value: string | null | undefined) => toDisplayTime(value),
               },
               { title: '错误摘要', dataIndex: 'error', width: 140, render: (value) => value || '-' },
+              {
+                title: '探测详情',
+                width: 110,
+                render: (_, record) => {
+                  const link = buildProbeDetailUrl(record.lineUrl);
+                  if (!link) return '-';
+                  return (
+                    <a href={link} target="_blank" rel="noreferrer">
+                      查看
+                    </a>
+                  );
+                },
+              },
             ]}
             size="small"
-            scroll={{ x: 1880 }}
+            scroll={{ x: 2000 }}
             locale={{ emptyText: '暂无线路数据' }}
           />
         </>
