@@ -18,6 +18,8 @@ import SsoCallbackPage from './pages/SsoCallbackPage';
 import AiOpsPage from './pages/AiOpsPage';
 import SignalMonitorRealtimePage from './pages/SignalMonitorRealtimePage';
 import SignalMonitorHistoryPage from './pages/SignalMonitorHistoryPage';
+import SignalMonitorStatsPage from './pages/SignalMonitorStatsPage';
+import SignalMonitorDailyPage from './pages/SignalMonitorDailyPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -91,6 +93,8 @@ const AppLayout: React.FC = () => {
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     { key: '/signal-monitor/realtime', label: 'Signal Monitor-实时', icon: <LineChartOutlined /> },
     { key: '/signal-monitor/history', label: 'Signal Monitor-历史', icon: <LineChartOutlined /> },
+    { key: '/signal-monitor/stats', label: 'Signal Monitor-统计', icon: <LineChartOutlined /> },
+    { key: '/signal-monitor/daily', label: 'Signal Monitor-日报', icon: <LineChartOutlined /> },
     { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
@@ -160,14 +164,7 @@ const AppLayout: React.FC = () => {
               <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
               <Route path="/data-query" element={<ProtectedRoute required={['menu:data-query']}><DataQueryPage /></ProtectedRoute>} />
               <Route path="/security-groups" element={<ProtectedRoute required={['menu:security-groups']}><SecurityGroupPage /></ProtectedRoute>} />
-              <Route
-                path="/lines"
-                element={
-                  <ProtectedRoute required={['menu:lines']}>
-                    <LineListPage />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
@@ -176,8 +173,9 @@ const AppLayout: React.FC = () => {
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
               <Route path="/signal-monitor/realtime" element={<SignalMonitorRealtimePage />} />
               <Route path="/signal-monitor/history" element={<SignalMonitorHistoryPage />} />
+              <Route path="/signal-monitor/stats" element={<SignalMonitorStatsPage />} />
+              <Route path="/signal-monitor/daily" element={<SignalMonitorDailyPage />} />
               <Route path="/403" element={<ForbiddenPage />} />
-              {/* 默认路由，指向第一个菜单项 */}
               <Route path="/" element={<Home />} />
             </Routes>
           </div>
