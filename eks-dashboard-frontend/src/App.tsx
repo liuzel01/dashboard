@@ -89,7 +89,8 @@ const AppLayout: React.FC = () => {
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
-    { key: '/signal-monitor/realtime', label: 'Signal Monitor', icon: <LineChartOutlined /> },
+    { key: '/signal-monitor/realtime', label: 'Signal Monitor-实时', icon: <LineChartOutlined /> },
+    { key: '/signal-monitor/history', label: 'Signal Monitor-历史', icon: <LineChartOutlined /> },
     { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];

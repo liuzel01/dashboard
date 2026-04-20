@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Row, Space, Table, Tag } from 'antd';
+import { Alert, Button, Card, Col, Row, Space, Table, Tag, Switch, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getSignalMonitorRealtime } from '../services/signalMonitorApi';
 import type { RealtimeItem } from '../services/signalMonitorApi';
@@ -9,6 +9,7 @@ const SignalMonitorRealtimePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<RealtimeItem[]>([]);
   const [lastTs, setLastTs] = useState<string>('');
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = async () => {
     setLoading(true);
@@ -26,9 +27,13 @@ const SignalMonitorRealtimePage: React.FC = () => {
 
   useEffect(() => {
     load();
+  }, []);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
     const timer = setInterval(load, 30000);
     return () => clearInterval(timer);
-  }, []);
+  }, [autoRefresh]);
 
   const highCount = useMemo(() => rows.filter((r) => r.priority === 'high').length, [rows]);
 
@@ -65,6 +70,8 @@ const SignalMonitorRealtimePage: React.FC = () => {
 
       <Space>
         <Button onClick={load} loading={loading}>刷新</Button>
+        <span>自动刷新</span>
+        <Switch checked={autoRefresh} onChange={setAutoRefresh} />
       </Space>
 
       <Table<RealtimeItem>
@@ -73,6 +80,7 @@ const SignalMonitorRealtimePage: React.FC = () => {
         columns={columns}
         dataSource={rows}
         pagination={{ pageSize: 20 }}
+        locale={{ emptyText: <Empty description="暂无实时信号" /> }}
       />
     </Space>
   );

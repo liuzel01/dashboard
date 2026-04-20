@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Input, Select, Space, Table, Tag } from 'antd';
+import { Alert, Button, Input, Select, Space, Table, Tag, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getSignalMonitorTriggers24h } from '../services/signalMonitorApi';
 import type { TriggerRow, Triggers24hParams } from '../services/signalMonitorApi';
@@ -86,6 +86,11 @@ const SignalMonitorHistoryPage: React.FC = () => {
           options={[{ label: 'high', value: 'high' }, { label: 'medium', value: 'medium' }, { label: 'low', value: 'low' }]}
         />
         <Button onClick={() => load({ ...query, page: 1 })} loading={loading}>查询</Button>
+        <Button onClick={() => {
+          const reset = { page: 1, pageSize: 20 } as Triggers24hParams;
+          setQuery(reset);
+          load(reset);
+        }}>重置</Button>
       </Space>
 
       <Table<TriggerRow>
@@ -93,11 +98,13 @@ const SignalMonitorHistoryPage: React.FC = () => {
         loading={loading}
         columns={columns}
         dataSource={rows}
+        locale={{ emptyText: <Empty description="近24小时无触发记录" /> }}
         pagination={{
           current: query.page,
           pageSize: query.pageSize,
           total,
           showSizeChanger: true,
+          showTotal: (t) => `共 ${t} 条`,
           onChange: (page, pageSize) => load({ ...query, page, pageSize }),
         }}
       />
