@@ -1,7 +1,7 @@
 import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined, RobotOutlined } from '@ant-design/icons';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined, RobotOutlined, LineChartOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -16,6 +16,8 @@ import ForbiddenPage from './pages/ForbiddenPage';
 import LoginPage from './pages/LoginPage';
 import SsoCallbackPage from './pages/SsoCallbackPage';
 import AiOpsPage from './pages/AiOpsPage';
+import SignalMonitorRealtimePage from './pages/SignalMonitorRealtimePage';
+import SignalMonitorHistoryPage from './pages/SignalMonitorHistoryPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -87,6 +89,7 @@ const AppLayout: React.FC = () => {
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
+    { key: '/signal-monitor/realtime', label: 'Signal Monitor', icon: <LineChartOutlined /> },
     { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
@@ -170,6 +173,8 @@ const AppLayout: React.FC = () => {
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
               <Route path="/access-control" element={<ProtectedRoute required={['menu:access-control']}><AccountManagementPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
+              <Route path="/signal-monitor/realtime" element={<SignalMonitorRealtimePage />} />
+              <Route path="/signal-monitor/history" element={<SignalMonitorHistoryPage />} />
               <Route path="/403" element={<ForbiddenPage />} />
               {/* 默认路由，指向第一个菜单项 */}
               <Route path="/" element={<Home />} />
