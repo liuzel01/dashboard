@@ -7,15 +7,20 @@ export default defineConfig({
   server: {
     host: '0.0.0.0', // 允许通过 IP 地址访问
     proxy: {
-      // 将 /api 开头的请求代理到后端服务
+      // Signal Monitor（price-alert）接口走独立后端
+      '/api/signal-monitor': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      // 其他 /api 仍走现有后端
       '/api': {
-        target: 'http://localhost:3000', // 你的 NestJS 后端地址
-        changeOrigin: true, // 改变源，以避免跨域问题
+        target: 'http://localhost:3000',
+        changeOrigin: true,
       },
       // 为 WebSocket 连接添加代理
       '/socket.io': {
-        target: 'http://localhost:3000', // 你的 NestJS 后端地址
-        ws: true, // 启用 WebSocket 代理
+        target: 'http://localhost:3000',
+        ws: true,
       },
     },
   },
