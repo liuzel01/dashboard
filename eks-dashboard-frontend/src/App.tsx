@@ -1,5 +1,6 @@
 import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
+import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined, RobotOutlined, LineChartOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
@@ -91,17 +92,35 @@ const AppLayout: React.FC = () => {
     { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
-    { key: '/signal-monitor/realtime', label: 'Signal Monitor-实时', icon: <LineChartOutlined /> },
-    { key: '/signal-monitor/history', label: 'Signal Monitor-历史', icon: <LineChartOutlined /> },
-    { key: '/signal-monitor/stats', label: 'Signal Monitor-统计', icon: <LineChartOutlined /> },
-    { key: '/signal-monitor/daily', label: 'Signal Monitor-日报', icon: <LineChartOutlined /> },
     { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
 
-  const visibleMenuItems = authLoading
+  const signalMonitorGroup: NonNullable<MenuProps['items']>[number] = {
+    key: '/signal-monitor',
+    label: 'Signal Monitor',
+    icon: <LineChartOutlined />,
+    children: [
+      { key: '/signal-monitor/realtime', label: <Link to="/signal-monitor/realtime">实时</Link> },
+      { key: '/signal-monitor/history', label: <Link to="/signal-monitor/history">历史</Link> },
+      { key: '/signal-monitor/stats', label: <Link to="/signal-monitor/stats">统计</Link> },
+      { key: '/signal-monitor/daily', label: <Link to="/signal-monitor/daily">日报</Link> },
+    ],
+  };
+
+  const baseVisibleMenuItems = authLoading
     ? menuItems
     : menuItems.filter((item) => hasPermission(item.permission));
+
+  const visibleMenuItems: MenuProps['items'] = [
+    ...baseVisibleMenuItems.map((item) => ({
+      key: item.key,
+      icon: item.icon,
+      label: <Link to={item.key}>{item.label}</Link>,
+      disabled: authLoading,
+    })),
+    signalMonitorGroup,
+  ];
 
   if (!authLoading && !isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -118,6 +137,9 @@ const AppLayout: React.FC = () => {
     navigate('/login', { replace: true });
   };
 
+  const selectedKey = location.pathname;
+  const openKeys = location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : [];
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider breakpoint="lg" collapsedWidth="0">
@@ -125,14 +147,10 @@ const AppLayout: React.FC = () => {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[location.pathname]}
-        >
-          {visibleMenuItems.map((item) => (
-            <Menu.Item key={item.key} icon={item.icon} disabled={authLoading}>
-              <Link to={item.key}>{item.label}</Link>
-            </Menu.Item>
-          ))}
-        </Menu>
+          selectedKeys={[selectedKey]}
+          defaultOpenKeys={openKeys}
+          items={visibleMenuItems}
+        />
       </Sider>
       <Layout
         style={{
