@@ -31,7 +31,7 @@ const SignalMonitorHistoryPage: React.FC = () => {
   }, []);
 
   const columns: ColumnsType<TriggerRow> = [
-    { title: '触发时间', dataIndex: 'event_time', key: 'event_time' },
+    { title: '触发时间（UTC）', dataIndex: 'event_time', key: 'event_time' },
     { title: '交易对', dataIndex: 'symbol', key: 'symbol' },
     { title: '周期', dataIndex: 'timeframe', key: 'timeframe' },
     { title: '规则', dataIndex: 'rule', key: 'rule' },

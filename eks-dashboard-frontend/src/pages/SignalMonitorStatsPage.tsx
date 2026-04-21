@@ -50,7 +50,7 @@ const SignalMonitorStatsPage: React.FC = () => {
         <Col span={6}><Card loading={loading} title="24h触发总数">{stats?.trigger_count ?? 0}</Card></Col>
         <Col span={6}><Card loading={loading} title="24h发送总数">{stats?.emitted_count ?? 0}</Card></Col>
         <Col span={6}><Card loading={loading} title="24h抑制总数">{stats?.suppressed_count ?? 0}</Card></Col>
-        <Col span={6}><Card loading={loading} title="发送成功率">{((stats?.send_success_rate ?? 0) * 100).toFixed(2)}%</Card></Col>
+        <Col span={6}><Card loading={loading} title="发送成功率（近24h）">{((stats?.send_success_rate ?? 0) * 100).toFixed(2)}%</Card></Col>
       </Row>
 
       <Card title="按规则统计" loading={loading}>

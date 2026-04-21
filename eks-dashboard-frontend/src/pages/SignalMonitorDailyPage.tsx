@@ -51,7 +51,7 @@ const SignalMonitorDailyPage: React.FC = () => {
           <Empty description="暂无日报数据" />
         ) : (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Text>触发总数: {data.summary?.trigger_count ?? 0}</Text>
+            <Text>触发总数（近24h）: {data.summary?.trigger_count ?? 0}</Text>
             <Text>高噪声规则: {(data.summary?.top_noise_rules || []).join(', ') || '-'}</Text>
             <Paragraph>
               <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{data.markdown}</pre>

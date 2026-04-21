@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Row, Space, Table, Tag, Switch, Empty } from 'antd';
+import { Alert, Button, Card, Col, Input, Row, Space, Table, Tag, Switch, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getSignalMonitorRealtime } from '../services/signalMonitorApi';
 import type { RealtimeItem } from '../services/signalMonitorApi';
@@ -10,6 +10,7 @@ const SignalMonitorRealtimePage: React.FC = () => {
   const [rows, setRows] = useState<RealtimeItem[]>([]);
   const [lastTs, setLastTs] = useState<string>('');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [symbolFilter, setSymbolFilter] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -35,7 +36,13 @@ const SignalMonitorRealtimePage: React.FC = () => {
     return () => clearInterval(timer);
   }, [autoRefresh]);
 
-  const highCount = useMemo(() => rows.filter((r) => r.priority === 'high').length, [rows]);
+  const filteredRows = useMemo(() => {
+    const kw = symbolFilter.trim().toUpperCase();
+    if (!kw) return rows;
+    return rows.filter((r) => r.symbol.toUpperCase().includes(kw));
+  }, [rows, symbolFilter]);
+
+  const highCount = useMemo(() => filteredRows.filter((r) => r.priority === 'high').length, [filteredRows]);
 
   const columns: ColumnsType<RealtimeItem> = [
     { title: '交易对', dataIndex: 'symbol', key: 'symbol' },
@@ -48,7 +55,7 @@ const SignalMonitorRealtimePage: React.FC = () => {
       key: 'priority',
       render: (v: string) => <Tag color={v === 'high' ? 'red' : v === 'medium' ? 'orange' : 'default'}>{v}</Tag>,
     },
-    { title: '最新价格', dataIndex: 'latest_price', key: 'latest_price' },
+    { title: '最新价格（USD）', dataIndex: 'latest_price', key: 'latest_price' },
     { title: '最近触发时间', dataIndex: 'latest_trigger_time', key: 'latest_trigger_time' },
   ];
 
@@ -58,7 +65,7 @@ const SignalMonitorRealtimePage: React.FC = () => {
 
       <Row gutter={16}>
         <Col span={8}>
-          <Card title="活跃信号数">{rows.length}</Card>
+          <Card title="活跃信号数">{filteredRows.length}</Card>
         </Col>
         <Col span={8}>
           <Card title="高优先级信号">{highCount}</Card>
@@ -68,7 +75,14 @@ const SignalMonitorRealtimePage: React.FC = () => {
         </Col>
       </Row>
 
-      <Space>
+      <Space wrap>
+        <Input
+          placeholder="筛选交易对（如 BTC / BTCUSDT）"
+          style={{ width: 260 }}
+          value={symbolFilter}
+          onChange={(e) => setSymbolFilter(e.target.value)}
+          allowClear
+        />
         <Button onClick={load} loading={loading}>刷新</Button>
         <span>自动刷新</span>
         <Switch checked={autoRefresh} onChange={setAutoRefresh} />
@@ -78,7 +92,7 @@ const SignalMonitorRealtimePage: React.FC = () => {
         rowKey={(r) => `${r.symbol}:${r.timeframe}:${r.rule}:${r.direction}`}
         loading={loading}
         columns={columns}
-        dataSource={rows}
+        dataSource={filteredRows}
         pagination={{ pageSize: 20 }}
         locale={{ emptyText: <Empty description="暂无实时信号" /> }}
       />
