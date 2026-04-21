@@ -31,25 +31,25 @@ const SignalMonitorHistoryPage: React.FC = () => {
   }, []);
 
   const columns: ColumnsType<TriggerRow> = [
-    { title: 'Event Time', dataIndex: 'event_time', key: 'event_time' },
-    { title: 'Symbol', dataIndex: 'symbol', key: 'symbol' },
-    { title: 'TF', dataIndex: 'timeframe', key: 'timeframe' },
-    { title: 'Rule', dataIndex: 'rule', key: 'rule' },
-    { title: 'Direction', dataIndex: 'direction', key: 'direction' },
+    { title: '触发时间', dataIndex: 'event_time', key: 'event_time' },
+    { title: '交易对', dataIndex: 'symbol', key: 'symbol' },
+    { title: '周期', dataIndex: 'timeframe', key: 'timeframe' },
+    { title: '规则', dataIndex: 'rule', key: 'rule' },
+    { title: '方向', dataIndex: 'direction', key: 'direction' },
     {
-      title: 'Priority',
+      title: '优先级',
       dataIndex: 'priority',
       key: 'priority',
       render: (v: string) => <Tag color={v === 'high' ? 'red' : v === 'medium' ? 'orange' : 'default'}>{v}</Tag>,
     },
     {
-      title: 'Emitted',
+      title: '是否发送',
       dataIndex: 'emitted',
       key: 'emitted',
-      render: (v: boolean) => (v ? <Tag color="green">true</Tag> : <Tag color="default">false</Tag>),
+      render: (v: boolean) => (v ? <Tag color="green">是</Tag> : <Tag color="default">否</Tag>),
     },
-    { title: 'Suppressed Reason', dataIndex: 'suppressed_reason', key: 'suppressed_reason' },
-    { title: 'Dedupe Key', dataIndex: 'dedupe_key', key: 'dedupe_key', ellipsis: true },
+    { title: '抑制原因', dataIndex: 'suppressed_reason', key: 'suppressed_reason' },
+    { title: '去重键', dataIndex: 'dedupe_key', key: 'dedupe_key', ellipsis: true },
   ];
 
   return (
@@ -58,19 +58,19 @@ const SignalMonitorHistoryPage: React.FC = () => {
 
       <Space wrap>
         <Input
-          placeholder="symbol"
+          placeholder="交易对"
           style={{ width: 120 }}
           value={query.symbol}
           onChange={(e) => setQuery((q) => ({ ...q, symbol: e.target.value || undefined }))}
         />
         <Input
-          placeholder="rule"
+          placeholder="规则"
           style={{ width: 120 }}
           value={query.rule}
           onChange={(e) => setQuery((q) => ({ ...q, rule: e.target.value || undefined }))}
         />
         <Select
-          placeholder="timeframe"
+          placeholder="周期"
           allowClear
           style={{ width: 120 }}
           value={query.timeframe}
@@ -78,12 +78,12 @@ const SignalMonitorHistoryPage: React.FC = () => {
           options={[{ label: '15m', value: '15m' }, { label: '1h', value: '1h' }]}
         />
         <Select
-          placeholder="priority"
+          placeholder="优先级"
           allowClear
           style={{ width: 120 }}
           value={query.priority}
           onChange={(v) => setQuery((q) => ({ ...q, priority: v || undefined }))}
-          options={[{ label: 'high', value: 'high' }, { label: 'medium', value: 'medium' }, { label: 'low', value: 'low' }]}
+          options={[{ label: '高', value: 'high' }, { label: '中', value: 'medium' }, { label: '低', value: 'low' }]}
         />
         <Button onClick={() => load({ ...query, page: 1 })} loading={loading}>查询</Button>
         <Button onClick={() => {

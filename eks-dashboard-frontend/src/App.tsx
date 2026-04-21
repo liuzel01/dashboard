@@ -102,7 +102,7 @@ const AppLayout: React.FC = () => {
     icon: <LineChartOutlined />,
     children: [
       { key: '/signal-monitor/realtime', label: <Link to="/signal-monitor/realtime">实时</Link> },
-      { key: '/signal-monitor/history', label: <Link to="/signal-monitor/history">历史</Link> },
+      { key: '/signal-monitor/history', label: <Link to="/signal-monitor/history">触发记录</Link> },
       { key: '/signal-monitor/stats', label: <Link to="/signal-monitor/stats">统计</Link> },
       { key: '/signal-monitor/daily', label: <Link to="/signal-monitor/daily">日报</Link> },
     ],

@@ -38,18 +38,18 @@ const SignalMonitorRealtimePage: React.FC = () => {
   const highCount = useMemo(() => rows.filter((r) => r.priority === 'high').length, [rows]);
 
   const columns: ColumnsType<RealtimeItem> = [
-    { title: 'Symbol', dataIndex: 'symbol', key: 'symbol' },
-    { title: 'Timeframe', dataIndex: 'timeframe', key: 'timeframe' },
-    { title: 'Rule', dataIndex: 'rule', key: 'rule' },
-    { title: 'Direction', dataIndex: 'direction', key: 'direction' },
+    { title: '交易对', dataIndex: 'symbol', key: 'symbol' },
+    { title: '周期', dataIndex: 'timeframe', key: 'timeframe' },
+    { title: '规则', dataIndex: 'rule', key: 'rule' },
+    { title: '方向', dataIndex: 'direction', key: 'direction' },
     {
-      title: 'Priority',
+      title: '优先级',
       dataIndex: 'priority',
       key: 'priority',
       render: (v: string) => <Tag color={v === 'high' ? 'red' : v === 'medium' ? 'orange' : 'default'}>{v}</Tag>,
     },
-    { title: 'Latest Price', dataIndex: 'latest_price', key: 'latest_price' },
-    { title: 'Latest Trigger Time', dataIndex: 'latest_trigger_time', key: 'latest_trigger_time' },
+    { title: '最新价格', dataIndex: 'latest_price', key: 'latest_price' },
+    { title: '最近触发时间', dataIndex: 'latest_trigger_time', key: 'latest_trigger_time' },
   ];
 
   return (
@@ -58,13 +58,13 @@ const SignalMonitorRealtimePage: React.FC = () => {
 
       <Row gutter={16}>
         <Col span={8}>
-          <Card title="Active Signals">{rows.length}</Card>
+          <Card title="活跃信号数">{rows.length}</Card>
         </Col>
         <Col span={8}>
-          <Card title="High Priority">{highCount}</Card>
+          <Card title="高优先级信号">{highCount}</Card>
         </Col>
         <Col span={8}>
-          <Card title="Last Refresh">{lastTs || '-'}</Card>
+          <Card title="最近刷新时间">{lastTs || '-'}</Card>
         </Col>
       </Row>
 

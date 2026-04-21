@@ -46,13 +46,13 @@ const SignalMonitorDailyPage: React.FC = () => {
         <Button onClick={onCopy} disabled={!data?.markdown}>复制 Markdown</Button>
       </Space>
 
-      <Card title={`Daily Report (${data?.date || dateStr})`} loading={loading}>
+      <Card title={`日报 (${data?.date || dateStr})`} loading={loading}>
         {!data ? (
           <Empty description="暂无日报数据" />
         ) : (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Text>trigger_count: {data.summary?.trigger_count ?? 0}</Text>
-            <Text>top_noise_rules: {(data.summary?.top_noise_rules || []).join(', ') || '-'}</Text>
+            <Text>触发总数: {data.summary?.trigger_count ?? 0}</Text>
+            <Text>高噪声规则: {(data.summary?.top_noise_rules || []).join(', ') || '-'}</Text>
             <Paragraph>
               <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{data.markdown}</pre>
             </Paragraph>
@@ -60,7 +60,7 @@ const SignalMonitorDailyPage: React.FC = () => {
         )}
       </Card>
 
-      <Card title="Markdown 原文（便于前端后续替换富文本渲染）">
+      <Card title="Markdown 原文（便于后续替换富文本渲染）">
         <Input.TextArea value={data?.markdown || ''} autoSize={{ minRows: 8, maxRows: 20 }} readOnly />
       </Card>
     </Space>

@@ -33,9 +33,9 @@ const SignalMonitorStatsPage: React.FC = () => {
   }, []);
 
   const ruleColumns: ColumnsType<RuleRow> = [
-    { title: 'Rule', dataIndex: 'rule', key: 'rule' },
-    { title: 'Trigger Count', dataIndex: 'trigger_count', key: 'trigger_count' },
-    { title: 'Emitted Count', dataIndex: 'emitted_count', key: 'emitted_count' },
+    { title: '规则', dataIndex: 'rule', key: 'rule' },
+    { title: '触发次数', dataIndex: 'trigger_count', key: 'trigger_count' },
+    { title: '发送次数', dataIndex: 'emitted_count', key: 'emitted_count' },
   ];
 
   const suppressedRows = stats
@@ -47,13 +47,13 @@ const SignalMonitorStatsPage: React.FC = () => {
       {error && <Alert type="error" showIcon message={error} />}
 
       <Row gutter={16}>
-        <Col span={6}><Card loading={loading} title="Trigger 24h">{stats?.trigger_count ?? 0}</Card></Col>
-        <Col span={6}><Card loading={loading} title="Emitted 24h">{stats?.emitted_count ?? 0}</Card></Col>
-        <Col span={6}><Card loading={loading} title="Suppressed 24h">{stats?.suppressed_count ?? 0}</Card></Col>
-        <Col span={6}><Card loading={loading} title="Success Rate">{((stats?.send_success_rate ?? 0) * 100).toFixed(2)}%</Card></Col>
+        <Col span={6}><Card loading={loading} title="24h触发总数">{stats?.trigger_count ?? 0}</Card></Col>
+        <Col span={6}><Card loading={loading} title="24h发送总数">{stats?.emitted_count ?? 0}</Card></Col>
+        <Col span={6}><Card loading={loading} title="24h抑制总数">{stats?.suppressed_count ?? 0}</Card></Col>
+        <Col span={6}><Card loading={loading} title="发送成功率">{((stats?.send_success_rate ?? 0) * 100).toFixed(2)}%</Card></Col>
       </Row>
 
-      <Card title="By Rule" loading={loading}>
+      <Card title="按规则统计" loading={loading}>
         <Table<RuleRow>
           rowKey={(r) => r.rule}
           columns={ruleColumns}
@@ -63,7 +63,7 @@ const SignalMonitorStatsPage: React.FC = () => {
         />
       </Card>
 
-      <Card title="Suppressed Breakdown" loading={loading}>
+      <Card title="抑制原因分布" loading={loading}>
         {suppressedRows.length === 0 ? (
           <Empty description="暂无抑制记录" />
         ) : (
