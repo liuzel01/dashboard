@@ -7,6 +7,13 @@ const signalMonitorApi = axios.create({
   timeout: 10000,
 });
 
+export type V02BreakdownItem = {
+  factor: string;
+  weightedBullish: number;
+  weightedBearish: number;
+  reason: string;
+};
+
 export type RealtimeItem = {
   symbol: string;
   timeframe: string;
@@ -15,6 +22,12 @@ export type RealtimeItem = {
   priority: string;
   latest_price: number;
   latest_trigger_time: string;
+  v01_signal_count?: number;
+  v02_direction?: string;
+  v02_score?: number;
+  v02_confidence?: 'low' | 'medium' | 'high';
+  v02_should_emit?: boolean;
+  v02_breakdown?: V02BreakdownItem[];
 };
 
 export type RealtimeResponse = {
@@ -33,6 +46,12 @@ export type TriggerRow = {
   dedupe_key: string;
   emitted: boolean;
   suppressed_reason?: string | null;
+  v01_signal_count?: number;
+  v02_direction?: string;
+  v02_score?: number;
+  v02_confidence?: 'low' | 'medium' | 'high';
+  v02_should_emit?: boolean;
+  v02_breakdown?: V02BreakdownItem[];
 };
 
 export type Triggers24hParams = {
