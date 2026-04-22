@@ -285,6 +285,7 @@ export class KubernetesService {
       query?: Record<string, any>;
       body?: any;
       timeoutMs?: number;
+      headers?: Record<string, string>;
     },
   ): Promise<{ statusCode: number; body: any; headers: Record<string, any> }> {
     const { kc } = await this.getK8sApis(environmentId);
@@ -309,6 +310,7 @@ export class KubernetesService {
       timeout: input.timeoutMs ?? 15000,
       headers: {
         Accept: 'application/json',
+        ...(input.headers || {}),
       },
     };
     if (input.body !== undefined) {
@@ -390,6 +392,7 @@ export class KubernetesService {
       query?: Record<string, any>;
       body?: any;
       timeoutMs?: number;
+      headers?: Record<string, string>;
     },
   ): Promise<{ statusCode: number; body: any; headers: Record<string, any> }> {
     const env = this.environmentsService.getEnvironmentById(environmentId);
@@ -445,6 +448,7 @@ export class KubernetesService {
         timeout: input.timeoutMs ?? 15000,
         headers: {
           Accept: 'application/json',
+          ...(input.headers || {}),
         },
       };
       if (input.body !== undefined) {
