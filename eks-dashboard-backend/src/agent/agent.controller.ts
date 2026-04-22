@@ -1,10 +1,14 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   Headers,
   Logger,
+  Param,
+  Patch,
   Post,
+  Query,
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
@@ -80,6 +84,44 @@ export class AgentController {
       `[AgentQuery] aggregate env=${envId} type=${body.type} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
     );
     return this.queryService.aggregate(envId, body.identifier, body.type, body.tenantId);
+  }
+
+  @Get('v1/query/trader/:uid')
+  async getTraderInfo(
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (!tenantId) {
+      throw new BadRequestException('tenantId is required');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.getTraderInfoByUserUid(envId, uid, Number(tenantId));
+  }
+
+  @Patch('v1/query/trader/:uid/nick')
+  async updateTraderNick(
+    @Param('uid') uid: string,
+    @Body() body: { nick_name?: string; tenantId?: number },
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (body.nick_name === undefined) {
+      throw new BadRequestException('nick_name is required in body');
+    }
+    if (body.tenantId === undefined) {
+      throw new BadRequestException('tenantId is required in body');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.updateTraderNickName(
+      envId,
+      uid,
+      body.nick_name,
+      body.tenantId,
+    );
   }
 
   private checkAgentToken(token?: string) {

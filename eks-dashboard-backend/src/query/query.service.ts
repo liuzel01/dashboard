@@ -499,73 +499,37 @@ export class QueryService {
   }
 
   /**
-   * 根据 tbl_user.tenant_user_id 查询对应的 tiger.copy_trade_user_info 记录并返回所有字段
+   * 通过 Agent 查询交易员信息
    */
   async getTraderInfoByUserUid(
     environmentId: string,
     uid: string,
     tenantId: number,
   ) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const user = await this.databaseService.findUserByUid(
+      const data = await this.queryGatewayClient.getTraderInfo(
         environmentId,
         uid,
         tenantId,
       );
-      if (!user || !user.id) {
-        throw new NotFoundException(`User with UID ${uid} not found.`);
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
       }
-      const userId = String(user.id);
-      // 使用 DatabaseService.runQuery 执行参数化查询
-      // 在同一租户约束下查询 trader info（如表中有 tenant_id 字段）
-      // 如果 copy_trade_user_info 没有 tenant_id 字段，则此处仍可以通过 user_id 唯一定位
-      // 优先按租户过滤：使用 user_id AND tenant_id 来保证在多租户场景下的隔离
-      const sqlWithTenant =
-        'SELECT * FROM `tiger`.`copy_trade_user_info` WHERE `user_id` = ? AND `tenant_id` = ? LIMIT 1';
-      try {
-        const [rows] = (await this.databaseService.runQuery(
-          environmentId,
-          sqlWithTenant,
-          [userId, tenantId],
-        )) as any;
-        if (Array.isArray(rows) && rows.length > 0) {
-          return rows[0];
-        }
-        // 如果使用 tenantId 查询未找到，再尝试不带 tenantId 的查询作为兜底（某些旧 schema 可能没有 tenant_id 字段）
-      } catch (err: any) {
-        // 如果报错提示不存在 tenant_id 字段（例如 Unknown column 或 ER_BAD_FIELD_ERROR），则回退到无 tenant 查询
-        const msg = String(err?.message || err);
-        if (!/Unknown column|ER_BAD_FIELD_ERROR/i.test(msg)) {
-          // 不是字段不存在的问题，记录并抛出
-          this.logger.error(
-            'Error selecting trader info with tenant filter:',
-            err,
-          );
-          throw err;
-        }
-        this.logger.warn(
-          'copy_trade_user_info does not contain tenant_id; falling back to user_id-only query',
-        );
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || 'Trader info not found');
       }
-
-      // 尝试不带 tenantId 的查询（兜底）
-      const sql =
-        'SELECT * FROM `tiger`.`copy_trade_user_info` WHERE `user_id` = ? LIMIT 1';
-      const [rowsNoTenant] = (await this.databaseService.runQuery(
-        environmentId,
-        sql,
-        [userId],
-      )) as any;
-      if (Array.isArray(rowsNoTenant) && rowsNoTenant.length > 0) {
-        return rowsNoTenant[0];
+      if (data?.status === 'success') {
+        return data.data;
       }
-      throw new NotFoundException(
-        `Trader info for user id ${userId} not found.`,
-      );
+      return data;
     } catch (error) {
       if (error instanceof HttpException) throw error;
       this.logger.error(
-        `Error fetching trader info for uid ${uid} in env ${environmentId}:`,
+        `Error fetching trader info via agent for uid ${uid} in env ${environmentId}:`,
         error,
       );
       throw new InternalServerErrorException('Failed to fetch trader info');
@@ -578,58 +542,28 @@ export class QueryService {
     nickName: string,
     tenantId: number,
   ) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const user = await this.databaseService.findUserByUid(
+      const data = await this.queryGatewayClient.updateTraderNickName(
         environmentId,
         uid,
+        nickName,
+        tenantId,
       );
-      if (!user || !user.id) {
-        throw new NotFoundException(`User with UID ${uid} not found.`);
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
       }
-      const userId = String(user.id);
-      const sqlWithTenant =
-        'UPDATE `tiger`.`copy_trade_user_info` SET `nick_name` = ? WHERE `user_id` = ? AND `tenant_id` = ?';
-      try {
-        const [result] = (await this.databaseService.runQuery(
-          environmentId,
-          sqlWithTenant,
-          [nickName, userId, tenantId],
-        )) as any;
-        if (!result || result.affectedRows === 0) {
-          throw new NotFoundException('No trader record updated.');
-        }
-        return { message: 'Trader nick_name updated successfully.' };
-      } catch (err: any) {
-        const msg = String(err?.message || err);
-        if (!/Unknown column|ER_BAD_FIELD_ERROR/i.test(msg)) {
-          this.logger.error(
-            'Error updating trader nick with tenant filter:',
-            err,
-          );
-          throw err;
-        }
-        this.logger.warn(
-          'copy_trade_user_info does not contain tenant_id; falling back to user_id-only update',
-        );
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || 'No trader record updated.');
       }
-
-      // 兜底：不带 tenantId 的 UPDATE
-      const sql =
-        'UPDATE `tiger`.`copy_trade_user_info` SET `nick_name` = ? WHERE `user_id` = ?';
-      const [resultNoTenant] = (await this.databaseService.runQuery(
-        environmentId,
-        sql,
-        [nickName, userId],
-      )) as any;
-      if (!resultNoTenant || resultNoTenant.affectedRows === 0) {
-        throw new NotFoundException('No trader record updated.');
-      }
-      return { message: 'Trader nick_name updated successfully.' };
-      return { message: 'Trader nick_name updated successfully.' };
+      return data;
     } catch (error) {
       if (error instanceof HttpException) throw error;
       this.logger.error(
-        `Error updating trader nick for uid ${uid} in env ${environmentId}:`,
+        `Error updating trader nick via agent for uid ${uid} in env ${environmentId}:`,
         error,
       );
       throw new InternalServerErrorException(

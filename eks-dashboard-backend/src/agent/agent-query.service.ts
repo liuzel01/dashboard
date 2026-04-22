@@ -210,6 +210,90 @@ export class AgentQueryService implements OnModuleDestroy {
     return this.redisClient;
   }
 
+  async getTraderInfoByUserUid(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT id FROM `tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+    if (!Array.isArray(userRows) || userRows.length === 0 || !userRows[0]?.id) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const userId = String(userRows[0].id);
+    const sqlWithTenant =
+      'SELECT * FROM `tiger`.`copy_trade_user_info` WHERE `user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    try {
+      const [rows] = (await pool.execute(sqlWithTenant, [userId, tenantId])) as any;
+      if (Array.isArray(rows) && rows.length > 0) {
+        return { status: 'success', data: rows[0] };
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      if (!/Unknown column|ER_BAD_FIELD_ERROR/i.test(msg)) {
+        throw err;
+      }
+      this.logger.warn(
+        '[AgentQuery] copy_trade_user_info missing tenant_id, fallback to user_id-only query',
+      );
+    }
+
+    const sql =
+      'SELECT * FROM `tiger`.`copy_trade_user_info` WHERE `user_id` = ? LIMIT 1';
+    const [rowsNoTenant] = (await pool.execute(sql, [userId])) as any;
+    if (Array.isArray(rowsNoTenant) && rowsNoTenant.length > 0) {
+      return { status: 'success', data: rowsNoTenant[0] };
+    }
+    return {
+      status: 'not_found',
+      error: `Trader info for user id ${userId} not found.`,
+    };
+  }
+
+  async updateTraderNickName(
+    environmentId: string,
+    uid: string,
+    nickName: string,
+    tenantId: number,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT id FROM `tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+    if (!Array.isArray(userRows) || userRows.length === 0 || !userRows[0]?.id) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const userId = String(userRows[0].id);
+    const sqlWithTenant =
+      'UPDATE `tiger`.`copy_trade_user_info` SET `nick_name` = ? WHERE `user_id` = ? AND `tenant_id` = ?';
+    try {
+      const [result] = (await pool.execute(sqlWithTenant, [nickName, userId, tenantId])) as any;
+      if (result && result.affectedRows > 0) {
+        return { message: 'Trader nick_name updated successfully.' };
+      }
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      if (!/Unknown column|ER_BAD_FIELD_ERROR/i.test(msg)) {
+        throw err;
+      }
+      this.logger.warn(
+        '[AgentQuery] copy_trade_user_info missing tenant_id, fallback to user_id-only update',
+      );
+    }
+
+    const sql =
+      'UPDATE `tiger`.`copy_trade_user_info` SET `nick_name` = ? WHERE `user_id` = ?';
+    const [resultNoTenant] = (await pool.execute(sql, [nickName, userId])) as any;
+    if (resultNoTenant && resultNoTenant.affectedRows > 0) {
+      return { message: 'Trader nick_name updated successfully.' };
+    }
+    return { status: 'not_found', error: 'No trader record updated.' };
+  }
+
   private parseJdbcUrl(url: string): JdbcConfig {
     const matched = url.match(/^jdbc:mysql:\/\/([^/?]+)\/([^?]+)(?:\?(.*))?$/i);
     if (!matched) {
