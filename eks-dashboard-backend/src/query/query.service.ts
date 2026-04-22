@@ -10,6 +10,7 @@ import { DatabaseService } from '../database/database.service';
 import { RedisService } from '../redis/redis.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { QueryGatewayClientService } from './query-gateway-client.service';
 
 // --- 模拟的数据服务，请替换为你自己的真实服务 ---
 /*@Injectable()
@@ -51,6 +52,7 @@ export class QueryService {
     private readonly redisService: RedisService,
     private readonly mongoService: MongoDataService,
     private readonly kubernetesService: KubernetesService,
+    private readonly queryGatewayClient: QueryGatewayClientService,
   ) {}
 
   // Helper to fetch a single redis key and return TTL and formatted TTL
@@ -252,6 +254,30 @@ export class QueryService {
     type: 'UID' | 'EMAIL' | 'PHONE',
     tenantId?: number,
   ) {
+    if (this.queryGatewayClient.isGatewayEnabled()) {
+      try {
+        const gatewayData = await this.queryGatewayClient.aggregate(
+          environmentId,
+          identifier,
+          type,
+          tenantId,
+        );
+        if (gatewayData) return gatewayData;
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `[QueryGateway] aggregate failed env=${environmentId}, fallback=${!this.queryGatewayClient.isGatewayStrict()} err=${errMsg}`,
+        );
+        if (this.queryGatewayClient.isGatewayStrict()) {
+          return {
+            mysql: { status: 'error', error: 'AGENT_UNREACHABLE' },
+            redis: { status: 'not_found', error: '网关不可达，未执行缓存查询' },
+            mongo: { status: 'not_found', error: '网关不可达，未执行活动日志查询' },
+          };
+        }
+      }
+    }
+
     this.logger.log(
       `Aggregating data for ${type}: ${identifier} in env ${environmentId} (tenant: ${tenantId || 'any'})`,
     );

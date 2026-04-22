@@ -18,14 +18,14 @@ data:
   AGENT_KMS_DECRYPT_TIMEOUT_MS: "8000"
 
   # Default decrypt profile (used when AGENT_DECRYPT_ENV_CONFIGS has no matching environmentId)
-  KMS_KEY_ALIAS: "alias/kms-eks-default"
-  KMS_CONTEXT: '{"Environment":"default","Source":"backend","DataType":"config-password"}'
+  KMS_KEY_ALIAS: "alias/kms-eks-hash"
+  KMS_CONTEXT: '{"Environment":"hash","Source":"backend","DataType":"config-password"}'
 
   # Environment-specific decrypt profile map.
   # Example:
   # KMS_KEY_ALIAS="alias/kms-eks-hash"
   # KMS_CONTEXT='{"Environment":"hash","Source":"backend","DataType":"config-password"}'
-  AGENT_DECRYPT_ENV_CONFIGS: '{"hash":{"provider":"kms","region":"ap-southeast-1","kmsKeyAlias":"alias/kms-eks-hash","kmsContext":{"Environment":"hash","Source":"backend","DataType":"config-password"},"valuePrefix":"kms://"}}'
+  AGENT_DECRYPT_ENV_CONFIGS: '{"hash":{"provider":"kms","region":"ap-east-1","kmsKeyAlias":"alias/kms-eks-hash","kmsContext":{"Environment":"hash","Source":"backend","DataType":"config-password"},"valuePrefix":"kms://"}}'
 
   # Dedicated datasource configs for dashboard-db-gateway-agent.
   datasource.url: "jdbc:mysql://meganew.c786smwyy2x7.ap-southeast-1.rds.amazonaws.com/spot?useUnicode=true&characterEncoding=utf-8&serverTimeZone=UTC&useSSL=false"

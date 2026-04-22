@@ -4,6 +4,7 @@ import { AgentController } from './agent.controller';
 import { AgentConfigService } from './agent-config.service';
 import { AgentDecryptService } from './agent-decrypt.service';
 import { AgentConnectionService } from './agent-connection.service';
+import { AgentQueryService } from './agent-query.service';
 
 @Module({
   imports: [
@@ -13,7 +14,11 @@ import { AgentConnectionService } from './agent-connection.service';
     }),
   ],
   controllers: [AgentController],
-  providers: [AgentConfigService, AgentDecryptService, AgentConnectionService],
+  providers: [
+    AgentConfigService,
+    AgentDecryptService,
+    AgentConnectionService,
+    AgentQueryService,
+  ],
 })
 export class AgentModule {}
-

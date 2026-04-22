@@ -1,12 +1,23 @@
-import { Controller, Get, Headers } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Post,
+  UnauthorizedException,
+  ValidationPipe,
+} from '@nestjs/common';
 import { AgentConfigService } from './agent-config.service';
 import { AgentConnectionService } from './agent-connection.service';
+import { AgentQueryService } from './agent-query.service';
+import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
 
 @Controller()
 export class AgentController {
   constructor(
     private readonly configService: AgentConfigService,
     private readonly connectionService: AgentConnectionService,
+    private readonly queryService: AgentQueryService,
   ) {}
 
   @Get('healthz')
@@ -19,7 +30,11 @@ export class AgentController {
   }
 
   @Get('v1/config/summary')
-  async configSummary(@Headers('x-environment-id') environmentId?: string) {
+  async configSummary(
+    @Headers('x-environment-id') environmentId?: string,
+    @Headers('x-agent-token') token?: string,
+  ) {
+    this.checkAgentToken(token);
     const envId = environmentId || this.configService.getAgentEnvironmentId();
     const resolved = await this.connectionService.getResolvedConnectionConfig(envId);
     const profile = this.configService.resolveDecryptProfile(envId);
@@ -47,6 +62,24 @@ export class AgentController {
     };
   }
 
+  @Post('v1/query/aggregate')
+  async aggregate(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe()) body: AgentAggregateQueryDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.aggregate(envId, body.identifier, body.type, body.tenantId);
+  }
+
+  private checkAgentToken(token?: string) {
+    const expected = this.configService.getAgentSharedToken();
+    if (!expected) return;
+    if (token === expected) return;
+    throw new UnauthorizedException('Invalid X-Agent-Token');
+  }
+
   private maskValue(value: string) {
     if (!value) return value;
     if (value.length <= 4) return '****';
@@ -67,4 +100,3 @@ export class AgentController {
     );
   }
 }
-

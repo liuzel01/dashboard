@@ -34,10 +34,10 @@ export class AgentError extends Error {
     public readonly code:
       | 'CONFIG_KEY_MISSING'
       | 'CONFIG_PARSE_FAILED'
-      | 'DECRYPT_FAILED',
+      | 'DECRYPT_FAILED'
+      | 'QUERY_EXEC_FAILED',
     message: string,
   ) {
     super(message);
   }
 }
-

@@ -27,6 +27,15 @@ export class AgentConfigService {
     return Number.isFinite(raw) && raw > 0 ? raw : 8_000;
   }
 
+  getQueryTimeoutMs() {
+    const raw = Number(process.env.QUERY_TIMEOUT_MS || 15_000);
+    return Number.isFinite(raw) && raw > 0 ? raw : 15_000;
+  }
+
+  getAgentSharedToken() {
+    return process.env.AGENT_SHARED_TOKEN || '';
+  }
+
   getRawConnectionConfig(): AgentRawConnectionConfig {
     const mysqlUrl = this.pickValue(['DB_MYSQL_URL', 'datasource.url']);
     const mysqlUser = this.pickValue(['DB_MYSQL_USER', 'datasource.username']);
