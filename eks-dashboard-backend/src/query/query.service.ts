@@ -11,6 +11,7 @@ import { RedisService } from '../redis/redis.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { QueryGatewayClientService } from './query-gateway-client.service';
+import { QueryRequestContext } from './query-request-context';
 
 // --- 模拟的数据服务，请替换为你自己的真实服务 ---
 /*@Injectable()
@@ -253,20 +254,22 @@ export class QueryService {
     identifier: string,
     type: 'UID' | 'EMAIL' | 'PHONE',
     tenantId?: number,
+    context?: QueryRequestContext,
   ) {
-    if (this.queryGatewayClient.isGatewayEnabled()) {
+    if (this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
       try {
         const gatewayData = await this.queryGatewayClient.aggregate(
           environmentId,
           identifier,
           type,
           tenantId,
+          context,
         );
         if (gatewayData) return gatewayData;
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         this.logger.warn(
-          `[QueryGateway] aggregate failed env=${environmentId}, fallback=${!this.queryGatewayClient.isGatewayStrict()} err=${errMsg}`,
+          `[QueryGateway] aggregate failed env=${environmentId} requestId=${context?.requestId || 'none'} fallback=${!this.queryGatewayClient.isGatewayStrict()} err=${errMsg}`,
         );
         if (this.queryGatewayClient.isGatewayStrict()) {
           return {
@@ -279,7 +282,7 @@ export class QueryService {
     }
 
     this.logger.log(
-      `Aggregating data for ${type}: ${identifier} in env ${environmentId} (tenant: ${tenantId || 'any'})`,
+      `Aggregating data for ${type}: ${identifier} in env ${environmentId} (tenant: ${tenantId || 'any'}, requestId: ${context?.requestId || 'none'})`,
     );
     const uid = identifier; // 简化处理，真实应用中可能需要转换
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
 import { EnvironmentsService } from '../environments/environments.service';
+import { QueryRequestContext } from './query-request-context';
 
 @Injectable()
 export class QueryGatewayClientService {
@@ -15,6 +16,17 @@ export class QueryGatewayClientService {
       .toLowerCase() === 'true';
   }
 
+  isGatewayEnabledForEnvironment(environmentId: string) {
+    if (!this.isGatewayEnabled()) return false;
+    const denylist = this.parseList(process.env.QUERY_CENTER_GATEWAY_ENV_DENYLIST);
+    if (denylist.has(environmentId)) return false;
+    const allowlist = this.parseList(
+      process.env.QUERY_CENTER_GATEWAY_ENV_ALLOWLIST,
+    );
+    if (allowlist.size === 0) return true;
+    return allowlist.has(environmentId);
+  }
+
   isGatewayStrict() {
     return String(process.env.QUERY_CENTER_GATEWAY_STRICT || '')
       .trim()
@@ -26,8 +38,9 @@ export class QueryGatewayClientService {
     identifier: string,
     type: 'UID' | 'EMAIL' | 'PHONE',
     tenantId?: number,
+    context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabled()) return null;
+    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
     const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(
       environmentId,
     );
@@ -35,7 +48,7 @@ export class QueryGatewayClientService {
 
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/aggregate`;
     const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
-    const requestId = randomUUID();
+    const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
 
     this.logger.log(
@@ -49,11 +62,22 @@ export class QueryGatewayClientService {
         headers: {
           'X-Environment-Id': environmentId,
           'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
           ...(token ? { 'X-Agent-Token': token } : {}),
         },
       },
     );
     return response.data;
   }
-}
 
+  private parseList(raw?: string) {
+    if (!raw) return new Set<string>();
+    return new Set(
+      String(raw)
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    );
+  }
+}

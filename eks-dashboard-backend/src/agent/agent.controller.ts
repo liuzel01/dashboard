@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Logger,
   Post,
   UnauthorizedException,
   ValidationPipe,
@@ -14,6 +15,8 @@ import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
 
 @Controller()
 export class AgentController {
+  private readonly logger = new Logger(AgentController.name);
+
   constructor(
     private readonly configService: AgentConfigService,
     private readonly connectionService: AgentConnectionService,
@@ -65,11 +68,17 @@ export class AgentController {
   @Post('v1/query/aggregate')
   async aggregate(
     @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
     @Headers('x-agent-token') token: string | undefined,
     @Body(new ValidationPipe()) body: AgentAggregateQueryDto,
   ) {
     this.checkAgentToken(token);
     const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentQuery] aggregate env=${envId} type=${body.type} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
+    );
     return this.queryService.aggregate(envId, body.identifier, body.type, body.tenantId);
   }
 

@@ -32,6 +32,9 @@ export class QueryController {
   @Post('aggregate')
   async aggregateQuery(
     @Headers('x-target-environment') environmentId: string,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
     @Body(new ValidationPipe()) queryDto: AggregateQueryDto,
   ) {
     this.checkEnvironmentHeader(environmentId);
@@ -40,6 +43,7 @@ export class QueryController {
       queryDto.identifier,
       queryDto.type,
       queryDto.tenantId,
+      { requestId, userId, username },
     );
   }
 
