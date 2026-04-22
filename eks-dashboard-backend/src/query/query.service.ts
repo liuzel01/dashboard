@@ -256,94 +256,41 @@ export class QueryService {
     tenantId?: number,
     context?: QueryRequestContext,
   ) {
-    if (this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
-      try {
-        const gatewayData = await this.queryGatewayClient.aggregate(
-          environmentId,
-          identifier,
-          type,
-          tenantId,
-          context,
-        );
-        if (gatewayData) return gatewayData;
-      } catch (error) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-        this.logger.warn(
-          `[QueryGateway] aggregate failed env=${environmentId} requestId=${context?.requestId || 'none'} fallback=${!this.queryGatewayClient.isGatewayStrict()} err=${errMsg}`,
-        );
-        if (this.queryGatewayClient.isGatewayStrict()) {
-          return {
-            mysql: { status: 'error', error: 'AGENT_UNREACHABLE' },
-            redis: { status: 'not_found', error: '网关不可达，未执行缓存查询' },
-            mongo: { status: 'not_found', error: '网关不可达，未执行活动日志查询' },
-          };
-        }
-      }
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      return {
+        mysql: { status: 'error', error: 'AGENT_ONLY_MODE_DISABLED' },
+        redis: { status: 'not_found', error: '网关未启用，未执行缓存查询' },
+        mongo: { status: 'not_found', error: '网关未启用，未执行活动日志查询' },
+      };
     }
 
-    this.logger.log(
-      `Aggregating data for ${type}: ${identifier} in env ${environmentId} (tenant: ${tenantId || 'any'}, requestId: ${context?.requestId || 'none'})`,
-    );
-    const uid = identifier; // 简化处理，真实应用中可能需要转换
-
-    let user: Record<string, unknown> | null = null;
-    let mysqlError: string | null = null;
-    // 步骤 1: 通过 EKS 集群内 super-admin 接口获取用户数据并定位数据库 ID
     try {
-      user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
-    } catch (e) {
-      mysqlError = e instanceof Error ? e.message : String(e);
-      this.logger.error(
-        `Super-admin user query failed for uid ${uid} in env ${environmentId}: ${mysqlError}`,
+      const gatewayData = await this.queryGatewayClient.aggregate(
+        environmentId,
+        identifier,
+        type,
+        tenantId,
+        context,
       );
-    }
+      if (gatewayData) return gatewayData;
 
-    if (mysqlError) {
       return {
-        mysql: { status: 'error', error: mysqlError },
-        redis: { status: 'not_found', error: '依赖用户信息，未执行缓存查询' },
-        mongo: { status: 'not_found', error: '依赖用户信息，未执行活动日志查询' },
+        mysql: { status: 'error', error: 'AGENT_UNREACHABLE' },
+        redis: { status: 'not_found', error: '网关不可达，未执行缓存查询' },
+        mongo: { status: 'not_found', error: '网关不可达，未执行活动日志查询' },
+      };
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[QueryGateway] aggregate failed env=${environmentId} requestId=${context?.requestId || 'none'} err=${errMsg}`,
+      );
+      return {
+        mysql: { status: 'error', error: 'AGENT_UNREACHABLE' },
+        redis: { status: 'not_found', error: '网关不可达，未执行缓存查询' },
+        mongo: { status: 'not_found', error: '网关不可达，未执行活动日志查询' },
       };
     }
-    if (!user) {
-      return {
-        mysql: { status: 'not_found', error: '未找到用户信息' },
-        redis: { status: 'not_found', error: '未找到缓存数据' },
-        mongo: { status: 'not_found', error: '未找到活动日志' },
-      };
-    }
 
-    // 步骤 2: 根据用户 ID 查询 Redis 和 Mongo
-    const redisPromise = user.id
-      ? (async () => {
-          // Wrap Redis call with a short timeout so slow/unavailable Redis won't
-          // block the whole aggregation. If it times out, return not found.
-          const p = this.redisService.getKeysWithTtl(
-            environmentId,
-            `*${user.id}*`,
-          );
-          const timeoutMs = 2500;
-          const timeout = new Promise<any>((res) =>
-            setTimeout(() => res([]), timeoutMs),
-          );
-          try {
-            return await Promise.race([p, timeout]);
-          } catch (e) {
-            this.logger.warn('Redis subquery failed or timed out', e);
-            return [];
-          }
-        })()
-      : Promise.resolve([]); // 用户存在但无 ID 时，视为无缓存数据
-
-    const mongoPromise = this.mongoService.findActivityByUid(uid);
-
-    const results = await Promise.allSettled([redisPromise, mongoPromise]);
-
-    return {
-      mysql: { status: 'success', data: user },
-      redis: this.formatSettledResult(results[0], '未找到缓存数据'),
-      mongo: this.formatSettledResult(results[1], '未找到活动日志'),
-    };
   }
 
   private formatSettledResult(
