@@ -13,6 +13,10 @@ export class CreateEnvironmentConfigDto {
   @IsString()
   super_admin_url?: string;
 
+  @IsOptional()
+  @IsString()
+  db_gateway_agent_url?: string;
+
   @IsString()
   @IsNotEmpty()
   aws_region!: string;
@@ -66,6 +70,10 @@ export class UpdateEnvironmentConfigDto {
   @IsOptional()
   @IsString()
   super_admin_url?: string;
+
+  @IsOptional()
+  @IsString()
+  db_gateway_agent_url?: string;
 
   @IsOptional()
   @IsString()

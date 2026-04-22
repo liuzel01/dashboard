@@ -76,6 +76,11 @@ export class EnvironmentsService implements OnModuleInit {
     return this.getEnvironmentById(environmentId);
   }
 
+  async getDbGatewayAgentUrl(environmentId: string): Promise<string | undefined> {
+    const env = await this.getEnvironmentConfigById(environmentId);
+    return env?.db_gateway_agent_url;
+  }
+
   async upsertEnvironmentConfig(environment: Environment) {
     const dbReady = await this.envDb.isConfigAvailable();
     if (!dbReady) {

@@ -125,6 +125,7 @@ export class EnvironmentsDbService {
         id: row.environment_id,
         name: row.name,
         super_admin_url: alerts?.super_admin_url || undefined,
+        db_gateway_agent_url: alerts?.db_gateway_agent_url || undefined,
         aws_access_key_id: row.aws_access_key_id || undefined,
         aws_secret_access_key: row.aws_secret_access_key || undefined,
         aws_profile: row.aws_profile || undefined,
@@ -157,6 +158,7 @@ export class EnvironmentsDbService {
       id: row.environment_id,
       name: row.name,
       super_admin_url: alerts?.super_admin_url || undefined,
+      db_gateway_agent_url: alerts?.db_gateway_agent_url || undefined,
       aws_access_key_id: row.aws_access_key_id || undefined,
       aws_secret_access_key: row.aws_secret_access_key || undefined,
       aws_profile: row.aws_profile || undefined,
@@ -175,6 +177,7 @@ export class EnvironmentsDbService {
     id: string;
     name: string;
     super_admin_url?: string;
+    db_gateway_agent_url?: string;
     aws_access_key_id?: string;
     aws_secret_access_key?: string;
     aws_profile?: string;
@@ -195,6 +198,11 @@ export class EnvironmentsDbService {
       alerts.super_admin_url = env.super_admin_url;
     } else if ('super_admin_url' in alerts) {
       delete alerts.super_admin_url;
+    }
+    if (env.db_gateway_agent_url) {
+      alerts.db_gateway_agent_url = env.db_gateway_agent_url;
+    } else if ('db_gateway_agent_url' in alerts) {
+      delete alerts.db_gateway_agent_url;
     }
 
     await this.db.query(
