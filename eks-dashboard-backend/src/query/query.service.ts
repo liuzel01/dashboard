@@ -46,6 +46,7 @@ export class QueryService {
   private readonly superAdminUserQueryPath = '/admin/trade/user/1/25';
   private readonly superAdminUidQueryType = 5;
   private readonly superAdminAuthRecordSearchPath = '/admin/authRecord/search';
+  private readonly superAdminAuthRecordDetailPath = '/admin/authRecord/detail';
   private readonly superAdminAuthRecordDetailByOldUserPath = '/admin/authRecord/detail/oldUser';
   private readonly superAdminAuthRecordUpdatePath = '/admin/authRecord/update/auth';
 
@@ -576,20 +577,60 @@ export class QueryService {
       return { resp, respBody, respCode, respMsg, respList };
     };
 
-    let { respCode: code, respMsg: msg, respList: list, respBody: body } = await searchAuthRecord({
-      userId,
-      tenantId,
-    });
+    const searchQueries: Record<string, unknown>[] = [
+      { userId, tenantId },
+      { userId },
+      // 高级认证常见筛选
+      {
+        type: 0,
+        startDate: '',
+        endDate: '',
+        userId,
+        statusType: '',
+        realName: '',
+        tel: '',
+        status: '',
+        authType: 1,
+        page: 1,
+        size: 25,
+        tenantId: '',
+      },
+      // 认证审核通过常见筛选
+      {
+        type: 0,
+        startDate: '',
+        endDate: '',
+        userId,
+        statusType: '',
+        realName: '',
+        tel: '',
+        status: 1,
+        authType: 0,
+        page: 1,
+        size: 25,
+        tenantId: '',
+      },
+    ];
 
-    if (code !== 0 || list.length === 0) {
-      this.logger.debug(
-        `[AuthRecord] primary search miss env=${environmentId} uid=${uid} userId=${userId} tenantId=${tenantId} code=${code} msg=${msg} -> retry by userId only`,
-      );
-      const fallback = await searchAuthRecord({ userId });
-      code = fallback.respCode;
-      msg = fallback.respMsg;
-      list = fallback.respList;
-      body = fallback.respBody;
+    let code = -1;
+    let msg = '';
+    let list: any[] = [];
+    let body: any = null;
+
+    for (let i = 0; i < searchQueries.length; i++) {
+      const r = await searchAuthRecord(searchQueries[i]);
+      code = r.respCode;
+      msg = r.respMsg;
+      list = r.respList;
+      body = r.respBody;
+      if (code === 0 && Array.isArray(list) && list.length > 0) {
+        break;
+      }
+      if (i < searchQueries.length - 1) {
+        this.logger.debug(
+          `[AuthRecord] search retry env=${environmentId} uid=${uid} userId=${userId} step=${i + 1}/${searchQueries.length}`,
+        );
+      }
     }
 
     if (
@@ -625,33 +666,47 @@ export class QueryService {
       return matched;
     }
 
-    const detailResponse = await this.kubernetesService.requestServiceProxyByKubectl(environmentId, {
-      namespace: this.superAdminNamespace,
-      serviceName: this.superAdminServiceName,
-      port: this.superAdminServicePort,
-      method: 'GET',
-      path: `${this.superAdminAuthRecordDetailByOldUserPath}/${authRecordId}`,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      expectJson: false,
-      timeoutMs: 15000,
-    });
+    const fetchDetail = async (detailPath: string) => {
+      const resp = await this.kubernetesService.requestServiceProxyByKubectl(environmentId, {
+        namespace: this.superAdminNamespace,
+        serviceName: this.superAdminServiceName,
+        port: this.superAdminServicePort,
+        method: 'GET',
+        path: detailPath,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        expectJson: false,
+        timeoutMs: 15000,
+      });
+      const b = resp?.body;
+      const c = Number((b as any)?.code);
+      const m = String((b as any)?.msg ?? '');
+      const d = (b as any)?.data;
+      this.logger.debug(
+        `[AuthRecord] detail env=${environmentId} path=${detailPath} http=${resp?.statusCode ?? 'n/a'} code=${Number.isFinite(c) ? c : 'n/a'} msg=${m}`,
+      );
+      return { code: c, msg: m, data: d };
+    };
 
-    const detailBody = detailResponse?.body;
-    if (
-      detailBody &&
-      typeof detailBody === 'object' &&
-      'code' in detailBody &&
-      Number((detailBody as { code?: number }).code) !== 0
-    ) {
-      const detailMsg =
-        (detailBody as { msg?: string }).msg || 'super-admin authRecord detail failed';
-      throw new InternalServerErrorException(detailMsg);
+    // 线上观察到部分环境使用 /admin/authRecord/detail/{id}，而不是 /detail/oldUser/{id}
+    const direct = await fetchDetail(`${this.superAdminAuthRecordDetailPath}/${authRecordId}`);
+    if (direct.code === 0 && direct.data && typeof direct.data === 'object') {
+      return direct.data;
     }
 
-    const detailData = (detailBody as any)?.data;
-    return detailData && typeof detailData === 'object' ? detailData : matched;
+    const oldUser = await fetchDetail(
+      `${this.superAdminAuthRecordDetailByOldUserPath}/${authRecordId}`,
+    );
+    if (oldUser.code === 0 && oldUser.data && typeof oldUser.data === 'object') {
+      return oldUser.data;
+    }
+
+    // detail 两种路径都失败时，直接报错，便于定位上游接口契约/数据问题
+    this.logger.error(
+      `[AuthRecord] detail_failed env=${environmentId} uid=${uid} tenantId=${tenantId} userId=${userId} recordId=${authRecordId} directCode=${direct.code} directMsg=${direct.msg} oldUserCode=${oldUser.code} oldUserMsg=${oldUser.msg}`,
+    );
+    throw new InternalServerErrorException('super-admin authRecord detail failed');
   }
 
   async updateAuthRecordByUserUid(
