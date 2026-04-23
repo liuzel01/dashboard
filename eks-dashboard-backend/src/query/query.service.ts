@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-import { RedisService } from '../redis/redis.service';
+
 import { UpdateUserDto } from './dto/update-user.dto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { QueryGatewayClientService } from './query-gateway-client.service';
@@ -50,35 +50,41 @@ export class QueryService {
 
   constructor(
     private readonly databaseService: DatabaseService,
-    private readonly redisService: RedisService,
     private readonly mongoService: MongoDataService,
     private readonly kubernetesService: KubernetesService,
     private readonly queryGatewayClient: QueryGatewayClientService,
   ) {}
 
-  // Helper to fetch a single redis key and return TTL and formatted TTL
+  // Helper to fetch a single redis key via agent and return TTL and formatted TTL
   async getRedisKey(environmentId: string, key: string) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const result = await this.redisService.getKeyWithTtl(environmentId, key);
-      const ttl = result.ttl; // seconds
-      // If TTL is -2 it means the key does not exist. Return 404 so front-end won't show a non-existent key.
-      if (ttl === -2) {
-        throw new NotFoundException(`Key "${key}" not found.`);
+      const data = await this.queryGatewayClient.getRedisKey(environmentId, key);
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
       }
-      const formatted = this.formatTtl(ttl);
-      return {
-        key: result.key,
-        value: result.value,
-        ttlSeconds: ttl,
-        ttlFormatted: formatted,
-      };
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || `Key "${key}" not found.`);
+      }
+      if (data?.status === 'success') {
+        const ttl = Number(data?.data?.ttlSeconds ?? -2);
+        return {
+          key: data?.data?.key,
+          value: data?.data?.value,
+          ttlSeconds: ttl,
+          ttlFormatted: this.formatTtl(ttl),
+        };
+      }
+      return data;
     } catch (e) {
-      // Use warn level here because missing keys or transient redis timeouts are
-      // expected in some flows and should not be logged as ERROR for routine queries.
       this.logger.warn(
-        `Warning fetching redis key ${key} in env ${environmentId}: ${String(e)}`,
+        `Warning fetching redis key via agent ${key} in env ${environmentId}: ${String(e)}`,
       );
-      throw e;
+      if (e instanceof HttpException) throw e;
+      throw new InternalServerErrorException('Failed to fetch key via agent');
     }
   }
 
@@ -446,27 +452,28 @@ export class QueryService {
   }
 
   async deleteRedisKey(environmentId: string, key: string) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const deletedCount = await this.redisService.deleteKey(
-        environmentId,
-        key,
-      );
-      if (deletedCount > 0) {
-        return { message: `Key "${key}" deleted successfully.` };
-      } else {
-        throw new NotFoundException(`Key "${key}" not found.`);
+      const data = await this.queryGatewayClient.deleteRedisKey(environmentId, key);
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
       }
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || `Key "${key}" not found.`);
+      }
+      return data;
     } catch (error) {
       this.logger.error(
-        `Error deleting Redis key "${key}" in env ${environmentId}:`,
+        `Error deleting Redis key via agent "${key}" in env ${environmentId}:`,
         error,
       );
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException(
-        `Failed to delete key: ${error.message}`,
-      );
+      throw new InternalServerErrorException('Failed to delete key via agent');
     }
   }
 
@@ -476,25 +483,30 @@ export class QueryService {
     value: string,
     ttlSeconds?: number,
   ) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const result = await this.redisService.setKey(
+      const data = await this.queryGatewayClient.createRedisKey(
         environmentId,
         key,
         value,
         ttlSeconds,
       );
-      return { message: `Key "${key}" created successfully.`, result };
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      return data;
     } catch (error) {
       this.logger.error(
-        `Error creating Redis key "${key}" in env ${environmentId}:`,
+        `Error creating Redis key via agent "${key}" in env ${environmentId}:`,
         error,
       );
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new InternalServerErrorException(
-        `Failed to create key: ${error.message}`,
-      );
+      throw new InternalServerErrorException('Failed to create key via agent');
     }
   }
 

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Logger,
@@ -99,6 +100,64 @@ export class AgentController {
     }
     const envId = environmentId || this.configService.getAgentEnvironmentId();
     return this.queryService.getTraderInfoByUserUid(envId, uid, Number(tenantId));
+  }
+
+  @Get('v1/query/redis-key')
+  async getRedisKey(
+    @Query('key') key: string | undefined,
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (!key) {
+      throw new BadRequestException('Query parameter "key" is required.');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.getRedisKey(envId, key);
+  }
+
+  @Post('v1/query/redis-key')
+  async createRedisKey(
+    @Body() body: { key?: string; value?: string; ttlSeconds?: number },
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (!body.key) {
+      throw new BadRequestException('Body field "key" is required.');
+    }
+    if (body.value === undefined) {
+      throw new BadRequestException('Body field "value" is required.');
+    }
+    if (
+      body.ttlSeconds !== undefined &&
+      (!Number.isFinite(body.ttlSeconds) || body.ttlSeconds <= 0)
+    ) {
+      throw new BadRequestException(
+        'Body field "ttlSeconds" must be a positive number when provided.',
+      );
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.createRedisKey(
+      envId,
+      body.key,
+      body.value,
+      body.ttlSeconds,
+    );
+  }
+
+  @Delete('v1/query/redis-key')
+  async deleteRedisKey(
+    @Query('key') key: string | undefined,
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (!key) {
+      throw new BadRequestException('Query parameter "key" is required.');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.deleteRedisKey(envId, key);
   }
 
   @Patch('v1/query/trader/:uid/nick')
