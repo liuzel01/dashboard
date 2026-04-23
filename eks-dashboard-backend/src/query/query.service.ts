@@ -45,6 +45,8 @@ export class QueryService {
   private readonly superAdminServicePort = 80;
   private readonly superAdminUserQueryPath = '/admin/trade/user/1/25';
   private readonly superAdminUidQueryType = 5;
+  private readonly superAdminAuthRecordSearchPath = '/admin/authRecord/search';
+  private readonly superAdminAuthRecordUpdatePath = '/admin/authRecord/update/auth';
 
   constructor(
     private readonly mongoService: MongoDataService,
@@ -528,6 +530,117 @@ export class QueryService {
         'Failed to update OTC merchant name',
       );
     }
+  }
+
+  async getAuthRecordByUserUid(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    const user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
+    if (!user) {
+      throw new NotFoundException(`User with UID ${uid} not found.`);
+    }
+    const userId = Number(user.id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      throw new InternalServerErrorException('Invalid user id resolved from super-admin user record');
+    }
+
+    const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+      namespace: this.superAdminNamespace,
+      serviceName: this.superAdminServiceName,
+      port: this.superAdminServicePort,
+      method: 'POST',
+      path: this.superAdminAuthRecordSearchPath,
+      body: {
+        page: 1,
+        size: 20,
+        userId,
+        status: 1,
+      },
+      timeoutMs: 15000,
+    });
+
+    const body = response?.body;
+    if (
+      body &&
+      typeof body === 'object' &&
+      'code' in body &&
+      Number((body as { code?: number }).code) !== 0
+    ) {
+      const msg = (body as { msg?: string }).msg || 'super-admin authRecord search failed';
+      throw new InternalServerErrorException(msg);
+    }
+
+    const list = Array.isArray((body as any)?.data?.list) ? (body as any).data.list : [];
+    const matched =
+      list.find(
+        (item: any) =>
+          Number(item?.userId) === userId &&
+          Number(item?.status) === 1 &&
+          (item?.tenantId === undefined || Number(item?.tenantId) === Number(tenantId)),
+      ) ||
+      list.find(
+        (item: any) => Number(item?.userId) === userId && Number(item?.status) === 1,
+      ) ||
+      null;
+    if (!matched) {
+      throw new NotFoundException(`Auth record for userId ${userId} not found.`);
+    }
+    return matched;
+  }
+
+  async updateAuthRecordByUserUid(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    realName?: string,
+    cardNo?: string,
+  ) {
+    const normalizedRealName = realName ?? '';
+    const normalizedCardNo = cardNo ?? '';
+    if (normalizedRealName === '' && normalizedCardNo === '') {
+      throw new HttpException(
+        'realName and cardNo cannot both be empty',
+        400,
+      );
+    }
+
+    const user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
+    if (!user) {
+      throw new NotFoundException(`User with UID ${uid} not found.`);
+    }
+    const userId = Number(user.id);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      throw new InternalServerErrorException('Invalid user id resolved from super-admin user record');
+    }
+
+    const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+      namespace: this.superAdminNamespace,
+      serviceName: this.superAdminServiceName,
+      port: this.superAdminServicePort,
+      method: 'POST',
+      path: this.superAdminAuthRecordUpdatePath,
+      body: {
+        userId,
+        realName: normalizedRealName,
+        cardNo: normalizedCardNo,
+      },
+      timeoutMs: 15000,
+    });
+
+    const body = response?.body;
+    if (
+      body &&
+      typeof body === 'object' &&
+      'code' in body &&
+      Number((body as { code?: number }).code) !== 0
+    ) {
+      const msg = (body as { msg?: string }).msg || 'super-admin authRecord update failed';
+      throw new InternalServerErrorException(msg);
+    }
+
+    return { message: 'Auth record updated successfully.' };
   }
 
   async getTraderInfoByUserUid(

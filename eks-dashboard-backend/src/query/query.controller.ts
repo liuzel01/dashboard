@@ -182,6 +182,48 @@ export class QueryController {
     );
   }
 
+  @Get('users/:uid/auth-record')
+  async getAuthRecord(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (!tenantId) {
+      throw new HttpException(
+        'Query parameter "tenantId" is required.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const tId = Number(tenantId);
+    return this.queryService.getAuthRecordByUserUid(environmentId, uid, tId);
+  }
+
+  @Patch('users/:uid/auth-record')
+  async updateAuthRecord(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Body() body: { realName?: string; cardNo?: string; tenantId?: number },
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (body.tenantId === undefined) {
+      throw new HttpException('tenantId is required in body', HttpStatus.BAD_REQUEST);
+    }
+    if (body.realName === undefined && body.cardNo === undefined) {
+      throw new HttpException(
+        'realName or cardNo is required in body',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.queryService.updateAuthRecordByUserUid(
+      environmentId,
+      uid,
+      body.tenantId,
+      body.realName,
+      body.cardNo,
+    );
+  }
+
   @Get('users/:uid/trader')
   async getTraderInfo(
     @Headers('x-target-environment') environmentId: string,
