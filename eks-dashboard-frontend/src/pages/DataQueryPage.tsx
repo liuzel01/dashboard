@@ -32,6 +32,8 @@ import {
   getOtcMerchantInfo,
   updateTraderNickName,
   updateOtcMerchantName,
+  getAuthRecord,
+  updateAuthRecord,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import PlaceholderPage from './PlaceholderPage';
@@ -91,6 +93,12 @@ const DataQueryPage: React.FC = () => {
   const [isOtcEditVisible, setIsOtcEditVisible] = useState(false);
   const [otcEditLoading, setOtcEditLoading] = useState(false);
   const [otcForm] = Form.useForm();
+  const [authRecordInfo, setAuthRecordInfo] = useState<Record<string, unknown> | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authDetailVisible, setAuthDetailVisible] = useState(false);
+  const [isAuthEditVisible, setIsAuthEditVisible] = useState(false);
+  const [authEditLoading, setAuthEditLoading] = useState(false);
+  const [authForm] = Form.useForm();
   const [lastSearchTerm, setLastSearchTerm] = useState('');
   const [tenants, setTenants] = useState<{ id: number; name: string }[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(
@@ -233,6 +241,21 @@ const DataQueryPage: React.FC = () => {
         setOtcMerchantInfo(null);
       } finally {
         setOtcLoading(false);
+      }
+
+      try {
+        setAuthLoading(true);
+        setAuthRecordInfo(null);
+        const auth = await getAuthRecord(uid, tenantFromRef);
+        setAuthRecordInfo(auth || null);
+      } catch (err) {
+        const axiosError = err as { response?: { status?: number } };
+        if (axiosError.response?.status !== 404) {
+          console.warn('getAuthRecord failed', err);
+        }
+        setAuthRecordInfo(null);
+      } finally {
+        setAuthLoading(false);
       }
 
       if (mysqlUserId === undefined || mysqlUserId === null) {
@@ -583,6 +606,53 @@ const DataQueryPage: React.FC = () => {
                 </Spin>
               </Card>
             </div>
+
+            <div style={{ marginTop: 16 }}>
+              <Card
+                title="用户认证信息"
+                extra={
+                  authRecordInfo ? (
+                    <Dropdown
+                      overlay={
+                        <Menu>
+                          <Menu.Item
+                            key="edit"
+                            onClick={() => {
+                              authForm.setFieldsValue({
+                                realName: authRecordInfo?.realName ?? '',
+                                cardNo: authRecordInfo?.cardNo ?? '',
+                              });
+                              setIsAuthEditVisible(true);
+                            }}
+                          >
+                            编辑信息
+                          </Menu.Item>
+                        </Menu>
+                      }
+                    >
+                      <Button>操作 <DownOutlined /></Button>
+                    </Dropdown>
+                  ) : null
+                }
+              >
+                <Spin spinning={authLoading} tip="正在查询用户认证信息...">
+                  {authRecordInfo ? (
+                    <div>
+                      <Descriptions bordered column={1}>
+                        <Descriptions.Item label="realName">{authRecordInfo.realName == null || authRecordInfo.realName === '' ? 'N/A' : String(authRecordInfo.realName)}</Descriptions.Item>
+                        <Descriptions.Item label="cardNo">{authRecordInfo.cardNo == null || authRecordInfo.cardNo === '' ? 'N/A' : String(authRecordInfo.cardNo)}</Descriptions.Item>
+                        <Descriptions.Item label="idType">{authRecordInfo.idType == null ? 'N/A' : String(authRecordInfo.idType)}</Descriptions.Item>
+                      </Descriptions>
+                      <div style={{ marginTop: 12 }}>
+                        <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setAuthDetailVisible(true)}>查看全部字段</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Empty description="无用户认证信息" />
+                  )}
+                </Spin>
+              </Card>
+            </div>
             </>
           ) : ( <Empty description="无用户基本信息" /> )}
         </TabPane>
@@ -828,6 +898,57 @@ const DataQueryPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="编辑用户认证信息"
+        open={isAuthEditVisible}
+        onCancel={() => setIsAuthEditVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Form
+          form={authForm}
+          layout="vertical"
+          onFinish={async (vals: { realName?: string; cardNo?: string }) => {
+            if (!userInfo?.tenant_user_id) {
+              message.error('缺少用户 UID，无法更新');
+              return;
+            }
+            if ((vals.realName ?? '') === '' && (vals.cardNo ?? '') === '') {
+              message.error('realName 和 cardNo 不能同时为空');
+              return;
+            }
+            setAuthEditLoading(true);
+            try {
+              const tenantIdForCall = userInfo.tenant_id || currentTenantRef.current!;
+              await updateAuthRecord(String(userInfo.tenant_user_id), tenantIdForCall!, {
+                realName: vals.realName,
+                cardNo: vals.cardNo,
+              });
+              message.success('用户认证信息更新成功');
+              setIsAuthEditVisible(false);
+              const auth = await getAuthRecord(String(userInfo.tenant_user_id), tenantIdForCall!);
+              setAuthRecordInfo(auth || null);
+            } catch (err) {
+              const e = err as { response?: { data?: { message?: string } }; message?: string };
+              const msg = e?.response?.data?.message || e?.message || String(err);
+              message.error(`更新失败: ${msg}`);
+            } finally {
+              setAuthEditLoading(false);
+            }
+          }}
+        >
+          <Form.Item name="realName" label="realName">
+            <Input placeholder="允许为空" />
+          </Form.Item>
+          <Form.Item name="cardNo" label="cardNo">
+            <Input placeholder="允许为空" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={authEditLoading}>保存</Button>
+          </Form.Item>
+        </Form>
+      </Modal>
       {/* 交易员全部字段 Modal */}
       {traderInfo && (
         <Modal
@@ -858,6 +979,23 @@ const DataQueryPage: React.FC = () => {
         >
           <Descriptions bordered column={1} size="small" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {Object.entries(otcMerchantInfo).map(([key, value]) => (
+              <Descriptions.Item key={key} label={key}>{value == null ? 'N/A' : String(value)}</Descriptions.Item>
+            ))}
+          </Descriptions>
+        </Modal>
+      )}
+      {authRecordInfo && (
+        <Modal
+          title="用户认证全部字段信息"
+          open={authDetailVisible}
+          onCancel={() => setAuthDetailVisible(false)}
+          footer={[
+            <Button key="back" onClick={() => setAuthDetailVisible(false)}>关闭</Button>,
+          ]}
+          width={800}
+        >
+          <Descriptions bordered column={1} size="small" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {Object.entries(authRecordInfo).map(([key, value]) => (
               <Descriptions.Item key={key} label={key}>{value == null ? 'N/A' : String(value)}</Descriptions.Item>
             ))}
           </Descriptions>

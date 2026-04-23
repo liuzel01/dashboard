@@ -161,6 +161,20 @@ export const updateOtcMerchantName = async (uid: string, name: string, tenantId:
   return response.data;
 };
 
+export const getAuthRecord = async (uid: string, tenantId: number) => {
+  const response = await api.get(`/query/users/${uid}/auth-record`, { params: { tenantId } });
+  return response.data;
+};
+
+export const updateAuthRecord = async (
+  uid: string,
+  tenantId: number,
+  data: { realName?: string; cardNo?: string },
+) => {
+  const response = await api.patch(`/query/users/${uid}/auth-record`, { tenantId, ...data });
+  return response.data;
+};
+
 export const previewAiOpsSql = async (data: { question?: string; sql?: string; maxRows?: number }) => {
   const response = await api.post('/ai-ops/sql/preview', data);
   return response.data;
