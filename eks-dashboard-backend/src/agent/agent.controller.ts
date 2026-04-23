@@ -132,6 +132,44 @@ export class AgentController {
     return this.queryService.deactivateUser(envId, uid, body.tenantId);
   }
 
+  @Get('v1/query/otc-merchant/:uid')
+  async getOtcMerchantInfo(
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (!tenantId) {
+      throw new BadRequestException('tenantId is required');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.getOtcMerchantInfoByUserUid(envId, uid, Number(tenantId));
+  }
+
+  @Patch('v1/query/otc-merchant/:uid/name')
+  async updateOtcMerchantName(
+    @Param('uid') uid: string,
+    @Body() body: { name?: string; tenantId?: number },
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (body.name === undefined) {
+      throw new BadRequestException('name is required in body');
+    }
+    if (body.tenantId === undefined) {
+      throw new BadRequestException('tenantId is required in body');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.updateOtcMerchantNameByUserUid(
+      envId,
+      uid,
+      body.tenantId,
+      body.name,
+    );
+  }
+
   @Get('v1/query/redis-key')
   async getRedisKey(
     @Query('key') key: string | undefined,

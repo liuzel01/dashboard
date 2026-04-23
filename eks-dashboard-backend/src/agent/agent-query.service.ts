@@ -253,6 +253,57 @@ export class AgentQueryService implements OnModuleDestroy {
     };
   }
 
+  async getOtcMerchantInfoByUserUid(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT id FROM `spot`.`tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+    if (!Array.isArray(userRows) || userRows.length === 0 || !userRows[0]?.id) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const userId = Number(userRows[0].id);
+    const sql =
+      'SELECT * FROM `otc`.`tbl_otc_merchant` WHERE `user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [rows] = (await pool.execute(sql, [userId, tenantId])) as any;
+    if (Array.isArray(rows) && rows.length > 0) {
+      return { status: 'success', data: rows[0] };
+    }
+    return {
+      status: 'not_found',
+      error: `OTC merchant info for user id ${userId} not found.`,
+    };
+  }
+
+  async updateOtcMerchantNameByUserUid(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    name: string,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT id FROM `spot`.`tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+    if (!Array.isArray(userRows) || userRows.length === 0 || !userRows[0]?.id) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const userId = Number(userRows[0].id);
+    const sql =
+      'UPDATE `otc`.`tbl_otc_merchant` SET `name` = ? WHERE `user_id` = ? AND `tenant_id` = ?';
+    const [result] = (await pool.execute(sql, [name, userId, tenantId])) as any;
+
+    if (result && result.affectedRows > 0) {
+      return { message: 'OTC merchant name updated successfully.' };
+    }
+    return { status: 'not_found', error: 'No OTC merchant record updated.' };
+  }
+
   async getRedisKey(environmentId: string, key: string) {
     const client = await this.getRedisClient(environmentId);
     const metaPipeline = client.pipeline();

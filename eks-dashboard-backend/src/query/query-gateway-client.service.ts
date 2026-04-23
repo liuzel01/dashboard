@@ -315,6 +315,118 @@ export class QueryGatewayClientService {
     return response.data;
   }
 
+  async getOtcMerchantInfo(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    context?: QueryRequestContext,
+  ): Promise<any | null> {
+    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+
+    const requestId = context?.requestId || randomUUID();
+    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const transport = this.getGatewayTransport();
+
+    if (transport === 'k8s-proxy') {
+      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
+      const serviceName =
+        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
+      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+        namespace,
+        serviceName,
+        port: Number.isFinite(servicePort) && servicePort > 0 ? servicePort : 8080,
+        method: 'GET',
+        path: `/v1/query/otc-merchant/${encodeURIComponent(uid)}`,
+        query: { tenantId },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      });
+      return response.body;
+    }
+
+    const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(environmentId);
+    if (!baseUrl) return null;
+    const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/otc-merchant/${encodeURIComponent(uid)}`;
+    const response = await axios.get(url, {
+      timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+      params: { tenantId },
+      headers: {
+        'X-Environment-Id': environmentId,
+        'X-Request-Id': requestId,
+        ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+        ...(context?.username ? { 'X-Username': context.username } : {}),
+        ...(token ? { 'X-Agent-Token': token } : {}),
+      },
+    });
+    return response.data;
+  }
+
+  async updateOtcMerchantName(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    name: string,
+    context?: QueryRequestContext,
+  ): Promise<any | null> {
+    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+
+    const requestId = context?.requestId || randomUUID();
+    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const transport = this.getGatewayTransport();
+
+    if (transport === 'k8s-proxy') {
+      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
+      const serviceName =
+        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
+      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+        namespace,
+        serviceName,
+        port: Number.isFinite(servicePort) && servicePort > 0 ? servicePort : 8080,
+        method: 'PATCH',
+        path: `/v1/query/otc-merchant/${encodeURIComponent(uid)}/name`,
+        body: { tenantId, name },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      });
+      return response.body;
+    }
+
+    const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(environmentId);
+    if (!baseUrl) return null;
+    const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/otc-merchant/${encodeURIComponent(uid)}/name`;
+    const response = await axios.patch(
+      url,
+      { tenantId, name },
+      {
+        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      },
+    );
+    return response.data;
+  }
+
   async getRedisKey(
     environmentId: string,
     key: string,

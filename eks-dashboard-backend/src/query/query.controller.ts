@@ -144,6 +144,44 @@ export class QueryController {
     return this.queryService.getRedisKey(environmentId, key);
   }
 
+  @Get('users/:uid/otc-merchant')
+  async getOtcMerchantInfo(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId?: string,
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (!tenantId) {
+      throw new HttpException(
+        'Query parameter "tenantId" is required.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const tId = Number(tenantId);
+    return this.queryService.getOtcMerchantInfoByUserUid(environmentId, uid, tId);
+  }
+
+  @Patch('users/:uid/otc-merchant/name')
+  async updateOtcMerchantName(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Body() body: { name?: string; tenantId?: number },
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (body.name === undefined) {
+      throw new HttpException('name is required in body', HttpStatus.BAD_REQUEST);
+    }
+    if (body.tenantId === undefined) {
+      throw new HttpException('tenantId is required in body', HttpStatus.BAD_REQUEST);
+    }
+    return this.queryService.updateOtcMerchantNameByUserUid(
+      environmentId,
+      uid,
+      body.name,
+      body.tenantId,
+    );
+  }
+
   @Get('users/:uid/trader')
   async getTraderInfo(
     @Headers('x-target-environment') environmentId: string,

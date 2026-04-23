@@ -459,6 +459,77 @@ export class QueryService {
   /**
    * 通过 Agent 查询交易员信息
    */
+  async getOtcMerchantInfoByUserUid(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
+    try {
+      const data = await this.queryGatewayClient.getOtcMerchantInfo(
+        environmentId,
+        uid,
+        tenantId,
+      );
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || 'OTC merchant info not found');
+      }
+      if (data?.status === 'success') {
+        return data.data;
+      }
+      return data;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `Error fetching OTC merchant info via agent for uid ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException('Failed to fetch OTC merchant info');
+    }
+  }
+
+  async updateOtcMerchantNameByUserUid(
+    environmentId: string,
+    uid: string,
+    name: string,
+    tenantId: number,
+  ) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
+    try {
+      const data = await this.queryGatewayClient.updateOtcMerchantName(
+        environmentId,
+        uid,
+        tenantId,
+        name,
+      );
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || 'No OTC merchant record updated.');
+      }
+      return data;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `Error updating OTC merchant name via agent for uid ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException(
+        'Failed to update OTC merchant name',
+      );
+    }
+  }
+
   async getTraderInfoByUserUid(
     environmentId: string,
     uid: string,
