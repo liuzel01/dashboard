@@ -187,6 +187,7 @@ export class QueryController {
     @Headers('x-target-environment') environmentId: string,
     @Param('uid') uid: string,
     @Query('tenantId') tenantId?: string,
+    @Query('userId') userId?: string,
   ) {
     this.checkEnvironmentHeader(environmentId);
     if (!tenantId) {
@@ -196,18 +197,30 @@ export class QueryController {
       );
     }
     const tId = Number(tenantId);
-    return this.queryService.getAuthRecordByUserUid(environmentId, uid, tId);
+    const resolvedUserId =
+      userId !== undefined && userId !== null && userId !== ''
+        ? Number(userId)
+        : undefined;
+    return this.queryService.getAuthRecordByUserUid(
+      environmentId,
+      uid,
+      tId,
+      Number.isFinite(Number(resolvedUserId)) ? Number(resolvedUserId) : undefined,
+    );
   }
 
   @Patch('users/:uid/auth-record')
   async updateAuthRecord(
     @Headers('x-target-environment') environmentId: string,
     @Param('uid') uid: string,
-    @Body() body: { realName?: string; cardNo?: string; tenantId?: number },
+    @Body() body: { realName?: string; cardNo?: string; tenantId?: number; userId?: number },
   ) {
     this.checkEnvironmentHeader(environmentId);
     if (body.tenantId === undefined) {
       throw new HttpException('tenantId is required in body', HttpStatus.BAD_REQUEST);
+    }
+    if (body.userId === undefined || !Number.isFinite(Number(body.userId)) || Number(body.userId) <= 0) {
+      throw new HttpException('userId is required in body', HttpStatus.BAD_REQUEST);
     }
     if (body.realName === undefined && body.cardNo === undefined) {
       throw new HttpException(
@@ -221,6 +234,7 @@ export class QueryController {
       body.tenantId,
       body.realName,
       body.cardNo,
+      Number(body.userId),
     );
   }
 

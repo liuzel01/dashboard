@@ -284,8 +284,10 @@ export class KubernetesService {
       method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
       query?: Record<string, any>;
       body?: any;
+      form?: Record<string, any>;
       timeoutMs?: number;
       headers?: Record<string, string>;
+      expectJson?: boolean;
     },
   ): Promise<{ statusCode: number; body: any; headers: Record<string, any> }> {
     const { kc } = await this.getK8sApis(environmentId);
@@ -301,19 +303,25 @@ export class KubernetesService {
       input.namespace,
     )}/services/${encodeURIComponent(serviceRef)}/proxy${normalizedPath}`;
 
+    const useForm = input.form !== undefined;
+    const expectJson = input.expectJson !== false;
     const options: request.Options = {
       method: input.method || 'GET',
       uri,
       qs: input.query,
-      body: input.body,
-      json: true,
+      body: useForm ? undefined : input.body,
+      form: useForm ? input.form : undefined,
+      json: useForm ? false : expectJson,
       timeout: input.timeoutMs ?? 15000,
       headers: {
         Accept: 'application/json',
         ...(input.headers || {}),
       },
     };
-    if (input.body !== undefined) {
+    if (useForm) {
+      (options.headers as Record<string, string>)['Content-Type'] =
+        'application/x-www-form-urlencoded';
+    } else if (input.body !== undefined) {
       (options.headers as Record<string, string>)['Content-Type'] = 'application/json';
     }
 
@@ -337,13 +345,25 @@ export class KubernetesService {
           return;
         }
         const statusCode = response?.statusCode || 0;
+        const normalizedBody =
+          typeof body === 'string'
+            ? (() => {
+                try {
+                  return JSON.parse(body);
+                } catch {
+                  return body;
+                }
+              })()
+            : body;
         if (statusCode < 200 || statusCode >= 300) {
           if (statusCode === 401) {
             this.requestServiceViaKubectlProxy(environmentId, input)
               .then((fallback) => resolve(fallback))
               .catch((fallbackError) => {
                 const bodyPreview =
-                  typeof body === 'string' ? body.slice(0, 240) : JSON.stringify(body).slice(0, 240);
+                  typeof normalizedBody === 'string'
+                    ? normalizedBody.slice(0, 240)
+                    : JSON.stringify(normalizedBody).slice(0, 240);
                 this.logger.warn(
                   `[ServiceProxy] fallback failed env=${environmentId} context=${contextName} status=${statusCode} body=${bodyPreview} fallback=${String(
                     (fallbackError as any)?.message || fallbackError,
@@ -351,20 +371,22 @@ export class KubernetesService {
                 );
                 reject(
                   new Error(
-                    `Service proxy request failed (${statusCode}): ${typeof body === 'string' ? body : JSON.stringify(body)}`,
+                    `Service proxy request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
                   ),
                 );
               });
             return;
           }
           const bodyPreview =
-            typeof body === 'string' ? body.slice(0, 240) : JSON.stringify(body).slice(0, 240);
+            typeof normalizedBody === 'string'
+              ? normalizedBody.slice(0, 240)
+              : JSON.stringify(normalizedBody).slice(0, 240);
           this.logger.warn(
             `[ServiceProxy] non-2xx env=${environmentId} context=${contextName} status=${statusCode} body=${bodyPreview}`,
           );
           reject(
             new Error(
-              `Service proxy request failed (${statusCode}): ${typeof body === 'string' ? body : JSON.stringify(body)}`,
+              `Service proxy request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
             ),
           );
           return;
@@ -374,11 +396,30 @@ export class KubernetesService {
         );
         resolve({
           statusCode,
-          body,
+          body: normalizedBody,
           headers: (response?.headers || {}) as Record<string, any>,
         });
       });
     });
+  }
+
+  async requestServiceProxyByKubectl(
+    environmentId: string,
+    input: {
+      namespace: string;
+      serviceName: string;
+      port: number;
+      path: string;
+      method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+      query?: Record<string, any>;
+      body?: any;
+      form?: Record<string, any>;
+      timeoutMs?: number;
+      headers?: Record<string, string>;
+      expectJson?: boolean;
+    },
+  ): Promise<{ statusCode: number; body: any; headers: Record<string, any> }> {
+    return this.requestServiceViaKubectlProxy(environmentId, input);
   }
 
   private async requestServiceViaKubectlProxy(
@@ -391,8 +432,10 @@ export class KubernetesService {
       method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
       query?: Record<string, any>;
       body?: any;
+      form?: Record<string, any>;
       timeoutMs?: number;
       headers?: Record<string, string>;
+      expectJson?: boolean;
     },
   ): Promise<{ statusCode: number; body: any; headers: Record<string, any> }> {
     const env = this.environmentsService.getEnvironmentById(environmentId);
@@ -439,19 +482,25 @@ export class KubernetesService {
       const uri = `http://127.0.0.1:${localPort}/api/v1/namespaces/${encodeURIComponent(
         input.namespace,
       )}/services/${encodeURIComponent(serviceRef)}/proxy${normalizedPath}`;
+      const useForm = input.form !== undefined;
+      const expectJson = input.expectJson !== false;
       const options: request.Options = {
         method: input.method || 'GET',
         uri,
         qs: input.query,
-        body: input.body,
-        json: true,
+        body: useForm ? undefined : input.body,
+        form: useForm ? input.form : undefined,
+        json: useForm ? false : expectJson,
         timeout: input.timeoutMs ?? 15000,
         headers: {
           Accept: 'application/json',
           ...(input.headers || {}),
         },
       };
-      if (input.body !== undefined) {
+      if (useForm) {
+        (options.headers as Record<string, string>)['Content-Type'] =
+          'application/x-www-form-urlencoded';
+      } else if (input.body !== undefined) {
         (options.headers as Record<string, string>)['Content-Type'] = 'application/json';
       }
 
@@ -466,17 +515,27 @@ export class KubernetesService {
             return;
           }
           const statusCode = response?.statusCode || 0;
+          const normalizedBody =
+            typeof body === 'string'
+              ? (() => {
+                  try {
+                    return JSON.parse(body);
+                  } catch {
+                    return body;
+                  }
+                })()
+              : body;
           if (statusCode < 200 || statusCode >= 300) {
             reject(
               new Error(
-                `Service proxy fallback request failed (${statusCode}): ${typeof body === 'string' ? body : JSON.stringify(body)}`,
+                `Service proxy fallback request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
               ),
             );
             return;
           }
           resolve({
             statusCode,
-            body,
+            body: normalizedBody,
             headers: (response?.headers || {}) as Record<string, any>,
           });
         });

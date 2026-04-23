@@ -46,6 +46,7 @@ export class QueryService {
   private readonly superAdminUserQueryPath = '/admin/trade/user/1/25';
   private readonly superAdminUidQueryType = 5;
   private readonly superAdminAuthRecordSearchPath = '/admin/authRecord/search';
+  private readonly superAdminAuthRecordDetailByOldUserPath = '/admin/authRecord/detail/oldUser';
   private readonly superAdminAuthRecordUpdatePath = '/admin/authRecord/update/auth';
 
   constructor(
@@ -536,58 +537,121 @@ export class QueryService {
     environmentId: string,
     uid: string,
     tenantId: number,
+    userIdFromClient?: number,
   ) {
-    const user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
-    if (!user) {
-      throw new NotFoundException(`User with UID ${uid} not found.`);
+    let userId: number;
+    if (Number.isFinite(Number(userIdFromClient)) && Number(userIdFromClient) > 0) {
+      userId = Number(userIdFromClient);
+    } else {
+      const user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
+      if (!user) {
+        throw new NotFoundException(`User with UID ${uid} not found.`);
+      }
+      userId = Number(user.id);
     }
-    const userId = Number(user.id);
     if (!Number.isFinite(userId) || userId <= 0) {
       throw new InternalServerErrorException('Invalid user id resolved from super-admin user record');
     }
 
-    const response = await this.kubernetesService.requestServiceProxy(environmentId, {
-      namespace: this.superAdminNamespace,
-      serviceName: this.superAdminServiceName,
-      port: this.superAdminServicePort,
-      method: 'POST',
-      path: this.superAdminAuthRecordSearchPath,
-      body: {
-        page: 1,
-        size: 20,
-        userId,
-        status: 1,
-      },
-      timeoutMs: 15000,
+    const searchAuthRecord = async (query: Record<string, unknown>) => {
+      const resp = await this.kubernetesService.requestServiceProxyByKubectl(environmentId, {
+        namespace: this.superAdminNamespace,
+        serviceName: this.superAdminServiceName,
+        port: this.superAdminServicePort,
+        method: 'POST',
+        path: this.superAdminAuthRecordSearchPath,
+        query,
+        timeoutMs: 15000,
+      });
+      const respBody = resp?.body;
+      const respCode = Number((respBody as any)?.code);
+      const respMsg = String((respBody as any)?.msg ?? '');
+      const respList = Array.isArray((respBody as any)?.data?.list)
+        ? (respBody as any).data.list
+        : [];
+      const respTotalCount = Number((respBody as any)?.data?.totalCount ?? respList.length ?? 0);
+      this.logger.debug(
+        `[AuthRecord] search env=${environmentId} uid=${uid} tenantId=${tenantId} userId=${userId} query=${JSON.stringify(query)} http=${resp?.statusCode ?? 'n/a'} code=${Number.isFinite(respCode) ? respCode : 'n/a'} msg=${respMsg} totalCount=${Number.isFinite(respTotalCount) ? respTotalCount : 'n/a'} listLen=${respList.length}`,
+      );
+      return { resp, respBody, respCode, respMsg, respList };
+    };
+
+    let { respCode: code, respMsg: msg, respList: list, respBody: body } = await searchAuthRecord({
+      userId,
+      tenantId,
     });
 
-    const body = response?.body;
+    if (code !== 0 || list.length === 0) {
+      this.logger.debug(
+        `[AuthRecord] primary search miss env=${environmentId} uid=${uid} userId=${userId} tenantId=${tenantId} code=${code} msg=${msg} -> retry by userId only`,
+      );
+      const fallback = await searchAuthRecord({ userId });
+      code = fallback.respCode;
+      msg = fallback.respMsg;
+      list = fallback.respList;
+      body = fallback.respBody;
+    }
+
     if (
       body &&
       typeof body === 'object' &&
       'code' in body &&
       Number((body as { code?: number }).code) !== 0
     ) {
-      const msg = (body as { msg?: string }).msg || 'super-admin authRecord search failed';
-      throw new InternalServerErrorException(msg);
+      throw new InternalServerErrorException(msg || 'super-admin authRecord search failed');
     }
 
-    const list = Array.isArray((body as any)?.data?.list) ? (body as any).data.list : [];
     const matched =
       list.find(
         (item: any) =>
           Number(item?.userId) === userId &&
-          Number(item?.status) === 1 &&
           (item?.tenantId === undefined || Number(item?.tenantId) === Number(tenantId)),
       ) ||
-      list.find(
-        (item: any) => Number(item?.userId) === userId && Number(item?.status) === 1,
-      ) ||
+      list.find((item: any) => Number(item?.userId) === userId) ||
       null;
     if (!matched) {
+      this.logger.warn(
+        `[AuthRecord] no_match env=${environmentId} uid=${uid} tenantId=${tenantId} userId=${userId} listLen=${list.length}`,
+      );
       throw new NotFoundException(`Auth record for userId ${userId} not found.`);
     }
-    return matched;
+
+    const authRecordId = Number((matched as any)?.id);
+    this.logger.debug(
+      `[AuthRecord] matched env=${environmentId} uid=${uid} tenantId=${tenantId} userId=${userId} recordId=${(matched as any)?.id ?? 'n/a'} recordTenantId=${(matched as any)?.tenantId ?? 'n/a'}`,
+    );
+
+    if (!Number.isFinite(authRecordId) || authRecordId <= 0) {
+      return matched;
+    }
+
+    const detailResponse = await this.kubernetesService.requestServiceProxyByKubectl(environmentId, {
+      namespace: this.superAdminNamespace,
+      serviceName: this.superAdminServiceName,
+      port: this.superAdminServicePort,
+      method: 'GET',
+      path: `${this.superAdminAuthRecordDetailByOldUserPath}/${authRecordId}`,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      expectJson: false,
+      timeoutMs: 15000,
+    });
+
+    const detailBody = detailResponse?.body;
+    if (
+      detailBody &&
+      typeof detailBody === 'object' &&
+      'code' in detailBody &&
+      Number((detailBody as { code?: number }).code) !== 0
+    ) {
+      const detailMsg =
+        (detailBody as { msg?: string }).msg || 'super-admin authRecord detail failed';
+      throw new InternalServerErrorException(detailMsg);
+    }
+
+    const detailData = (detailBody as any)?.data;
+    return detailData && typeof detailData === 'object' ? detailData : matched;
   }
 
   async updateAuthRecordByUserUid(
@@ -596,6 +660,7 @@ export class QueryService {
     tenantId: number,
     realName?: string,
     cardNo?: string,
+    userIdFromClient?: number,
   ) {
     const normalizedRealName = realName ?? '';
     const normalizedCardNo = cardNo ?? '';
@@ -606,22 +671,18 @@ export class QueryService {
       );
     }
 
-    const user = await this.findUserByUidViaSuperAdmin(environmentId, uid, tenantId);
-    if (!user) {
-      throw new NotFoundException(`User with UID ${uid} not found.`);
+    if (!Number.isFinite(Number(userIdFromClient)) || Number(userIdFromClient) <= 0) {
+      throw new HttpException('userId is required for auth record update', 400);
     }
-    const userId = Number(user.id);
-    if (!Number.isFinite(userId) || userId <= 0) {
-      throw new InternalServerErrorException('Invalid user id resolved from super-admin user record');
-    }
+    const userId = Number(userIdFromClient);
 
-    const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+    const response = await this.kubernetesService.requestServiceProxyByKubectl(environmentId, {
       namespace: this.superAdminNamespace,
       serviceName: this.superAdminServiceName,
       port: this.superAdminServicePort,
       method: 'POST',
       path: this.superAdminAuthRecordUpdatePath,
-      body: {
+      form: {
         userId,
         realName: normalizedRealName,
         cardNo: normalizedCardNo,
