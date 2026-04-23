@@ -31,12 +31,6 @@ export class QueryGatewayClientService {
     return allowlist.has(environmentId);
   }
 
-  isGatewayStrict() {
-    return String(process.env.QUERY_CENTER_GATEWAY_STRICT || '')
-      .trim()
-      .toLowerCase() === 'true';
-  }
-
   async aggregate(
     environmentId: string,
     identifier: string,

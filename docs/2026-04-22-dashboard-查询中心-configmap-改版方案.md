@@ -111,6 +111,37 @@ Agent 专用 ConfigMap（每环境一份）：
 
 ---
 
+## 7.1 关键环境变量说明（精简后）
+
+> 目标：统一走 `dashboard-db-gateway-agent`，不再依赖环境配置中的 `database_json/redis_json` 直连信息。
+
+### 中心后端（Query Center）
+
+- `QUERY_CENTER_GATEWAY_ENABLED`：是否开启网关转发。
+- `QUERY_CENTER_GATEWAY_TIMEOUT_MS`：转发到 agent 的超时。
+- `QUERY_CENTER_GATEWAY_ENV_ALLOWLIST` / `QUERY_CENTER_GATEWAY_ENV_DENYLIST`：按环境灰度控制（可为空）。
+- `QUERY_CENTER_GATEWAY_TRANSPORT`：`k8s-proxy` 或 `direct-url`（当前推荐 `k8s-proxy`）。
+- `QUERY_CENTER_AGENT_K8S_NAMESPACE` / `QUERY_CENTER_AGENT_K8S_SERVICE` / `QUERY_CENTER_AGENT_K8S_PORT`：k8s-proxy 模式下的目标服务定位。
+- `QUERY_CENTER_AGENT_TOKEN`：与 agent 侧 `AGENT_SHARED_TOKEN` 对齐。
+
+### 环境侧 Agent
+
+- `AGENT_ENVIRONMENT_ID`：单环境 agent 的默认环境标识（建议与部署环境一致）。
+- `AGENT_SHARED_TOKEN`：agent 鉴权令牌。
+- `AGENT_DECRYPT_PROVIDER`：解密提供方（如 `kms`）。
+- `KMS_KEY_ALIAS` / `KMS_CONTEXT`：当前单环境部署的 KMS 解密参数。
+- `AGENT_KMS_VALUE_PREFIX` / `AGENT_KMS_DECRYPT_TIMEOUT_MS`：解密行为控制参数。
+- `CONFIG_CACHE_TTL_MS`：解密后连接配置缓存 TTL。
+- `QUERY_TIMEOUT_MS`：agent 内部查询超时。
+- `DB_MYSQL_URL` / `DB_MYSQL_USER` / `DB_MYSQL_PASSWORD`：MySQL 连接参数。
+- `REDIS_HOST` / `REDIS_PORT` / `REDIS_DATABASE` / `REDIS_SSL` / `REDIS_PASSWORD`：Redis 连接参数。
+- `MONGO_URI`：Mongo 连接参数（当前聚合查询仍保留字段，后续可按功能启用）。
+
+### 已下线/不再推荐
+
+- `QUERY_CENTER_GATEWAY_STRICT`：代码未实际使用，已移除。
+- `AGENT_DECRYPT_ENV_CONFIGS`：当前按“单 agent 对应单环境”策略，先移除环境映射配置，统一使用 `KMS_KEY_ALIAS + KMS_CONTEXT`。
+
 ## 8. 权限与前提
 
 ### 8.1 Kubernetes
