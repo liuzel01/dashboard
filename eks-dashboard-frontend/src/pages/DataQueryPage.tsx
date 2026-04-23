@@ -29,8 +29,10 @@ import {
   getTenantsForEnvironment,
   getRedisKey,
   getTraderInfo,
+  getOtcMerchantInfo,
+  updateTraderNickName,
+  updateOtcMerchantName,
 } from '../services/api';
-import { updateTraderNickName } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import PlaceholderPage from './PlaceholderPage';
 
@@ -83,6 +85,12 @@ const DataQueryPage: React.FC = () => {
   const [traderLoading, setTraderLoading] = useState(false);
   const [traderDetailVisible, setTraderDetailVisible] = useState(false);
   const [traderForm] = Form.useForm();
+  const [otcMerchantInfo, setOtcMerchantInfo] = useState<Record<string, unknown> | null>(null);
+  const [otcLoading, setOtcLoading] = useState(false);
+  const [otcDetailVisible, setOtcDetailVisible] = useState(false);
+  const [isOtcEditVisible, setIsOtcEditVisible] = useState(false);
+  const [otcEditLoading, setOtcEditLoading] = useState(false);
+  const [otcForm] = Form.useForm();
   const [lastSearchTerm, setLastSearchTerm] = useState('');
   const [tenants, setTenants] = useState<{ id: number; name: string }[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(
@@ -140,115 +148,119 @@ const DataQueryPage: React.FC = () => {
   }, [selectedTenantId]);
 
   const onSearch = async (value: string) => {
-    if (!value.trim()) {
-      return;
-    }
+    if (!value.trim()) return;
+
     setLastSearchTerm(value);
     setActiveTabKey('1');
     setLoading(true);
     setSearched(true);
+    setError(null);
+
     try {
-      // 简单地假设纯数字是 tenant_user_id
       const isNumeric = /^\d+$/.test(value);
-      if (isNumeric) {
-        const uid = value.trim();
-        let mysqlUserId: string | number | null = null;
-        let redisKeyHints: RedisData[] = [];
+      if (!isNumeric) {
         const tenantFromRef = currentTenantRef.current;
-        if (!tenantFromRef) {
-          message.error('查询前请先选择租户。');
-          setUserInfo(null);
-          setRedisData(null);
-          setRedisMatchId(null);
-          setTraderInfo(null);
-          setLoading(false);
-          return;
-        }
-        // Query MySQL user info (best-effort)
-        try {
-          const results = await aggregateQuery(uid, 'UID', tenantFromRef);
-          const res = results as unknown as AggregateResult;
-          const mysqlData = res.mysql?.data || null;
-          setUserInfo(mysqlData);
-          const redisDataFromAggregate = res.redis?.data;
-          redisKeyHints = Array.isArray(redisDataFromAggregate) ? redisDataFromAggregate : [];
-          if (
-            mysqlData &&
-            typeof mysqlData === 'object' &&
-            'id' in mysqlData &&
-            (mysqlData as { id?: unknown }).id !== undefined &&
-            (mysqlData as { id?: unknown }).id !== null
-          ) {
-            mysqlUserId = (mysqlData as { id: string | number }).id;
-          }
-        } catch {
-          setUserInfo(null);
-        }
+        const results = await aggregateQuery(value, 'UID', tenantFromRef);
+        const res = results as unknown as AggregateResult;
+        setUserInfo(res.mysql?.data || null);
+        setRedisData(res.redis?.data || null);
+        setRedisMatchId(null);
+        setTraderInfo(null);
+        setOtcMerchantInfo(null);
+        return;
+      }
 
-          // 当 userInfo 可用时，再去查询交易员信息
-          try {
-            setTraderLoading(true);
-            setTraderInfo(null);
-            const trader = await getTraderInfo(uid, tenantFromRef!);
-            console.debug('getTraderInfo response for', uid, 'tenant', tenantFromRef, trader);
-            setTraderInfo(trader || null);
-          } catch (err) {
-            // If the error is a 404, it's an expected "not found" case, not a system error.
-            const axiosError = err as { response?: { status?: number } };
-            if (axiosError.response?.status === 404) {
-              console.log(`Trader info not found for UID ${uid} (tenant: ${tenantFromRef})`);
-            } else {
-              // For other errors (500, network issues), log it as a warning.
-              console.warn('getTraderInfo failed', err);
-            }
-            setTraderInfo(null);
-          } finally {
-            setTraderLoading(false);
-          }
+      const uid = value.trim();
+      const tenantFromRef = currentTenantRef.current;
+      let mysqlUserId: string | number | null = null;
+      let redisKeyHints: RedisData[] = [];
 
-        // Fetch known Redis keys related to this UID.
-        // Redis keys are resolved by matching all keys that contain MySQL user id.
-        if (mysqlUserId === undefined || mysqlUserId === null) {
-          setRedisMatchId(null);
-          setRedisData([]);
-        } else {
-          const matchId = String(mysqlUserId);
-          setRedisMatchId(matchId);
-          const redisItems = await Promise.all(
-            redisKeyHints.map(async (hint) => {
-              try {
-                const redisRes = await getRedisKey(hint.key);
-                const r = redisRes as unknown as RedisKeyResult;
-                const ttlVal = r.ttlSeconds ?? r.ttl ?? hint.ttl ?? -2;
-                if (ttlVal === -2) return null;
-                return {
-                  key: r.key || hint.key,
-                  ttl: ttlVal,
-                  value: r.value ?? null,
-                } as RedisData;
-              } catch (err) {
-                const e = err as { response?: { status?: number } };
-                // 404 means key disappeared between list/read. Skip it.
-                if (e?.response?.status === 404) return null;
-                // Keep item visible even if value fetch fails.
-                return {
-                  key: hint.key,
-                  ttl: hint.ttl,
-                  value: null,
-                } as RedisData;
-              }
-            }),
-          );
-          setRedisData(redisItems.filter((item): item is RedisData => item !== null));
+      if (!tenantFromRef) {
+        message.error('查询前请先选择租户。');
+        setUserInfo(null);
+        setRedisData(null);
+        setRedisMatchId(null);
+        setTraderInfo(null);
+        setOtcMerchantInfo(null);
+        return;
+      }
+
+      try {
+        const results = await aggregateQuery(uid, 'UID', tenantFromRef);
+        const res = results as unknown as AggregateResult;
+        const mysqlData = res.mysql?.data || null;
+        setUserInfo(mysqlData);
+        const redisDataFromAggregate = res.redis?.data;
+        redisKeyHints = Array.isArray(redisDataFromAggregate) ? redisDataFromAggregate : [];
+        if (
+          mysqlData &&
+          typeof mysqlData === 'object' &&
+          'id' in mysqlData &&
+          (mysqlData as { id?: unknown }).id !== undefined &&
+          (mysqlData as { id?: unknown }).id !== null
+        ) {
+          mysqlUserId = (mysqlData as { id: string | number }).id;
         }
+      } catch {
+        setUserInfo(null);
+      }
+
+      try {
+        setTraderLoading(true);
+        setTraderInfo(null);
+        const trader = await getTraderInfo(uid, tenantFromRef);
+        setTraderInfo(trader || null);
+      } catch (err) {
+        const axiosError = err as { response?: { status?: number } };
+        if (axiosError.response?.status !== 404) {
+          console.warn('getTraderInfo failed', err);
+        }
+        setTraderInfo(null);
+      } finally {
+        setTraderLoading(false);
+      }
+
+      try {
+        setOtcLoading(true);
+        setOtcMerchantInfo(null);
+        const otc = await getOtcMerchantInfo(uid, tenantFromRef);
+        setOtcMerchantInfo(otc || null);
+      } catch (err) {
+        const axiosError = err as { response?: { status?: number } };
+        if (axiosError.response?.status !== 404) {
+          console.warn('getOtcMerchantInfo failed', err);
+        }
+        setOtcMerchantInfo(null);
+      } finally {
+        setOtcLoading(false);
+      }
+
+      if (mysqlUserId === undefined || mysqlUserId === null) {
+        setRedisMatchId(null);
+        setRedisData([]);
       } else {
-        // 非数字，使用原 aggregateQuery 行为（兼顾旧流程）
-  const tenantFromRef = currentTenantRef.current;
-  const results = await aggregateQuery(value, 'UID', tenantFromRef);
-  const res = results as unknown as AggregateResult;
-  setUserInfo(res.mysql?.data || null);
-  setRedisData(res.redis?.data || null);
-  setRedisMatchId(null);
+        const matchId = String(mysqlUserId);
+        setRedisMatchId(matchId);
+        const redisItems = await Promise.all(
+          redisKeyHints.map(async (hint) => {
+            try {
+              const redisRes = await getRedisKey(hint.key);
+              const r = redisRes as unknown as RedisKeyResult;
+              const ttlVal = r.ttlSeconds ?? r.ttl ?? hint.ttl ?? -2;
+              if (ttlVal === -2) return null;
+              return {
+                key: r.key || hint.key,
+                ttl: ttlVal,
+                value: r.value ?? null,
+              } as RedisData;
+            } catch (err) {
+              const e = err as { response?: { status?: number } };
+              if (e?.response?.status === 404) return null;
+              return { key: hint.key, ttl: hint.ttl, value: null } as RedisData;
+            }
+          }),
+        );
+        setRedisData(redisItems.filter((item): item is RedisData => item !== null));
       }
     } catch (err) {
       const errObj = err as { response?: { data?: { message?: string } }; message?: string };
@@ -484,7 +496,6 @@ const DataQueryPage: React.FC = () => {
                     <Dropdown overlay={
                       <Menu>
                         <Menu.Item key="edit" onClick={() => {
-                          // open trader edit modal and set form value
                           traderForm.setFieldsValue({ nick_name: traderInfo?.nick_name ?? '' });
                           setIsTraderEditVisible(true);
                         }}>
@@ -500,10 +511,8 @@ const DataQueryPage: React.FC = () => {
                 <Spin spinning={traderLoading} tip="正在查询交易员信息...">
                   {traderInfo ? (
                     <div>
-                      {/* 展示常用字段：与用户详情处保持一致的展示方式 */}
                       <Descriptions bordered column={1}>
                         {(() => {
-                          // 挑选常用字段，如果不存在则使用前几个字段
                           const commonKeys = ['user_id', 'nick_name', 'id', 'status', 'create_time'];
                           const entries = Object.entries(traderInfo);
                           const shown: [string, unknown][] = [];
@@ -513,7 +522,6 @@ const DataQueryPage: React.FC = () => {
                             }
                           }
                           if (shown.length === 0) {
-                            // fallback: show first 3 fields
                             for (let i = 0; i < Math.min(3, entries.length); i++) shown.push(entries[i]);
                           }
                           return shown.map(([k, v]) => (
@@ -527,6 +535,50 @@ const DataQueryPage: React.FC = () => {
                     </div>
                   ) : (
                     <Empty description="无交易员信息" />
+                  )}
+                </Spin>
+              </Card>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <Card
+                title="OTC商家信息 (otc.tbl_otc_merchant)"
+                extra={
+                  otcMerchantInfo ? (
+                    <Dropdown
+                      overlay={
+                        <Menu>
+                          <Menu.Item
+                            key="edit"
+                            onClick={() => {
+                              otcForm.setFieldsValue({ name: otcMerchantInfo?.name ?? '' });
+                              setIsOtcEditVisible(true);
+                            }}
+                          >
+                            编辑信息
+                          </Menu.Item>
+                        </Menu>
+                      }
+                    >
+                      <Button>操作 <DownOutlined /></Button>
+                    </Dropdown>
+                  ) : null
+                }
+              >
+                <Spin spinning={otcLoading} tip="正在查询OTC商家信息...">
+                  {otcMerchantInfo ? (
+                    <div>
+                      <Descriptions bordered column={1}>
+                        <Descriptions.Item label="user_id">{otcMerchantInfo.user_id == null ? 'N/A' : String(otcMerchantInfo.user_id)}</Descriptions.Item>
+                        <Descriptions.Item label="name">{otcMerchantInfo.name == null || otcMerchantInfo.name === '' ? 'N/A' : String(otcMerchantInfo.name)}</Descriptions.Item>
+                        <Descriptions.Item label="level">{otcMerchantInfo.level == null ? 'N/A' : String(otcMerchantInfo.level)}</Descriptions.Item>
+                      </Descriptions>
+                      <div style={{ marginTop: 12 }}>
+                        <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setOtcDetailVisible(true)}>查看全部字段</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Empty description="无OTC商家信息" />
                   )}
                 </Spin>
               </Card>
@@ -713,7 +765,6 @@ const DataQueryPage: React.FC = () => {
             await updateTraderNickName(String(userInfo.tenant_user_id), vals.nick_name, tenantIdForCall!);
             message.success('交易员昵称更新成功');
             setIsTraderEditVisible(false);
-            // refresh trader info
             const t = await getTraderInfo(String(userInfo.tenant_user_id), tenantIdForCall!);
             setTraderInfo(t || null);
           } catch (err) {
@@ -732,6 +783,51 @@ const DataQueryPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="编辑OTC商家名称"
+        open={isOtcEditVisible}
+        onCancel={() => setIsOtcEditVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Form
+          form={otcForm}
+          layout="vertical"
+          onFinish={async (vals: { name?: string }) => {
+            if (!userInfo?.tenant_user_id) {
+              message.error('缺少用户 UID，无法更新');
+              return;
+            }
+            setOtcEditLoading(true);
+            try {
+              const tenantIdForCall = userInfo.tenant_id || currentTenantRef.current!;
+              await updateOtcMerchantName(
+                String(userInfo.tenant_user_id),
+                vals.name ?? '',
+                tenantIdForCall!,
+              );
+              message.success('OTC商家名称更新成功');
+              setIsOtcEditVisible(false);
+              const o = await getOtcMerchantInfo(String(userInfo.tenant_user_id), tenantIdForCall!);
+              setOtcMerchantInfo(o || null);
+            } catch (err) {
+              const e = err as { response?: { data?: { message?: string } }; message?: string };
+              const msg = e?.response?.data?.message || e?.message || String(err);
+              message.error(`更新失败: ${msg}`);
+            } finally {
+              setOtcEditLoading(false);
+            }
+          }}
+        >
+          <Form.Item name="name" label="name">
+            <Input placeholder="允许为空" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={otcEditLoading}>保存</Button>
+          </Form.Item>
+        </Form>
+      </Modal>
       {/* 交易员全部字段 Modal */}
       {traderInfo && (
         <Modal
@@ -746,6 +842,23 @@ const DataQueryPage: React.FC = () => {
           <Descriptions bordered column={1} size="small" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {Object.entries(traderInfo).map(([key, value]) => (
               <Descriptions.Item key={key} label={key}>{String(value)}</Descriptions.Item>
+            ))}
+          </Descriptions>
+        </Modal>
+      )}
+      {otcMerchantInfo && (
+        <Modal
+          title="OTC商家全部字段信息"
+          open={otcDetailVisible}
+          onCancel={() => setOtcDetailVisible(false)}
+          footer={[
+            <Button key="back" onClick={() => setOtcDetailVisible(false)}>关闭</Button>,
+          ]}
+          width={800}
+        >
+          <Descriptions bordered column={1} size="small" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            {Object.entries(otcMerchantInfo).map(([key, value]) => (
+              <Descriptions.Item key={key} label={key}>{value == null ? 'N/A' : String(value)}</Descriptions.Item>
             ))}
           </Descriptions>
         </Modal>

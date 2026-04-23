@@ -151,6 +151,16 @@ export const updateTraderNickName = async (uid: string, nickName: string, tenant
   return response.data;
 };
 
+export const getOtcMerchantInfo = async (uid: string, tenantId: number) => {
+  const response = await api.get(`/query/users/${uid}/otc-merchant`, { params: { tenantId } });
+  return response.data;
+};
+
+export const updateOtcMerchantName = async (uid: string, name: string, tenantId: number) => {
+  const response = await api.patch(`/query/users/${uid}/otc-merchant/name`, { name, tenantId });
+  return response.data;
+};
+
 export const previewAiOpsSql = async (data: { question?: string; sql?: string; maxRows?: number }) => {
   const response = await api.post('/ai-ops/sql/preview', data);
   return response.data;
