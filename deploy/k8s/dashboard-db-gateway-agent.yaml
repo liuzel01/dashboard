@@ -8,13 +8,15 @@ metadata:
     app.kubernetes.io/part-of: dashboard
 data:
   LOG_LEVEL: "info"
-  AGENT_ENVIRONMENT_ID: "mgbx"
-  AWS_REGION: "ap-southeast-1"
+  PORT: "8080"
+  AGENT_ENVIRONMENT_ID: "hashex"
+  AWS_REGION: "ap-east-1"
   CONFIG_CACHE_TTL_MS: "300000"
   QUERY_TIMEOUT_MS: "15000"
   DB_READONLY_DEFAULT: "true"
+  AGENT_SHARED_TOKEN: "tgS6trgOonYNdLsbfrgEH9yIwTY2KtUG"
   AGENT_DECRYPT_PROVIDER: "kms"
-  AGENT_KMS_VALUE_PREFIX: "kms://"
+  AGENT_KMS_VALUE_PREFIX: "{kms-app}"
   AGENT_KMS_DECRYPT_TIMEOUT_MS: "8000"
 
   # Default decrypt profile (used when AGENT_DECRYPT_ENV_CONFIGS has no matching environmentId)
@@ -25,20 +27,20 @@ data:
   # Example:
   # KMS_KEY_ALIAS="alias/kms-eks-hash"
   # KMS_CONTEXT='{"Environment":"hash","Source":"backend","DataType":"config-password"}'
-  AGENT_DECRYPT_ENV_CONFIGS: '{"hash":{"provider":"kms","region":"ap-east-1","kmsKeyAlias":"alias/kms-eks-hash","kmsContext":{"Environment":"hash","Source":"backend","DataType":"config-password"},"valuePrefix":"kms://"}}'
+  AGENT_DECRYPT_ENV_CONFIGS: '{"hash":{"provider":"kms","region":"ap-east-1","kmsKeyAlias":"alias/kms-eks-hash","kmsContext":{"Environment":"hash","Source":"backend","DataType":"config-password"},"valuePrefix":"{kms-app}"}}'
 
   # Dedicated datasource configs for dashboard-db-gateway-agent.
-  datasource.url: "jdbc:mysql://meganew.c786smwyy2x7.ap-southeast-1.rds.amazonaws.com/spot?useUnicode=true&characterEncoding=utf-8&serverTimeZone=UTC&useSSL=false"
-  datasource.username: "usernamename"
+  datasource.url: "jdbc:mysql://meganew.c786smwyy2x7.ap-southeast-1.rds.amazonaws.com/spot?useUnicode=true&characterEncoding=utf-8&serverTimeZone=UTC&allowMultiQueries=true&&useSSL=false"
+  datasource.username: "megauuusss"
   datasource.password: "Q9#vE8mT!2xPa4Hr"
 
-  redis.host: "master.megatiger.ijxpl8.qqqq"
+  redis.host: "master.megatiger.ijxpl8.apse1.cache.amazonaws.com"
   redis.port: "6379"
   redis.database: "0"
   redis.ssl: "true"
-  redis.password: "NKA*cmexxxx"
+  redis.password: "NKA*cme2p#1sAsaznlyy12"
 
-  mongo.uri: "mongodb://megauuaa:xxxxx@172.31.23.137:27017,172.31.22.44:27017,172.31.27.168:27017/spot?replicaSet=mongo-repl&readPreference=secondaryPreferred&ssl=false"
+  mongo.uri: "mongodb://megauuaa:KA*cme2pqg@172.31.23.137:27017,172.31.22.44:27017,172.31.27.168:27017/spot?replicaSet=mongo-repl&readPreference=secondaryPreferred&ssl=false"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -62,24 +64,30 @@ spec:
       serviceAccountName: kms-app-sa
       containers:
         - name: agent
-          # CLI/debug pod baseline. For production, build a dedicated image with fixed client versions.
-          image: ubuntu:22.04
-          imagePullPolicy: IfNotPresent
-          command:
-            - /bin/sh
-            - -c
-          args:
-            - |
-              set -e
-              apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-                ca-certificates curl jq dnsutils iputils-ping netcat-openbsd telnet \
-                default-mysql-client redis-tools
-              echo "dashboard-db-gateway-agent is ready"
-              sleep infinity
+          image: reghk.hashex.vip/test/dashboard-db-gateway-agent:latest
+          imagePullPolicy: Always
           envFrom:
             - configMapRef:
                 name: dashboard-db-gateway-agent-config
+          ports:
+            - containerPort: 8080
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           env:
             - name: POD_NAME
               valueFrom:
@@ -146,3 +154,20 @@ spec:
               cpu: "1"
               memory: 1Gi
       terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-db-gateway-agent
+  namespace: default
+  labels:
+    app.kubernetes.io/name: dashboard-db-gateway-agent
+    app.kubernetes.io/part-of: dashboard
+spec:
+  selector:
+    app.kubernetes.io/name: dashboard-db-gateway-agent
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

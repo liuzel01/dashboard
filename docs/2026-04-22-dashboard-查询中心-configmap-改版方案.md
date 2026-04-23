@@ -261,21 +261,21 @@ Agent 专用 ConfigMap（每环境一份）：
 
 ### A. Agent 服务开发（环境侧）
 
-- [ ] A1. 建立 `dashboard-db-gateway-agent` 应用入口（独立模块/独立启动命令）
+- [x] A1. 建立 `dashboard-db-gateway-agent` 应用入口（独立模块/独立启动命令）
   - 产出：可运行的 agent 进程，暴露 `/healthz`
-- [ ] A2. 实现 ConfigMap 配置读取器
+- [x] A2. 实现 ConfigMap 配置读取器
   - 范围：读取 `datasource.*`、`redis.*`、`mongo.uri`
   - 产出：配置解析 DTO + schema 校验 + 缺失字段错误码
-- [ ] A3. 实现解密器
+- [x] A3. 实现解密器
   - 范围：接入现网同款解密逻辑（KMS 或现有算法）
   - 产出：`DECRYPT_FAILED` 分类错误与日志去敏
-- [ ] A4. 实现连接工厂与缓存
+- [x] A4. 实现连接工厂与缓存
   - 范围：MySQL/Redis/Mongo 建连，配置缓存 TTL（默认 3~5 分钟）
   - 产出：缓存命中/失效日志，连接失败错误码
-- [ ] A5. 实现查询接口 `POST /v1/query/aggregate`
+- [x] A5. 实现查询接口 `POST /v1/query/aggregate`
   - 范围：默认只读，超时控制，基础输入校验
   - 产出：统一响应结构与错误码
-- [ ] A6. 实现 Agent 鉴权
+- [x] A6. 实现 Agent 鉴权
   - 范围：`X-Agent-Token` 校验
   - 产出：未授权返回 401，审计日志包含 requestId
 - [ ] A7. 补齐单元测试与最小集成测试
@@ -283,15 +283,15 @@ Agent 专用 ConfigMap（每环境一份）：
 
 ### B. 中心 dashboard 后端改造
 
-- [ ] B1. 新增 `environmentId -> agent endpoint` 路由配置
+- [x] B1. 新增 `environmentId -> agent endpoint` 路由配置
   - 产出：每环境 agent 地址配置项（DB 表或配置文件）
-- [ ] B2. 查询中心接入 agent 调用客户端
+- [x] B2. 查询中心接入 agent 调用客户端
   - 范围：原接口不变，内部改为转调 agent
   - 产出：`AGENT_UNREACHABLE` 等错误码映射
-- [ ] B3. 请求链路透传
+- [x] B3. 请求链路透传
   - 范围：透传 `X-Environment-Id`、`X-Request-Id`、`X-Agent-Token`
   - 产出：端到端 requestId 可追踪
-- [ ] B4. 回退开关
+- [x] B4. 回退开关
   - 范围：保留 feature flag（gateway on/off）
   - 产出：灰度失败可快速回滚
 - [ ] B5. 兼容前端与现有权限
@@ -305,10 +305,10 @@ Agent 专用 ConfigMap（每环境一份）：
 - [ ] C2. 核验 `kms-app-sa` 权限
   - 范围：IRSA、`kms:Decrypt`、KMS key policy
   - 产出：权限核验记录
-- [ ] C3. 构建并发布 agent 镜像
+- [x] C3. 构建并发布 agent 镜像
   - 范围：替换工具镜像（`ubuntu + sleep infinity`）为真实应用镜像
   - 产出：镜像 tag 与回滚 tag
-- [ ] C4. 部署与探活
+- [x] C4. 部署与探活
   - 范围：Deployment/Service/探针，确认 `/healthz` 正常
   - 产出：`kubectl get pods/svc` 与探活记录
 - [ ] C5. 网络与白名单核验
@@ -317,7 +317,7 @@ Agent 专用 ConfigMap（每环境一份）：
 
 ### D. 联调与验收
 
-- [ ] D1. 场景 1：配置正确 + 解密成功 + 查询成功
+- [x] D1. 场景 1：配置正确 + 解密成功 + 查询成功
   - 验收：2 个以上 environment 成功返回
 - [ ] D2. 场景 2：ConfigMap 缺失或字段缺失
   - 验收：返回 `CONFIGMAP_NOT_FOUND` / `CONFIG_KEY_MISSING`
