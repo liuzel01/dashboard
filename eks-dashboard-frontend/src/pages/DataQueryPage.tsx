@@ -246,7 +246,11 @@ const DataQueryPage: React.FC = () => {
       try {
         setAuthLoading(true);
         setAuthRecordInfo(null);
-        const auth = await getAuthRecord(uid, tenantFromRef);
+        const auth = await getAuthRecord(
+          uid,
+          tenantFromRef,
+          mysqlUserId !== null && mysqlUserId !== undefined ? Number(mysqlUserId) : undefined,
+        );
         setAuthRecordInfo(auth || null);
       } catch (err) {
         const axiosError = err as { response?: { status?: number } };
@@ -922,12 +926,17 @@ const DataQueryPage: React.FC = () => {
             try {
               const tenantIdForCall = userInfo.tenant_id || currentTenantRef.current!;
               await updateAuthRecord(String(userInfo.tenant_user_id), tenantIdForCall!, {
+                userId: userInfo.id ? Number(userInfo.id) : undefined,
                 realName: vals.realName,
                 cardNo: vals.cardNo,
               });
               message.success('用户认证信息更新成功');
               setIsAuthEditVisible(false);
-              const auth = await getAuthRecord(String(userInfo.tenant_user_id), tenantIdForCall!);
+              const auth = await getAuthRecord(
+                String(userInfo.tenant_user_id),
+                tenantIdForCall!,
+                userInfo.id ? Number(userInfo.id) : undefined,
+              );
               setAuthRecordInfo(auth || null);
             } catch (err) {
               const e = err as { response?: { data?: { message?: string } }; message?: string };

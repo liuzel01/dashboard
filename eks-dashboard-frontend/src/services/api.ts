@@ -161,15 +161,15 @@ export const updateOtcMerchantName = async (uid: string, name: string, tenantId:
   return response.data;
 };
 
-export const getAuthRecord = async (uid: string, tenantId: number) => {
-  const response = await api.get(`/query/users/${uid}/auth-record`, { params: { tenantId } });
+export const getAuthRecord = async (uid: string, tenantId: number, userId?: number) => {
+  const response = await api.get(`/query/users/${uid}/auth-record`, { params: { tenantId, userId } });
   return response.data;
 };
 
 export const updateAuthRecord = async (
   uid: string,
   tenantId: number,
-  data: { realName?: string; cardNo?: string },
+  data: { realName?: string; cardNo?: string; userId?: number },
 ) => {
   const response = await api.patch(`/query/users/${uid}/auth-record`, { tenantId, ...data });
   return response.data;
