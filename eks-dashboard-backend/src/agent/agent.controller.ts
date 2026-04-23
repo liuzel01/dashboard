@@ -102,6 +102,36 @@ export class AgentController {
     return this.queryService.getTraderInfoByUserUid(envId, uid, Number(tenantId));
   }
 
+  @Patch('v1/query/users/:uid')
+  async updateUser(
+    @Param('uid') uid: string,
+    @Body() body: { tenantId?: number; email?: string | null; tel?: string; tel_country_code?: string | null },
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (body.tenantId === undefined) {
+      throw new BadRequestException('tenantId is required in body');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.updateUser(envId, uid, body.tenantId, body);
+  }
+
+  @Post('v1/query/users/:uid/deactivate')
+  async deactivateUser(
+    @Param('uid') uid: string,
+    @Body() body: { tenantId?: number },
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (body.tenantId === undefined) {
+      throw new BadRequestException('tenantId is required in body');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.deactivateUser(envId, uid, body.tenantId);
+  }
+
   @Get('v1/query/redis-key')
   async getRedisKey(
     @Query('key') key: string | undefined,

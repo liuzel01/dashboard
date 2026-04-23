@@ -6,8 +6,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
-
 import { UpdateUserDto } from './dto/update-user.dto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { QueryGatewayClientService } from './query-gateway-client.service';
@@ -49,7 +47,6 @@ export class QueryService {
   private readonly superAdminUidQueryType = 5;
 
   constructor(
-    private readonly databaseService: DatabaseService,
     private readonly mongoService: MongoDataService,
     private readonly kubernetesService: KubernetesService,
     private readonly queryGatewayClient: QueryGatewayClientService,
@@ -322,132 +319,81 @@ export class QueryService {
     tenantId: number,
     data: UpdateUserDto,
   ) {
-    // This try-catch block will capture raw database errors (like permission issues)
-    // and provide a more informative error message to the frontend.
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const updatePayload: { [key: string]: any } = {};
-
-      // 只处理请求中明确提供的字段，避免因DTO中未提供的字段为undefined而引发问题
-      if (data.email !== undefined) {
-        // DTO中的 @Transform 已经将 '' 转换为了 null
-        updatePayload.email = data.email;
-      }
-
-      // 只有在请求中明确提供了 tel 字段时才处理
-      if (data.tel !== undefined) {
-        if (data.tel === '') {
-          // 业务规则：如果电话号码被清空，电话国家代码也必须被清空
-          updatePayload.tel = null;
-          updatePayload.tel_country_code = null;
-        } else {
-          updatePayload.tel = data.tel;
-          // 如果电话号码被更新，并且请求中也包含了国家代码，则一并更新
-          if (data.tel_country_code !== undefined) {
-            updatePayload.tel_country_code = data.tel_country_code;
-          }
-        }
-      } else if (data.tel_country_code !== undefined) {
-        // 处理只更新国家代码的场景
-        updatePayload.tel_country_code = data.tel_country_code;
-      }
-
-      if (Object.keys(updatePayload).length === 0) {
-        return { message: 'No fields to update.' };
-      }
-
-      const result = await this.databaseService.updateUserByUid(
+      const result = await this.queryGatewayClient.updateUser(
         environmentId,
         uid,
         tenantId,
-        updatePayload,
+        {
+          email: data.email,
+          tel: data.tel,
+          tel_country_code: data.tel_country_code,
+        },
       );
-      if (result.affectedRows === 0) {
-        throw new NotFoundException(`User with UID ${uid} not found.`);
+      if (!result) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
       }
-      return { message: 'User updated successfully.' };
-    } catch (error) {
-      // 专门处理唯一约束冲突错误
-      if (error?.code === 'ER_DUP_ENTRY') {
-        if (error.message.includes('tbl_user_tel_tenantId_uindex')) {
-          throw new ConflictException(
-            '此电话号码已被同一租户下的其他用户使用。',
-          );
-        }
-        // 可以为其他唯一键添加更多判断
+      if (result?.status === 'not_found') {
+        throw new NotFoundException(result?.error || `User with UID ${uid} not found.`);
+      }
+      if (result?.status === 'conflict') {
         throw new ConflictException(
-          '更新失败，因为一个或多个字段的值与现有记录冲突。',
+          result?.error || '更新失败，因为一个或多个字段的值与现有记录冲突。',
         );
       }
-      // If it's an exception we've already handled (like NotFoundException), rethrow it.
+      if (result?.status === 'noop') {
+        return { message: result?.message || 'No fields to update.' };
+      }
+      return { message: result?.message || 'User updated successfully.' };
+    } catch (error) {
       if (error instanceof HttpException) {
         throw error;
       }
-      // Otherwise, log the specific DB error and wrap it in a 500 error.
       this.logger.error(
-        `Database error while updating user ${uid} in env ${environmentId}:`,
+        `Error updating user via agent ${uid} in env ${environmentId}:`,
         error,
       );
-      throw new InternalServerErrorException(
-        `Database error on update: ${error.message}`,
-      );
+      throw new InternalServerErrorException('Failed to update user via agent');
     }
   }
 
   async deactivateUser(environmentId: string, uid: string, tenantId: number) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
     try {
-      const user = await this.databaseService.findUserByUid(
+      const result = await this.queryGatewayClient.deactivateUser(
         environmentId,
         uid,
         tenantId,
       );
-      if (!user) {
-        throw new NotFoundException(`User with UID ${uid} not found.`);
+      if (!result) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
       }
-
-      const updates: { [key: string]: any } = {};
-
-      // Only append -del if it's not already there and the field is a string
-      if (typeof user.email === 'string' && !user.email.endsWith('-del')) {
-        updates.email = `${user.email}-del`;
+      if (result?.status === 'not_found') {
+        throw new NotFoundException(result?.error || `User with UID ${uid} not found.`);
       }
-      if (typeof user.tel === 'string' && !user.tel.endsWith('-del')) {
-        updates.tel = `${user.tel}-del`;
-      }
-
-      if (Object.keys(updates).length === 0) {
+      if (result?.status === 'noop') {
         return {
-          message: 'User already deactivated or has no email/phone to mark.',
+          message:
+            result?.message || 'User already deactivated or has no email/phone to mark.',
         };
       }
-
-      const result = await this.databaseService.updateUserByUid(
-        environmentId,
-        uid,
-        tenantId,
-        updates,
-      );
-      if (result.affectedRows === 0) {
-        // FIX: This is a logic bug. It should be a 404, not a 500.
-        // This can happen if the user is deleted between the SELECT and UPDATE.
-        this.logger.warn(
-          `Deactivation for user ${uid} in env ${environmentId} affected 0 rows. The user might have been deleted.`,
-        );
-        throw new NotFoundException(
-          `Failed to deactivate user with UID ${uid}. The record may have been modified or deleted.`,
-        );
-      }
-      return { message: 'User deactivated successfully.' };
+      return { message: result?.message || 'User deactivated successfully.' };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
       }
       this.logger.error(
-        `Database error while deactivating user ${uid} in env ${environmentId}:`,
+        `Error deactivating user via agent ${uid} in env ${environmentId}:`,
         error,
       );
-      throw new InternalServerErrorException(
-        `Database error on deactivation: ${error.message}`,
-      );
+      throw new InternalServerErrorException('Failed to deactivate user via agent');
     }
   }
 

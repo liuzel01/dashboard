@@ -356,6 +356,106 @@ export class AgentQueryService implements OnModuleDestroy {
     return { status: 'not_found', error: `Key "${key}" not found.` };
   }
 
+  async updateUser(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    data: Record<string, any>,
+  ) {
+    const updatePayload: { [key: string]: any } = {};
+
+    if (data.email !== undefined) {
+      updatePayload.email = data.email;
+    }
+
+    if (data.tel !== undefined) {
+      if (data.tel === '') {
+        updatePayload.tel = null;
+        updatePayload.tel_country_code = null;
+      } else {
+        updatePayload.tel = data.tel;
+        if (data.tel_country_code !== undefined) {
+          updatePayload.tel_country_code = data.tel_country_code;
+        }
+      }
+    } else if (data.tel_country_code !== undefined) {
+      updatePayload.tel_country_code = data.tel_country_code;
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      return { status: 'noop', message: 'No fields to update.' };
+    }
+
+    const pool = await this.getMysqlPool(environmentId);
+    const fields = Object.keys(updatePayload)
+      .map((key) => `\`${key}\` = ?`)
+      .join(', ');
+    const values = Object.values(updatePayload);
+    const sql = `UPDATE \`tbl_user\` SET ${fields} WHERE \`tenant_user_id\` = ? AND \`tenant_id\` = ? LIMIT 1`;
+
+    try {
+      const [result] = (await pool.execute(sql, [...values, uid, tenantId])) as any;
+      if (!result || result.affectedRows === 0) {
+        return { status: 'not_found', error: `User with UID ${uid} not found.` };
+      }
+      return { status: 'success', message: 'User updated successfully.' };
+    } catch (error: any) {
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return {
+          status: 'conflict',
+          error:
+            String(error?.message || '').includes('tbl_user_tel_tenantId_uindex')
+              ? '此电话号码已被同一租户下的其他用户使用。'
+              : '更新失败，因为一个或多个字段的值与现有记录冲突。',
+        };
+      }
+      throw error;
+    }
+  }
+
+  async deactivateUser(environmentId: string, uid: string, tenantId: number) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT email, tel FROM `tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+
+    if (!Array.isArray(userRows) || userRows.length === 0) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const user = userRows[0] || {};
+    const updates: { [key: string]: any } = {};
+    if (typeof user.email === 'string' && !user.email.endsWith('-del')) {
+      updates.email = `${user.email}-del`;
+    }
+    if (typeof user.tel === 'string' && !user.tel.endsWith('-del')) {
+      updates.tel = `${user.tel}-del`;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return {
+        status: 'noop',
+        message: 'User already deactivated or has no email/phone to mark.',
+      };
+    }
+
+    const fields = Object.keys(updates)
+      .map((key) => `\`${key}\` = ?`)
+      .join(', ');
+    const values = Object.values(updates);
+    const sql = `UPDATE \`tbl_user\` SET ${fields} WHERE \`tenant_user_id\` = ? AND \`tenant_id\` = ? LIMIT 1`;
+    const [result] = (await pool.execute(sql, [...values, uid, tenantId])) as any;
+
+    if (!result || result.affectedRows === 0) {
+      return {
+        status: 'not_found',
+        error: `Failed to deactivate user with UID ${uid}. The record may have been modified or deleted.`,
+      };
+    }
+
+    return { status: 'success', message: 'User deactivated successfully.' };
+  }
+
   async updateTraderNickName(
     environmentId: string,
     uid: string,

@@ -146,6 +146,121 @@ export class QueryGatewayClientService {
     return response.data;
   }
 
+  async updateUser(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    data: { email?: string | null; tel?: string | null; tel_country_code?: string | null },
+    context?: QueryRequestContext,
+  ): Promise<any | null> {
+    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+
+    const requestId = context?.requestId || randomUUID();
+    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const transport = this.getGatewayTransport();
+
+    if (transport === 'k8s-proxy') {
+      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
+      const serviceName =
+        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
+      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+        namespace,
+        serviceName,
+        port: Number.isFinite(servicePort) && servicePort > 0 ? servicePort : 8080,
+        method: 'PATCH',
+        path: `/v1/query/users/${encodeURIComponent(uid)}`,
+        body: { tenantId, ...data },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      });
+      return response.body;
+    }
+
+    const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(environmentId);
+    if (!baseUrl) return null;
+    const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/users/${encodeURIComponent(uid)}`;
+    const response = await axios.patch(
+      url,
+      { tenantId, ...data },
+      {
+        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      },
+    );
+    return response.data;
+  }
+
+  async deactivateUser(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    context?: QueryRequestContext,
+  ): Promise<any | null> {
+    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+
+    const requestId = context?.requestId || randomUUID();
+    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const transport = this.getGatewayTransport();
+
+    if (transport === 'k8s-proxy') {
+      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
+      const serviceName =
+        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
+      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+        namespace,
+        serviceName,
+        port: Number.isFinite(servicePort) && servicePort > 0 ? servicePort : 8080,
+        method: 'POST',
+        path: `/v1/query/users/${encodeURIComponent(uid)}/deactivate`,
+        body: { tenantId },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      });
+      return response.body;
+    }
+
+    const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(environmentId);
+    if (!baseUrl) return null;
+    const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/users/${encodeURIComponent(uid)}/deactivate`;
+    const response = await axios.post(
+      url,
+      { tenantId },
+      {
+        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      },
+    );
+    return response.data;
+  }
+
   async getTraderInfo(
     environmentId: string,
     uid: string,
