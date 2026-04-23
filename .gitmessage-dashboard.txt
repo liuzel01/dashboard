@@ -1,0 +1,22 @@
+# 提交标题（必填）：<类型>: <中文简述>
+# 示例：feat: 查询中心新增OTC商家信息卡片
+# 可选类型：feat | fix | docs | style | refactor | test | chore | ci | perf | revert
+
+# 提交标题：
+
+# 变更说明（建议填写，1-3条）：
+# - 
+# - 
+
+# 验证方式（建议填写）：
+# - backend: npm run build
+# - frontend: npm run build
+# - 手工验证：
+
+# 风险与回滚（建议填写）：
+# - 风险：
+# - 回滚：
+
+# 影响范围（可选）：
+# - 模块：query / agent / environments / frontend-data-query
+# - 环境：dev / test / prod
