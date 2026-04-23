@@ -268,7 +268,7 @@ export class AgentQueryService implements OnModuleDestroy {
 
     const userId = Number(userRows[0].id);
     const sql =
-      'SELECT * FROM `otc`.`tbl_otc_merchant` WHERE `user_id` = ? AND `tenant_id` = ? LIMIT 1';
+      'SELECT * FROM `otc`.`tbl_otc_merchant` WHERE `user_id` = ? AND `tenant_id` = ? AND `status` = 0 AND `deleted` = 0 LIMIT 1';
     const [rows] = (await pool.execute(sql, [userId, tenantId])) as any;
     if (Array.isArray(rows) && rows.length > 0) {
       return { status: 'success', data: rows[0] };
@@ -295,7 +295,7 @@ export class AgentQueryService implements OnModuleDestroy {
 
     const userId = Number(userRows[0].id);
     const sql =
-      'UPDATE `otc`.`tbl_otc_merchant` SET `name` = ? WHERE `user_id` = ? AND `tenant_id` = ?';
+      'UPDATE `otc`.`tbl_otc_merchant` SET `name` = ? WHERE `user_id` = ? AND `tenant_id` = ? AND `status` = 0 AND `deleted` = 0';
     const [result] = (await pool.execute(sql, [name, userId, tenantId])) as any;
 
     if (result && result.affectedRows > 0) {
