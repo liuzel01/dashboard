@@ -405,6 +405,16 @@ export const getIngressOriginCandidates = async (params?: { keyword?: string }) 
   return response.data;
 };
 
+export const cloneIngressForLineOnboarding = async (data: {
+  environmentId: string;
+  namespace: string;
+  sourceIngressName: string;
+  newHost: string;
+}) => {
+  const response = await api.post('/lines/ingress/clone', data);
+  return response.data;
+};
+
 export const provisionDcdnDomain = async (data: {
   domainName: string;
   originDomain: string;

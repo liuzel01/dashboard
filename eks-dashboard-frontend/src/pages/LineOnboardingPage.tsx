@@ -23,6 +23,7 @@ import {
   getDcdnCasCertificates,
   getDcdnDomainStatus,
   getIngressOriginCandidates,
+  cloneIngressForLineOnboarding,
   provisionDcdnDomain,
   registerSuperAdminLine,
   verifyExternalLine,
@@ -188,6 +189,9 @@ const LineOnboardingPage: React.FC = () => {
   const [securityApplyError, setSecurityApplyError] = useState<string | null>(null);
 
   const [ingressApplied, setIngressApplied] = useState(false);
+  const [ingressApplying, setIngressApplying] = useState(false);
+  const [ingressApplyError, setIngressApplyError] = useState<string | null>(null);
+  const [ingressApplyResult, setIngressApplyResult] = useState<{ newIngressName: string; namespace: string; host: string } | null>(null);
   const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
   const [superAdminLineZh, setSuperAdminLineZh] = useState('');
   const [superAdminLineEn, setSuperAdminLineEn] = useState('');
@@ -860,21 +864,68 @@ const LineOnboardingPage: React.FC = () => {
     message.success('已确认 DCDN 配置');
   };
 
-  const handleConfirmIngressApplied = () => {
+  const handleCloneIngressApply = async () => {
     if (!dcdnConfirmed) {
       message.warning('请先完成步骤3');
       return;
     }
-    setIngressApplied(true);
-    setSuperAdminRegistered(false);
-    setSuperAdminRegisterError(null);
-    setSuperAdminRegisterResult(null);
-    setSuperAdminPendingUpdate(false);
-    setConnectivityChecked(false);
-    setSqlConfirmed(false);
-    setVerifyResult(null);
-    setVerifyError(null);
-    message.success('已确认执行 apply');
+    if (!confirmedSubdomain) {
+      message.warning('请先完成步骤2并确认子域名');
+      return;
+    }
+
+    setIngressApplying(true);
+    setIngressApplyError(null);
+    setIngressApplyResult(null);
+
+    try {
+      const resp = (await cloneIngressForLineOnboarding({
+        environmentId: currentEnvironment?.id || '',
+        namespace: 'default',
+        sourceIngressName: 'nginx-web-app',
+        newHost: confirmedSubdomain,
+      })) as {
+        success?: boolean;
+        data?: { newIngressName: string; namespace: string; host: string };
+      };
+
+      if (!resp?.data?.newIngressName) {
+        throw new Error('克隆结果不完整，请检查后端返回');
+      }
+
+      setIngressApplyResult(resp.data);
+      setIngressApplied(true);
+      setSuperAdminRegistered(false);
+      setSuperAdminRegisterError(null);
+      setSuperAdminRegisterResult(null);
+      setSuperAdminPendingUpdate(false);
+      setConnectivityChecked(false);
+      setSqlConfirmed(false);
+      setVerifyResult(null);
+      setVerifyError(null);
+      message.success(`Ingress 创建成功：${resp.data.newIngressName}`);
+    } catch (error: any) {
+      const status = Number(error?.response?.status);
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || error?.message || 'Ingress 克隆应用失败';
+
+      setIngressApplied(false);
+      setIngressApplyError(msg);
+
+      if (status === 404) {
+        message.error(`模板 ingress 不存在：${msg}`);
+      } else if (status === 409) {
+        message.error(`Ingress 冲突：${msg}`);
+      } else if (status === 400) {
+        message.error(`参数错误：${msg}`);
+      } else {
+        message.error(msg);
+      }
+    } finally {
+      setIngressApplying(false);
+    }
   };
 
   const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect') => {
