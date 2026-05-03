@@ -865,10 +865,6 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleCloneIngressApply = async () => {
-    if (!dcdnConfirmed) {
-      message.warning('请先完成步骤3');
-      return;
-    }
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2并确认子域名');
       return;
@@ -1477,16 +1473,47 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤4：Ingress 文件复制并应用" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Text code>cp {SOURCE_INGRESS} {targetIngress}</Text>
-          <Text code>{applyCommand}</Text>
+      <Card title="步骤4：Ingress 克隆并应用（自动）" style={{ marginBottom: 12 }}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="自动执行 ingress 克隆"
+            description="基于模板 ingress（当前固定 nginx-web-app）创建新 ingress，并将 host 替换为步骤2生成的子域名。"
+          />
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
+            <Text>命名空间：<Text code>default</Text></Text>
+            <Text>模板 ingress：<Text code>nginx-web-app</Text></Text>
+            <Text>目标 host（来自步骤2）：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
+          </Space>
           <Space>
-            <Button type="primary" onClick={handleConfirmIngressApplied} disabled={!dcdnConfirmed}>
-              确认已执行 apply
+            <Button
+              type="primary"
+              loading={ingressApplying}
+              onClick={handleCloneIngressApply}
+              disabled={!confirmedSubdomain}
+            >
+              执行 ingress 克隆应用
             </Button>
             {ingressApplied ? <Tag color="green">已执行</Tag> : null}
           </Space>
+
+          {ingressApplyError ? <Alert type="error" showIcon message={ingressApplyError} /> : null}
+          {ingressApplyResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message="Ingress 克隆应用成功"
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>新 Ingress：<Text code>{ingressApplyResult.newIngressName}</Text></Text>
+                  <Text>Namespace：<Text code>{ingressApplyResult.namespace}</Text></Text>
+                  <Text>Host：<Text code>{ingressApplyResult.host}</Text></Text>
+                </Space>
+              }
+            />
+          ) : null}
         </Space>
       </Card>
 
