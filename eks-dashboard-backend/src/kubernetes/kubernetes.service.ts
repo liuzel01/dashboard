@@ -274,6 +274,69 @@ export class KubernetesService {
     };
   }
 
+  async getIngress(environmentId: string, namespace: string, name: string) {
+    const { k8sNetworkingV1Api } = await this.getK8sApis(environmentId);
+    try {
+      const { body } = await k8sNetworkingV1Api.readNamespacedIngress(name, namespace);
+      return body;
+    } catch (e: any) {
+      if (e?.response?.statusCode === 404) return null;
+      throw e;
+    }
+  }
+
+  async findIngressByHost(environmentId: string, host: string) {
+    const { k8sNetworkingV1Api } = await this.getK8sApis(environmentId);
+    const { body } = await k8sNetworkingV1Api.listIngressForAllNamespaces();
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const target = host.trim().toLowerCase();
+    for (const item of items) {
+      const rules = Array.isArray(item?.spec?.rules) ? item.spec.rules : [];
+      const matchedRule = rules.find((rule: any) => String(rule?.host || '').trim().toLowerCase() === target);
+      if (matchedRule) {
+        return {
+          namespace: String(item?.metadata?.namespace || 'default'),
+          name: String(item?.metadata?.name || ''),
+          host: target,
+        };
+      }
+    }
+    return null;
+  }
+
+  cloneIngressSpec(source: any, input: { newName: string; newHost: string }) {
+    const cloned = JSON.parse(JSON.stringify(source || {}));
+    cloned.metadata = cloned.metadata || {};
+    delete cloned.metadata.uid;
+    delete cloned.metadata.resourceVersion;
+    delete cloned.metadata.generation;
+    delete cloned.metadata.creationTimestamp;
+    delete cloned.metadata.managedFields;
+    if (cloned.metadata.annotations) {
+      delete cloned.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration'];
+    }
+    delete cloned.status;
+
+    cloned.metadata.name = input.newName;
+
+    if (Array.isArray(cloned.spec?.rules)) {
+      cloned.spec.rules = cloned.spec.rules.map((rule: any) => ({ ...rule, host: input.newHost }));
+    }
+    if (Array.isArray(cloned.spec?.tls)) {
+      cloned.spec.tls = cloned.spec.tls.map((tls: any) => ({
+        ...tls,
+        hosts: Array.isArray(tls?.hosts) ? tls.hosts.map(() => input.newHost) : tls?.hosts,
+      }));
+    }
+    return cloned;
+  }
+
+  async createIngress(environmentId: string, namespace: string, body: any) {
+    const { k8sNetworkingV1Api } = await this.getK8sApis(environmentId);
+    const { body: created } = await k8sNetworkingV1Api.createNamespacedIngress(namespace, body);
+    return created;
+  }
+
   async requestServiceProxy(
     environmentId: string,
     input: {

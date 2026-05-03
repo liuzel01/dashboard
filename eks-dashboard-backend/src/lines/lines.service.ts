@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -126,6 +126,7 @@ type SuperAdminLineItem = {
 
 @Injectable()
 export class LinesService {
+  private readonly logger = new Logger(LinesService.name);
   private readonly lineVerifyApiUrl: string;
   private readonly dcdnEndpoint: string;
   private readonly dcdnAccessKeyId: string;
@@ -1225,6 +1226,96 @@ export class LinesService {
       keyword || 'nginx-web-app',
     );
     return result;
+  }
+
+  async cloneIngressFromTemplate(
+    environmentId: string,
+    input: {
+      namespace: string;
+      sourceIngressName: string;
+      newHost: string;
+      requestId?: string;
+      userId?: string;
+      username?: string;
+    },
+  ) {
+    const namespace = String(input.namespace || '').trim();
+    const sourceIngressName = String(input.sourceIngressName || '').trim();
+    const newHost = String(input.newHost || '').trim().toLowerCase();
+
+    if (!namespace) throw new BadRequestException('namespace is required');
+    if (!sourceIngressName) throw new BadRequestException('sourceIngressName is required');
+    if (!newHost) throw new BadRequestException('newHost is required');
+
+    const contextInfo = {
+      requestId: input.requestId || 'none',
+      userId: input.userId || 'none',
+      username: input.username || 'none',
+      environmentId,
+      namespace,
+      sourceIngressName,
+      newHost,
+    };
+    this.logger.log(`[IngressClone] start ${JSON.stringify(contextInfo)}`);
+
+    const source = await this.kubernetesService.getIngress(environmentId, namespace, sourceIngressName);
+    if (!source) {
+      throw new NotFoundException(`source ingress not found: ${namespace}/${sourceIngressName}`);
+    }
+
+    const hostConflict = await this.kubernetesService.findIngressByHost(environmentId, newHost);
+    if (hostConflict) {
+      throw new ConflictException({
+        message: `host already exists: ${newHost}`,
+        conflictType: 'host',
+        conflictIngress: hostConflict,
+      });
+    }
+
+    const now = new Date();
+    const y = String(now.getFullYear()).slice(2);
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const baseName = `${sourceIngressName}-${y}${m}${d}${hh}${mm}`;
+
+    let newIngressName = baseName;
+    for (let i = 0; i < 5; i += 1) {
+      const exists = await this.kubernetesService.getIngress(environmentId, namespace, newIngressName);
+      if (!exists) break;
+      newIngressName = `${baseName}-${Math.floor(Math.random() * 90 + 10)}`;
+    }
+    const finalExists = await this.kubernetesService.getIngress(environmentId, namespace, newIngressName);
+    if (finalExists) {
+      throw new ConflictException({
+        message: `ingress name already exists: ${newIngressName}`,
+        conflictType: 'name',
+        conflictIngress: { namespace, name: newIngressName },
+      });
+    }
+
+    const cloned = this.kubernetesService.cloneIngressSpec(source, {
+      newName: newIngressName,
+      newHost,
+    });
+
+    const created = await this.kubernetesService.createIngress(environmentId, namespace, cloned);
+
+    this.logger.log(
+      `[IngressClone] success requestId=${contextInfo.requestId} userId=${contextInfo.userId} username=${contextInfo.username} env=${environmentId} source=${namespace}/${sourceIngressName} new=${namespace}/${newIngressName} host=${newHost}`,
+    );
+
+    return {
+      success: true,
+      data: {
+        newIngressName,
+        namespace,
+        host: newHost,
+        sourceIngressName,
+        createdAt: created?.metadata?.creationTimestamp || new Date().toISOString(),
+      },
+    };
   }
 
   private normalizeToHost(rawLineUrl: string) {
