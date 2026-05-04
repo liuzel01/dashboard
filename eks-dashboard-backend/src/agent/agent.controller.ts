@@ -16,7 +16,9 @@ import {
 import { AgentConfigService } from './agent-config.service';
 import { AgentConnectionService } from './agent-connection.service';
 import { AgentQueryService } from './agent-query.service';
+import { AgentIngressService } from './agent-ingress.service';
 import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
+import { AgentCloneIngressDto } from './dto/agent-clone-ingress.dto';
 
 @Controller()
 export class AgentController {
@@ -26,6 +28,7 @@ export class AgentController {
     private readonly configService: AgentConfigService,
     private readonly connectionService: AgentConnectionService,
     private readonly queryService: AgentQueryService,
+    private readonly ingressService: AgentIngressService,
   ) {}
 
   @Get('healthz')
@@ -226,6 +229,31 @@ export class AgentController {
     }
     const envId = environmentId || this.configService.getAgentEnvironmentId();
     return this.queryService.deleteRedisKey(envId, key);
+  }
+
+  @Post('v1/ingress/clone')
+  async cloneIngress(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentCloneIngressDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentIngress] clone env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
+    );
+    return this.ingressService.cloneIngress({
+      environmentId: envId,
+      namespace: body.namespace,
+      sourceIngressName: body.sourceIngressName,
+      newHost: body.newHost,
+      requestId,
+      userId,
+      username,
+    });
   }
 
   @Patch('v1/query/trader/:uid/nick')

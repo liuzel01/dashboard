@@ -4,10 +4,11 @@ import { LinesController } from './lines.controller';
 import { LinesService } from './lines.service';
 import { KubernetesModule } from '../kubernetes/kubernetes.module';
 import { SiteMonitorModule } from '../site-monitor/site-monitor.module';
+import { IngressGatewayClientService } from './ingress-gateway-client.service';
 
 @Module({
   imports: [HttpModule, KubernetesModule, SiteMonitorModule],
   controllers: [LinesController],
-  providers: [LinesService],
+  providers: [LinesService, IngressGatewayClientService],
 })
 export class LinesModule {}

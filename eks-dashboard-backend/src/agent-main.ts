@@ -14,6 +14,8 @@ async function bootstrap() {
       'X-Environment-Id',
       'X-Request-Id',
       'X-Agent-Token',
+      'X-User-Id',
+      'X-Username',
     ],
   });
   const port = Number(process.env.PORT || 8080);

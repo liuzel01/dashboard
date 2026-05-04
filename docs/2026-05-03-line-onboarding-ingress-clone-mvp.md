@@ -265,6 +265,8 @@
 ### 当前状态说明
 
 - MVP 主链路已可用：前端 Step4 可触发后端 clone API，并可收到成功/冲突反馈。
+- 当前实现存在一处架构偏差：文档规划链路为“后端通过 `dashboard-db-gateway-agent` 在集群内执行 ingress clone/apply”，但当前 MVP 实际为“后端通过本机 kubeconfig 使用 Kubernetes client 直接调用 Kubernetes API 创建 ingress”，并未经过 `dashboard-db-gateway-agent`，也不是 `kubectl apply -f` 仓库 YAML 文件。
+- 后续进入动态 source ingress 前，建议优先将 clone 执行面迁移到 `dashboard-db-gateway-agent`，否则动态解析与 clone 逻辑继续堆在后端会增加后续返工成本。
 - 仍建议在后续回归中补强：
   - requestId 维度的完整日志留存示例
   - `kubectl get ingress` 验证截图/命令结果沉淀

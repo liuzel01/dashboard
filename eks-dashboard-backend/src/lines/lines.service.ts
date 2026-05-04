@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -12,6 +12,7 @@ import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
 import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 import { CentralDatabaseService } from '../site-monitor/central-database.service';
+import { IngressGatewayClientService } from './ingress-gateway-client.service';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -167,6 +168,7 @@ export class LinesService {
     private readonly configService: ConfigService,
     private readonly kubernetesService: KubernetesService,
     private readonly centralDb: CentralDatabaseService,
+    private readonly ingressGatewayClient: IngressGatewayClientService,
   ) {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
@@ -1258,64 +1260,21 @@ export class LinesService {
     };
     this.logger.log(`[IngressClone] start ${JSON.stringify(contextInfo)}`);
 
-    const source = await this.kubernetesService.getIngress(environmentId, namespace, sourceIngressName);
-    if (!source) {
-      throw new NotFoundException(`source ingress not found: ${namespace}/${sourceIngressName}`);
-    }
-
-    const hostConflict = await this.kubernetesService.findIngressByHost(environmentId, newHost);
-    if (hostConflict) {
-      throw new ConflictException({
-        message: `host already exists: ${newHost}`,
-        conflictType: 'host',
-        conflictIngress: hostConflict,
-      });
-    }
-
-    const now = new Date();
-    const y = String(now.getFullYear()).slice(2);
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const baseName = `${sourceIngressName}-${y}${m}${d}${hh}${mm}`;
-
-    let newIngressName = baseName;
-    for (let i = 0; i < 5; i += 1) {
-      const exists = await this.kubernetesService.getIngress(environmentId, namespace, newIngressName);
-      if (!exists) break;
-      newIngressName = `${baseName}-${Math.floor(Math.random() * 90 + 10)}`;
-    }
-    const finalExists = await this.kubernetesService.getIngress(environmentId, namespace, newIngressName);
-    if (finalExists) {
-      throw new ConflictException({
-        message: `ingress name already exists: ${newIngressName}`,
-        conflictType: 'name',
-        conflictIngress: { namespace, name: newIngressName },
-      });
-    }
-
-    const cloned = this.kubernetesService.cloneIngressSpec(source, {
-      newName: newIngressName,
-      newHost,
-    });
-
-    const created = await this.kubernetesService.createIngress(environmentId, namespace, cloned);
-
-    this.logger.log(
-      `[IngressClone] success requestId=${contextInfo.requestId} userId=${contextInfo.userId} username=${contextInfo.username} env=${environmentId} source=${namespace}/${sourceIngressName} new=${namespace}/${newIngressName} host=${newHost}`,
+    const result = await this.ingressGatewayClient.cloneIngress(
+      environmentId,
+      { namespace, sourceIngressName, newHost },
+      {
+        requestId: input.requestId,
+        userId: input.userId,
+        username: input.username,
+      },
     );
 
-    return {
-      success: true,
-      data: {
-        newIngressName,
-        namespace,
-        host: newHost,
-        sourceIngressName,
-        createdAt: created?.metadata?.creationTimestamp || new Date().toISOString(),
-      },
-    };
+    this.logger.log(
+      `[IngressClone] success via agent requestId=${contextInfo.requestId} userId=${contextInfo.userId} username=${contextInfo.username} env=${environmentId} source=${namespace}/${sourceIngressName} new=${namespace}/${result?.data?.newIngressName || 'unknown'} host=${newHost}`,
+    );
+
+    return result;
   }
 
   private normalizeToHost(rawLineUrl: string) {
