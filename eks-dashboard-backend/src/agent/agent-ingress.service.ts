@@ -23,6 +23,34 @@ export class AgentIngressService {
     this.networkingV1Api = this.kc.makeApiClient(k8s.NetworkingV1Api);
   }
 
+  async listSourceCandidates(input: {
+    environmentId: string;
+    namespace: string;
+    keyword?: string;
+    requestId?: string;
+    userId?: string;
+    username?: string;
+  }) {
+    const namespace = String(input.namespace || '').trim();
+    const keyword = String(input.keyword || 'nginx-web-app').trim().toLowerCase();
+    if (!namespace) throw new BadRequestException('namespace is required');
+
+    this.logger.log(
+      `[AgentIngressCandidates] start env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} namespace=${namespace} keyword=${keyword || 'none'}`,
+    );
+
+    const items = await this.listIngressCandidates(namespace, keyword);
+    return {
+      success: true,
+      data: {
+        namespace,
+        keyword: keyword || null,
+        total: items.length,
+        items,
+      },
+    };
+  }
+
   async resolveSource(input: {
     environmentId: string;
     namespace: string;

@@ -14,6 +14,17 @@ export class IngressGatewayClientService {
 
   constructor(private readonly kubernetesService: KubernetesService) {}
 
+  async listSourceCandidates(
+    environmentId: string,
+    input: {
+      namespace: string;
+      keyword?: string;
+    },
+    context?: IngressGatewayContext,
+  ) {
+    return this.postToAgent(environmentId, '/v1/ingress/source-candidates', input, context, 'source-candidates');
+  }
+
   async resolveSource(
     environmentId: string,
     input: {

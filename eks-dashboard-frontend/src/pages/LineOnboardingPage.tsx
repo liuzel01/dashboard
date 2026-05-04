@@ -23,7 +23,7 @@ import {
   getDcdnCasCertificates,
   getDcdnDomainStatus,
   getIngressOriginCandidates,
-  resolveIngressSourceForLineOnboarding,
+  getIngressSourceCandidatesForLineOnboarding,
   cloneIngressForLineOnboarding,
   provisionDcdnDomain,
   registerSuperAdminLine,
@@ -891,21 +891,31 @@ const LineOnboardingPage: React.FC = () => {
     setResolvedIngressSource(null);
     setSelectedSourceIngressKey('');
     try {
-      const resolveResp = (await resolveIngressSourceForLineOnboarding({
+      const candidatesResp = (await getIngressSourceCandidatesForLineOnboarding({
         environmentId: currentEnvironment?.id || '',
         namespace: 'default',
         keyword: 'nginx-web-app',
-      })) as { success?: boolean; data?: ResolvedIngressSource };
-      const resolved = resolveResp?.data;
-      setResolvedIngressSource(resolved || null);
-      const candidates = resolved?.candidates || [];
+      })) as {
+        success?: boolean;
+        data?: {
+          namespace: string;
+          keyword?: string | null;
+          total?: number;
+          items?: NonNullable<ResolvedIngressSource['candidates']>;
+        };
+      };
+      const candidates = candidatesResp?.data?.items || [];
+      setResolvedIngressSource({
+        namespace: candidatesResp?.data?.namespace || 'default',
+        sourceIngressName: candidates[0]?.name || '',
+        matchedBy: 'manual-candidates',
+        candidates,
+      });
       if (candidates.length === 0) {
         setSourceIngressError('未找到可用 source ingress 候选');
         return;
       }
-      const first = resolved?.sourceIngressName
-        ? `${resolved.namespace}/${resolved.sourceIngressName}`
-        : `${candidates[0].namespace}/${candidates[0].name}`;
+      const first = `${candidates[0].namespace}/${candidates[0].name}`;
       setSelectedSourceIngressKey(first);
       message.success(`已加载 ${candidates.length} 个 source ingress 候选`);
     } catch (error: any) {
