@@ -43,6 +43,7 @@ export class IngressGatewayClientService {
       namespace: string;
       sourceIngressName: string;
       newHost: string;
+      newIngressName?: string;
     },
     context?: IngressGatewayContext,
   ) {

@@ -138,6 +138,29 @@ const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0
 const SUBDOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
 const normalizeDomain = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+const K8S_RESOURCE_NAME_REGEX = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+
+const formatIngressTimestamp = (date = new Date()) => {
+  const y = String(date.getFullYear()).slice(2);
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${y}${m}${d}${hh}${mm}`;
+};
+
+const toIngressNameHostPrefix = (host: string) =>
+  normalizeDomain(host)
+    .split('.')[0]
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48);
+
+const generateDefaultIngressName = (host: string) => {
+  const prefix = toIngressNameHostPrefix(host) || 'line';
+  return `nginx-web-app-${prefix}-${formatIngressTimestamp()}`;
+};
 
 const generateHex = (length = 16) => {
   const bytes = new Uint8Array(Math.max(4, Math.ceil(length / 2)));
@@ -202,6 +225,7 @@ const LineOnboardingPage: React.FC = () => {
   const [sourceIngressLoading, setSourceIngressLoading] = useState(false);
   const [sourceIngressError, setSourceIngressError] = useState<string | null>(null);
   const [selectedSourceIngressKey, setSelectedSourceIngressKey] = useState<string>('');
+  const [newIngressNameInput, setNewIngressNameInput] = useState('');
   const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
   const [superAdminLineZh, setSuperAdminLineZh] = useState('');
   const [superAdminLineEn, setSuperAdminLineEn] = useState('');
@@ -456,6 +480,7 @@ const LineOnboardingPage: React.FC = () => {
     setResolvedIngressSource(null);
     setSourceIngressError(null);
     setSelectedSourceIngressKey('');
+    setNewIngressNameInput('');
     setConfirmedRootDomain(normalized);
     message.success(`已确认一级域名：${normalized}`);
   };
@@ -486,6 +511,7 @@ const LineOnboardingPage: React.FC = () => {
     setResolvedIngressSource(null);
     setSourceIngressError(null);
     setSelectedSourceIngressKey('');
+    setNewIngressNameInput(generateDefaultIngressName(candidate));
     setConfirmedSubdomain(candidate);
     message.success(`已确认线路子域名：${candidate}`);
   };
@@ -500,6 +526,7 @@ const LineOnboardingPage: React.FC = () => {
     setSourceIngressLoading(false);
     setSourceIngressError(null);
     setSelectedSourceIngressKey('');
+    setNewIngressNameInput('');
     setDcdnAutoResult(null);
     setDcdnAutoError(null);
     setDcdnLastRefreshAt(null);
@@ -917,6 +944,9 @@ const LineOnboardingPage: React.FC = () => {
       }
       const first = `${candidates[0].namespace}/${candidates[0].name}`;
       setSelectedSourceIngressKey(first);
+      if (!newIngressNameInput.trim()) {
+        setNewIngressNameInput(generateDefaultIngressName(confirmedSubdomain));
+      }
       message.success(`已加载 ${candidates.length} 个 source ingress 候选`);
     } catch (error: any) {
       const backendMsg = error?.response?.data?.message;
@@ -939,6 +969,15 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先加载并选择 source ingress');
       return;
     }
+    const newIngressName = newIngressNameInput.trim().toLowerCase();
+    if (!newIngressName) {
+      message.warning('请先确认新 ingress 名称');
+      return;
+    }
+    if (!K8S_RESOURCE_NAME_REGEX.test(newIngressName)) {
+      message.error('新 ingress 名称格式不合法：只能使用小写字母、数字和中划线，且首尾必须是字母或数字');
+      return;
+    }
 
     setIngressApplying(true);
     setIngressApplyError(null);
@@ -957,6 +996,7 @@ const LineOnboardingPage: React.FC = () => {
         namespace: sourceNamespace,
         sourceIngressName,
         newHost: confirmedSubdomain,
+        newIngressName,
       })) as {
         success?: boolean;
         data?: { newIngressName: string; namespace: string; host: string };
@@ -1556,7 +1596,7 @@ const LineOnboardingPage: React.FC = () => {
             type="info"
             showIcon
             message="手动选择 source ingress 后执行克隆"
-            description="当前先复用 resolve-source 能力加载候选；source ingress 由人工显式选择，目标 host 固定使用步骤2生成的新子域名。"
+            description="加载候选后人工选择 source ingress；目标 host 固定使用步骤2生成的新子域名，新 ingress 名称可确认或修改。"
           />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
@@ -1586,13 +1626,24 @@ const LineOnboardingPage: React.FC = () => {
             />
             {resolvedIngressSource?.matchedBy ? <Tag color="blue">候选来源：{resolvedIngressSource.matchedBy}</Tag> : null}
           </Space>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>新 ingress 名称：</Text>
+            <Input
+              style={{ maxWidth: 520 }}
+              value={newIngressNameInput}
+              onChange={(e) => setNewIngressNameInput(e.target.value.trim().toLowerCase())}
+              placeholder="例如 nginx-web-app-l01-test-2605040650"
+              disabled={!confirmedSubdomain}
+            />
+            <Text type="secondary">默认规则：nginx-web-app-{'{host前缀}'}-{'{YYMMDDHHmm}'}，可按实际命名规范手动修改。</Text>
+          </Space>
           {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
           <Space>
             <Button
               type="primary"
               loading={ingressApplying}
               onClick={handleCloneIngressApply}
-              disabled={!confirmedSubdomain || !selectedSourceIngressKey}
+              disabled={!confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
             >
               执行 ingress 克隆应用
             </Button>

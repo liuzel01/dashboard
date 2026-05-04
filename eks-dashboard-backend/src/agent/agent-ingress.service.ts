@@ -102,6 +102,7 @@ export class AgentIngressService {
     namespace: string;
     sourceIngressName: string;
     newHost: string;
+    newIngressName?: string;
     requestId?: string;
     userId?: string;
     username?: string;
@@ -110,10 +111,14 @@ export class AgentIngressService {
     const namespace = String(input.namespace || '').trim();
     const sourceIngressName = String(input.sourceIngressName || '').trim();
     const newHost = String(input.newHost || '').trim().toLowerCase();
+    const requestedIngressName = String(input.newIngressName || '').trim().toLowerCase();
 
     if (!namespace) throw new BadRequestException('namespace is required');
     if (!sourceIngressName) throw new BadRequestException('sourceIngressName is required');
     if (!newHost) throw new BadRequestException('newHost is required');
+    if (requestedIngressName && !this.isValidK8sResourceName(requestedIngressName)) {
+      throw new BadRequestException('newIngressName format is invalid');
+    }
 
     this.logger.log(
       `[AgentIngressClone] start env=${environmentId || 'none'} requestId=${input.requestId || 'none'} userId=${input.userId || 'none'} username=${input.username || 'none'} source=${namespace}/${sourceIngressName} host=${newHost}`,
@@ -133,8 +138,15 @@ export class AgentIngressService {
       });
     }
 
-    const baseName = `${sourceIngressName}-${this.formatTimestamp(new Date())}`;
-    const newIngressName = await this.generateAvailableIngressName(namespace, baseName);
+    const newIngressName = requestedIngressName || `${sourceIngressName}-${this.formatTimestamp(new Date())}`;
+    const nameConflict = await this.getIngress(namespace, newIngressName);
+    if (nameConflict) {
+      throw new ConflictException({
+        message: `ingress name already exists: ${newIngressName}`,
+        conflictType: 'name',
+        conflictIngress: { namespace, name: newIngressName },
+      });
+    }
     const cloned = this.cloneIngressSpec(source, { newName: newIngressName, newHost });
     const created = await this.networkingV1Api.createNamespacedIngress(namespace, cloned as any);
 
@@ -182,7 +194,13 @@ export class AgentIngressService {
           lbAddresses,
         };
       })
-      .filter((item) => item.name);
+      .filter((item) => item.name)
+      .sort((a, b) => {
+        const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (bt !== at) return bt - at;
+        return a.name.localeCompare(b.name);
+      });
   }
 
   private normalizeToHost(rawLineUrl: string) {
@@ -194,6 +212,10 @@ export class AgentIngressService {
     } catch {
       throw new BadRequestException('lineUrl format is invalid');
     }
+  }
+
+  private isValidK8sResourceName(name: string) {
+    return /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name) && name.length <= 253;
   }
 
   private async getIngress(namespace: string, name: string) {
@@ -222,24 +244,6 @@ export class AgentIngressService {
       }
     }
     return null;
-  }
-
-  private async generateAvailableIngressName(namespace: string, baseName: string) {
-    let candidate = baseName;
-    for (let i = 0; i < 5; i += 1) {
-      const exists = await this.getIngress(namespace, candidate);
-      if (!exists) return candidate;
-      candidate = `${baseName}-${Math.floor(Math.random() * 90 + 10)}`;
-    }
-    const finalExists = await this.getIngress(namespace, candidate);
-    if (finalExists) {
-      throw new ConflictException({
-        message: `ingress name already exists: ${candidate}`,
-        conflictType: 'name',
-        conflictIngress: { namespace, name: candidate },
-      });
-    }
-    return candidate;
   }
 
   private formatTimestamp(now: Date) {

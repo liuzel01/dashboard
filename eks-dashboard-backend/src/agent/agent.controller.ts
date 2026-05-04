@@ -301,6 +301,7 @@ export class AgentController {
       namespace: body.namespace,
       sourceIngressName: body.sourceIngressName,
       newHost: body.newHost,
+      newIngressName: body.newIngressName,
       requestId,
       userId,
       username,

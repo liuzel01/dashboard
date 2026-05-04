@@ -1290,6 +1290,7 @@ export class LinesService {
       namespace: string;
       sourceIngressName: string;
       newHost: string;
+      newIngressName?: string;
       requestId?: string;
       userId?: string;
       username?: string;
@@ -1298,6 +1299,7 @@ export class LinesService {
     const namespace = String(input.namespace || '').trim();
     const sourceIngressName = String(input.sourceIngressName || '').trim();
     const newHost = String(input.newHost || '').trim().toLowerCase();
+    const newIngressName = String(input.newIngressName || '').trim().toLowerCase();
 
     if (!namespace) throw new BadRequestException('namespace is required');
     if (!sourceIngressName) throw new BadRequestException('sourceIngressName is required');
@@ -1311,12 +1313,13 @@ export class LinesService {
       namespace,
       sourceIngressName,
       newHost,
+      newIngressName: newIngressName || 'auto',
     };
     this.logger.log(`[IngressClone] start ${JSON.stringify(contextInfo)}`);
 
     const result = await this.ingressGatewayClient.cloneIngress(
       environmentId,
-      { namespace, sourceIngressName, newHost },
+      { namespace, sourceIngressName, newHost, ...(newIngressName ? { newIngressName } : {}) },
       {
         requestId: input.requestId,
         userId: input.userId,

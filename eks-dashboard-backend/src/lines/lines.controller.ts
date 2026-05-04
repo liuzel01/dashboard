@@ -170,6 +170,7 @@ export class LinesController {
       namespace: body.namespace,
       sourceIngressName: body.sourceIngressName,
       newHost: body.newHost,
+      newIngressName: body.newIngressName,
       requestId: req?.requestId,
       userId: req?.user?.id ? String(req.user.id) : undefined,
       username: req?.user?.username,

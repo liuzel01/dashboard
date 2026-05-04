@@ -429,6 +429,7 @@ export const cloneIngressForLineOnboarding = async (data: {
   namespace: string;
   sourceIngressName: string;
   newHost: string;
+  newIngressName?: string;
 }) => {
   const response = await api.post('/lines/ingress/clone', data);
   return response.data;
