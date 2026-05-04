@@ -1144,10 +1144,6 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleApplyTenantDomain = async () => {
-    if (!connectivityChecked) {
-      message.warning('请先完成步骤5');
-      return;
-    }
     if (!selectedTenantId) {
       message.error('请先选择目标租户');
       return;
@@ -1186,10 +1182,6 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleConfirmSql = () => {
-    if (!connectivityChecked) {
-      message.warning('请先完成步骤5');
-      return;
-    }
     if (!selectedTenantId) {
       message.error('请先选择目标租户');
       return;
@@ -1880,6 +1872,12 @@ const LineOnboardingPage: React.FC = () => {
           <Text type="secondary">
             tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
           </Text>
+          <Alert
+            type="warning"
+            showIcon
+            message="测试阶段已放开 Step6 前置限制"
+            description="当前只要求已选择租户并确认子域名，不再强制要求先完成步骤5联通性检查；生产流程是否恢复限制后续再定。"
+          />
           <Text>
             目标租户：
             {selectedTenant ? (
@@ -1898,7 +1896,7 @@ const LineOnboardingPage: React.FC = () => {
               type="primary"
               loading={tenantDomainApplying}
               onClick={handleApplyTenantDomain}
-              disabled={!connectivityChecked || !selectedTenantId || !confirmedSubdomain}
+              disabled={!selectedTenantId || !confirmedSubdomain}
             >
               自动写入 tenant_domain
             </Button>
@@ -1911,11 +1909,11 @@ const LineOnboardingPage: React.FC = () => {
                   message.error('复制失败，请手工复制');
                 }
               }}
-              disabled={!connectivityChecked || !selectedTenantId}
+              disabled={!selectedTenantId || !confirmedSubdomain}
             >
               复制 SQL
             </Button>
-            <Button type="primary" onClick={handleConfirmSql} disabled={!connectivityChecked || !selectedTenantId}>
+            <Button type="primary" onClick={handleConfirmSql} disabled={!selectedTenantId || !confirmedSubdomain}>
               确认已完成执行 SQL
             </Button>
             {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}
