@@ -13,6 +13,7 @@ import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
 import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 import { CentralDatabaseService } from '../site-monitor/central-database.service';
 import { IngressGatewayClientService } from './ingress-gateway-client.service';
+import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-client.service';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -169,6 +170,7 @@ export class LinesService {
     private readonly kubernetesService: KubernetesService,
     private readonly centralDb: CentralDatabaseService,
     private readonly ingressGatewayClient: IngressGatewayClientService,
+    private readonly lineOnboardingGatewayClient: LineOnboardingGatewayClientService,
   ) {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
@@ -1282,6 +1284,41 @@ export class LinesService {
         username: input.username,
       },
     );
+  }
+
+  async applyTenantDomain(
+    environmentId: string,
+    input: {
+      tenantId: number;
+      domain: string;
+      requestId?: string;
+      userId?: string;
+      username?: string;
+    },
+  ) {
+    const tenantId = Number(input.tenantId);
+    const domain = String(input.domain || '').trim().toLowerCase();
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+      throw new BadRequestException('tenantId must be a positive integer');
+    }
+    if (!domain) throw new BadRequestException('domain is required');
+
+    this.logger.log(
+      `[TenantDomainApply] start requestId=${input.requestId || 'none'} userId=${input.userId || 'none'} username=${input.username || 'none'} env=${environmentId} tenantId=${tenantId} domain=${domain}`,
+    );
+    const result = await this.lineOnboardingGatewayClient.applyTenantDomain(
+      environmentId,
+      { tenantId, domain },
+      {
+        requestId: input.requestId,
+        userId: input.userId,
+        username: input.username,
+      },
+    );
+    this.logger.log(
+      `[TenantDomainApply] success requestId=${input.requestId || 'none'} env=${environmentId} tenantId=${tenantId} domain=${domain} action=${result?.data?.action || 'unknown'}`,
+    );
+    return result;
   }
 
   async cloneIngressFromTemplate(

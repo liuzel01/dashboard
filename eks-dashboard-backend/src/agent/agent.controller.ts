@@ -17,10 +17,12 @@ import { AgentConfigService } from './agent-config.service';
 import { AgentConnectionService } from './agent-connection.service';
 import { AgentQueryService } from './agent-query.service';
 import { AgentIngressService } from './agent-ingress.service';
+import { AgentTenantDomainService } from './agent-tenant-domain.service';
 import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
 import { AgentCloneIngressDto } from './dto/agent-clone-ingress.dto';
 import { AgentResolveIngressSourceDto } from './dto/agent-resolve-ingress-source.dto';
 import { AgentListIngressSourceCandidatesDto } from './dto/agent-list-ingress-source-candidates.dto';
+import { AgentApplyTenantDomainDto } from './dto/agent-apply-tenant-domain.dto';
 
 @Controller()
 export class AgentController {
@@ -31,6 +33,7 @@ export class AgentController {
     private readonly connectionService: AgentConnectionService,
     private readonly queryService: AgentQueryService,
     private readonly ingressService: AgentIngressService,
+    private readonly tenantDomainService: AgentTenantDomainService,
   ) {}
 
   @Get('healthz')
@@ -231,6 +234,30 @@ export class AgentController {
     }
     const envId = environmentId || this.configService.getAgentEnvironmentId();
     return this.queryService.deleteRedisKey(envId, key);
+  }
+
+  @Post('v1/tenant-domain/apply')
+  async applyTenantDomain(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentApplyTenantDomainDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentTenantDomain] apply env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'} tenantId=${body.tenantId} domain=${body.domain}`,
+    );
+    return this.tenantDomainService.applyTenantDomain({
+      environmentId: envId,
+      tenantId: body.tenantId,
+      domain: body.domain,
+      requestId,
+      userId,
+      username,
+    });
   }
 
   @Post('v1/ingress/source-candidates')

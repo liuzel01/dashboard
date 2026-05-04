@@ -13,6 +13,7 @@ import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 import { CloneIngressDto } from './dto/clone-ingress.dto';
 import { ResolveIngressSourceDto } from './dto/resolve-ingress-source.dto';
 import { ListIngressSourceCandidatesDto } from './dto/list-ingress-source-candidates.dto';
+import { ApplyTenantDomainDto } from './dto/apply-tenant-domain.dto';
 
 @Controller('lines')
 export class LinesController {
@@ -106,6 +107,28 @@ export class LinesController {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
     }
     return this.linesService.listIngressOriginCandidates(environmentId, query.keyword);
+  }
+
+  @Post('tenant-domain/apply')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  applyTenantDomain(
+    @Headers('x-target-environment') environmentId: string,
+    @Req() req: any,
+    @Body() body: ApplyTenantDomainDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    if (body.environmentId && body.environmentId !== environmentId) {
+      throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.applyTenantDomain(environmentId, {
+      tenantId: body.tenantId,
+      domain: body.domain,
+      requestId: req?.requestId,
+      userId: req?.user?.id ? String(req.user.id) : undefined,
+      username: req?.user?.username,
+    });
   }
 
   @Post('ingress/source-candidates')

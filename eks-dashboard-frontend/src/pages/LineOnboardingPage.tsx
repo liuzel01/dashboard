@@ -25,6 +25,7 @@ import {
   getIngressOriginCandidates,
   getIngressSourceCandidatesForLineOnboarding,
   cloneIngressForLineOnboarding,
+  applyTenantDomainForLineOnboarding,
   provisionDcdnDomain,
   registerSuperAdminLine,
   verifyExternalLine,
@@ -101,6 +102,15 @@ type CasCertificateOption = {
 type TenantOption = {
   id: number;
   name: string;
+};
+
+type TenantDomainApplyResult = {
+  action: 'created' | 'unchanged';
+  id?: number;
+  tenantId: number;
+  domain: string;
+  status: number;
+  createdAt?: string;
 };
 
 type SuperAdminRegisterResult = {
@@ -242,6 +252,9 @@ const LineOnboardingPage: React.FC = () => {
   const [tenantLoadError, setTenantLoadError] = useState<string | null>(null);
   const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(undefined);
   const [sqlConfirmed, setSqlConfirmed] = useState(false);
+  const [tenantDomainApplying, setTenantDomainApplying] = useState(false);
+  const [tenantDomainApplyError, setTenantDomainApplyError] = useState<string | null>(null);
+  const [tenantDomainApplyResult, setTenantDomainApplyResult] = useState<TenantDomainApplyResult | null>(null);
 
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
@@ -300,6 +313,8 @@ const LineOnboardingPage: React.FC = () => {
   useEffect(() => {
     const envId = currentEnvironment?.id;
     setSqlConfirmed(false);
+    setTenantDomainApplyError(null);
+    setTenantDomainApplyResult(null);
     setVerifyResult(null);
     setVerifyError(null);
     setSuperAdminLinesOpen(false);
@@ -1128,6 +1143,48 @@ const LineOnboardingPage: React.FC = () => {
     message.success('已确认联通性检查完成');
   };
 
+  const handleApplyTenantDomain = async () => {
+    if (!connectivityChecked) {
+      message.warning('请先完成步骤5');
+      return;
+    }
+    if (!selectedTenantId) {
+      message.error('请先选择目标租户');
+      return;
+    }
+    if (!confirmedSubdomain) {
+      message.warning('请先完成步骤2');
+      return;
+    }
+    setTenantDomainApplying(true);
+    setTenantDomainApplyError(null);
+    setTenantDomainApplyResult(null);
+    try {
+      const resp = (await applyTenantDomainForLineOnboarding({
+        environmentId: currentEnvironment?.id || '',
+        tenantId: selectedTenantId,
+        domain: confirmedSubdomain,
+      })) as { success?: boolean; data?: TenantDomainApplyResult };
+      if (!resp?.success || !resp?.data) {
+        throw new Error('tenant_domain 写入未返回成功结果');
+      }
+      setTenantDomainApplyResult(resp.data);
+      setSqlConfirmed(true);
+      setVerifyResult(null);
+      setVerifyError(null);
+      message.success(resp.data.action === 'created' ? 'tenant_domain 已自动写入' : 'tenant_domain 已存在，无需重复写入');
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || error?.message || '自动写入 tenant_domain 失败';
+      setTenantDomainApplyError(msg);
+      message.error(msg);
+    } finally {
+      setTenantDomainApplying(false);
+    }
+  };
+
   const handleConfirmSql = () => {
     if (!connectivityChecked) {
       message.warning('请先完成步骤5');
@@ -1821,7 +1878,7 @@ const LineOnboardingPage: React.FC = () => {
       <Card title="步骤6：在环境平台数据库新增 tenant_domain 数据" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text type="secondary">
-            tenant_id 自动取自步骤1选择的目标租户。当前版本只输出 SQL，由你手工执行。
+            tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
           </Text>
           <Text>
             目标租户：
@@ -1836,7 +1893,15 @@ const LineOnboardingPage: React.FC = () => {
           <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
             {insertSql}
           </Paragraph>
-          <Space>
+          <Space wrap>
+            <Button
+              type="primary"
+              loading={tenantDomainApplying}
+              onClick={handleApplyTenantDomain}
+              disabled={!connectivityChecked || !selectedTenantId || !confirmedSubdomain}
+            >
+              自动写入 tenant_domain
+            </Button>
             <Button
               onClick={async () => {
                 try {
@@ -1855,6 +1920,23 @@ const LineOnboardingPage: React.FC = () => {
             </Button>
             {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}
           </Space>
+          {tenantDomainApplyError ? <Alert type="error" showIcon message={tenantDomainApplyError} /> : null}
+          {tenantDomainApplyResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message={tenantDomainApplyResult.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在，未重复写入'}
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>Action：<Tag color={tenantDomainApplyResult.action === 'created' ? 'green' : 'blue'}>{tenantDomainApplyResult.action}</Tag></Text>
+                  <Text>ID：<Text code>{tenantDomainApplyResult.id || '-'}</Text></Text>
+                  <Text>Tenant ID：<Text code>{tenantDomainApplyResult.tenantId}</Text></Text>
+                  <Text>Domian：<Text code>{tenantDomainApplyResult.domain}</Text></Text>
+                  <Text>Status：<Text code>{tenantDomainApplyResult.status}</Text></Text>
+                </Space>
+              }
+            />
+          ) : null}
         </Space>
       </Card>
 

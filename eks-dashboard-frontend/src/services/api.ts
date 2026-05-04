@@ -435,6 +435,15 @@ export const cloneIngressForLineOnboarding = async (data: {
   return response.data;
 };
 
+export const applyTenantDomainForLineOnboarding = async (data: {
+  environmentId: string;
+  tenantId: number;
+  domain: string;
+}) => {
+  const response = await api.post('/lines/tenant-domain/apply', data);
+  return response.data;
+};
+
 export const provisionDcdnDomain = async (data: {
   domainName: string;
   originDomain: string;

@@ -6,6 +6,7 @@ import { AgentDecryptService } from './agent-decrypt.service';
 import { AgentConnectionService } from './agent-connection.service';
 import { AgentQueryService } from './agent-query.service';
 import { AgentIngressService } from './agent-ingress.service';
+import { AgentTenantDomainService } from './agent-tenant-domain.service';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AgentIngressService } from './agent-ingress.service';
     AgentConnectionService,
     AgentQueryService,
     AgentIngressService,
+    AgentTenantDomainService,
   ],
 })
 export class AgentModule {}
