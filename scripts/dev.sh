@@ -2,9 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
-# export PM2_HOME="$ROOT_DIR/.pm2-dev"
-PM2_HOME="${PM2_HOME:-$HOME/.pm2}"
+
+# Always isolate dashboard dev PM2 runtime from global PM2 runtime.
+# This avoids inheriting stale processes / mismatched Node binary paths.
+PM2_HOME="${PM2_HOME:-$ROOT_DIR/.pm2-dev}"
 export PM2_HOME
+
+# Prefer current shell's nvm Node/PM2 first, to avoid Homebrew Node dylib mismatch.
+if [[ -n "${NVM_BIN:-}" ]]; then
+  export PATH="$NVM_BIN:$PATH"
+fi
 PM2_NAMESPACE="dev"
 APPS=(eks-dashboard-backend eks-dashboard-frontend)
 

@@ -119,8 +119,6 @@ type IngressOriginCandidate = {
   createdAt?: string | null;
 };
 
-const SOURCE_INGRESS = '/home/ubuntu/kylin-script/k8s-yaml/ingress/app-ingress-0313.yaml';
-const INGRESS_DIR = '/home/ubuntu/kylin-script/k8s-yaml/ingress';
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const SUBDOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
@@ -144,13 +142,6 @@ const generateHex = (length = 16) => {
 const randomPrefixLength = () => {
   // 12~20位十六进制，降低碰撞概率并保持长度多样性
   return 12 + Math.floor(Math.random() * 9);
-};
-
-const getMonthDay = () => {
-  const now = new Date();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  return `${mm}${dd}`;
 };
 
 const LineOnboardingPage: React.FC = () => {
@@ -215,9 +206,6 @@ const LineOnboardingPage: React.FC = () => {
   const [superAdminUrl, setSuperAdminUrl] = useState<string>('');
   const [superAdminLoading, setSuperAdminLoading] = useState(false);
 
-  const monthDay = useMemo(() => getMonthDay(), []);
-  const targetIngress = `${INGRESS_DIR}/app-ingress-${monthDay}.yaml`;
-  const applyCommand = `kubectl apply -f ${targetIngress}`;
   const superAdminLineUrl = confirmedSubdomain ? `https://${confirmedSubdomain}` : '';
   const superAdminOtcUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/otc` : '';
   const connectivityUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/pro/p/symbol/list` : '';
