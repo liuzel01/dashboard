@@ -1230,6 +1230,34 @@ export class LinesService {
     return result;
   }
 
+  async resolveIngressSource(
+    environmentId: string,
+    input: {
+      namespace: string;
+      lineUrl?: string;
+      keyword?: string;
+      requestId?: string;
+      userId?: string;
+      username?: string;
+    },
+  ) {
+    const namespace = String(input.namespace || '').trim();
+    if (!namespace) throw new BadRequestException('namespace is required');
+    return this.ingressGatewayClient.resolveSource(
+      environmentId,
+      {
+        namespace,
+        lineUrl: input.lineUrl,
+        keyword: input.keyword,
+      },
+      {
+        requestId: input.requestId,
+        userId: input.userId,
+        username: input.username,
+      },
+    );
+  }
+
   async cloneIngressFromTemplate(
     environmentId: string,
     input: {

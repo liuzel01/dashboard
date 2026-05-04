@@ -19,6 +19,7 @@ import { AgentQueryService } from './agent-query.service';
 import { AgentIngressService } from './agent-ingress.service';
 import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
 import { AgentCloneIngressDto } from './dto/agent-clone-ingress.dto';
+import { AgentResolveIngressSourceDto } from './dto/agent-resolve-ingress-source.dto';
 
 @Controller()
 export class AgentController {
@@ -229,6 +230,31 @@ export class AgentController {
     }
     const envId = environmentId || this.configService.getAgentEnvironmentId();
     return this.queryService.deleteRedisKey(envId, key);
+  }
+
+  @Post('v1/ingress/resolve-source')
+  async resolveIngressSource(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentResolveIngressSourceDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentIngress] resolve-source env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
+    );
+    return this.ingressService.resolveSource({
+      environmentId: envId,
+      namespace: body.namespace,
+      lineUrl: body.lineUrl,
+      keyword: body.keyword,
+      requestId,
+      userId,
+      username,
+    });
   }
 
   @Post('v1/ingress/clone')

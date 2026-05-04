@@ -11,6 +11,7 @@ import { ListSuperAdminLinesDto } from './dto/list-super-admin-lines.dto';
 import { ListIngressOriginCandidatesDto } from './dto/list-ingress-origin-candidates.dto';
 import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 import { CloneIngressDto } from './dto/clone-ingress.dto';
+import { ResolveIngressSourceDto } from './dto/resolve-ingress-source.dto';
 
 @Controller('lines')
 export class LinesController {
@@ -104,6 +105,29 @@ export class LinesController {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
     }
     return this.linesService.listIngressOriginCandidates(environmentId, query.keyword);
+  }
+
+  @Post('ingress/resolve-source')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  resolveIngressSource(
+    @Headers('x-target-environment') environmentId: string,
+    @Req() req: any,
+    @Body() body: ResolveIngressSourceDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    if (body.environmentId && body.environmentId !== environmentId) {
+      throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.resolveIngressSource(environmentId, {
+      namespace: body.namespace,
+      lineUrl: body.lineUrl,
+      keyword: body.keyword,
+      requestId: req?.requestId,
+      userId: req?.user?.id ? String(req.user.id) : undefined,
+      username: req?.user?.username,
+    });
   }
 
   @Post('ingress/clone')

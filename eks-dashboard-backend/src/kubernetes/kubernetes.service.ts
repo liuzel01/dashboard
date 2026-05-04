@@ -432,11 +432,13 @@ export class KubernetesService {
                     (fallbackError as any)?.message || fallbackError,
                   )}`,
                 );
-                reject(
-                  new Error(
-                    `Service proxy request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
-                  ),
+                const proxyError: any = new Error(
+                  `Service proxy request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
                 );
+                proxyError.statusCode = statusCode;
+                proxyError.body = normalizedBody;
+                proxyError.headers = response?.headers || {};
+                reject(proxyError);
               });
             return;
           }
@@ -447,11 +449,13 @@ export class KubernetesService {
           this.logger.warn(
             `[ServiceProxy] non-2xx env=${environmentId} context=${contextName} status=${statusCode} body=${bodyPreview}`,
           );
-          reject(
-            new Error(
-              `Service proxy request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
-            ),
+          const proxyError: any = new Error(
+            `Service proxy request failed (${statusCode}): ${typeof normalizedBody === 'string' ? normalizedBody : JSON.stringify(normalizedBody)}`,
           );
+          proxyError.statusCode = statusCode;
+          proxyError.body = normalizedBody;
+          proxyError.headers = response?.headers || {};
+          reject(proxyError);
           return;
         }
         this.logger.log(

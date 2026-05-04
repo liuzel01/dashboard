@@ -23,6 +23,52 @@ export class AgentIngressService {
     this.networkingV1Api = this.kc.makeApiClient(k8s.NetworkingV1Api);
   }
 
+  async resolveSource(input: {
+    environmentId: string;
+    namespace: string;
+    lineUrl?: string;
+    keyword?: string;
+    requestId?: string;
+    userId?: string;
+    username?: string;
+  }) {
+    const namespace = String(input.namespace || '').trim();
+    const lineHost = input.lineUrl ? this.normalizeToHost(input.lineUrl) : '';
+    const keyword = String(input.keyword || 'nginx-web-app').trim().toLowerCase();
+    if (!namespace) throw new BadRequestException('namespace is required');
+
+    this.logger.log(
+      `[AgentIngressResolve] start env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} namespace=${namespace} lineHost=${lineHost || 'none'} keyword=${keyword || 'none'}`,
+    );
+
+    const candidates = await this.listIngressCandidates(namespace, keyword);
+    const exactHost = lineHost
+      ? candidates.find((item) => item.ruleHosts.some((host) => host.toLowerCase() === lineHost))
+      : undefined;
+    const keywordMatched = !exactHost && keyword ? candidates[0] : undefined;
+    const selected = exactHost || keywordMatched || candidates[0];
+    const matchedBy = exactHost ? 'host' : keywordMatched ? 'keyword' : selected ? 'fallback' : 'none';
+
+    return {
+      success: Boolean(selected),
+      data: selected
+        ? {
+            namespace: selected.namespace,
+            sourceIngressName: selected.name,
+            matchedBy,
+            lineHost: lineHost || null,
+            candidates,
+          }
+        : {
+            namespace,
+            sourceIngressName: null,
+            matchedBy,
+            lineHost: lineHost || null,
+            candidates,
+          },
+    };
+  }
+
   async cloneIngress(input: {
     environmentId: string;
     namespace: string;
@@ -78,6 +124,48 @@ export class AgentIngressService {
         createdAt: created?.body?.metadata?.creationTimestamp || new Date().toISOString(),
       },
     };
+  }
+
+  private async listIngressCandidates(namespace: string, keyword = '') {
+    const { body } = await this.networkingV1Api.listIngressForAllNamespaces();
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    const items = Array.isArray(body?.items) ? body.items : [];
+    return items
+      .filter((item) => String(item?.metadata?.namespace || 'default') === namespace)
+      .filter((item) => {
+        if (!normalizedKeyword) return true;
+        const name = String(item?.metadata?.name || '').toLowerCase();
+        const ns = String(item?.metadata?.namespace || '').toLowerCase();
+        const hosts = (item?.spec?.rules || []).map((rule: any) => String(rule?.host || '').toLowerCase());
+        return ns.includes(normalizedKeyword) || name.includes(normalizedKeyword) || hosts.some((host) => host.includes(normalizedKeyword));
+      })
+      .map((item) => {
+        const ruleHosts = (item?.spec?.rules || [])
+          .map((rule: any) => String(rule?.host || '').trim())
+          .filter(Boolean);
+        const lbAddresses = (item?.status?.loadBalancer?.ingress || [])
+          .map((ing: any) => String(ing?.hostname || ing?.ip || '').trim())
+          .filter(Boolean);
+        return {
+          namespace: String(item?.metadata?.namespace || 'default'),
+          name: String(item?.metadata?.name || ''),
+          createdAt: item?.metadata?.creationTimestamp || null,
+          ruleHosts,
+          lbAddresses,
+        };
+      })
+      .filter((item) => item.name);
+  }
+
+  private normalizeToHost(rawLineUrl: string) {
+    const value = rawLineUrl.trim().toLowerCase();
+    if (!value) return '';
+    try {
+      const withSchema = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+      return new URL(withSchema).hostname.toLowerCase();
+    } catch {
+      throw new BadRequestException('lineUrl format is invalid');
+    }
   }
 
   private async getIngress(namespace: string, name: string) {

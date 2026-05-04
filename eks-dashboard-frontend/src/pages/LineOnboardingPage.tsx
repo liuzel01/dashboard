@@ -23,6 +23,7 @@ import {
   getDcdnCasCertificates,
   getDcdnDomainStatus,
   getIngressOriginCandidates,
+  resolveIngressSourceForLineOnboarding,
   cloneIngressForLineOnboarding,
   provisionDcdnDomain,
   registerSuperAdminLine,
@@ -119,6 +120,20 @@ type IngressOriginCandidate = {
   createdAt?: string | null;
 };
 
+type ResolvedIngressSource = {
+  namespace: string;
+  sourceIngressName: string;
+  matchedBy?: string;
+  lineHost?: string | null;
+  candidates?: Array<{
+    namespace: string;
+    name: string;
+    ruleHosts?: string[];
+    lbAddresses?: string[];
+    createdAt?: string | null;
+  }>;
+};
+
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const SUBDOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
@@ -183,6 +198,10 @@ const LineOnboardingPage: React.FC = () => {
   const [ingressApplying, setIngressApplying] = useState(false);
   const [ingressApplyError, setIngressApplyError] = useState<string | null>(null);
   const [ingressApplyResult, setIngressApplyResult] = useState<{ newIngressName: string; namespace: string; host: string } | null>(null);
+  const [resolvedIngressSource, setResolvedIngressSource] = useState<ResolvedIngressSource | null>(null);
+  const [sourceIngressLoading, setSourceIngressLoading] = useState(false);
+  const [sourceIngressError, setSourceIngressError] = useState<string | null>(null);
+  const [selectedSourceIngressKey, setSelectedSourceIngressKey] = useState<string>('');
   const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
   const [superAdminLineZh, setSuperAdminLineZh] = useState('');
   const [superAdminLineEn, setSuperAdminLineEn] = useState('');
@@ -434,6 +453,9 @@ const LineOnboardingPage: React.FC = () => {
       resetFromStep2();
     }
     setRootDomainInput(normalized);
+    setResolvedIngressSource(null);
+    setSourceIngressError(null);
+    setSelectedSourceIngressKey('');
     setConfirmedRootDomain(normalized);
     message.success(`已确认一级域名：${normalized}`);
   };
@@ -461,6 +483,9 @@ const LineOnboardingPage: React.FC = () => {
       resetFromStep3();
     }
     setGeneratedSubdomain(candidate);
+    setResolvedIngressSource(null);
+    setSourceIngressError(null);
+    setSelectedSourceIngressKey('');
     setConfirmedSubdomain(candidate);
     message.success(`已确认线路子域名：${candidate}`);
   };
@@ -471,6 +496,10 @@ const LineOnboardingPage: React.FC = () => {
     setIngressCandidatesError(null);
     setIngressCandidates([]);
     setSelectedIngressCandidateKey(null);
+    setResolvedIngressSource(null);
+    setSourceIngressLoading(false);
+    setSourceIngressError(null);
+    setSelectedSourceIngressKey('');
     setDcdnAutoResult(null);
     setDcdnAutoError(null);
     setDcdnLastRefreshAt(null);
@@ -852,9 +881,52 @@ const LineOnboardingPage: React.FC = () => {
     message.success('已确认 DCDN 配置');
   };
 
+  const handleLoadSourceIngressCandidates = async () => {
+    if (!confirmedSubdomain) {
+      message.warning('请先完成步骤2并确认子域名');
+      return;
+    }
+    setSourceIngressLoading(true);
+    setSourceIngressError(null);
+    setResolvedIngressSource(null);
+    setSelectedSourceIngressKey('');
+    try {
+      const resolveResp = (await resolveIngressSourceForLineOnboarding({
+        environmentId: currentEnvironment?.id || '',
+        namespace: 'default',
+        keyword: 'nginx-web-app',
+      })) as { success?: boolean; data?: ResolvedIngressSource };
+      const resolved = resolveResp?.data;
+      setResolvedIngressSource(resolved || null);
+      const candidates = resolved?.candidates || [];
+      if (candidates.length === 0) {
+        setSourceIngressError('未找到可用 source ingress 候选');
+        return;
+      }
+      const first = resolved?.sourceIngressName
+        ? `${resolved.namespace}/${resolved.sourceIngressName}`
+        : `${candidates[0].namespace}/${candidates[0].name}`;
+      setSelectedSourceIngressKey(first);
+      message.success(`已加载 ${candidates.length} 个 source ingress 候选`);
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || error?.message || '加载 source ingress 候选失败';
+      setSourceIngressError(msg);
+      message.error(msg);
+    } finally {
+      setSourceIngressLoading(false);
+    }
+  };
+
   const handleCloneIngressApply = async () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2并确认子域名');
+      return;
+    }
+    if (!selectedSourceIngressKey) {
+      message.warning('请先加载并选择 source ingress');
       return;
     }
 
@@ -863,10 +935,17 @@ const LineOnboardingPage: React.FC = () => {
     setIngressApplyResult(null);
 
     try {
+      const [ns, name] = selectedSourceIngressKey.split('/');
+      const sourceNamespace = ns || 'default';
+      const sourceIngressName = name || '';
+      if (!sourceIngressName) {
+        throw new Error('source ingress 选择无效，请重新选择');
+      }
+
       const resp = (await cloneIngressForLineOnboarding({
         environmentId: currentEnvironment?.id || '',
-        namespace: 'default',
-        sourceIngressName: 'nginx-web-app',
+        namespace: sourceNamespace,
+        sourceIngressName,
         newHost: confirmedSubdomain,
       })) as {
         success?: boolean;
@@ -1466,21 +1545,44 @@ const LineOnboardingPage: React.FC = () => {
           <Alert
             type="info"
             showIcon
-            message="自动执行 ingress 克隆"
-            description="基于模板 ingress（当前固定 nginx-web-app）创建新 ingress，并将 host 替换为步骤2生成的子域名。"
+            message="手动选择 source ingress 后执行克隆"
+            description="当前先复用 resolve-source 能力加载候选；source ingress 由人工显式选择，目标 host 固定使用步骤2生成的新子域名。"
           />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
-            <Text>命名空间：<Text code>default</Text></Text>
-            <Text>模板 ingress：<Text code>nginx-web-app</Text></Text>
             <Text>目标 host（来自步骤2）：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
+            <Text>source ingress：<Text code>{selectedSourceIngressKey || '(未选择)'}</Text></Text>
           </Space>
+          <Space wrap>
+            <Button
+              loading={sourceIngressLoading}
+              onClick={handleLoadSourceIngressCandidates}
+              disabled={!confirmedSubdomain}
+            >
+              加载 source ingress 候选
+            </Button>
+            <Select
+              style={{ width: 520 }}
+              placeholder="请选择用于克隆的 source ingress"
+              value={selectedSourceIngressKey || undefined}
+              onChange={(value) => setSelectedSourceIngressKey(value)}
+              disabled={!resolvedIngressSource?.candidates?.length}
+              options={(resolvedIngressSource?.candidates || []).map((item) => ({
+                value: `${item.namespace}/${item.name}`,
+                label: `${item.namespace}/${item.name}${item.ruleHosts?.length ? ` · ${item.ruleHosts.join(', ')}` : ''}`,
+              }))}
+              showSearch
+              optionFilterProp="label"
+            />
+            {resolvedIngressSource?.matchedBy ? <Tag color="blue">候选来源：{resolvedIngressSource.matchedBy}</Tag> : null}
+          </Space>
+          {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
           <Space>
             <Button
               type="primary"
               loading={ingressApplying}
               onClick={handleCloneIngressApply}
-              disabled={!confirmedSubdomain}
+              disabled={!confirmedSubdomain || !selectedSourceIngressKey}
             >
               执行 ingress 克隆应用
             </Button>
