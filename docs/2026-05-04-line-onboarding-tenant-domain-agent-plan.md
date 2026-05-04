@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Step6 当前仅输出 SQL 并由人工执行；若升级为自动写入，推荐沿用 Step4 的执行边界：`frontend -> dashboard backend -> dashboard-db-gateway-agent -> 环境 MySQL`。MVP 只做受控 INSERT，不做 UPDATE；重复/冲突一律返回人工确认。
+Step6 已从“仅输出 SQL 并人工执行”升级为可自动写入：`frontend -> dashboard backend -> dashboard-db-gateway-agent -> 环境 MySQL`。MVP 只做受控 INSERT，不做 UPDATE；同租户重复提交返回 `unchanged` 并提示“已存在，未重复写入”，跨租户/重复历史记录返回冲突并交由人工确认。
 
 ---
 
@@ -14,8 +14,9 @@ Step6 当前仅输出 SQL 并由人工执行；若升级为自动写入，推荐
 
 - 前端根据步骤1租户与步骤2子域名生成 SQL 草稿。
 - 支持复制 SQL。
-- 支持点击“确认已完成执行 SQL”，仅设置前端状态 `sqlConfirmed = true`。
-- 当前没有后端 API，没有自动写库，没有幂等/冲突检查。
+- 支持点击“确认已完成执行 SQL”，设置前端状态 `sqlConfirmed = true`。
+- 已新增自动写入能力：点击“自动写入 tenant_domain”后，backend 通过 `dashboard-db-gateway-agent` 写入环境 MySQL。
+- 已实现幂等/冲突检查：新 domain 返回 `created`；同租户重复返回 `unchanged`；跨租户或重复历史记录返回 `409 conflict`。
 
 当前 SQL 草稿：
 
@@ -227,7 +228,7 @@ POST /v1/tenant-domain/apply
 
 ---
 
-## 6. 前端 Step6 改造建议
+## 6. 前端 Step6 当前实现
 
 保留现有人工 fallback：
 
@@ -239,14 +240,16 @@ POST /v1/tenant-domain/apply
 
 - 按钮：`自动写入 tenant_domain`
 - 成功后展示：`created / unchanged`
-- 冲突时展示冲突记录，要求人工确认
-- 自动写入成功或 unchanged 后，可将 `sqlConfirmed = true`
+- 冲突时展示错误信息，要求人工确认
+- 自动写入成功或 unchanged 后，将 `sqlConfirmed = true`
 
-按钮依赖：
+按钮依赖（测试阶段已临时放开 Step5 前置）：
 
-- 已完成步骤5联通性检查：`connectivityChecked = true`
 - 已选择租户：`selectedTenantId`
 - 已确认步骤2子域名：`confirmedSubdomain`
+- 当前不再强制依赖步骤5联通性检查：`connectivityChecked`
+
+说明：测试阶段允许未完成 Step5 时验证 Step6 自动写入；生产流程是否恢复 Step5 前置限制后续再定。
 
 ---
 
@@ -276,15 +279,20 @@ Agent 记录：
 
 ---
 
-## 8. 测试清单
+## 8. 测试状态
 
-1. 新 domain：返回 `created`，tenant.tenant_domain 新增一行。
-2. 重复提交同 tenant/domain：返回 `unchanged`，不新增第二行。
-3. domain 已属于其他 tenant：返回 `409`，不写入。
-4. domain 存在多条历史重复：返回 `409`，不写入。
-5. 非法 domain：返回 `400`。
-6. agent token 缺失/错误：返回鉴权错误。
-7. MySQL 连接失败：返回可读错误，不误标记 Step6 完成。
+已验证通过：
+
+1. 新 domain：可写入 `tenant.tenant_domain`。
+2. 重复提交同 tenant/domain：返回 `unchanged`，前端提示“已存在，未重复写入”，不新增第二行。
+
+待补充/后续回归：
+
+3. domain 已属于其他 tenant：应返回 `409`，不写入。
+4. domain 存在多条历史重复：应返回 `409`，不写入。
+5. 非法 domain：应返回 `400`。
+6. agent token 缺失/错误：应返回鉴权错误。
+7. MySQL 连接失败：应返回可读错误，不误标记 Step6 完成。
 
 ---
 
@@ -294,3 +302,30 @@ Agent 记录：
 2. 审计表持久化：记录每次写库尝试。
 3. 数据库唯一索引评估：业务确认后可考虑为 `domian` 增加唯一约束，或至少建立检测/巡检任务。
 4. 流程会话绑定：确保 Step6 domain 必须来自同一次 Step2 confirmedSubdomain。
+5. 是否恢复 Step5 前置限制：当前测试阶段已放开 Step6 对 `connectivityChecked` 的依赖，生产流程需再决定是否恢复或改为配置开关。
+6. 冲突详情展示增强：当前前端主要展示错误信息，后续可将 409 conflicts 表格化展示。
+
+---
+
+## 10. 下一步计划
+
+结合当前新增线路流程，推荐下一步优先级：
+
+1. **修复 Step5 超级后台登记 400 问题**
+   - 已定位根因：`/admin/app/line/url/add` 需要 JSON，且 `AppLineUrl.version` 为必填。
+   - 最小修复：register payload 增加 `version: '1'`（或业务确认后的版本值）。
+   - 修复后重新测试“确认并自动登记新线路”。
+
+2. **Step7 外部 API 验收回归**
+   - 在 Step5/Step6 都完成后，调用外部 `/api/lines` 验证新线路是否可被外部系统发现。
+   - 如失败，区分是超级后台登记未生效、tenant_domain 未同步、还是外部聚合服务延迟。
+
+3. **端到端流程文档/证据沉淀**
+   - 记录 Step4 ingress clone 成功证据。
+   - 记录 Step6 `created/unchanged` 证据。
+   - 记录 Step7 验收结果。
+
+4. **审计与权限增强（后续）**
+   - requestId/userId/username 全链路日志样例。
+   - tenant_domain 写入权限控制。
+   - 可选审计表。
