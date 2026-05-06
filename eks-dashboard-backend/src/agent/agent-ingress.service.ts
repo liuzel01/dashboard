@@ -6,6 +6,7 @@ export class AgentIngressService {
   private readonly logger = new Logger(AgentIngressService.name);
   private readonly kc: k8s.KubeConfig;
   private readonly networkingV1Api: k8s.NetworkingV1Api;
+  private readonly coreV1Api: k8s.CoreV1Api;
 
   constructor() {
     this.kc = new k8s.KubeConfig();
@@ -21,6 +22,55 @@ export class AgentIngressService {
       this.kc.loadFromDefault();
     }
     this.networkingV1Api = this.kc.makeApiClient(k8s.NetworkingV1Api);
+    this.coreV1Api = this.kc.makeApiClient(k8s.CoreV1Api);
+  }
+
+  async readTlsSecret(input: {
+    environmentId: string;
+    namespace: string;
+    secretName: string;
+    requestId?: string;
+    userId?: string;
+    username?: string;
+  }) {
+    const namespace = String(input.namespace || '').trim();
+    const secretName = String(input.secretName || '').trim();
+    if (!namespace) throw new BadRequestException('namespace is required');
+    if (!secretName) throw new BadRequestException('secretName is required');
+
+    this.logger.log(
+      `[AgentTlsSecret] read env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} namespace=${namespace} secret=${secretName}`,
+    );
+
+    let secret: any;
+    try {
+      const { body } = await this.coreV1Api.readNamespacedSecret(secretName, namespace);
+      secret = body;
+    } catch (error: any) {
+      if (error?.response?.statusCode === 404 || error?.statusCode === 404) {
+        throw new NotFoundException(`TLS Secret ${namespace}/${secretName} not found`);
+      }
+      throw error;
+    }
+
+    if (secret.type !== 'kubernetes.io/tls') {
+      throw new BadRequestException(`Secret ${namespace}/${secretName} is not kubernetes.io/tls`);
+    }
+    const crt = secret.data?.['tls.crt'];
+    const key = secret.data?.['tls.key'];
+    if (!crt || !key) {
+      throw new BadRequestException(`Secret ${namespace}/${secretName} missing tls.crt or tls.key`);
+    }
+
+    return {
+      success: true,
+      data: {
+        namespace,
+        name: secretName,
+        cert: Buffer.from(crt, 'base64').toString('utf8'),
+        key: Buffer.from(key, 'base64').toString('utf8'),
+      },
+    };
   }
 
   async listSourceCandidates(input: {

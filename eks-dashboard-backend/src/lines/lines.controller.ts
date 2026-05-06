@@ -63,8 +63,11 @@ export class LinesController {
 
   @Post('dcdn/security/apply')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
-  applyDcdnSecurity(@Body() body: ApplyDcdnSecurityDto) {
-    return this.linesService.applyDcdnSecurity(body);
+  applyDcdnSecurity(
+    @Headers('x-target-environment') environmentId: string | undefined,
+    @Body() body: ApplyDcdnSecurityDto,
+  ) {
+    return this.linesService.applyDcdnSecurity(body, environmentId);
   }
 
   @Get('dcdn/cas-certificates')

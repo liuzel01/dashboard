@@ -80,7 +80,7 @@ type DcdnProvisionResult = {
 type DcdnSecurityApplyResult = {
   domainName: string;
   certName: string;
-  certSource?: 'cas' | 'upload';
+  certSource?: 'k8s-secret' | 'cas' | 'upload';
   certId?: number | null;
   httpsConfigured: boolean;
   websocketConfigured: boolean;
@@ -220,7 +220,7 @@ const LineOnboardingPage: React.FC = () => {
   const [sslPubInput, setSslPubInput] = useState('');
   const [sslPriInput, setSslPriInput] = useState('');
   const [certNameInput, setCertNameInput] = useState('');
-  const [certSource, setCertSource] = useState<'cas' | 'upload'>('cas');
+  const [certSource, setCertSource] = useState<'k8s-secret' | 'cas' | 'upload'>('k8s-secret');
   const [casCertMode, setCasCertMode] = useState<'reuse' | 'upload'>('reuse');
   const [casCertLoading, setCasCertLoading] = useState(false);
   const [casCertOptions, setCasCertOptions] = useState<CasCertificateOption[]>([]);
@@ -294,6 +294,7 @@ const LineOnboardingPage: React.FC = () => {
   );
   const showUploadCertificateInputs =
     certSource === 'upload' || (certSource === 'cas' && casCertMode === 'upload');
+  const dcdnTlsSecretName = tlsSecretNameInput || (confirmedSubdomain ? `${confirmedSubdomain.split('.')[0]}-tls` : '');
 
   useEffect(() => {
     const envId = currentEnvironment?.id;
@@ -793,6 +794,10 @@ const LineOnboardingPage: React.FC = () => {
       return;
     }
     const usingUploadMaterial = certSource === 'upload' || (certSource === 'cas' && casCertMode === 'upload');
+    if (certSource === 'k8s-secret' && !dcdnTlsSecretName) {
+      message.error('请先完成步骤3并确认 TLS Secret 名称');
+      return;
+    }
     if (usingUploadMaterial && (!sslPubInput.trim() || !sslPriInput.trim())) {
       message.error('请提供 cert.crt 与 privkey.key 内容');
       return;
@@ -811,6 +816,8 @@ const LineOnboardingPage: React.FC = () => {
         sslPri: usingUploadMaterial ? sslPriInput.trim() : undefined,
         certName: certNameInput.trim() || undefined,
         certSource,
+        tlsSecretName: certSource === 'k8s-secret' ? dcdnTlsSecretName : undefined,
+        tlsSecretNamespace: certSource === 'k8s-secret' ? 'default' : undefined,
         casCertificateId: certSource === 'cas' && casCertMode === 'reuse' ? selectedCasCertId : undefined,
         casCertificateName:
           certSource === 'cas' && casCertMode === 'reuse' ? selectedCasCert?.certName : undefined,
@@ -1849,7 +1856,7 @@ const LineOnboardingPage: React.FC = () => {
           <Divider style={{ margin: '8px 0' }} />
           <Text strong>2) 配置 HTTPS/WebSocket/WAF</Text>
           <Text type="secondary">
-            推荐证书来源：CAS（云盾SSL证书中心）。也保留直传模式作为备用。
+            推荐证书来源：使用步骤3 Ingress/TLS 生成的 K8s TLS Secret，并自动上传到 CAS 后绑定 DCDN。CAS 复用/手动上传保留为高级备用。
           </Text>
           <Radio.Group
             value={certSource}
@@ -1862,9 +1869,25 @@ const LineOnboardingPage: React.FC = () => {
             buttonStyle="solid"
             disabled={!dcdnAutoResult?.domainName}
           >
-            <Radio.Button value="cas">CAS（推荐）</Radio.Button>
-            <Radio.Button value="upload">直传（备用）</Radio.Button>
+            <Radio.Button value="k8s-secret">K8s TLS Secret（推荐）</Radio.Button>
+            <Radio.Button value="cas">CAS 高级</Radio.Button>
+            <Radio.Button value="upload">直传备用</Radio.Button>
           </Radio.Group>
+
+          {certSource === 'k8s-secret' ? (
+            <Alert
+              type="info"
+              showIcon
+              message="将同步 K8s TLS Secret 到 DCDN"
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>TLS Secret：<Text code>{dcdnTlsSecretName || '(待生成)'}</Text></Text>
+                  <Text>Namespace：<Text code>default</Text></Text>
+                  <Text type="secondary">点击应用时，后端会读取该 Secret 的 tls.crt/tls.key，上传到 CAS，并绑定到当前 DCDN 域名。</Text>
+                </Space>
+              }
+            />
+          ) : null}
 
           {certSource === 'cas' ? (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -2002,7 +2025,7 @@ const LineOnboardingPage: React.FC = () => {
               description={
                 <Space direction="vertical" size={2}>
                   <Text>证书名称：{securityApplyResult.certName}</Text>
-                  <Text>证书来源：{securityApplyResult.certSource === 'upload' ? '直传（备用）' : 'CAS（云盾SSL证书中心）'}</Text>
+                  <Text>证书来源：{securityApplyResult.certSource === 'k8s-secret' ? 'K8s TLS Secret → CAS' : securityApplyResult.certSource === 'upload' ? '直传（备用）' : 'CAS（云盾SSL证书中心）'}</Text>
                   <Text>CAS证书ID：{securityApplyResult.certId || '-'}</Text>
                   <Text>HTTPS 配置：{securityApplyResult.httpsConfigured ? '成功' : '失败'}</Text>
                   <Text>WebSocket 配置：{securityApplyResult.websocketConfigured ? '成功' : '失败'}</Text>

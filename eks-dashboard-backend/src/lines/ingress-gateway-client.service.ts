@@ -14,6 +14,17 @@ export class IngressGatewayClientService {
 
   constructor(private readonly kubernetesService: KubernetesService) {}
 
+  async readTlsSecret(
+    environmentId: string,
+    input: {
+      namespace: string;
+      secretName: string;
+    },
+    context?: IngressGatewayContext,
+  ) {
+    return this.postToAgent(environmentId, '/v1/tls-secret/read', input, context, 'tls-secret-read');
+  }
+
   async listSourceCandidates(
     environmentId: string,
     input: {

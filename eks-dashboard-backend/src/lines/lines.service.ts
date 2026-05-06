@@ -2139,11 +2139,11 @@ export class LinesService {
     };
   }
 
-  async applyDcdnSecurity(dto: ApplyDcdnSecurityDto) {
+  async applyDcdnSecurity(dto: ApplyDcdnSecurityDto, environmentId?: string) {
     const domainName = this.normalizeToHost(dto.domainName);
     const client = this.createDcdnClient();
     const certName = (dto.certName || `${domainName}-cert`).trim();
-    const certSource = (dto.certSource || this.dcdnCertSourceDefault) as 'cas' | 'upload';
+    const certSource = (dto.certSource || this.dcdnCertSourceDefault) as 'k8s-secret' | 'cas' | 'upload';
     const enableWebsocket = dto.enableWebsocket ?? true;
     const enableWaf = dto.enableWaf ?? true;
 
@@ -2165,8 +2165,33 @@ export class LinesService {
     }
 
     try {
-      if (certSource === 'cas') {
-        if (casCertificateId && Number.isFinite(casCertificateId) && casCertificateId > 0) {
+      if (certSource === 'k8s-secret' || certSource === 'cas') {
+        if (certSource === 'k8s-secret') {
+          if (!environmentId) {
+            throw new BadRequestException('使用 K8s TLS Secret 作为证书来源时，必须提供目标环境');
+          }
+          const tlsSecretName = (dto.tlsSecretName || '').trim();
+          const tlsSecretNamespace = (dto.tlsSecretNamespace || 'default').trim() || 'default';
+          if (!tlsSecretName) {
+            throw new BadRequestException('使用 K8s TLS Secret 作为证书来源时，必须提供 tlsSecretName');
+          }
+          const tlsSecretResp = await this.ingressGatewayClient.readTlsSecret(environmentId, {
+            namespace: tlsSecretNamespace,
+            secretName: tlsSecretName,
+          });
+          const tlsSecret = tlsSecretResp?.data;
+          if (!tlsSecret?.cert || !tlsSecret?.key) {
+            throw new BadRequestException('Agent 未返回有效 TLS Secret 证书内容');
+          }
+          const casClient = this.createCasClient();
+          const casUpload = await this.uploadCertificateToCas(casClient, certName, tlsSecret.cert, tlsSecret.key);
+          appliedCertName = casUpload.certName;
+          appliedCertId = casUpload.certId;
+          if (appliedCertName !== certName) {
+            warnings.push(`证书名称 ${certName} 已存在，已自动使用 ${appliedCertName}`);
+          }
+          warnings.push(`已从 K8s TLS Secret ${tlsSecretNamespace}/${tlsSecretName} 同步证书到 CAS`);
+        } else if (casCertificateId && Number.isFinite(casCertificateId) && casCertificateId > 0) {
           appliedCertId = casCertificateId;
           appliedCertName = (dto.casCertificateName || certName).trim();
         } else {

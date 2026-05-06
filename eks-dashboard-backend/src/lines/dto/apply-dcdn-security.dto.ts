@@ -29,8 +29,16 @@ export class ApplyDcdnSecurityDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['cas', 'upload'])
-  certSource?: 'cas' | 'upload';
+  @IsIn(['k8s-secret', 'cas', 'upload'])
+  certSource?: 'k8s-secret' | 'cas' | 'upload';
+
+  @IsOptional()
+  @IsString()
+  tlsSecretName?: string;
+
+  @IsOptional()
+  @IsString()
+  tlsSecretNamespace?: string;
 
   @IsOptional()
   @Type(() => Number)

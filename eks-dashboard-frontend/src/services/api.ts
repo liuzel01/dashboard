@@ -488,7 +488,9 @@ export const applyDcdnSecurity = async (data: {
   sslPub?: string;
   sslPri?: string;
   certName?: string;
-  certSource?: 'cas' | 'upload';
+  certSource?: 'k8s-secret' | 'cas' | 'upload';
+  tlsSecretName?: string;
+  tlsSecretNamespace?: string;
   casCertificateId?: number;
   casCertificateName?: string;
   enableWebsocket?: boolean;

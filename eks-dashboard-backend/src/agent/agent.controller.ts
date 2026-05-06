@@ -23,6 +23,7 @@ import { AgentCloneIngressDto } from './dto/agent-clone-ingress.dto';
 import { AgentResolveIngressSourceDto } from './dto/agent-resolve-ingress-source.dto';
 import { AgentListIngressSourceCandidatesDto } from './dto/agent-list-ingress-source-candidates.dto';
 import { AgentApplyTenantDomainDto } from './dto/agent-apply-tenant-domain.dto';
+import { AgentReadTlsSecretDto } from './dto/agent-read-tls-secret.dto';
 
 @Controller()
 export class AgentController {
@@ -254,6 +255,27 @@ export class AgentController {
       environmentId: envId,
       tenantId: body.tenantId,
       domain: body.domain,
+      requestId,
+      userId,
+      username,
+    });
+  }
+
+  @Post('v1/tls-secret/read')
+  async readTlsSecret(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentReadTlsSecretDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.ingressService.readTlsSecret({
+      environmentId: envId,
+      namespace: body.namespace,
+      secretName: body.secretName,
       requestId,
       userId,
       username,
