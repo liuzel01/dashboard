@@ -260,12 +260,12 @@ const LineOnboardingPage: React.FC = () => {
   const [superAdminPendingUpdate, setSuperAdminPendingUpdate] = useState(false);
   const [superAdminLinesOpen, setSuperAdminLinesOpen] = useState(false);
   const [superAdminLinesReloadKey, setSuperAdminLinesReloadKey] = useState(0);
-  const [connectivityChecked, setConnectivityChecked] = useState(false);
+  const [, setConnectivityChecked] = useState(false);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [tenantLoading, setTenantLoading] = useState(false);
   const [tenantLoadError, setTenantLoadError] = useState<string | null>(null);
   const [selectedTenantId, setSelectedTenantId] = useState<number | undefined>(undefined);
-  const [sqlConfirmed, setSqlConfirmed] = useState(false);
+  const [, setSqlConfirmed] = useState(false);
   const [tenantDomainApplying, setTenantDomainApplying] = useState(false);
   const [tenantDomainApplyError, setTenantDomainApplyError] = useState<string | null>(null);
   const [tenantDomainApplyResult, setTenantDomainApplyResult] = useState<TenantDomainApplyResult | null>(null);
@@ -429,12 +429,12 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const stepDone = [
-    Boolean(confirmedRootDomain),
+    DOMAIN_REGEX.test(normalizeDomain(rootDomainInput)),
     Boolean(confirmedSubdomain),
     ingressApplied,
-    superAdminRegistered && sqlConfirmed,
+    superAdminRegistered && Boolean(tenantDomainApplyResult),
     dcdnConfirmed,
-    connectivityChecked,
+    Boolean(confirmedSubdomain),
     verifyResult?.exists === true,
   ];
 
@@ -497,53 +497,27 @@ const LineOnboardingPage: React.FC = () => {
     setVerifyError(null);
   };
 
-  const handleConfirmRootDomain = () => {
-    const normalized = normalizeDomain(rootDomainInput);
-    if (!DOMAIN_REGEX.test(normalized)) {
-      message.error('请输入合法一级域名，例如 sample.com');
-      return;
-    }
-    if (normalized !== confirmedRootDomain) {
-      resetFromStep2();
-    }
-    setRootDomainInput(normalized);
-    setResolvedIngressSource(null);
-    setSourceIngressError(null);
-    setSelectedSourceIngressKey('');
-    setNewIngressNameInput('');
-    setConfirmedRootDomain(normalized);
-    message.success(`已确认一级域名：${normalized}`);
-  };
-
   const handleGenerateSubdomain = () => {
-    if (!confirmedRootDomain) {
-      message.warning('请先完成步骤1并确认一级域名');
+    const rootDomain = normalizeDomain(rootDomainInput);
+    if (!DOMAIN_REGEX.test(rootDomain)) {
+      message.warning('请先输入合法一级域名');
       return;
+    }
+    if (rootDomain !== confirmedRootDomain) {
+      resetFromStep2();
+      setConfirmedRootDomain(rootDomain);
     }
     const prefix = generateHex(randomPrefixLength());
-    const subdomain = `${prefix}.${confirmedRootDomain}`;
+    const subdomain = `${prefix}.${rootDomain}`;
     setGeneratedSubdomain(subdomain);
     if (subdomain !== confirmedSubdomain) {
       resetFromStep3();
     }
-  };
-
-  const handleConfirmSubdomain = () => {
-    const candidate = normalizeDomain(generatedSubdomain);
-    if (!SUBDOMAIN_REGEX.test(candidate)) {
-      message.error('生成的线路子域名格式不合法');
-      return;
-    }
-    if (candidate !== confirmedSubdomain) {
-      resetFromStep3();
-    }
-    setGeneratedSubdomain(candidate);
     setResolvedIngressSource(null);
     setSourceIngressError(null);
     setSelectedSourceIngressKey('');
-    setNewIngressNameInput(generateDefaultIngressName(candidate));
-    setConfirmedSubdomain(candidate);
-    message.success(`已确认线路子域名：${candidate}`);
+    setNewIngressNameInput(generateDefaultIngressName(subdomain));
+    setConfirmedSubdomain(subdomain);
   };
 
   const resetStep3Runtime = () => {
@@ -601,7 +575,7 @@ const LineOnboardingPage: React.FC = () => {
 
   const handleLoadCasCertificates = async () => {
     if (!confirmedRootDomain) {
-      message.warning('请先完成步骤1并确认一级域名');
+      message.warning('请先输入合法一级域名');
       return;
     }
     if (!confirmedSubdomain) {
@@ -940,7 +914,7 @@ const LineOnboardingPage: React.FC = () => {
 
   const handleLoadSourceIngressCandidates = async () => {
     if (!confirmedSubdomain) {
-      message.warning('请先完成步骤2并确认子域名');
+      message.warning('请先生成并确认可用的线路域名');
       return;
     }
     setSourceIngressLoading(true);
@@ -994,7 +968,7 @@ const LineOnboardingPage: React.FC = () => {
 
   const validateIngressCloneInputs = () => {
     if (!confirmedSubdomain) {
-      message.warning('请先完成步骤2并确认子域名');
+      message.warning('请先生成并确认可用的线路域名');
       return null;
     }
     if (!selectedSourceIngressKey) {
@@ -1152,7 +1126,7 @@ const LineOnboardingPage: React.FC = () => {
       return;
     }
     if (!confirmedSubdomain) {
-      message.warning('请先完成步骤2并确认子域名');
+      message.warning('请先生成并确认可用的线路域名');
       return;
     }
     if (!selectedTenantId) {
@@ -1217,22 +1191,6 @@ const LineOnboardingPage: React.FC = () => {
     doSuperAdminRegistration('update');
   };
 
-  const handleConfirmConnectivity = () => {
-    if (!ingressApplied) {
-      message.warning('请先完成步骤3：Ingress/TLS 应用');
-      return;
-    }
-    if (!superAdminRegistered) {
-      message.warning('请先完成步骤4-1：在超级后台登记新线路');
-      return;
-    }
-    setConnectivityChecked(true);
-    setSqlConfirmed(false);
-    setVerifyResult(null);
-    setVerifyError(null);
-    message.success('已确认联通性检查完成');
-  };
-
   const handleApplyTenantDomain = async () => {
     if (!selectedTenantId) {
       message.error('请先选择目标租户');
@@ -1271,21 +1229,6 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const handleConfirmSql = () => {
-    if (!selectedTenantId) {
-      message.error('请先选择目标租户');
-      return;
-    }
-    if (!confirmedSubdomain) {
-      message.warning('请先完成步骤2');
-      return;
-    }
-    setSqlConfirmed(true);
-    setVerifyResult(null);
-    setVerifyError(null);
-    message.success('已确认完成执行 SQL');
-  };
-
   const handleOpenProbeDetail = () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2');
@@ -1301,10 +1244,6 @@ const LineOnboardingPage: React.FC = () => {
   const handleVerifyExternal = async () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2');
-      return;
-    }
-    if (!sqlConfirmed) {
-      message.warning('请先完成步骤4-2：tenant_domain 自动写入/确认');
       return;
     }
     setVerifying(true);
@@ -1405,15 +1344,22 @@ const LineOnboardingPage: React.FC = () => {
           </Paragraph>
           <Input
             value={rootDomainInput}
-            onChange={(e) => setRootDomainInput(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value.trim().toLowerCase();
+              setRootDomainInput(value);
+              const normalized = normalizeDomain(value);
+              if (DOMAIN_REGEX.test(normalized)) {
+                if (normalized !== confirmedRootDomain) {
+                  resetFromStep2();
+                }
+                setConfirmedRootDomain(normalized);
+              } else {
+                setConfirmedRootDomain('');
+              }
+            }}
             placeholder="例如 sample.com"
           />
-          <Space>
-            <Button type="primary" onClick={handleConfirmRootDomain}>
-              确认一级域名
-            </Button>
-            {confirmedRootDomain ? <Tag color="blue">{confirmedRootDomain}</Tag> : null}
-          </Space>
+          {confirmedRootDomain ? <Tag color="blue">当前一级域名：{confirmedRootDomain}</Tag> : null}
         </Space>
       </Card>
 
@@ -1425,17 +1371,30 @@ const LineOnboardingPage: React.FC = () => {
             <Button onClick={handleGenerateSubdomain} disabled={!confirmedRootDomain}>
               生成子域名
             </Button>
-            <Button type="primary" onClick={handleConfirmSubdomain} disabled={!generatedSubdomain}>
-              确认子域名
-            </Button>
           </Space>
           <Input
             value={generatedSubdomain}
-            onChange={(e) => setGeneratedSubdomain(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value.trim().toLowerCase();
+              setGeneratedSubdomain(value);
+              const candidate = normalizeDomain(value);
+              if (SUBDOMAIN_REGEX.test(candidate)) {
+                if (candidate !== confirmedSubdomain) {
+                  resetFromStep3();
+                }
+                setResolvedIngressSource(null);
+                setSourceIngressError(null);
+                setSelectedSourceIngressKey('');
+                setNewIngressNameInput(generateDefaultIngressName(candidate));
+                setConfirmedSubdomain(candidate);
+              } else {
+                setConfirmedSubdomain('');
+              }
+            }}
             placeholder="生成结果"
             disabled={!confirmedRootDomain}
           />
-          {confirmedSubdomain ? <Tag color="green">{confirmedSubdomain}</Tag> : null}
+          {confirmedSubdomain ? <Tag color="green">当前线路域名：{confirmedSubdomain}</Tag> : null}
         </Space>
       </Card>
 
@@ -1717,9 +1676,9 @@ const LineOnboardingPage: React.FC = () => {
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Text type="secondary">
-                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
+                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2线路域名。推荐使用自动写入 tenant_domain。
                   </Text>
-                  <Alert type="warning" showIcon message="测试阶段已放开平台登记前置限制" description="当前只要求已选择租户并确认子域名，不再强制要求先完成步骤6连通性验证；生产流程是否恢复限制后续再定。" />
+                  <Alert type="warning" showIcon message="测试阶段已放开平台登记前置限制" description="当前只要求已选择租户并生成可用线路域名；步骤6连通性验证为非必要检查。" />
                 </Space>
               ),
             }]}
@@ -1738,7 +1697,7 @@ const LineOnboardingPage: React.FC = () => {
             size="small"
             items={[{
               key: 'tenant-domain-sql',
-              label: '展开查看 / 复制备用 SQL',
+              label: '展开查看备用 SQL',
               children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph>,
             }]}
           />
@@ -1751,23 +1710,7 @@ const LineOnboardingPage: React.FC = () => {
             >
               自动写入 tenant_domain
             </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(insertSql);
-                  message.success('SQL 已复制');
-                } catch {
-                  message.error('复制失败，请手工复制');
-                }
-              }}
-              disabled={!selectedTenantId || !confirmedSubdomain}
-            >
-              复制 SQL
-            </Button>
-            <Button type="primary" onClick={handleConfirmSql} disabled={!selectedTenantId || !confirmedSubdomain}>
-              确认已完成执行 SQL
-            </Button>
-            {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}
+            {tenantDomainApplyResult ? <Tag color="green">已写入</Tag> : null}
           </Space>
           {tenantDomainApplyError ? <Alert type="error" showIcon message={tenantDomainApplyError} /> : null}
           {tenantDomainApplyResult ? (
@@ -2099,7 +2042,7 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤6：连通性验证" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Text type="secondary">使用线路域名访问业务接口，当前为打开 <Text code>/pro/p/symbol/list</Text> 后人工确认。</Text>
+          <Text type="secondary">非必要步骤：可按需打开业务接口地址进行人工查看，不再作为后续流程前置条件。</Text>
           <Text>检查地址：<Text code>{connectivityUrl || 'https://{步骤2子域名}/pro/p/symbol/list'}</Text></Text>
           <Space>
             <Button
@@ -2114,10 +2057,7 @@ const LineOnboardingPage: React.FC = () => {
             >
               打开检查地址
             </Button>
-            <Button type="primary" onClick={handleConfirmConnectivity} disabled={!ingressApplied || !superAdminRegistered}>
-              确认已完成联通性检查
-            </Button>
-            {connectivityChecked ? <Tag color="green">已确认</Tag> : null}
+
           </Space>
         </Space>
       </Card>
@@ -2137,7 +2077,7 @@ const LineOnboardingPage: React.FC = () => {
             <Button onClick={handleOpenProbeDetail} disabled={!confirmedSubdomain || !probeDetailUrl}>
               打开外部探测详情
             </Button>
-            <Button type="primary" loading={verifying} onClick={handleVerifyExternal} disabled={!sqlConfirmed}>
+            <Button type="primary" loading={verifying} onClick={handleVerifyExternal} disabled={!confirmedSubdomain}>
               调用 /api/lines 验收
             </Button>
             {verifyResult?.exists ? <Tag color="green">验收通过</Tag> : null}
