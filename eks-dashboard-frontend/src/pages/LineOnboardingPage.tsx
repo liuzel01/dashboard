@@ -238,7 +238,6 @@ const LineOnboardingPage: React.FC = () => {
   const [sourceIngressError, setSourceIngressError] = useState<string | null>(null);
   const [selectedSourceIngressKey, setSelectedSourceIngressKey] = useState<string>('');
   const [newIngressNameInput, setNewIngressNameInput] = useState('');
-  const [tlsSecretMode, setTlsSecretMode] = useState<'new' | 'reuse' | 'custom'>('new');
   const [tlsSecretNameInput, setTlsSecretNameInput] = useState('');
   const [ingressPreviewLoading, setIngressPreviewLoading] = useState(false);
   const [ingressPreviewError, setIngressPreviewError] = useState<string | null>(null);
@@ -1011,10 +1010,6 @@ const LineOnboardingPage: React.FC = () => {
       return null;
     }
     const tlsSecretName = tlsSecretNameInput.trim().toLowerCase();
-    if (tlsSecretMode === 'custom' && !tlsSecretName) {
-      message.warning('自定义 TLS Secret 模式下，请填写 secret 名称');
-      return null;
-    }
     if (tlsSecretName && !K8S_RESOURCE_NAME_REGEX.test(tlsSecretName)) {
       message.error('TLS Secret 名称格式不合法：只能使用小写字母、数字和中划线，且首尾必须是字母或数字');
       return null;
@@ -1047,7 +1042,7 @@ const LineOnboardingPage: React.FC = () => {
         sourceIngressName: validated.sourceIngressName,
         newHost: confirmedSubdomain,
         newIngressName: validated.newIngressName,
-        tlsSecretMode,
+        tlsSecretMode: 'new',
         ...(validated.tlsSecretName ? { tlsSecretName: validated.tlsSecretName } : {}),
       })) as {
         success?: boolean;
@@ -1067,6 +1062,9 @@ const LineOnboardingPage: React.FC = () => {
       }
 
       setIngressPreviewResult(resp.data);
+      if (!tlsSecretNameInput.trim() && resp.data.tlsSecretNames?.[0]) {
+        setTlsSecretNameInput(resp.data.tlsSecretNames[0]);
+      }
       message.success('Ingress YAML 预览已生成，请确认后创建');
     } catch (error: any) {
       const backendMsg = error?.response?.data?.message;
@@ -1099,7 +1097,7 @@ const LineOnboardingPage: React.FC = () => {
         sourceIngressName: validated.sourceIngressName,
         newHost: confirmedSubdomain,
         newIngressName: validated.newIngressName,
-        tlsSecretMode,
+        tlsSecretMode: 'new',
         ...(validated.tlsSecretName ? { tlsSecretName: validated.tlsSecretName } : {}),
         confirmed: true,
       })) as {
@@ -1798,31 +1796,8 @@ const LineOnboardingPage: React.FC = () => {
           </Space>
 
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
-            <Text>TLS Secret 策略：</Text>
-            <Radio.Group
-              value={tlsSecretMode}
-              onChange={(e) => {
-                setTlsSecretMode(e.target.value);
-                setIngressPreviewResult(null);
-              }}
-              disabled={!confirmedSubdomain}
-            >
-              <Radio value="new">为新域名生成新 TLS Secret（推荐）</Radio>
-              <Radio value="reuse">复用 source ingress 的 TLS Secret</Radio>
-              <Radio value="custom">自定义 TLS Secret 名称</Radio>
-            </Radio.Group>
-            {tlsSecretMode === 'custom' ? (
-              <Input
-                style={{ maxWidth: 520 }}
-                value={tlsSecretNameInput}
-                onChange={(e) => {
-                  setTlsSecretNameInput(e.target.value.trim().toLowerCase());
-                  setIngressPreviewResult(null);
-                }}
-                placeholder="例如 mggg2f97b9afe7223e-tls"
-                disabled={!confirmedSubdomain}
-              />
-            ) : null}
+            <Text>TLS Secret 策略：<Tag color="green">为新域名生成新 TLS Secret（推荐）</Tag></Text>
+            <Text type="secondary">预览会默认使用新子域名前缀拼接 <Text code>-tls</Text>；如需覆盖，可在预览输出下方手动输入 TLS Secret 名称后再确认创建。</Text>
           </Space>
 
           {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
@@ -1857,7 +1832,17 @@ const LineOnboardingPage: React.FC = () => {
                   <Text>新 Ingress：<Text code>{ingressPreviewResult.newIngressName}</Text></Text>
                   <Text>Namespace：<Text code>{ingressPreviewResult.namespace}</Text></Text>
                   <Text>Host：<Text code>{ingressPreviewResult.host}</Text></Text>
-                  <Text>TLS Secret：<Text code>{(ingressPreviewResult.tlsSecretNames || []).join(', ') || '(无)'}</Text></Text>
+                  <Text>TLS Secret：<Text code>{tlsSecretNameInput || (ingressPreviewResult.tlsSecretNames || []).join(', ') || '(待填写)'}</Text></Text>
+                  <Input
+                    style={{ maxWidth: 520 }}
+                    value={tlsSecretNameInput}
+                    onChange={(e) => {
+                      setTlsSecretNameInput(e.target.value.trim().toLowerCase());
+                      setIngressApplied(false);
+                    }}
+                    placeholder="例如 mgggf12be7574100-tls"
+                  />
+                  <Text type="secondary">如需覆盖预览中的 TLS Secret，可在这里修改；确认创建时会以此名称为准。</Text>
                   {ingressPreviewResult.yaml ? (
                     <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
                       {ingressPreviewResult.yaml}

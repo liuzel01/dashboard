@@ -1357,23 +1357,23 @@ export class LinesService {
     };
     this.logger.log(`[IngressClone] start ${JSON.stringify(contextInfo)}`);
 
-    const result = await this.ingressGatewayClient.cloneIngress(
-      environmentId,
-      {
-        namespace,
-        sourceIngressName,
-        newHost,
-        ...(newIngressName ? { newIngressName } : {}),
-        ...(input.tlsSecretMode ? { tlsSecretMode: input.tlsSecretMode } : {}),
-        ...(input.tlsSecretName ? { tlsSecretName: input.tlsSecretName } : {}),
-        confirmed: input.confirmed === true,
-      },
-      {
-        requestId: input.requestId,
-        userId: input.userId,
-        username: input.username,
-      },
-    );
+    const payload = {
+      namespace,
+      sourceIngressName,
+      newHost,
+      ...(newIngressName ? { newIngressName } : {}),
+      tlsSecretMode: input.tlsSecretMode || 'new',
+      ...(input.tlsSecretName ? { tlsSecretName: input.tlsSecretName } : {}),
+      confirmed: input.confirmed === true,
+    };
+    const gatewayContext = {
+      requestId: input.requestId,
+      userId: input.userId,
+      username: input.username,
+    };
+    const result = input.confirmed === true
+      ? await this.ingressGatewayClient.cloneIngress(environmentId, payload, gatewayContext)
+      : await this.ingressGatewayClient.previewCloneIngress(environmentId, payload, gatewayContext);
 
     this.logger.log(
       `[IngressClone] success via agent requestId=${contextInfo.requestId} userId=${contextInfo.userId} username=${contextInfo.username} env=${environmentId} source=${namespace}/${sourceIngressName} new=${namespace}/${result?.data?.newIngressName || 'unknown'} host=${newHost}`,
