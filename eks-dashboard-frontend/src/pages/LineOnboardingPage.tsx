@@ -431,10 +431,10 @@ const LineOnboardingPage: React.FC = () => {
   const stepDone = [
     Boolean(confirmedRootDomain),
     Boolean(confirmedSubdomain),
-    dcdnConfirmed,
     ingressApplied,
+    superAdminRegistered && sqlConfirmed,
+    dcdnConfirmed,
     connectivityChecked,
-    sqlConfirmed,
     verifyResult?.exists === true,
   ];
 
@@ -1148,7 +1148,7 @@ const LineOnboardingPage: React.FC = () => {
 
   const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect') => {
     if (!ingressApplied) {
-      message.warning('请先完成步骤4');
+      message.warning('请先完成步骤3：Ingress/TLS 应用');
       return;
     }
     if (!confirmedSubdomain) {
@@ -1219,11 +1219,11 @@ const LineOnboardingPage: React.FC = () => {
 
   const handleConfirmConnectivity = () => {
     if (!ingressApplied) {
-      message.warning('请先完成步骤4');
+      message.warning('请先完成步骤3：Ingress/TLS 应用');
       return;
     }
     if (!superAdminRegistered) {
-      message.warning('请先完成步骤5-1：在超级后台登记新线路');
+      message.warning('请先完成步骤4-1：在超级后台登记新线路');
       return;
     }
     setConnectivityChecked(true);
@@ -1304,7 +1304,7 @@ const LineOnboardingPage: React.FC = () => {
       return;
     }
     if (!sqlConfirmed) {
-      message.warning('请先完成步骤6');
+      message.warning('请先完成步骤4-2：tenant_domain 自动写入/确认');
       return;
     }
     setVerifying(true);
@@ -1342,18 +1342,18 @@ const LineOnboardingPage: React.FC = () => {
           current={activeStep}
           size="small"
           items={[
-            { title: '域名录入', status: stepDone[0] ? 'finish' : activeStep === 0 ? 'process' : 'wait' },
-            { title: '子域名生成', status: stepDone[1] ? 'finish' : activeStep === 1 ? 'process' : 'wait' },
-            { title: 'DCDN配置', status: stepDone[2] ? 'finish' : activeStep === 2 ? 'process' : 'wait' },
-            { title: 'Ingress应用', status: stepDone[3] ? 'finish' : activeStep === 3 ? 'process' : 'wait' },
-            { title: '联通性检查', status: stepDone[4] ? 'finish' : activeStep === 4 ? 'process' : 'wait' },
-            { title: '数据库SQL', status: stepDone[5] ? 'finish' : activeStep === 5 ? 'process' : 'wait' },
+            { title: '域名准备', status: stepDone[0] ? 'finish' : activeStep === 0 ? 'process' : 'wait' },
+            { title: '线路域名', status: stepDone[1] ? 'finish' : activeStep === 1 ? 'process' : 'wait' },
+            { title: 'Ingress/TLS', status: stepDone[2] ? 'finish' : activeStep === 2 ? 'process' : 'wait' },
+            { title: '平台登记', status: stepDone[3] ? 'finish' : activeStep === 3 ? 'process' : 'wait' },
+            { title: 'DCDN/HTTPS', status: stepDone[4] ? 'finish' : activeStep === 4 ? 'process' : 'wait' },
+            { title: '连通性验证', status: stepDone[5] ? 'finish' : activeStep === 5 ? 'process' : 'wait' },
             { title: '外部API验收', status: stepDone[6] ? 'finish' : activeStep === 6 ? 'process' : 'wait' },
           ]}
         />
       </Card>
 
-      <Card title="步骤1：购买备案域名并确认一级域名" style={{ marginBottom: 12 }}>
+      <Card title="步骤1：域名准备" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Collapse
             ghost
@@ -1361,7 +1361,7 @@ const LineOnboardingPage: React.FC = () => {
             items={[{
               key: 'tenant-help',
               label: '查看目标租户说明',
-              children: <Alert type="info" showIcon message="先选择目标租户" description="步骤6 的 tenant_domain SQL 会自动使用这里选择的租户 ID。" />,
+              children: <Alert type="info" showIcon message="先选择目标租户" description="步骤4 的 tenant_domain 写入会自动使用这里选择的租户 ID。" />,
             }]}
           />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
@@ -1417,7 +1417,7 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤2：根据步骤1域名生成线路子域名" style={{ marginBottom: 12 }}>
+      <Card title="步骤2：线路域名" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text>推荐命令：<Text code>openssl rand -hex 16</Text></Text>
           <Text type="secondary">系统将生成随机前缀（12~20位十六进制）并与步骤1域名拼接，示例：f0c15ebd6dc50f8.sample.com</Text>
@@ -1439,7 +1439,357 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤3：阿里云国际 DCDN 自动创建 + HTTPS/WebSocket/WAF 自动化" style={{ marginBottom: 12 }}>
+      <Card title="步骤3：Ingress/TLS 应用" style={{ marginBottom: 12 }}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'ingress-clone-help',
+              label: '查看 Ingress 克隆说明',
+              children: <Alert type="info" showIcon message="手动选择 source ingress，先预览 YAML，再确认创建" description="目标 host 固定使用步骤2生成的新子域名。推荐使用“新 TLS Secret”模式，先生成 Ingress YAML 预览，确认无误后再执行创建。" />,
+            }]}
+          />
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
+            <Text>目标 host（来自步骤2）：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
+            <Text>source ingress：<Text code>{selectedSourceIngressKey || '(未选择)'}</Text></Text>
+          </Space>
+          <Space wrap>
+            <Button
+              loading={sourceIngressLoading}
+              onClick={handleLoadSourceIngressCandidates}
+              disabled={!confirmedSubdomain}
+            >
+              加载 source ingress 候选
+            </Button>
+            <Select
+              style={{ width: 520 }}
+              placeholder="请选择用于克隆的 source ingress"
+              value={selectedSourceIngressKey || undefined}
+              onChange={(value) => {
+                setSelectedSourceIngressKey(value);
+                setIngressPreviewResult(null);
+                setIngressPreviewError(null);
+              }}
+              disabled={!resolvedIngressSource?.candidates?.length}
+              options={(resolvedIngressSource?.candidates || []).map((item) => ({
+                value: `${item.namespace}/${item.name}`,
+                label: `${item.namespace}/${item.name}${item.ruleHosts?.length ? ` · ${item.ruleHosts.join(', ')}` : ''}`,
+              }))}
+              showSearch
+              optionFilterProp="label"
+            />
+            {resolvedIngressSource?.matchedBy ? <Tag color="blue">候选来源：{resolvedIngressSource.matchedBy}</Tag> : null}
+          </Space>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>新 ingress 名称：</Text>
+            <Input
+              style={{ maxWidth: 520 }}
+              value={newIngressNameInput}
+              onChange={(e) => {
+                setNewIngressNameInput(e.target.value.trim().toLowerCase());
+                setIngressPreviewResult(null);
+              }}
+              placeholder="例如 nginx-web-app-l01-test-2605040650"
+              disabled={!confirmedSubdomain}
+            />
+            <Text type="secondary">默认规则：nginx-web-app-{'{host前缀}'}-{'{YYMMDDHHmm}'}，可按实际命名规范手动修改。</Text>
+          </Space>
+
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>TLS Secret 策略：<Tag color="green">为新域名生成新 TLS Secret（推荐）</Tag></Text>
+            <Text type="secondary">预览会默认使用新子域名前缀拼接 <Text code>-tls</Text>；如需覆盖，可在预览输出下方手动输入 TLS Secret 名称后再确认创建。</Text>
+          </Space>
+
+          {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
+          {ingressPreviewError ? <Alert type="error" showIcon message={ingressPreviewError} /> : null}
+
+          <Space>
+            <Button
+              loading={ingressPreviewLoading}
+              onClick={handlePreviewCloneIngress}
+              disabled={!confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
+            >
+              生成 Ingress YAML 预览
+            </Button>
+            <Button
+              type="primary"
+              loading={ingressApplying}
+              onClick={handleCloneIngressApply}
+              disabled={!ingressPreviewResult || ingressPreviewLoading}
+            >
+              用户确认后执行创建
+            </Button>
+            {ingressApplied ? <Tag color="green">已执行</Tag> : null}
+          </Space>
+
+          {ingressPreviewResult ? (
+            <Alert
+              type="info"
+              showIcon
+              message="Ingress YAML 预览"
+              description={
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Text>新 Ingress：<Text code>{ingressPreviewResult.newIngressName}</Text></Text>
+                  <Text>Namespace：<Text code>{ingressPreviewResult.namespace}</Text></Text>
+                  <Text>Host：<Text code>{ingressPreviewResult.host}</Text></Text>
+                  <Text>TLS Secret：<Text code>{tlsSecretNameInput || (ingressPreviewResult.tlsSecretNames || []).join(', ') || '(待填写)'}</Text></Text>
+                  <Input
+                    style={{ maxWidth: 520 }}
+                    value={tlsSecretNameInput}
+                    onChange={(e) => {
+                      setTlsSecretNameInput(e.target.value.trim().toLowerCase());
+                      setIngressApplied(false);
+                    }}
+                    placeholder="例如 mgggf12be7574100-tls"
+                  />
+                  <Text type="secondary">如需覆盖预览中的 TLS Secret，可在这里修改；确认创建时会以此名称为准。</Text>
+                  {ingressPreviewResult.yaml ? (
+                    <Collapse
+                      ghost
+                      size="small"
+                      items={[{
+                        key: 'ingress-yaml-detail',
+                        label: '展开查看完整 YAML',
+                        children: (
+                          <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                            {ingressPreviewResult.yaml}
+                          </pre>
+                        ),
+                      }]}
+                    />
+                  ) : null}
+                </Space>
+              }
+            />
+          ) : null}
+
+          {ingressApplyError ? <Alert type="error" showIcon message={ingressApplyError} /> : null}
+          {ingressApplyResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message="Ingress 克隆应用成功"
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>新 Ingress：<Text code>{ingressApplyResult.newIngressName}</Text></Text>
+                  <Text>Namespace：<Text code>{ingressApplyResult.namespace}</Text></Text>
+                  <Text>Host：<Text code>{ingressApplyResult.host}</Text></Text>
+                </Space>
+              }
+            />
+          ) : null}
+        </Space>
+      </Card>
+
+      <Card title="步骤4：平台登记" style={{ marginBottom: 12 }}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
+          <Text type="secondary">登记动作会通过当前环境 kubeContext 代理调用集群内超级后台接口。</Text>
+          <Text strong>1) 在超级后台登记新线路</Text>
+          <Text>
+            当前环境：<Text code>{currentEnvironment?.name || currentEnvironment?.id || '-'}</Text>
+          </Text>
+          <Text>
+            大管理端地址：
+            {superAdminUrl ? (
+              <Link href={superAdminUrl} target="_blank" rel="noreferrer">
+                {superAdminUrl}
+              </Link>
+            ) : (
+              <Text type="warning">
+                {superAdminLoading ? '加载中...' : '未配置，请在“环境管理”中设置大管理端地址'}
+              </Text>
+            )}
+          </Text>
+          <Input value={superAdminLineUrl} placeholder="lineUrl（自动生成）" disabled />
+          <Input value={superAdminOtcUrl} placeholder="otcUrl（自动生成）" disabled />
+          <Input
+            value={superAdminLineZh}
+            onChange={(e) => {
+              setSuperAdminLineZh(e.target.value);
+              setSuperAdminRegistered(false);
+              setSuperAdminPendingUpdate(false);
+              setSuperAdminRegisterResult(null);
+            }}
+            placeholder="线路中文名（zh），例如：线路-l01"
+            disabled={!ingressApplied}
+          />
+          <Input
+            value={superAdminLineEn}
+            onChange={(e) => {
+              setSuperAdminLineEn(e.target.value);
+              setSuperAdminRegistered(false);
+              setSuperAdminPendingUpdate(false);
+              setSuperAdminRegisterResult(null);
+            }}
+            placeholder="线路英文名（en），例如：l01"
+            disabled={!ingressApplied}
+          />
+          <Space>
+            <Text>状态（status）</Text>
+            <Switch
+              checked={superAdminLineStatus}
+              checkedChildren="启用"
+              unCheckedChildren="停用"
+              onChange={(checked) => {
+                setSuperAdminLineStatus(checked);
+                setSuperAdminRegistered(false);
+                setSuperAdminPendingUpdate(false);
+                setSuperAdminRegisterResult(null);
+              }}
+              disabled={!ingressApplied}
+            />
+          </Space>
+          <Space>
+            <Button
+              type="primary"
+              loading={superAdminRegistering}
+              onClick={handleConfirmSuperAdminRegistration}
+              disabled={!ingressApplied || !selectedTenantId || !confirmedSubdomain}
+            >
+              确认并自动登记新线路
+            </Button>
+            <Button
+              onClick={() => {
+                if (!selectedTenantId) {
+                  message.warning('请先在步骤1选择目标租户');
+                  return;
+                }
+                setSuperAdminLinesReloadKey((prev) => prev + 1);
+                setSuperAdminLinesOpen(true);
+              }}
+              disabled={!selectedTenantId}
+            >
+              查看当前租户全部线路
+            </Button>
+            {superAdminRegistered ? <Tag color="green">已登记</Tag> : null}
+          </Space>
+          {superAdminRegisterError ? <Alert type="error" showIcon message={superAdminRegisterError} /> : null}
+          {superAdminRegisterResult ? (
+            <Alert
+              type={superAdminRegisterResult.action === 'conflict' ? 'warning' : 'success'}
+              showIcon
+              message={superAdminRegisterResult.message}
+              description={
+                superAdminRegisterResult.action === 'conflict' && superAdminRegisterResult.differences?.length ? (
+                  <Space direction="vertical" size={4}>
+                    {superAdminRegisterResult.differences.map((item) => (
+                      <Text key={`line-diff-${item.field}`}>
+                        {item.field}: 现有=<Text code>{String(item.existing)}</Text>，目标=<Text code>{String(item.incoming)}</Text>
+                      </Text>
+                    ))}
+                    <Space>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={superAdminRegistering}
+                        onClick={handleUpdateSuperAdminRegistration}
+                        disabled={!superAdminPendingUpdate}
+                      >
+                        更新已有线路
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSuperAdminPendingUpdate(false);
+                          setSuperAdminRegisterResult(null);
+                        }}
+                      >
+                        取消
+                      </Button>
+                    </Space>
+                  </Space>
+                ) : null
+              }
+            />
+          ) : null}
+
+          <Divider style={{ margin: '4px 0' }} />
+          <Text strong>2) tenant_domain 自动写入</Text>
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'tenant-domain-help',
+              label: '查看 tenant_domain 写入说明 / 测试阶段限制',
+              children: (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text type="secondary">
+                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
+                  </Text>
+                  <Alert type="warning" showIcon message="测试阶段已放开平台登记前置限制" description="当前只要求已选择租户并确认子域名，不再强制要求先完成步骤6连通性验证；生产流程是否恢复限制后续再定。" />
+                </Space>
+              ),
+            }]}
+          />
+          <Text>
+            目标租户：
+            {selectedTenant ? (
+              <Text code>
+                {selectedTenant.id} - {selectedTenant.name}
+              </Text>
+            ) : (
+              <Text type="warning">未选择（请回到步骤1选择）</Text>
+            )}
+          </Text>
+          <Collapse
+            size="small"
+            items={[{
+              key: 'tenant-domain-sql',
+              label: '展开查看 / 复制备用 SQL',
+              children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph>,
+            }]}
+          />
+          <Space wrap>
+            <Button
+              type="primary"
+              loading={tenantDomainApplying}
+              onClick={handleApplyTenantDomain}
+              disabled={!selectedTenantId || !confirmedSubdomain}
+            >
+              自动写入 tenant_domain
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(insertSql);
+                  message.success('SQL 已复制');
+                } catch {
+                  message.error('复制失败，请手工复制');
+                }
+              }}
+              disabled={!selectedTenantId || !confirmedSubdomain}
+            >
+              复制 SQL
+            </Button>
+            <Button type="primary" onClick={handleConfirmSql} disabled={!selectedTenantId || !confirmedSubdomain}>
+              确认已完成执行 SQL
+            </Button>
+            {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}
+          </Space>
+          {tenantDomainApplyError ? <Alert type="error" showIcon message={tenantDomainApplyError} /> : null}
+          {tenantDomainApplyResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message={tenantDomainApplyResult.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在，未重复写入'}
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>Action：<Tag color={tenantDomainApplyResult.action === 'created' ? 'green' : 'blue'}>{tenantDomainApplyResult.action}</Tag></Text>
+                  <Text>ID：<Text code>{tenantDomainApplyResult.id || '-'}</Text></Text>
+                  <Text>Tenant ID：<Text code>{tenantDomainApplyResult.tenantId}</Text></Text>
+                  <Text>Domian：<Text code>{tenantDomainApplyResult.domain}</Text></Text>
+                  <Text>Status：<Text code>{tenantDomainApplyResult.status}</Text></Text>
+                </Space>
+              }
+            />
+          ) : null}
+        </Space>
+      </Card>
+
+      <Card title="步骤5：DCDN/HTTPS 配置" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text type="secondary">
             使用步骤2确认的线路域名：{confirmedSubdomain || '(待确认)'}
@@ -1747,279 +2097,10 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤4：Ingress 克隆并应用（自动）" style={{ marginBottom: 12 }}>
+      <Card title="步骤6：连通性验证" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'ingress-clone-help',
-              label: '查看 Ingress 克隆说明',
-              children: <Alert type="info" showIcon message="手动选择 source ingress，先预览 YAML，再确认创建" description="目标 host 固定使用步骤2生成的新子域名。推荐使用“新 TLS Secret”模式，先生成 Ingress YAML 预览，确认无误后再执行创建。" />,
-            }]}
-          />
-          <Space direction="vertical" size={4} style={{ width: '100%' }}>
-            <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
-            <Text>目标 host（来自步骤2）：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
-            <Text>source ingress：<Text code>{selectedSourceIngressKey || '(未选择)'}</Text></Text>
-          </Space>
-          <Space wrap>
-            <Button
-              loading={sourceIngressLoading}
-              onClick={handleLoadSourceIngressCandidates}
-              disabled={!confirmedSubdomain}
-            >
-              加载 source ingress 候选
-            </Button>
-            <Select
-              style={{ width: 520 }}
-              placeholder="请选择用于克隆的 source ingress"
-              value={selectedSourceIngressKey || undefined}
-              onChange={(value) => {
-                setSelectedSourceIngressKey(value);
-                setIngressPreviewResult(null);
-                setIngressPreviewError(null);
-              }}
-              disabled={!resolvedIngressSource?.candidates?.length}
-              options={(resolvedIngressSource?.candidates || []).map((item) => ({
-                value: `${item.namespace}/${item.name}`,
-                label: `${item.namespace}/${item.name}${item.ruleHosts?.length ? ` · ${item.ruleHosts.join(', ')}` : ''}`,
-              }))}
-              showSearch
-              optionFilterProp="label"
-            />
-            {resolvedIngressSource?.matchedBy ? <Tag color="blue">候选来源：{resolvedIngressSource.matchedBy}</Tag> : null}
-          </Space>
-          <Space direction="vertical" size={4} style={{ width: '100%' }}>
-            <Text>新 ingress 名称：</Text>
-            <Input
-              style={{ maxWidth: 520 }}
-              value={newIngressNameInput}
-              onChange={(e) => {
-                setNewIngressNameInput(e.target.value.trim().toLowerCase());
-                setIngressPreviewResult(null);
-              }}
-              placeholder="例如 nginx-web-app-l01-test-2605040650"
-              disabled={!confirmedSubdomain}
-            />
-            <Text type="secondary">默认规则：nginx-web-app-{'{host前缀}'}-{'{YYMMDDHHmm}'}，可按实际命名规范手动修改。</Text>
-          </Space>
-
-          <Space direction="vertical" size={4} style={{ width: '100%' }}>
-            <Text>TLS Secret 策略：<Tag color="green">为新域名生成新 TLS Secret（推荐）</Tag></Text>
-            <Text type="secondary">预览会默认使用新子域名前缀拼接 <Text code>-tls</Text>；如需覆盖，可在预览输出下方手动输入 TLS Secret 名称后再确认创建。</Text>
-          </Space>
-
-          {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
-          {ingressPreviewError ? <Alert type="error" showIcon message={ingressPreviewError} /> : null}
-
-          <Space>
-            <Button
-              loading={ingressPreviewLoading}
-              onClick={handlePreviewCloneIngress}
-              disabled={!confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
-            >
-              生成 Ingress YAML 预览
-            </Button>
-            <Button
-              type="primary"
-              loading={ingressApplying}
-              onClick={handleCloneIngressApply}
-              disabled={!ingressPreviewResult || ingressPreviewLoading}
-            >
-              用户确认后执行创建
-            </Button>
-            {ingressApplied ? <Tag color="green">已执行</Tag> : null}
-          </Space>
-
-          {ingressPreviewResult ? (
-            <Alert
-              type="info"
-              showIcon
-              message="Ingress YAML 预览"
-              description={
-                <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                  <Text>新 Ingress：<Text code>{ingressPreviewResult.newIngressName}</Text></Text>
-                  <Text>Namespace：<Text code>{ingressPreviewResult.namespace}</Text></Text>
-                  <Text>Host：<Text code>{ingressPreviewResult.host}</Text></Text>
-                  <Text>TLS Secret：<Text code>{tlsSecretNameInput || (ingressPreviewResult.tlsSecretNames || []).join(', ') || '(待填写)'}</Text></Text>
-                  <Input
-                    style={{ maxWidth: 520 }}
-                    value={tlsSecretNameInput}
-                    onChange={(e) => {
-                      setTlsSecretNameInput(e.target.value.trim().toLowerCase());
-                      setIngressApplied(false);
-                    }}
-                    placeholder="例如 mgggf12be7574100-tls"
-                  />
-                  <Text type="secondary">如需覆盖预览中的 TLS Secret，可在这里修改；确认创建时会以此名称为准。</Text>
-                  {ingressPreviewResult.yaml ? (
-                    <Collapse
-                      ghost
-                      size="small"
-                      items={[{
-                        key: 'ingress-yaml-detail',
-                        label: '展开查看完整 YAML',
-                        children: (
-                          <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                            {ingressPreviewResult.yaml}
-                          </pre>
-                        ),
-                      }]}
-                    />
-                  ) : null}
-                </Space>
-              }
-            />
-          ) : null}
-
-          {ingressApplyError ? <Alert type="error" showIcon message={ingressApplyError} /> : null}
-          {ingressApplyResult ? (
-            <Alert
-              type="success"
-              showIcon
-              message="Ingress 克隆应用成功"
-              description={
-                <Space direction="vertical" size={2}>
-                  <Text>新 Ingress：<Text code>{ingressApplyResult.newIngressName}</Text></Text>
-                  <Text>Namespace：<Text code>{ingressApplyResult.namespace}</Text></Text>
-                  <Text>Host：<Text code>{ingressApplyResult.host}</Text></Text>
-                </Space>
-              }
-            />
-          ) : null}
-        </Space>
-      </Card>
-
-      <Card title="步骤5：超级后台登记与联通性检查" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
-          <Text type="secondary">登记动作会通过当前环境 kubeContext 代理调用集群内超级后台接口。</Text>
-          <Text strong>1) 在超级后台登记新线路</Text>
-          <Text>
-            当前环境：<Text code>{currentEnvironment?.name || currentEnvironment?.id || '-'}</Text>
-          </Text>
-          <Text>
-            大管理端地址：
-            {superAdminUrl ? (
-              <Link href={superAdminUrl} target="_blank" rel="noreferrer">
-                {superAdminUrl}
-              </Link>
-            ) : (
-              <Text type="warning">
-                {superAdminLoading ? '加载中...' : '未配置，请在“环境管理”中设置大管理端地址'}
-              </Text>
-            )}
-          </Text>
-          <Text>
-            联通性检查地址：
-            <Text code>{connectivityUrl || 'https://{步骤2子域名}/pro/p/symbol/list'}</Text>
-          </Text>
-          <Input value={superAdminLineUrl} placeholder="lineUrl（自动生成）" disabled />
-          <Input value={superAdminOtcUrl} placeholder="otcUrl（自动生成）" disabled />
-          <Input
-            value={superAdminLineZh}
-            onChange={(e) => {
-              setSuperAdminLineZh(e.target.value);
-              setSuperAdminRegistered(false);
-              setSuperAdminPendingUpdate(false);
-              setSuperAdminRegisterResult(null);
-            }}
-            placeholder="线路中文名（zh），例如：线路-l01"
-            disabled={!ingressApplied}
-          />
-          <Input
-            value={superAdminLineEn}
-            onChange={(e) => {
-              setSuperAdminLineEn(e.target.value);
-              setSuperAdminRegistered(false);
-              setSuperAdminPendingUpdate(false);
-              setSuperAdminRegisterResult(null);
-            }}
-            placeholder="线路英文名（en），例如：l01"
-            disabled={!ingressApplied}
-          />
-          <Space>
-            <Text>状态（status）</Text>
-            <Switch
-              checked={superAdminLineStatus}
-              checkedChildren="启用"
-              unCheckedChildren="停用"
-              onChange={(checked) => {
-                setSuperAdminLineStatus(checked);
-                setSuperAdminRegistered(false);
-                setSuperAdminPendingUpdate(false);
-                setSuperAdminRegisterResult(null);
-              }}
-              disabled={!ingressApplied}
-            />
-          </Space>
-          <Space>
-            <Button
-              type="primary"
-              loading={superAdminRegistering}
-              onClick={handleConfirmSuperAdminRegistration}
-              disabled={!ingressApplied || !selectedTenantId || !confirmedSubdomain}
-            >
-              确认并自动登记新线路
-            </Button>
-            <Button
-              onClick={() => {
-                if (!selectedTenantId) {
-                  message.warning('请先在步骤1选择目标租户');
-                  return;
-                }
-                setSuperAdminLinesReloadKey((prev) => prev + 1);
-                setSuperAdminLinesOpen(true);
-              }}
-              disabled={!selectedTenantId}
-            >
-              查看当前租户全部线路
-            </Button>
-            {superAdminRegistered ? <Tag color="green">已登记</Tag> : null}
-          </Space>
-          {superAdminRegisterError ? <Alert type="error" showIcon message={superAdminRegisterError} /> : null}
-          {superAdminRegisterResult ? (
-            <Alert
-              type={superAdminRegisterResult.action === 'conflict' ? 'warning' : 'success'}
-              showIcon
-              message={superAdminRegisterResult.message}
-              description={
-                superAdminRegisterResult.action === 'conflict' && superAdminRegisterResult.differences?.length ? (
-                  <Space direction="vertical" size={4}>
-                    {superAdminRegisterResult.differences.map((item) => (
-                      <Text key={`line-diff-${item.field}`}>
-                        {item.field}: 现有=<Text code>{String(item.existing)}</Text>，目标=<Text code>{String(item.incoming)}</Text>
-                      </Text>
-                    ))}
-                    <Space>
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={superAdminRegistering}
-                        onClick={handleUpdateSuperAdminRegistration}
-                        disabled={!superAdminPendingUpdate}
-                      >
-                        更新已有线路
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          setSuperAdminPendingUpdate(false);
-                          setSuperAdminRegisterResult(null);
-                        }}
-                      >
-                        取消
-                      </Button>
-                    </Space>
-                  </Space>
-                ) : null
-              }
-            />
-          ) : null}
-
-          <Divider style={{ margin: '4px 0' }} />
-          <Text strong>2) 线路联通性检查</Text>
+          <Text type="secondary">使用线路域名访问业务接口，当前为打开 <Text code>/pro/p/symbol/list</Text> 后人工确认。</Text>
+          <Text>检查地址：<Text code>{connectivityUrl || 'https://{步骤2子域名}/pro/p/symbol/list'}</Text></Text>
           <Space>
             <Button
               onClick={() => {
@@ -2041,90 +2122,7 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤6：在环境平台数据库新增 tenant_domain 数据" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'tenant-domain-help',
-              label: '查看 tenant_domain 写入说明 / 测试阶段限制',
-              children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Text type="secondary">
-                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
-                  </Text>
-                  <Alert type="warning" showIcon message="测试阶段已放开 Step6 前置限制" description="当前只要求已选择租户并确认子域名，不再强制要求先完成步骤5联通性检查；生产流程是否恢复限制后续再定。" />
-                </Space>
-              ),
-            }]}
-          />
-          <Text>
-            目标租户：
-            {selectedTenant ? (
-              <Text code>
-                {selectedTenant.id} - {selectedTenant.name}
-              </Text>
-            ) : (
-              <Text type="warning">未选择（请回到步骤1选择）</Text>
-            )}
-          </Text>
-          <Collapse
-            size="small"
-            items={[{
-              key: 'tenant-domain-sql',
-              label: '展开查看 / 复制备用 SQL',
-              children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph>,
-            }]}
-          />
-          <Space wrap>
-            <Button
-              type="primary"
-              loading={tenantDomainApplying}
-              onClick={handleApplyTenantDomain}
-              disabled={!selectedTenantId || !confirmedSubdomain}
-            >
-              自动写入 tenant_domain
-            </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(insertSql);
-                  message.success('SQL 已复制');
-                } catch {
-                  message.error('复制失败，请手工复制');
-                }
-              }}
-              disabled={!selectedTenantId || !confirmedSubdomain}
-            >
-              复制 SQL
-            </Button>
-            <Button type="primary" onClick={handleConfirmSql} disabled={!selectedTenantId || !confirmedSubdomain}>
-              确认已完成执行 SQL
-            </Button>
-            {sqlConfirmed ? <Tag color="green">已确认</Tag> : null}
-          </Space>
-          {tenantDomainApplyError ? <Alert type="error" showIcon message={tenantDomainApplyError} /> : null}
-          {tenantDomainApplyResult ? (
-            <Alert
-              type="success"
-              showIcon
-              message={tenantDomainApplyResult.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在，未重复写入'}
-              description={
-                <Space direction="vertical" size={2}>
-                  <Text>Action：<Tag color={tenantDomainApplyResult.action === 'created' ? 'green' : 'blue'}>{tenantDomainApplyResult.action}</Tag></Text>
-                  <Text>ID：<Text code>{tenantDomainApplyResult.id || '-'}</Text></Text>
-                  <Text>Tenant ID：<Text code>{tenantDomainApplyResult.tenantId}</Text></Text>
-                  <Text>Domian：<Text code>{tenantDomainApplyResult.domain}</Text></Text>
-                  <Text>Status：<Text code>{tenantDomainApplyResult.status}</Text></Text>
-                </Space>
-              }
-            />
-          ) : null}
-        </Space>
-      </Card>
-
-      <Card title="步骤7：外部 API 验收">
+      <Card title="步骤7：外部API验收">
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Collapse
             ghost
