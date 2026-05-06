@@ -309,6 +309,35 @@ export class AgentController {
     });
   }
 
+  @Post('v1/ingress/clone-preview')
+  async previewCloneIngress(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentCloneIngressDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentIngress] clone-preview env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
+    );
+    return this.ingressService.cloneIngress({
+      environmentId: envId,
+      namespace: body.namespace,
+      sourceIngressName: body.sourceIngressName,
+      newHost: body.newHost,
+      newIngressName: body.newIngressName,
+      tlsSecretMode: body.tlsSecretMode,
+      tlsSecretName: body.tlsSecretName,
+      confirmed: false,
+      requestId,
+      userId,
+      username,
+    });
+  }
+
   @Post('v1/ingress/clone')
   async cloneIngress(
     @Headers('x-environment-id') environmentId: string | undefined,
@@ -329,6 +358,9 @@ export class AgentController {
       sourceIngressName: body.sourceIngressName,
       newHost: body.newHost,
       newIngressName: body.newIngressName,
+      tlsSecretMode: body.tlsSecretMode,
+      tlsSecretName: body.tlsSecretName,
+      confirmed: body.confirmed,
       requestId,
       userId,
       username,

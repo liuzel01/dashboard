@@ -103,6 +103,9 @@ export class AgentIngressService {
     sourceIngressName: string;
     newHost: string;
     newIngressName?: string;
+    tlsSecretMode?: 'new' | 'reuse' | 'custom';
+    tlsSecretName?: string;
+    confirmed?: boolean;
     requestId?: string;
     userId?: string;
     username?: string;
@@ -112,12 +115,23 @@ export class AgentIngressService {
     const sourceIngressName = String(input.sourceIngressName || '').trim();
     const newHost = String(input.newHost || '').trim().toLowerCase();
     const requestedIngressName = String(input.newIngressName || '').trim().toLowerCase();
+    const tlsSecretMode = input.tlsSecretMode || 'new';
+    const requestedTlsSecretName = String(input.tlsSecretName || '').trim().toLowerCase();
 
     if (!namespace) throw new BadRequestException('namespace is required');
     if (!sourceIngressName) throw new BadRequestException('sourceIngressName is required');
     if (!newHost) throw new BadRequestException('newHost is required');
     if (requestedIngressName && !this.isValidK8sResourceName(requestedIngressName)) {
       throw new BadRequestException('newIngressName format is invalid');
+    }
+    if (!['new', 'reuse', 'custom'].includes(tlsSecretMode)) {
+      throw new BadRequestException('tlsSecretMode is invalid');
+    }
+    if (requestedTlsSecretName && !this.isValidK8sResourceName(requestedTlsSecretName)) {
+      throw new BadRequestException('tlsSecretName format is invalid');
+    }
+    if (tlsSecretMode === 'custom' && !requestedTlsSecretName) {
+      throw new BadRequestException('tlsSecretName is required when tlsSecretMode is custom');
     }
 
     this.logger.log(
@@ -147,7 +161,22 @@ export class AgentIngressService {
         conflictIngress: { namespace, name: newIngressName },
       });
     }
-    const cloned = this.cloneIngressSpec(source, { newName: newIngressName, newHost });
+    const cloned = this.cloneIngressSpec(source, {
+      newName: newIngressName,
+      newHost,
+      tlsSecretMode,
+      tlsSecretName: requestedTlsSecretName || undefined,
+    });
+    const preview = this.buildIngressPreview({ namespace, sourceIngressName, newIngressName, newHost, cloned });
+
+    if (!input.confirmed) {
+      return {
+        success: true,
+        preview: true,
+        data: preview,
+      };
+    }
+
     const created = await this.networkingV1Api.createNamespacedIngress(namespace, cloned as any);
 
     this.logger.log(
@@ -156,11 +185,9 @@ export class AgentIngressService {
 
     return {
       success: true,
+      preview: false,
       data: {
-        newIngressName,
-        namespace,
-        host: newHost,
-        sourceIngressName,
+        ...preview,
         createdAt: created?.body?.metadata?.creationTimestamp || new Date().toISOString(),
       },
     };
@@ -255,7 +282,10 @@ export class AgentIngressService {
     return `${y}${m}${d}${hh}${mm}`;
   }
 
-  private cloneIngressSpec(source: any, input: { newName: string; newHost: string }) {
+  private cloneIngressSpec(
+    source: any,
+    input: { newName: string; newHost: string; tlsSecretMode?: 'new' | 'reuse' | 'custom'; tlsSecretName?: string },
+  ) {
     const cloned = JSON.parse(JSON.stringify(source || {}));
     cloned.metadata = cloned.metadata || {};
     delete cloned.metadata.uid;
@@ -277,8 +307,76 @@ export class AgentIngressService {
       cloned.spec.tls = cloned.spec.tls.map((tls: any) => ({
         ...tls,
         hosts: Array.isArray(tls?.hosts) ? tls.hosts.map(() => input.newHost) : tls?.hosts,
+        secretName: this.resolveTlsSecretName(tls?.secretName, input),
       }));
     }
     return cloned;
+  }
+
+  private resolveTlsSecretName(
+    sourceSecretName: string | undefined,
+    input: { newHost: string; tlsSecretMode?: 'new' | 'reuse' | 'custom'; tlsSecretName?: string },
+  ) {
+    if (input.tlsSecretMode === 'reuse') return sourceSecretName;
+    if (input.tlsSecretMode === 'custom') return input.tlsSecretName;
+    return input.tlsSecretName || `${input.newHost.split('.')[0]}-tls`;
+  }
+
+  private buildIngressPreview(input: {
+    namespace: string;
+    sourceIngressName: string;
+    newIngressName: string;
+    newHost: string;
+    cloned: any;
+  }) {
+    const tlsSecretNames = Array.from(
+      new Set((input.cloned?.spec?.tls || []).map((tls: any) => String(tls?.secretName || '').trim()).filter(Boolean)),
+    );
+    return {
+      newIngressName: input.newIngressName,
+      namespace: input.namespace,
+      host: input.newHost,
+      sourceIngressName: input.sourceIngressName,
+      tlsSecretNames,
+      yaml: this.toYaml(input.cloned),
+    };
+  }
+
+  private toYaml(value: any, indent = 0): string {
+    const pad = ' '.repeat(indent);
+    if (Array.isArray(value)) {
+      if (value.length === 0) return '[]';
+      return value
+        .map((item) => {
+          if (item && typeof item === 'object') {
+            const rendered = this.toYaml(item, indent + 2);
+            return `${pad}- ${rendered.trimStart()}`;
+          }
+          return `${pad}- ${this.formatYamlScalar(item)}`;
+        })
+        .join('\n');
+    }
+    if (value && typeof value === 'object') {
+      return Object.entries(value)
+        .filter(([, v]) => v !== undefined)
+        .map(([key, v]) => {
+          if (v && typeof v === 'object') {
+            const rendered = this.toYaml(v, indent + 2);
+            return `${pad}${key}:\n${rendered}`;
+          }
+          return `${pad}${key}: ${this.formatYamlScalar(v)}`;
+        })
+        .join('\n');
+    }
+    return `${pad}${this.formatYamlScalar(value)}`;
+  }
+
+  private formatYamlScalar(value: any) {
+    if (value === null) return 'null';
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    const text = String(value);
+    if (!text) return "''";
+    if (/^[a-zA-Z0-9._/-]+$/.test(text)) return text;
+    return JSON.stringify(text);
   }
 }

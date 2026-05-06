@@ -24,6 +24,7 @@ import {
   getDcdnDomainStatus,
   getIngressOriginCandidates,
   getIngressSourceCandidatesForLineOnboarding,
+  previewCloneIngressForLineOnboarding,
   cloneIngressForLineOnboarding,
   applyTenantDomainForLineOnboarding,
   provisionDcdnDomain,
@@ -237,6 +238,18 @@ const LineOnboardingPage: React.FC = () => {
   const [sourceIngressError, setSourceIngressError] = useState<string | null>(null);
   const [selectedSourceIngressKey, setSelectedSourceIngressKey] = useState<string>('');
   const [newIngressNameInput, setNewIngressNameInput] = useState('');
+  const [tlsSecretMode, setTlsSecretMode] = useState<'new' | 'reuse' | 'custom'>('new');
+  const [tlsSecretNameInput, setTlsSecretNameInput] = useState('');
+  const [ingressPreviewLoading, setIngressPreviewLoading] = useState(false);
+  const [ingressPreviewError, setIngressPreviewError] = useState<string | null>(null);
+  const [ingressPreviewResult, setIngressPreviewResult] = useState<{
+    newIngressName: string;
+    namespace: string;
+    host: string;
+    sourceIngressName: string;
+    tlsSecretNames?: string[];
+    yaml?: string;
+  } | null>(null);
   const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
   const [superAdminLineZh, setSuperAdminLineZh] = useState('');
   const [superAdminLineEn, setSuperAdminLineEn] = useState('');
@@ -955,6 +968,8 @@ const LineOnboardingPage: React.FC = () => {
         matchedBy: 'manual-candidates',
         candidates,
       });
+      setIngressPreviewResult(null);
+      setIngressPreviewError(null);
       if (candidates.length === 0) {
         setSourceIngressError('未找到可用 source ingress 候选');
         return;
@@ -977,22 +992,99 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const handleCloneIngressApply = async () => {
+  const validateIngressCloneInputs = () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2并确认子域名');
-      return;
+      return null;
     }
     if (!selectedSourceIngressKey) {
       message.warning('请先加载并选择 source ingress');
-      return;
+      return null;
     }
     const newIngressName = newIngressNameInput.trim().toLowerCase();
     if (!newIngressName) {
       message.warning('请先确认新 ingress 名称');
-      return;
+      return null;
     }
     if (!K8S_RESOURCE_NAME_REGEX.test(newIngressName)) {
       message.error('新 ingress 名称格式不合法：只能使用小写字母、数字和中划线，且首尾必须是字母或数字');
+      return null;
+    }
+    const tlsSecretName = tlsSecretNameInput.trim().toLowerCase();
+    if (tlsSecretMode === 'custom' && !tlsSecretName) {
+      message.warning('自定义 TLS Secret 模式下，请填写 secret 名称');
+      return null;
+    }
+    if (tlsSecretName && !K8S_RESOURCE_NAME_REGEX.test(tlsSecretName)) {
+      message.error('TLS Secret 名称格式不合法：只能使用小写字母、数字和中划线，且首尾必须是字母或数字');
+      return null;
+    }
+    const [ns, name] = selectedSourceIngressKey.split('/');
+    const sourceNamespace = ns || 'default';
+    const sourceIngressName = name || '';
+    if (!sourceIngressName) {
+      message.error('source ingress 选择无效，请重新选择');
+      return null;
+    }
+    return { sourceNamespace, sourceIngressName, newIngressName, tlsSecretName };
+  };
+
+  const handlePreviewCloneIngress = async () => {
+    const validated = validateIngressCloneInputs();
+    if (!validated || !confirmedSubdomain) return;
+
+    setIngressPreviewLoading(true);
+    setIngressPreviewError(null);
+    setIngressPreviewResult(null);
+    setIngressApplyError(null);
+    setIngressApplyResult(null);
+    setIngressApplied(false);
+
+    try {
+      const resp = (await previewCloneIngressForLineOnboarding({
+        environmentId: currentEnvironment?.id || '',
+        namespace: validated.sourceNamespace,
+        sourceIngressName: validated.sourceIngressName,
+        newHost: confirmedSubdomain,
+        newIngressName: validated.newIngressName,
+        tlsSecretMode,
+        ...(validated.tlsSecretName ? { tlsSecretName: validated.tlsSecretName } : {}),
+      })) as {
+        success?: boolean;
+        preview?: boolean;
+        data?: {
+          newIngressName: string;
+          namespace: string;
+          host: string;
+          sourceIngressName: string;
+          tlsSecretNames?: string[];
+          yaml?: string;
+        };
+      };
+
+      if (!resp?.data?.newIngressName) {
+        throw new Error('预览结果不完整，请检查后端返回');
+      }
+
+      setIngressPreviewResult(resp.data);
+      message.success('Ingress YAML 预览已生成，请确认后创建');
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || error?.message || '生成 Ingress 预览失败';
+      setIngressPreviewError(msg);
+      message.error(msg);
+    } finally {
+      setIngressPreviewLoading(false);
+    }
+  };
+
+  const handleCloneIngressApply = async () => {
+    const validated = validateIngressCloneInputs();
+    if (!validated || !confirmedSubdomain) return;
+    if (!ingressPreviewResult) {
+      message.warning('请先生成 Ingress YAML 预览并确认');
       return;
     }
 
@@ -1001,21 +1093,18 @@ const LineOnboardingPage: React.FC = () => {
     setIngressApplyResult(null);
 
     try {
-      const [ns, name] = selectedSourceIngressKey.split('/');
-      const sourceNamespace = ns || 'default';
-      const sourceIngressName = name || '';
-      if (!sourceIngressName) {
-        throw new Error('source ingress 选择无效，请重新选择');
-      }
-
       const resp = (await cloneIngressForLineOnboarding({
         environmentId: currentEnvironment?.id || '',
-        namespace: sourceNamespace,
-        sourceIngressName,
+        namespace: validated.sourceNamespace,
+        sourceIngressName: validated.sourceIngressName,
         newHost: confirmedSubdomain,
-        newIngressName,
+        newIngressName: validated.newIngressName,
+        tlsSecretMode,
+        ...(validated.tlsSecretName ? { tlsSecretName: validated.tlsSecretName } : {}),
+        confirmed: true,
       })) as {
         success?: boolean;
+        preview?: boolean;
         data?: { newIngressName: string; namespace: string; host: string };
       };
 
@@ -1658,8 +1747,8 @@ const LineOnboardingPage: React.FC = () => {
           <Alert
             type="info"
             showIcon
-            message="手动选择 source ingress 后执行克隆"
-            description="加载候选后人工选择 source ingress；目标 host 固定使用步骤2生成的新子域名，新 ingress 名称可确认或修改。"
+            message="手动选择 source ingress，先预览 YAML，再确认创建"
+            description="目标 host 固定使用步骤2生成的新子域名。推荐使用“新 TLS Secret”模式，先生成 Ingress YAML 预览，确认无误后再执行创建。"
           />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
@@ -1678,7 +1767,11 @@ const LineOnboardingPage: React.FC = () => {
               style={{ width: 520 }}
               placeholder="请选择用于克隆的 source ingress"
               value={selectedSourceIngressKey || undefined}
-              onChange={(value) => setSelectedSourceIngressKey(value)}
+              onChange={(value) => {
+                setSelectedSourceIngressKey(value);
+                setIngressPreviewResult(null);
+                setIngressPreviewError(null);
+              }}
               disabled={!resolvedIngressSource?.candidates?.length}
               options={(resolvedIngressSource?.candidates || []).map((item) => ({
                 value: `${item.namespace}/${item.name}`,
@@ -1694,24 +1787,86 @@ const LineOnboardingPage: React.FC = () => {
             <Input
               style={{ maxWidth: 520 }}
               value={newIngressNameInput}
-              onChange={(e) => setNewIngressNameInput(e.target.value.trim().toLowerCase())}
+              onChange={(e) => {
+                setNewIngressNameInput(e.target.value.trim().toLowerCase());
+                setIngressPreviewResult(null);
+              }}
               placeholder="例如 nginx-web-app-l01-test-2605040650"
               disabled={!confirmedSubdomain}
             />
             <Text type="secondary">默认规则：nginx-web-app-{'{host前缀}'}-{'{YYMMDDHHmm}'}，可按实际命名规范手动修改。</Text>
           </Space>
+
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text>TLS Secret 策略：</Text>
+            <Radio.Group
+              value={tlsSecretMode}
+              onChange={(e) => {
+                setTlsSecretMode(e.target.value);
+                setIngressPreviewResult(null);
+              }}
+              disabled={!confirmedSubdomain}
+            >
+              <Radio value="new">为新域名生成新 TLS Secret（推荐）</Radio>
+              <Radio value="reuse">复用 source ingress 的 TLS Secret</Radio>
+              <Radio value="custom">自定义 TLS Secret 名称</Radio>
+            </Radio.Group>
+            {tlsSecretMode === 'custom' ? (
+              <Input
+                style={{ maxWidth: 520 }}
+                value={tlsSecretNameInput}
+                onChange={(e) => {
+                  setTlsSecretNameInput(e.target.value.trim().toLowerCase());
+                  setIngressPreviewResult(null);
+                }}
+                placeholder="例如 mggg2f97b9afe7223e-tls"
+                disabled={!confirmedSubdomain}
+              />
+            ) : null}
+          </Space>
+
           {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
+          {ingressPreviewError ? <Alert type="error" showIcon message={ingressPreviewError} /> : null}
+
           <Space>
+            <Button
+              loading={ingressPreviewLoading}
+              onClick={handlePreviewCloneIngress}
+              disabled={!confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
+            >
+              生成 Ingress YAML 预览
+            </Button>
             <Button
               type="primary"
               loading={ingressApplying}
               onClick={handleCloneIngressApply}
-              disabled={!confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
+              disabled={!ingressPreviewResult || ingressPreviewLoading}
             >
-              执行 ingress 克隆应用
+              用户确认后执行创建
             </Button>
             {ingressApplied ? <Tag color="green">已执行</Tag> : null}
           </Space>
+
+          {ingressPreviewResult ? (
+            <Alert
+              type="info"
+              showIcon
+              message="Ingress YAML 预览"
+              description={
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Text>新 Ingress：<Text code>{ingressPreviewResult.newIngressName}</Text></Text>
+                  <Text>Namespace：<Text code>{ingressPreviewResult.namespace}</Text></Text>
+                  <Text>Host：<Text code>{ingressPreviewResult.host}</Text></Text>
+                  <Text>TLS Secret：<Text code>{(ingressPreviewResult.tlsSecretNames || []).join(', ') || '(无)'}</Text></Text>
+                  {ingressPreviewResult.yaml ? (
+                    <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                      {ingressPreviewResult.yaml}
+                    </pre>
+                  ) : null}
+                </Space>
+              }
+            />
+          ) : null}
 
           {ingressApplyError ? <Alert type="error" showIcon message={ingressApplyError} /> : null}
           {ingressApplyResult ? (

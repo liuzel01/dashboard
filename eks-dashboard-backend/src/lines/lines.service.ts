@@ -1328,6 +1328,9 @@ export class LinesService {
       sourceIngressName: string;
       newHost: string;
       newIngressName?: string;
+      tlsSecretMode?: 'new' | 'reuse' | 'custom';
+      tlsSecretName?: string;
+      confirmed?: boolean;
       requestId?: string;
       userId?: string;
       username?: string;
@@ -1356,7 +1359,15 @@ export class LinesService {
 
     const result = await this.ingressGatewayClient.cloneIngress(
       environmentId,
-      { namespace, sourceIngressName, newHost, ...(newIngressName ? { newIngressName } : {}) },
+      {
+        namespace,
+        sourceIngressName,
+        newHost,
+        ...(newIngressName ? { newIngressName } : {}),
+        ...(input.tlsSecretMode ? { tlsSecretMode: input.tlsSecretMode } : {}),
+        ...(input.tlsSecretName ? { tlsSecretName: input.tlsSecretName } : {}),
+        confirmed: input.confirmed === true,
+      },
       {
         requestId: input.requestId,
         userId: input.userId,

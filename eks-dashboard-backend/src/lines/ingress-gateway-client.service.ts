@@ -37,6 +37,21 @@ export class IngressGatewayClientService {
     return this.postToAgent(environmentId, '/v1/ingress/resolve-source', input, context, 'resolve-source');
   }
 
+  async previewCloneIngress(
+    environmentId: string,
+    input: {
+      namespace: string;
+      sourceIngressName: string;
+      newHost: string;
+      newIngressName?: string;
+      tlsSecretMode?: 'new' | 'reuse' | 'custom';
+      tlsSecretName?: string;
+    },
+    context?: IngressGatewayContext,
+  ) {
+    return this.postToAgent(environmentId, '/v1/ingress/clone-preview', input, context, 'clone-preview');
+  }
+
   async cloneIngress(
     environmentId: string,
     input: {
@@ -44,6 +59,9 @@ export class IngressGatewayClientService {
       sourceIngressName: string;
       newHost: string;
       newIngressName?: string;
+      tlsSecretMode?: 'new' | 'reuse' | 'custom';
+      tlsSecretName?: string;
+      confirmed?: boolean;
     },
     context?: IngressGatewayContext,
   ) {

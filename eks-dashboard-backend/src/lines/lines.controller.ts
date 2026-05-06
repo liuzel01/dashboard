@@ -176,6 +176,33 @@ export class LinesController {
     });
   }
 
+  @Post('ingress/clone-preview')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  cloneIngressPreview(
+    @Headers('x-target-environment') environmentId: string,
+    @Req() req: any,
+    @Body() body: CloneIngressDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    if (body.environmentId && body.environmentId !== environmentId) {
+      throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.cloneIngressFromTemplate(environmentId, {
+      namespace: body.namespace,
+      sourceIngressName: body.sourceIngressName,
+      newHost: body.newHost,
+      newIngressName: body.newIngressName,
+      tlsSecretMode: body.tlsSecretMode,
+      tlsSecretName: body.tlsSecretName,
+      confirmed: false,
+      requestId: req?.requestId,
+      userId: req?.user?.id ? String(req.user.id) : undefined,
+      username: req?.user?.username,
+    });
+  }
+
   @Post('ingress/clone')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   cloneIngress(
@@ -194,6 +221,9 @@ export class LinesController {
       sourceIngressName: body.sourceIngressName,
       newHost: body.newHost,
       newIngressName: body.newIngressName,
+      tlsSecretMode: body.tlsSecretMode,
+      tlsSecretName: body.tlsSecretName,
+      confirmed: body.confirmed,
       requestId: req?.requestId,
       userId: req?.user?.id ? String(req.user.id) : undefined,
       username: req?.user?.username,

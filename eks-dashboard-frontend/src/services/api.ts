@@ -424,12 +424,28 @@ export const resolveIngressSourceForLineOnboarding = async (data: {
   return response.data;
 };
 
+export const previewCloneIngressForLineOnboarding = async (data: {
+  environmentId: string;
+  namespace: string;
+  sourceIngressName: string;
+  newHost: string;
+  newIngressName?: string;
+  tlsSecretMode?: 'new' | 'reuse' | 'custom';
+  tlsSecretName?: string;
+}) => {
+  const response = await api.post('/lines/ingress/clone-preview', data);
+  return response.data;
+};
+
 export const cloneIngressForLineOnboarding = async (data: {
   environmentId: string;
   namespace: string;
   sourceIngressName: string;
   newHost: string;
   newIngressName?: string;
+  tlsSecretMode?: 'new' | 'reuse' | 'custom';
+  tlsSecretName?: string;
+  confirmed?: boolean;
 }) => {
   const response = await api.post('/lines/ingress/clone', data);
   return response.data;

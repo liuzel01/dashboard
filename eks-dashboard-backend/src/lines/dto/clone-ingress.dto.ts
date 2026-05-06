@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 const DNS_HOST_REGEX =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -26,4 +26,18 @@ export class CloneIngressDto {
   @IsString()
   @Matches(K8S_RESOURCE_NAME_REGEX, { message: 'newIngressName format is invalid' })
   newIngressName?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['new', 'reuse', 'custom'])
+  tlsSecretMode?: 'new' | 'reuse' | 'custom';
+
+  @IsOptional()
+  @IsString()
+  @Matches(K8S_RESOURCE_NAME_REGEX, { message: 'tlsSecretName format is invalid' })
+  tlsSecretName?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  confirmed?: boolean;
 }
