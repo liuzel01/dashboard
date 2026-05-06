@@ -32,6 +32,7 @@ import {
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import TenantLinesTable from '../components/TenantLinesTable';
+import { buildProbeDetailUrl } from '../utils/probeDashboard';
 
 const { Text, Paragraph, Link } = Typography;
 
@@ -265,6 +266,7 @@ const LineOnboardingPage: React.FC = () => {
   const superAdminLineUrl = confirmedSubdomain ? `https://${confirmedSubdomain}` : '';
   const superAdminOtcUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/otc` : '';
   const connectivityUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/pro/p/symbol/list` : '';
+  const probeDetailUrl = buildProbeDetailUrl(superAdminLineUrl);
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId),
     [tenants, selectedTenantId],
@@ -1196,6 +1198,18 @@ const LineOnboardingPage: React.FC = () => {
     message.success('已确认完成执行 SQL');
   };
 
+  const handleOpenProbeDetail = () => {
+    if (!confirmedSubdomain) {
+      message.warning('请先完成步骤2');
+      return;
+    }
+    if (!probeDetailUrl) {
+      message.error('外部探测详情页地址未配置');
+      return;
+    }
+    window.open(probeDetailUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const handleVerifyExternal = async () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2');
@@ -1947,6 +1961,9 @@ const LineOnboardingPage: React.FC = () => {
             description="接口地址：http://172.31.29.3:3000/api/lines（不是当前系统接口）"
           />
           <Space>
+            <Button onClick={handleOpenProbeDetail} disabled={!confirmedSubdomain || !probeDetailUrl}>
+              打开外部探测详情
+            </Button>
             <Button type="primary" loading={verifying} onClick={handleVerifyExternal} disabled={!sqlConfirmed}>
               调用 /api/lines 验收
             </Button>
@@ -1967,11 +1984,6 @@ const LineOnboardingPage: React.FC = () => {
                   </Space>
                 }
               />
-              <Divider style={{ margin: '8px 0' }} />
-              <Text type="secondary">已解析到的域名样本（最多展示20条）</Text>
-              <Paragraph code style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
-                {(verifyResult.discoveredHosts || []).slice(0, 20).join('\n') || '无'}
-              </Paragraph>
             </>
           ) : null}
         </Space>

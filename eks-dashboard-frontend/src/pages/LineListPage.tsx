@@ -2,6 +2,7 @@ import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { getLineInventory, getTenantsForEnvironment } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { buildProbeDetailUrl } from '../utils/probeDashboard';
 
 type TenantOption = {
   id: number;
@@ -49,8 +50,6 @@ type InventoryResponse = {
 };
 
 const { Text } = Typography;
-const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
-const probeDashboardBaseUrl = String(viteEnv.VITE_PROBE_DASHBOARD_URL || '').trim();
 
 const LineListPage: React.FC = () => {
   const [form] = Form.useForm();
@@ -245,32 +244,6 @@ const LineListPage: React.FC = () => {
     return `${success}/${failed}/${unknown}`;
   };
 
-  const getProbeDetailBaseUrl = () => {
-    if (probeDashboardBaseUrl) return probeDashboardBaseUrl;
-    if (probeSourceApi) {
-      try {
-        const parsed = new URL(probeSourceApi);
-        return `${parsed.protocol}//${parsed.host}`;
-      } catch {
-        // ignore invalid source api
-      }
-    }
-    return '';
-  };
-
-  const buildProbeDetailUrl = (lineUrl?: string | null) => {
-    if (!lineUrl) return null;
-    const base = getProbeDetailBaseUrl();
-    if (!base) return null;
-    try {
-      const url = new URL(base);
-      url.searchParams.set('lineUrl', lineUrl);
-      return url.toString();
-    } catch {
-      return `${base}${base.includes('?') ? '&' : '?'}lineUrl=${encodeURIComponent(lineUrl)}`;
-    }
-  };
-
   const selectedTenantText = query.tenantId
     ? `${query.tenantId} - ${tenants.find((item) => item.id === query.tenantId)?.name || '未知租户'}`
     : '全部租户';
@@ -421,7 +394,7 @@ const LineListPage: React.FC = () => {
                 title: '探测详情',
                 width: 110,
                 render: (_, record) => {
-                  const link = buildProbeDetailUrl(record.lineUrl);
+                  const link = buildProbeDetailUrl(record.lineUrl, probeSourceApi);
                   if (!link) return '-';
                   return (
                     <a href={link} target="_blank" rel="noreferrer">
