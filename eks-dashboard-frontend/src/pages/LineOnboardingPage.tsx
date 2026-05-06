@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Divider,
   Input,
   Modal,
@@ -1354,11 +1355,14 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤1：购买备案域名并确认一级域名" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="先选择目标租户"
-            description="步骤6 的 tenant_domain SQL 会自动使用这里选择的租户 ID。"
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'tenant-help',
+              label: '查看目标租户说明',
+              children: <Alert type="info" showIcon message="先选择目标租户" description="步骤6 的 tenant_domain SQL 会自动使用这里选择的租户 ID。" />,
+            }]}
           />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标租户（当前环境）</Text>
@@ -1455,11 +1459,14 @@ const LineOnboardingPage: React.FC = () => {
             </Button>
             <Text type="secondary">可通过当前环境 kubeContext 拉取 ingress（关键字：nginx-web-app）并选择源站。</Text>
           </Space>
-          <Alert
-            type="info"
-            showIcon
-            message="操作顺序"
-            description="先输入源站域名并点击“1) 创建/复用 DCDN 域名”，成功后再配置 HTTPS/WebSocket/WAF，最后刷新状态。"
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'dcdn-order',
+              label: '查看操作顺序 / 风险提示',
+              children: <Alert type="info" showIcon message="操作顺序" description="先输入源站域名并点击“1) 创建/复用 DCDN 域名”，成功后再配置 HTTPS/WebSocket/WAF，最后刷新状态。" />,
+            }]}
           />
           <Space>
             <Button
@@ -1742,11 +1749,14 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤4：Ingress 克隆并应用（自动）" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="手动选择 source ingress，先预览 YAML，再确认创建"
-            description="目标 host 固定使用步骤2生成的新子域名。推荐使用“新 TLS Secret”模式，先生成 Ingress YAML 预览，确认无误后再执行创建。"
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'ingress-clone-help',
+              label: '查看 Ingress 克隆说明',
+              children: <Alert type="info" showIcon message="手动选择 source ingress，先预览 YAML，再确认创建" description="目标 host 固定使用步骤2生成的新子域名。推荐使用“新 TLS Secret”模式，先生成 Ingress YAML 预览，确认无误后再执行创建。" />,
+            }]}
           />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
@@ -1844,9 +1854,19 @@ const LineOnboardingPage: React.FC = () => {
                   />
                   <Text type="secondary">如需覆盖预览中的 TLS Secret，可在这里修改；确认创建时会以此名称为准。</Text>
                   {ingressPreviewResult.yaml ? (
-                    <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                      {ingressPreviewResult.yaml}
-                    </pre>
+                    <Collapse
+                      ghost
+                      size="small"
+                      items={[{
+                        key: 'ingress-yaml-detail',
+                        label: '展开查看完整 YAML',
+                        children: (
+                          <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                            {ingressPreviewResult.yaml}
+                          </pre>
+                        ),
+                      }]}
+                    />
                   ) : null}
                 </Space>
               }
@@ -2023,14 +2043,21 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤6：在环境平台数据库新增 tenant_domain 数据" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Text type="secondary">
-            tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
-          </Text>
-          <Alert
-            type="warning"
-            showIcon
-            message="测试阶段已放开 Step6 前置限制"
-            description="当前只要求已选择租户并确认子域名，不再强制要求先完成步骤5联通性检查；生产流程是否恢复限制后续再定。"
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'tenant-domain-help',
+              label: '查看 tenant_domain 写入说明 / 测试阶段限制',
+              children: (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text type="secondary">
+                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2确认子域名。推荐使用自动写入，复制 SQL/手工确认保留为备用。
+                  </Text>
+                  <Alert type="warning" showIcon message="测试阶段已放开 Step6 前置限制" description="当前只要求已选择租户并确认子域名，不再强制要求先完成步骤5联通性检查；生产流程是否恢复限制后续再定。" />
+                </Space>
+              ),
+            }]}
           />
           <Text>
             目标租户：
@@ -2042,9 +2069,14 @@ const LineOnboardingPage: React.FC = () => {
               <Text type="warning">未选择（请回到步骤1选择）</Text>
             )}
           </Text>
-          <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-            {insertSql}
-          </Paragraph>
+          <Collapse
+            size="small"
+            items={[{
+              key: 'tenant-domain-sql',
+              label: '展开查看 / 复制备用 SQL',
+              children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph>,
+            }]}
+          />
           <Space wrap>
             <Button
               type="primary"
@@ -2094,11 +2126,14 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤7：外部 API 验收">
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="调用外部系统接口进行验收"
-            description="接口地址：http://172.31.29.3:3000/api/lines（不是当前系统接口）"
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'external-verify-help',
+              label: '查看外部 API 验收说明',
+              children: <Alert type="info" showIcon message="调用外部系统接口进行验收" description="接口地址：http://172.31.29.3:3000/api/lines（不是当前系统接口）" />,
+            }]}
           />
           <Space>
             <Button onClick={handleOpenProbeDetail} disabled={!confirmedSubdomain || !probeDetailUrl}>
