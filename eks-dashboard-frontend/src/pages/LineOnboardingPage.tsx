@@ -710,6 +710,7 @@ const LineOnboardingPage: React.FC = () => {
       setIngressCandidatesError(msg);
       setIngressCandidatesOpen(true);
       message.error(msg);
+      return false;
     } finally {
       setIngressCandidatesLoading(false);
     }
@@ -768,6 +769,7 @@ const LineOnboardingPage: React.FC = () => {
       setDcdnAutoResult(null);
       setDcdnConfirmed(false);
       message.error(msg);
+      return false;
     } finally {
       setDcdnProvisioning(false);
     }
@@ -827,6 +829,7 @@ const LineOnboardingPage: React.FC = () => {
         : backendMsg || '刷新 DCDN 状态失败';
       setDcdnAutoError(msg);
       message.error(msg);
+      return false;
     } finally {
       setDcdnRefreshing(false);
     }
@@ -925,6 +928,7 @@ const LineOnboardingPage: React.FC = () => {
         : backendMsg || '应用 HTTPS/WebSocket/WAF/缓存 失败';
       setSecurityApplyError(msg);
       message.error(msg);
+      return false;
     } finally {
       setDcdnSecurityApplying(false);
     }
@@ -969,6 +973,7 @@ const LineOnboardingPage: React.FC = () => {
       setRoute53SyncError(msg);
       setRoute53PreviewResult(null);
       message.error(msg);
+      return false;
     } finally {
       setRoute53Previewing(false);
     }
@@ -1002,6 +1007,7 @@ const LineOnboardingPage: React.FC = () => {
         : backendMsg || 'Route53 CNAME 同步失败';
       setRoute53SyncError(msg);
       message.error(msg);
+      return false;
     } finally {
       setRoute53Syncing(false);
     }
@@ -1047,7 +1053,7 @@ const LineOnboardingPage: React.FC = () => {
   const handleLoadSourceIngressCandidates = async () => {
     if (!confirmedSubdomain) {
       message.warning('请先生成并确认可用的线路域名');
-      return;
+      return false;
     }
     setSourceIngressLoading(true);
     setSourceIngressError(null);
@@ -1093,6 +1099,7 @@ const LineOnboardingPage: React.FC = () => {
         : backendMsg || error?.message || '加载 source ingress 候选失败';
       setSourceIngressError(msg);
       message.error(msg);
+      return false;
     } finally {
       setSourceIngressLoading(false);
     }
@@ -1180,6 +1187,7 @@ const LineOnboardingPage: React.FC = () => {
         : backendMsg || error?.message || '生成 Ingress 预览失败';
       setIngressPreviewError(msg);
       message.error(msg);
+      return false;
     } finally {
       setIngressPreviewLoading(false);
     }
@@ -1252,22 +1260,22 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect', statusOverride?: boolean, verifyConnectivity = false) => {
-    if (!ingressApplied) {
+  const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect', statusOverride?: boolean, verifyConnectivity = false): Promise<boolean> => {
+    if (mode !== 'update' && !ingressApplied) {
       message.warning('请先完成步骤3：Ingress/TLS 应用');
-      return;
+      return false;
     }
     if (!confirmedSubdomain) {
       message.warning('请先生成并确认可用的线路域名');
-      return;
+      return false;
     }
     if (!selectedTenantId) {
       message.warning('请先在步骤1选择目标租户');
-      return;
+      return false;
     }
     if (!superAdminLineZh.trim() || !superAdminLineEn.trim()) {
       message.error('请先填写线路中文名和英文名');
-      return;
+      return false;
     }
 
     setSuperAdminRegistering(true);
@@ -1293,7 +1301,7 @@ const LineOnboardingPage: React.FC = () => {
         setSuperAdminPendingUpdate(Boolean(result.canUpdate));
         setSuperAdminRegistered(false);
         message.warning(result.message || '检测到已存在差异配置，请确认是否更新');
-        return;
+        return false;
       }
 
       setSuperAdminPendingUpdate(false);
@@ -1303,6 +1311,7 @@ const LineOnboardingPage: React.FC = () => {
       setVerifyResult(null);
       setVerifyError(null);
       message.success(result.connectivityCheck?.ok ? '连通性检查通过，平台线路已启用' : result.message || '超级后台登记成功');
+      return true;
     } catch (error: any) {
       const backendMsg = error?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
@@ -1311,24 +1320,27 @@ const LineOnboardingPage: React.FC = () => {
       setSuperAdminRegisterError(msg);
       setSuperAdminRegistered(false);
       message.error(msg);
+      return false;
     } finally {
       setSuperAdminRegistering(false);
     }
   };
 
   const handleConfirmSuperAdminRegistration = () => {
-    doSuperAdminRegistration('detect');
+    void doSuperAdminRegistration('detect');
   };
 
   const handleUpdateSuperAdminRegistration = () => {
-    doSuperAdminRegistration('update');
+    void doSuperAdminRegistration('update');
   };
 
   const handleActivateSuperAdminLine = async () => {
     setSuperAdminActivating(true);
     try {
-      await doSuperAdminRegistration('update', true, true);
-      setSuperAdminLineStatus(true);
+      const ok = await doSuperAdminRegistration('update', true, true);
+      if (ok) {
+        setSuperAdminLineStatus(true);
+      }
     } finally {
       setSuperAdminActivating(false);
     }
@@ -1367,6 +1379,7 @@ const LineOnboardingPage: React.FC = () => {
         : backendMsg || error?.message || '自动写入 tenant_domain 失败';
       setTenantDomainApplyError(msg);
       message.error(msg);
+      return false;
     } finally {
       setTenantDomainApplying(false);
     }
@@ -1405,6 +1418,7 @@ const LineOnboardingPage: React.FC = () => {
       setVerifyError(msg);
       setVerifyResult(null);
       message.error(msg);
+      return false;
     } finally {
       setVerifying(false);
     }
