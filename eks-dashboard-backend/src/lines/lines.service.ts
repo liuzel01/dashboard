@@ -2843,10 +2843,28 @@ export class LinesService {
       );
     }
 
+    const verifyLookup = await this.findExistingSuperAdminLine(
+      environmentId,
+      normalizedLineUrl,
+      dto.tenantId,
+    );
+    const verified = verifyLookup.existing;
+    if (!verified) {
+      throw new BadRequestException(
+        `平台更新接口已返回成功，但复查未找到该线路：tenantId=${dto.tenantId}, lineUrl=${normalizedLineUrl}`,
+      );
+    }
+    if (verified.status !== payload.status) {
+      throw new BadRequestException(
+        `平台更新接口已返回成功，但复查状态未生效：期望 status=${payload.status}，实际 status=${verified.status}，lineUrl=${normalizedLineUrl}`,
+      );
+    }
+
     return {
       action: 'updated',
       message: `超级后台线路已更新（${updated.path}）`,
       existing: existing.raw,
+      verified: verified.raw,
       payload,
       differences,
       connectivityCheck,
