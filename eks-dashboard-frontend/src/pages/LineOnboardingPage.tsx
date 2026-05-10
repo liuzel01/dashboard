@@ -1260,9 +1260,14 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect', statusOverride?: boolean, verifyConnectivity = false): Promise<boolean> => {
-    if (mode !== 'update' && !ingressApplied) {
-      message.warning('请先完成步骤3：Ingress/TLS 应用');
+  const doSuperAdminRegistration = async (
+    mode: 'detect' | 'update' = 'detect',
+    statusOverride?: boolean,
+    verifyConnectivity = false,
+    options: { showRegisterLoading?: boolean } = {},
+  ): Promise<boolean> => {
+    if (mode !== 'update' && !dcdnConfirmed) {
+      message.warning('请先完成步骤4：DCDN/HTTPS 配置并点击“确认 DCDN 配置”');
       return false;
     }
     if (!confirmedSubdomain) {
@@ -1278,7 +1283,10 @@ const LineOnboardingPage: React.FC = () => {
       return false;
     }
 
-    setSuperAdminRegistering(true);
+    const showRegisterLoading = options.showRegisterLoading ?? true;
+    if (showRegisterLoading) {
+      setSuperAdminRegistering(true);
+    }
     setSuperAdminRegisterError(null);
     if (mode !== 'update') {
       setSuperAdminPendingUpdate(false);
@@ -1322,7 +1330,9 @@ const LineOnboardingPage: React.FC = () => {
       message.error(msg);
       return false;
     } finally {
-      setSuperAdminRegistering(false);
+      if (showRegisterLoading) {
+        setSuperAdminRegistering(false);
+      }
     }
   };
 
@@ -1337,7 +1347,7 @@ const LineOnboardingPage: React.FC = () => {
   const handleActivateSuperAdminLine = async () => {
     setSuperAdminActivating(true);
     try {
-      const ok = await doSuperAdminRegistration('update', true, true);
+      const ok = await doSuperAdminRegistration('update', true, true, { showRegisterLoading: false });
       if (ok) {
         setSuperAdminLineStatus(true);
       }
