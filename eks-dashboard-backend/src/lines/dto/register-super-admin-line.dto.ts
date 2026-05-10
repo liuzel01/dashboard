@@ -31,5 +31,11 @@ export class RegisterSuperAdminLineDto {
   @IsString()
   @IsIn(['detect', 'update'])
   mode?: 'detect' | 'update';
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  verifyConnectivity?: boolean;
 }
+
 

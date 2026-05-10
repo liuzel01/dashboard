@@ -385,6 +385,7 @@ export const registerSuperAdminLine = async (data: {
   status: boolean;
   tenantId: number;
   mode?: 'detect' | 'update';
+  verifyConnectivity?: boolean;
 }) => {
   const response = await api.post('/lines/super-admin/register', data);
   return response.data;
@@ -483,6 +484,28 @@ export const getDcdnCasCertificates = async (rootDomain: string, targetDomain?: 
   return response.data;
 };
 
+
+export const previewRoute53CnameForLineOnboarding = async (data: {
+  rootDomain: string;
+  domainName: string;
+  cnameValue: string;
+  hostedZoneId?: string;
+}) => {
+  const response = await api.post('/lines/route53/cname/preview', data);
+  return response.data;
+};
+
+export const syncRoute53CnameForLineOnboarding = async (data: {
+  rootDomain: string;
+  domainName: string;
+  cnameValue: string;
+  hostedZoneId?: string;
+  confirmed: boolean;
+}) => {
+  const response = await api.post('/lines/route53/cname/sync', data);
+  return response.data;
+};
+
 export const applyDcdnSecurity = async (data: {
   domainName: string;
   sslPub?: string;
@@ -497,6 +520,7 @@ export const applyDcdnSecurity = async (data: {
   enableWaf?: boolean;
   websocketOriginScheme?: 'http' | 'https' | 'follow';
   websocketHeartbeat?: number;
+  enableCache?: boolean;
 }) => {
   const response = await api.post('/lines/dcdn/security/apply', data);
   return response.data;

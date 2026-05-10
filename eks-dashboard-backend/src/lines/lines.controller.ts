@@ -14,6 +14,7 @@ import { CloneIngressDto } from './dto/clone-ingress.dto';
 import { ResolveIngressSourceDto } from './dto/resolve-ingress-source.dto';
 import { ListIngressSourceCandidatesDto } from './dto/list-ingress-source-candidates.dto';
 import { ApplyTenantDomainDto } from './dto/apply-tenant-domain.dto';
+import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
 
 @Controller('lines')
 export class LinesController {
@@ -74,6 +75,31 @@ export class LinesController {
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   listCasCertificates(@Query() query: ListCasCertificatesDto) {
     return this.linesService.listCasCertificates(query.rootDomain, query.targetDomain);
+  }
+
+
+  @Post('route53/cname/preview')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  previewRoute53Cname(
+    @Headers('x-target-environment') environmentId: string,
+    @Body() body: SyncRoute53CnameDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.previewRoute53Cname(environmentId, body);
+  }
+
+  @Post('route53/cname/sync')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  syncRoute53Cname(
+    @Headers('x-target-environment') environmentId: string,
+    @Body() body: SyncRoute53CnameDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.syncRoute53Cname(environmentId, body);
   }
 
   @Post('super-admin/register')

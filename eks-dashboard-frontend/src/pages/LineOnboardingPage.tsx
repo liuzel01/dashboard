@@ -31,6 +31,8 @@ import {
   provisionDcdnDomain,
   registerSuperAdminLine,
   verifyExternalLine,
+  previewRoute53CnameForLineOnboarding,
+  syncRoute53CnameForLineOnboarding,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import TenantLinesTable from '../components/TenantLinesTable';
@@ -61,6 +63,7 @@ type DcdnProvisionResult = {
   httpsEnabled?: boolean | null;
   websocketEnabled?: boolean | null;
   wafEnabled?: boolean | null;
+  cacheRuleConfigured?: boolean | null;
   certName?: string | null;
   certId?: string | null;
   certRegion?: string | null;
@@ -85,9 +88,32 @@ type DcdnSecurityApplyResult = {
   httpsConfigured: boolean;
   websocketConfigured: boolean;
   wafConfigured: boolean;
+  cacheConfigured?: boolean;
   warnings: string[];
   errors: string[];
   status?: Partial<DcdnProvisionResult>;
+  message: string;
+};
+
+
+type Route53CnameResult = {
+  environmentId: string;
+  hostedZoneId: string;
+  hostedZoneName: string;
+  hostedZoneMatchedBy?: string;
+  recordName: string;
+  recordType: 'CNAME';
+  recordValue: string;
+  ttl: number;
+  action: 'none' | 'create' | 'upsert';
+  alreadySynced: boolean;
+  existing?: { type: string; ttl: number | null; values: string[] } | null;
+  conflicts?: Array<{ type: string; ttl: number | null; values: string[] }>;
+  safeToApply: boolean;
+  changed?: boolean;
+  changeId?: string | null;
+  changeStatus?: string | null;
+  submittedAt?: string | null;
   message: string;
 };
 
@@ -121,6 +147,7 @@ type SuperAdminRegisterResult = {
   message: string;
   differences?: Array<{ field: string; existing: any; incoming: any }>;
   canUpdate?: boolean;
+  connectivityCheck?: { ok: boolean; url: string; status: number } | null;
 };
 
 type IngressOriginCandidate = {
@@ -227,8 +254,14 @@ const LineOnboardingPage: React.FC = () => {
   const [selectedCasCertId, setSelectedCasCertId] = useState<number | undefined>(undefined);
   const [enableWebsocket, setEnableWebsocket] = useState(true);
   const [enableWaf, setEnableWaf] = useState(true);
+  const [enableCache, setEnableCache] = useState(true);
   const [securityApplyResult, setSecurityApplyResult] = useState<DcdnSecurityApplyResult | null>(null);
   const [securityApplyError, setSecurityApplyError] = useState<string | null>(null);
+  const [route53Previewing, setRoute53Previewing] = useState(false);
+  const [route53Syncing, setRoute53Syncing] = useState(false);
+  const [route53PreviewResult, setRoute53PreviewResult] = useState<Route53CnameResult | null>(null);
+  const [route53SyncResult, setRoute53SyncResult] = useState<Route53CnameResult | null>(null);
+  const [route53SyncError, setRoute53SyncError] = useState<string | null>(null);
 
   const [ingressApplied, setIngressApplied] = useState(false);
   const [ingressApplying, setIngressApplying] = useState(false);
@@ -255,6 +288,7 @@ const LineOnboardingPage: React.FC = () => {
   const [superAdminLineEn, setSuperAdminLineEn] = useState('');
   const [superAdminLineStatus, setSuperAdminLineStatus] = useState(false);
   const [superAdminRegistering, setSuperAdminRegistering] = useState(false);
+  const [superAdminActivating, setSuperAdminActivating] = useState(false);
   const [superAdminRegisterError, setSuperAdminRegisterError] = useState<string | null>(null);
   const [superAdminRegisterResult, setSuperAdminRegisterResult] = useState<SuperAdminRegisterResult | null>(null);
   const [superAdminPendingUpdate, setSuperAdminPendingUpdate] = useState(false);
@@ -449,6 +483,9 @@ const LineOnboardingPage: React.FC = () => {
     setSelectedCasCertId(undefined);
     setDcdnCname('');
     setDcdnConfirmed(false);
+    setRoute53PreviewResult(null);
+    setRoute53SyncResult(null);
+    setRoute53SyncError(null);
     setIngressApplied(false);
     setSuperAdminRegistered(false);
     setSuperAdminRegisterError(null);
@@ -477,16 +514,20 @@ const LineOnboardingPage: React.FC = () => {
     setSslPubInput('');
     setSslPriInput('');
     setCertNameInput('');
-    setCertSource('cas');
+    setCertSource('k8s-secret');
     setCasCertMode('reuse');
     setCasCertLoading(false);
     setCasCertOptions([]);
     setSelectedCasCertId(undefined);
     setEnableWebsocket(true);
     setEnableWaf(true);
+    setEnableCache(true);
     setSecurityApplyResult(null);
     setSecurityApplyError(null);
     setDcdnConfirmed(false);
+    setRoute53PreviewResult(null);
+    setRoute53SyncResult(null);
+    setRoute53SyncError(null);
     setIngressApplied(false);
     setSuperAdminRegistered(false);
     setSuperAdminRegisterError(null);
@@ -539,6 +580,9 @@ const LineOnboardingPage: React.FC = () => {
     setSecurityApplyError(null);
     setSecurityApplyResult(null);
     setDcdnConfirmed(false);
+    setRoute53PreviewResult(null);
+    setRoute53SyncResult(null);
+    setRoute53SyncError(null);
     setSelectedCasCertId(undefined);
   };
 
@@ -823,6 +867,7 @@ const LineOnboardingPage: React.FC = () => {
           certSource === 'cas' && casCertMode === 'reuse' ? selectedCasCert?.certName : undefined,
         enableWebsocket,
         enableWaf,
+        enableCache,
       })) as DcdnSecurityApplyResult;
       setSecurityApplyResult(result);
       if (result.status) {
@@ -839,6 +884,9 @@ const LineOnboardingPage: React.FC = () => {
           wafEnabled:
             result.status?.wafEnabled ??
             (result.wafConfigured ? true : prev?.wafEnabled ?? null),
+          cacheRuleConfigured:
+            result.status?.cacheRuleConfigured ??
+            (result.cacheConfigured ? true : prev?.cacheRuleConfigured ?? null),
           createdAt: result.status?.createdAt || prev?.createdAt || null,
           updatedAt: result.status?.updatedAt || prev?.updatedAt || null,
           resourceGroupId: result.status?.resourceGroupId || prev?.resourceGroupId || null,
@@ -868,17 +916,94 @@ const LineOnboardingPage: React.FC = () => {
       if (result.errors?.length) {
         message.warning('安全配置部分失败，请查看错误详情');
       } else {
-        message.success('HTTPS/WebSocket/WAF 配置完成');
+        message.success('HTTPS/WebSocket/WAF/缓存 配置完成');
       }
     } catch (error: any) {
       const backendMsg = error?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || '应用 HTTPS/WebSocket/WAF 失败';
+        : backendMsg || '应用 HTTPS/WebSocket/WAF/缓存 失败';
       setSecurityApplyError(msg);
       message.error(msg);
     } finally {
       setDcdnSecurityApplying(false);
+    }
+  };
+
+
+  const buildRoute53Payload = () => {
+    const cnameValue = normalizeDomain(dcdnCname || dcdnAutoResult?.cname || '');
+    return {
+      rootDomain: confirmedRootDomain,
+      domainName: confirmedSubdomain,
+      cnameValue,
+    };
+  };
+
+  const handlePreviewRoute53Cname = async () => {
+    if (!confirmedRootDomain || !confirmedSubdomain) {
+      message.warning('请先完成步骤1和步骤2');
+      return;
+    }
+    const payload = buildRoute53Payload();
+    if (!payload.cnameValue) {
+      message.error('请先获取或录入 DCDN 返回的 CNAME');
+      return;
+    }
+    setRoute53Previewing(true);
+    setRoute53SyncError(null);
+    try {
+      const result = (await previewRoute53CnameForLineOnboarding(payload)) as Route53CnameResult;
+      setRoute53PreviewResult(result);
+      setRoute53SyncResult(null);
+      if (result.safeToApply) {
+        message.success(result.message || 'Route53 CNAME 预览完成');
+      } else {
+        message.warning(result.message || 'Route53 CNAME 存在冲突');
+      }
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || 'Route53 CNAME 预览失败';
+      setRoute53SyncError(msg);
+      setRoute53PreviewResult(null);
+      message.error(msg);
+    } finally {
+      setRoute53Previewing(false);
+    }
+  };
+
+  const handleSyncRoute53Cname = async () => {
+    if (!confirmedRootDomain || !confirmedSubdomain) {
+      message.warning('请先完成步骤1和步骤2');
+      return;
+    }
+    const payload = buildRoute53Payload();
+    if (!payload.cnameValue) {
+      message.error('请先获取或录入 DCDN 返回的 CNAME');
+      return;
+    }
+    setRoute53Syncing(true);
+    setRoute53SyncError(null);
+    try {
+      const result = (await syncRoute53CnameForLineOnboarding({
+        ...payload,
+        confirmed: true,
+      })) as Route53CnameResult;
+      setRoute53PreviewResult(result);
+      setRoute53SyncResult(result);
+      message.success(result.changed ? 'Route53 CNAME 同步已提交' : 'Route53 CNAME 已存在，无需变更');
+      await handleRefreshDcdnStatus();
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || 'Route53 CNAME 同步失败';
+      setRoute53SyncError(msg);
+      message.error(msg);
+    } finally {
+      setRoute53Syncing(false);
     }
   };
 
@@ -1127,7 +1252,7 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect') => {
+  const doSuperAdminRegistration = async (mode: 'detect' | 'update' = 'detect', statusOverride?: boolean, verifyConnectivity = false) => {
     if (!ingressApplied) {
       message.warning('请先完成步骤3：Ingress/TLS 应用');
       return;
@@ -1157,9 +1282,10 @@ const LineOnboardingPage: React.FC = () => {
         otcUrl: superAdminOtcUrl,
         zh: superAdminLineZh.trim(),
         en: superAdminLineEn.trim(),
-        status: superAdminLineStatus,
+        status: statusOverride ?? superAdminLineStatus,
         tenantId: selectedTenantId,
         mode,
+        verifyConnectivity,
       })) as SuperAdminRegisterResult;
 
       setSuperAdminRegisterResult(result);
@@ -1176,7 +1302,7 @@ const LineOnboardingPage: React.FC = () => {
       setSqlConfirmed(false);
       setVerifyResult(null);
       setVerifyError(null);
-      message.success(result.message || '超级后台登记成功');
+      message.success(result.connectivityCheck?.ok ? '连通性检查通过，平台线路已启用' : result.message || '超级后台登记成功');
     } catch (error: any) {
       const backendMsg = error?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
@@ -1196,6 +1322,16 @@ const LineOnboardingPage: React.FC = () => {
 
   const handleUpdateSuperAdminRegistration = () => {
     doSuperAdminRegistration('update');
+  };
+
+  const handleActivateSuperAdminLine = async () => {
+    setSuperAdminActivating(true);
+    try {
+      await doSuperAdminRegistration('update', true, true);
+      setSuperAdminLineStatus(true);
+    } finally {
+      setSuperAdminActivating(false);
+    }
   };
 
   const handleApplyTenantDomain = async () => {
@@ -1593,6 +1729,7 @@ const LineOnboardingPage: React.FC = () => {
             placeholder="线路英文名（en），例如：l01"
             disabled={!ingressApplied}
           />
+          <Alert type="info" showIcon message="平台登记默认停用" description="DCDN / Route53 尚未完整配置前，新线路会以停用状态登记；连通性验证通过后再手动点击下方按钮启用。" />
           <Space>
             <Text>状态（status）</Text>
             <Switch
@@ -1615,7 +1752,7 @@ const LineOnboardingPage: React.FC = () => {
               onClick={handleConfirmSuperAdminRegistration}
               disabled={!ingressApplied || !selectedTenantId || !confirmedSubdomain}
             >
-              确认并自动登记新线路
+              确认并自动登记新线路（默认停用）
             </Button>
             <Button
               onClick={() => {
@@ -1765,7 +1902,7 @@ const LineOnboardingPage: React.FC = () => {
             items={[{
               key: 'dcdn-order',
               label: '查看操作顺序 / 风险提示',
-              children: <Alert type="info" showIcon message="操作顺序" description="先输入源站域名并点击“1) 创建/复用 DCDN 域名”，成功后再配置 HTTPS/WebSocket/WAF，最后刷新状态。" />,
+              children: <Alert type="info" showIcon message="操作顺序" description="先输入源站域名并点击“1) 创建/复用 DCDN 域名”，成功后配置 HTTPS/WebSocket/WAF，再配置缓存，最后同步 Route53 CNAME。" />,
             }]}
           />
           <Space>
@@ -1822,6 +1959,7 @@ const LineOnboardingPage: React.FC = () => {
                   <Text>HTTPS：{toStatusText(dcdnAutoResult.httpsEnabled)}</Text>
                   <Text>WebSocket：{toStatusText(dcdnAutoResult.websocketEnabled)}</Text>
                   <Text>WAF：{toStatusText(dcdnAutoResult.wafEnabled)}</Text>
+                  <Text>缓存 /img：{toStatusText(dcdnAutoResult.cacheRuleConfigured)}</Text>
                   <Text>证书名称：{dcdnAutoResult.certName || '-'}</Text>
                   <Text>证书地域：{dcdnAutoResult.certRegion || '-'}</Text>
                   <Text>证书状态：{toCertStatusText(dcdnAutoResult.certStatus)}</Text>
@@ -1854,7 +1992,7 @@ const LineOnboardingPage: React.FC = () => {
           ) : null}
 
           <Divider style={{ margin: '8px 0' }} />
-          <Text strong>2) 配置 HTTPS/WebSocket/WAF</Text>
+          <Text strong>2) 配置 HTTPS/WebSocket/WAF/缓存</Text>
           <Text type="secondary">
             推荐证书来源：使用步骤3 Ingress/TLS 生成的 K8s TLS Secret，并自动上传到 CAS 后绑定 DCDN。CAS 复用/手动上传保留为高级备用。
           </Text>
@@ -2008,13 +2146,50 @@ const LineOnboardingPage: React.FC = () => {
             <Text>自动接入 WAF</Text>
             <Switch checked={enableWaf} onChange={setEnableWaf} disabled={!dcdnAutoResult?.domainName} />
           </Space>
+          <Text strong>缓存配置</Text>
+          <Space align="center">
+            <Text>配置缓存</Text>
+            <Switch checked={enableCache} onChange={setEnableCache} disabled={!dcdnAutoResult?.domainName} />
+            <Tag color={enableCache ? 'green' : 'default'}>{enableCache ? '默认开启' : '已关闭'}</Tag>
+          </Space>
+          <Alert
+            type="info"
+            showIcon
+            message="默认缓存规则：目录 /img 缓存 1 年"
+            description={
+              <Space direction="vertical" size={2}>
+                <Text>类型：<Text code>目录</Text></Text>
+                <Text>内容：<Text code>/img</Text></Text>
+                <Text>过期时间：<Text code>1 年</Text> / <Text code>31536000 秒</Text></Text>
+                <Text>规则条件：<Text code>不使用</Text></Text>
+                <Collapse
+                  ghost
+                  size="small"
+                  items={[{
+                    key: 'dcdn-cache-detail',
+                    label: '展开查看完整缓存配置',
+                    children: (
+                      <Space direction="vertical" size={2}>
+                        <Text>有限遵循源站缓存策略：关闭</Text>
+                        <Text>忽略源站不缓存标头：关闭</Text>
+                        <Text>客户端跟随 DCDN 缓存策略：关闭</Text>
+                        <Text>强制内容重新验证：关闭（等同于缓存策略 no-store）</Text>
+                        <Text>权重：1</Text>
+                        <Text>API Function：<Text code>path_based_ttl_set</Text></Text>
+                      </Space>
+                    ),
+                  }]}
+                />
+              </Space>
+            }
+          />
           <Button
             type="primary"
             loading={dcdnSecurityApplying}
             onClick={handleApplyDcdnSecurity}
             disabled={!dcdnAutoResult?.domainName}
           >
-            应用 HTTPS / WebSocket / WAF 配置
+            应用 HTTPS / WebSocket / WAF / 缓存配置
           </Button>
           {securityApplyError ? <Alert type="error" showIcon message={securityApplyError} /> : null}
           {securityApplyResult ? (
@@ -2030,6 +2205,7 @@ const LineOnboardingPage: React.FC = () => {
                   <Text>HTTPS 配置：{securityApplyResult.httpsConfigured ? '成功' : '失败'}</Text>
                   <Text>WebSocket 配置：{securityApplyResult.websocketConfigured ? '成功' : '失败'}</Text>
                   <Text>WAF 配置：{securityApplyResult.wafConfigured ? '成功' : '失败'}</Text>
+                  <Text>缓存配置：{enableCache ? (securityApplyResult.cacheConfigured ? '成功' : '失败') : '已关闭'}</Text>
                   {(securityApplyResult.warnings || []).map((item, index) => (
                     <Text key={`security-warning-${index}`} type="warning">
                       {item}
@@ -2044,6 +2220,64 @@ const LineOnboardingPage: React.FC = () => {
               }
             />
           ) : null}
+
+          <Divider style={{ margin: '8px 0' }} />
+          <Text strong>3) 同步 AWS Route53 CNAME</Text>
+          <Alert
+            type="info"
+            showIcon
+            message="将 DCDN CNAME 写入步骤1一级域名对应的 Route53 Hosted Zone"
+            description={
+              <Space direction="vertical" size={2}>
+                <Text>记录名称：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
+                <Text>记录类型：<Text code>CNAME</Text></Text>
+                <Text>记录值：<Text code>{dcdnCname || dcdnAutoResult?.cname || '(等待 DCDN 返回 CNAME)'}</Text></Text>
+                <Text>查找 Zone：<Text code>{confirmedRootDomain || '(步骤1一级域名)'}</Text></Text>
+              </Space>
+            }
+          />
+          <Space>
+            <Button
+              loading={route53Previewing}
+              onClick={handlePreviewRoute53Cname}
+              disabled={route53Syncing || !confirmedSubdomain || !(dcdnCname || dcdnAutoResult?.cname)}
+            >
+              预览 Route53 CNAME
+            </Button>
+            <Button
+              type="primary"
+              loading={route53Syncing}
+              onClick={handleSyncRoute53Cname}
+              disabled={route53Previewing || !confirmedSubdomain || !(dcdnCname || dcdnAutoResult?.cname)}
+            >
+              同步 Route53 CNAME
+            </Button>
+          </Space>
+          {route53SyncError ? <Alert type="error" showIcon message={route53SyncError} /> : null}
+          {route53PreviewResult ? (
+            <Alert
+              type={route53PreviewResult.safeToApply ? (route53PreviewResult.alreadySynced ? 'success' : 'info') : 'warning'}
+              showIcon
+              message={route53PreviewResult.message}
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>Hosted Zone：<Text code>{route53PreviewResult.hostedZoneName}</Text> / <Text code>{route53PreviewResult.hostedZoneId}</Text></Text>
+                  <Text>记录：<Text code>{route53PreviewResult.recordName}</Text> CNAME <Text code>{route53PreviewResult.recordValue}</Text></Text>
+                  <Text>动作：<Tag color={route53PreviewResult.action === 'none' ? 'green' : 'blue'}>{route53PreviewResult.action}</Tag></Text>
+                  {route53PreviewResult.existing ? (
+                    <Text>已有 CNAME：<Text code>{route53PreviewResult.existing.values.join(', ')}</Text></Text>
+                  ) : null}
+                  {route53PreviewResult.conflicts && route53PreviewResult.conflicts.length > 0 ? (
+                    <Text type="danger">冲突记录：{route53PreviewResult.conflicts.map((item) => item.type).join(', ')}</Text>
+                  ) : null}
+                  {route53SyncResult?.changeId ? (
+                    <Text>Change：<Text code>{route53SyncResult.changeId}</Text> / {route53SyncResult.changeStatus || '-'}</Text>
+                  ) : null}
+                </Space>
+              }
+            />
+          ) : null}
+
 
           <Input
             value={dcdnCname}
@@ -2065,22 +2299,18 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤6：连通性验证" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Text type="secondary">非必要步骤：可按需打开业务接口地址进行人工查看，不再作为后续流程前置条件。</Text>
+          <Text type="secondary">点击后由后台请求检查地址；只有返回有效 data 数据时，才会继续启用平台线路。</Text>
           <Text>检查地址：<Text code>{connectivityUrl || 'https://{步骤2子域名}/pro/p/symbol/list'}</Text></Text>
           <Space>
             <Button
-              onClick={() => {
-                if (!connectivityUrl) {
-                  message.warning('请先完成步骤2');
-                  return;
-                }
-                window.open(connectivityUrl, '_blank', 'noopener,noreferrer');
-              }}
-              disabled={!ingressApplied || !superAdminRegistered}
+              type="primary"
+              loading={superAdminActivating}
+              onClick={handleActivateSuperAdminLine}
+              disabled={superAdminLineStatus || !selectedTenantId || !confirmedSubdomain}
             >
-              打开检查地址
+              连通性确认后启用平台线路
             </Button>
-
+            {superAdminLineStatus ? <Tag color="green">平台线路已启用</Tag> : <Tag color="orange">平台线路停用中</Tag>}
           </Space>
         </Space>
       </Card>
@@ -2140,7 +2370,7 @@ const LineOnboardingPage: React.FC = () => {
             rowKey="key"
             loading={ingressCandidatesLoading}
             dataSource={ingressCandidates}
-            pagination={{ pageSize: 8, showSizeChanger: true }}
+            pagination={{ defaultPageSize: 10, pageSizeOptions: ['10', '20', '50'], showSizeChanger: true, showTotal: (total) => `共 ${total} 个候选源站` }}
             rowSelection={{
               type: 'radio',
               selectedRowKeys: selectedIngressCandidateKey ? [selectedIngressCandidateKey] : [],

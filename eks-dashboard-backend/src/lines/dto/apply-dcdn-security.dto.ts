@@ -69,4 +69,10 @@ export class ApplyDcdnSecurityDto {
   @Min(1)
   @Max(300)
   websocketHeartbeat?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  enableCache?: boolean;
 }
+

@@ -4,11 +4,12 @@ import { LinesController } from './lines.controller';
 import { LinesService } from './lines.service';
 import { KubernetesModule } from '../kubernetes/kubernetes.module';
 import { SiteMonitorModule } from '../site-monitor/site-monitor.module';
+import { EnvironmentsModule } from '../environments/environments.module';
 import { IngressGatewayClientService } from './ingress-gateway-client.service';
 import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-client.service';
 
 @Module({
-  imports: [HttpModule, KubernetesModule, SiteMonitorModule],
+  imports: [HttpModule, KubernetesModule, SiteMonitorModule, EnvironmentsModule],
   controllers: [LinesController],
   providers: [LinesService, IngressGatewayClientService, LineOnboardingGatewayClientService],
 })

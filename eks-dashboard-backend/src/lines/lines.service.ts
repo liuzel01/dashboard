@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { ChangeResourceRecordSetsCommand, ListHostedZonesByNameCommand, ListResourceRecordSetsCommand } from '@aws-sdk/client-route-53';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -14,6 +15,8 @@ import { ListLineInventoryDto } from './dto/list-line-inventory.dto';
 import { CentralDatabaseService } from '../site-monitor/central-database.service';
 import { IngressGatewayClientService } from './ingress-gateway-client.service';
 import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-client.service';
+import { EnvironmentsService } from '../environments/environments.service';
+import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -171,6 +174,7 @@ export class LinesService {
     private readonly centralDb: CentralDatabaseService,
     private readonly ingressGatewayClient: IngressGatewayClientService,
     private readonly lineOnboardingGatewayClient: LineOnboardingGatewayClientService,
+    private readonly environmentsService: EnvironmentsService,
   ) {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
@@ -1813,6 +1817,7 @@ export class LinesService {
     let httpsEnabled: boolean | null = null;
     let websocketEnabled: boolean | null = null;
     let wafEnabled: boolean | null = null;
+    let cacheRuleConfigured: boolean | null = null;
     let detailRespRaw: any = null;
     const warnings: string[] = [];
 
@@ -1845,6 +1850,20 @@ export class LinesService {
     }
 
     try {
+      const cacheResp = await client.request(
+        'DescribeDcdnDomainConfigs',
+        {
+          DomainName: domainName,
+          FunctionNames: 'path_based_ttl_set',
+        },
+        { method: 'GET', timeout: 10000 },
+      );
+      cacheRuleConfigured = JSON.stringify(cacheResp).includes('/img');
+    } catch (error) {
+      warnings.push(`读取缓存配置失败：${this.extractAliyunErrorMessage(error, 'unknown error')}`);
+    }
+
+    try {
       const wafResp = await client.request(
         'DescribeDcdnWafDomains',
         {
@@ -1873,6 +1892,7 @@ export class LinesService {
       httpsEnabled,
       websocketEnabled,
       wafEnabled,
+      cacheRuleConfigured,
       warnings,
       detailRespRaw,
       ...cnameCheck,
@@ -1912,6 +1932,7 @@ export class LinesService {
       httpsEnabled: security.httpsEnabled,
       websocketEnabled: security.websocketEnabled,
       wafEnabled: security.wafEnabled,
+      cacheRuleConfigured: security.cacheRuleConfigured,
       certName: security.certName,
       certId: security.certId,
       certRegion: security.certRegion,
@@ -2146,12 +2167,14 @@ export class LinesService {
     const certSource = (dto.certSource || this.dcdnCertSourceDefault) as 'k8s-secret' | 'cas' | 'upload';
     const enableWebsocket = dto.enableWebsocket ?? true;
     const enableWaf = dto.enableWaf ?? true;
+    const enableCache = dto.enableCache ?? true;
 
     const warnings: string[] = [];
     const errors: string[] = [];
     let httpsConfigured = false;
     let websocketConfigured = false;
     let wafConfigured = false;
+    let cacheConfigured = false;
     let appliedCertName = certName;
     let appliedCertId: number | null = null;
     const sslPub = dto.sslPub?.trim() || '';
@@ -2303,6 +2326,38 @@ export class LinesService {
       }
     }
 
+    if (enableCache) {
+      try {
+        await client.request(
+          'BatchSetDcdnDomainConfigs',
+          {
+            DomainNames: domainName,
+            Functions: JSON.stringify([
+              {
+                functionName: 'path_based_ttl_set',
+                functionArgs: [
+                  { argName: 'path', argValue: '/img' },
+                  { argName: 'ttl', argValue: '31536000' },
+                  { argName: 'swift_origin_cache_high', argValue: 'off' },
+                  { argName: 'swift_no_cache_low', argValue: 'off' },
+                  { argName: 'swift_follow_cachetime', argValue: 'off' },
+                  { argName: 'force_revalidate', argValue: 'off' },
+                  { argName: 'weight', argValue: '1' },
+                ],
+              },
+            ]),
+          },
+          {
+            method: 'POST',
+            timeout: 15000,
+          },
+        );
+        cacheConfigured = true;
+      } catch (error) {
+        errors.push(`缓存配置失败：${this.extractAliyunErrorMessage(error, 'unknown error')}`);
+      }
+    }
+
     const status = await this.getDcdnDomainStatusInternal(client, domainName);
     if (certSource === 'upload' && !status.certRegion) {
       warnings.push('当前 DCDN 直传证书模式未返回证书地域。');
@@ -2321,13 +2376,14 @@ export class LinesService {
       httpsConfigured,
       websocketConfigured,
       wafConfigured,
+      cacheConfigured,
       warnings: warnings.concat(status.warnings || []),
       errors,
       status,
       message:
         errors.length === 0
-          ? 'DCDN HTTPS/WebSocket/WAF 配置已完成'
-          : 'DCDN 安全配置部分失败，请根据 errors 排查',
+          ? 'DCDN HTTPS/WebSocket/WAF/缓存 配置已完成'
+          : 'DCDN 配置部分失败，请根据 errors 排查',
     };
   }
 
@@ -2335,6 +2391,50 @@ export class LinesService {
     const host = this.normalizeToHost(raw);
     const cleanPath = fallbackPath ? (fallbackPath.startsWith('/') ? fallbackPath : `/${fallbackPath}`) : '';
     return `https://${host}${cleanPath}`;
+  }
+
+  private responseHasData(payload: any): boolean {
+    if (payload == null) return false;
+    if (Array.isArray(payload)) return payload.length > 0;
+    if (typeof payload !== 'object') return true;
+    if ('data' in payload) {
+      const data = payload.data;
+      if (Array.isArray(data)) return data.length > 0;
+      if (data && typeof data === 'object') return Object.keys(data).length > 0;
+      return Boolean(data);
+    }
+    return false;
+  }
+
+  private async verifyLineConnectivityBeforeActivation(lineUrl: string) {
+    const checkUrl = this.normalizeAbsoluteHttpUrl(lineUrl, '/pro/p/symbol/list');
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(checkUrl, {
+          timeout: 10000,
+          headers: {
+            Accept: 'application/json,text/plain,*/*',
+            'User-Agent': 'dashboard-line-onboarding/1.0',
+          },
+          validateStatus: () => true,
+        }),
+      );
+      const status = Number(response.status);
+      if (status < 200 || status >= 300) {
+        throw new BadRequestException(`连通性检查失败：${checkUrl} 返回 HTTP ${status}`);
+      }
+      if (!this.responseHasData(response.data)) {
+        throw new BadRequestException(`连通性检查失败：${checkUrl} 未返回有效 data 数据`);
+      }
+      return {
+        ok: true,
+        url: checkUrl,
+        status,
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException(`连通性检查失败：${checkUrl} 请求异常：${this.extractAliyunErrorMessage(error, 'unknown error')}`);
+    }
   }
 
   private flattenLineRecords(payload: unknown, output: any[]) {
@@ -2598,6 +2698,9 @@ export class LinesService {
       tenantId: dto.tenantId,
     };
     const mode = dto.mode || 'detect';
+    const connectivityCheck = mode === 'update' && dto.status === true && dto.verifyConnectivity
+      ? await this.verifyLineConnectivityBeforeActivation(normalizedLineUrl)
+      : null;
 
     const lookup = await this.findExistingSuperAdminLine(
       environmentId,
@@ -2632,6 +2735,11 @@ export class LinesService {
     }
 
     if (!existing) {
+      if (mode === 'update') {
+        throw new BadRequestException(
+          '未找到可更新的已有线路。为避免误创建启用状态线路，请先在步骤4以停用状态完成平台登记。',
+        );
+      }
       await this.callSuperAdminService(environmentId, 'POST', this.superAdminAddPath, undefined, payload);
       return {
         action: 'created',
@@ -2689,6 +2797,7 @@ export class LinesService {
       existing: existing.raw,
       payload,
       differences,
+      connectivityCheck,
     };
   }
 
@@ -2714,6 +2823,172 @@ export class LinesService {
         this.collectHosts(value, result),
       );
     }
+  }
+
+
+  private normalizeDnsName(value: string) {
+    return this.normalizeToHost(value).replace(/\.$/, '').toLowerCase();
+  }
+
+  private toRoute53Fqdn(value: string) {
+    const normalized = this.normalizeDnsName(value);
+    return `${normalized}.`;
+  }
+
+  private normalizeHostedZoneId(value?: string | null) {
+    return String(value || '').replace('/hostedzone/', '').trim();
+  }
+
+  private normalizeRoute53RecordValue(value?: string | null) {
+    return String(value || '').trim().toLowerCase().replace(/\.$/, '');
+  }
+
+  private async resolveHostedZoneByRootDomain(environmentId: string, rootDomainRaw: string, hostedZoneIdRaw?: string) {
+    const { route53 } = this.environmentsService.getAwsClients(environmentId);
+    const rootDomain = this.normalizeDnsName(rootDomainRaw);
+    const expectedName = `${rootDomain}.`;
+    const hostedZoneId = this.normalizeHostedZoneId(hostedZoneIdRaw);
+
+    if (hostedZoneId) {
+      return {
+        id: hostedZoneId,
+        name: expectedName,
+        matchedBy: 'provided' as const,
+      };
+    }
+
+    const response = await route53.send(
+      new ListHostedZonesByNameCommand({
+        DNSName: expectedName,
+        MaxItems: 10,
+      }),
+    );
+    const zone = (response.HostedZones || []).find((item) => item.Name === expectedName);
+    if (!zone?.Id) {
+      throw new BadRequestException(`未找到步骤1一级域名对应的 Route53 Hosted Zone：${rootDomain}`);
+    }
+    return {
+      id: this.normalizeHostedZoneId(zone.Id),
+      name: zone.Name || expectedName,
+      matchedBy: 'rootDomain' as const,
+    };
+  }
+
+  async previewRoute53Cname(environmentId: string, dto: SyncRoute53CnameDto) {
+    const domainName = this.normalizeDnsName(dto.domainName);
+    const rootDomain = this.normalizeDnsName(dto.rootDomain);
+    const cnameValue = this.normalizeDnsName(dto.cnameValue);
+    if (!domainName.endsWith(`.${rootDomain}`) && domainName !== rootDomain) {
+      throw new BadRequestException('domainName must be under rootDomain');
+    }
+    if (domainName === rootDomain) {
+      throw new BadRequestException('根域名不能创建 CNAME，请使用子域名');
+    }
+
+    const zone = await this.resolveHostedZoneByRootDomain(environmentId, rootDomain, dto.hostedZoneId);
+    const { route53 } = this.environmentsService.getAwsClients(environmentId);
+    const recordName = this.toRoute53Fqdn(domainName);
+    const cnameFqdn = this.toRoute53Fqdn(cnameValue);
+
+    const existingResp = await route53.send(
+      new ListResourceRecordSetsCommand({
+        HostedZoneId: zone.id,
+        StartRecordName: recordName,
+        StartRecordType: 'CNAME',
+        MaxItems: 10,
+      }),
+    );
+    const sameNameRecords = (existingResp.ResourceRecordSets || []).filter(
+      (record) => record.Name === recordName,
+    );
+    const existingCname = sameNameRecords.find((record) => record.Type === 'CNAME');
+    const conflictingRecords = sameNameRecords.filter((record) => record.Type !== 'CNAME');
+    const existingValues = (existingCname?.ResourceRecords || []).map((item) =>
+      this.normalizeRoute53RecordValue(item.Value),
+    );
+    const desiredValue = this.normalizeRoute53RecordValue(cnameFqdn);
+    const alreadySynced = existingValues.length === 1 && existingValues[0] === desiredValue;
+
+    return {
+      environmentId,
+      hostedZoneId: zone.id,
+      hostedZoneName: zone.name,
+      hostedZoneMatchedBy: zone.matchedBy,
+      recordName,
+      recordType: 'CNAME',
+      recordValue: cnameFqdn,
+      ttl: 300,
+      action: alreadySynced ? 'none' : existingCname ? 'upsert' : 'create',
+      alreadySynced,
+      existing: existingCname
+        ? {
+            type: existingCname.Type,
+            ttl: existingCname.TTL || null,
+            values: existingValues,
+          }
+        : null,
+      conflicts: conflictingRecords.map((record) => ({
+        type: record.Type,
+        ttl: record.TTL || null,
+        values: (record.ResourceRecords || []).map((item) => item.Value || ''),
+      })),
+      safeToApply: conflictingRecords.length === 0,
+      message: alreadySynced
+        ? 'Route53 CNAME 已存在且值一致，无需变更'
+        : conflictingRecords.length > 0
+          ? '存在同名非 CNAME 记录，请先人工处理冲突'
+          : '可以同步 Route53 CNAME',
+    };
+  }
+
+  async syncRoute53Cname(environmentId: string, dto: SyncRoute53CnameDto) {
+    if (!dto.confirmed) {
+      throw new BadRequestException('confirmed=true is required to sync Route53 CNAME');
+    }
+    const preview = await this.previewRoute53Cname(environmentId, dto);
+    if (!preview.safeToApply) {
+      throw new BadRequestException(preview.message);
+    }
+    if (preview.alreadySynced) {
+      return {
+        ...preview,
+        changed: false,
+        changeId: null,
+        changeStatus: null,
+        message: 'Route53 CNAME 已存在且值一致，无需变更',
+      };
+    }
+
+    const { route53 } = this.environmentsService.getAwsClients(environmentId);
+    const response = await route53.send(
+      new ChangeResourceRecordSetsCommand({
+        HostedZoneId: preview.hostedZoneId,
+        ChangeBatch: {
+          Comment: `dashboard line onboarding sync CNAME ${preview.recordName} -> ${preview.recordValue}`,
+          Changes: [
+            {
+              Action: 'UPSERT',
+              ResourceRecordSet: {
+                Name: preview.recordName,
+                Type: 'CNAME',
+                TTL: preview.ttl,
+                ResourceRecords: [{ Value: preview.recordValue }],
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    return {
+      ...preview,
+      action: 'upsert',
+      changed: true,
+      changeId: response.ChangeInfo?.Id || null,
+      changeStatus: response.ChangeInfo?.Status || null,
+      submittedAt: response.ChangeInfo?.SubmittedAt || null,
+      message: 'Route53 CNAME 同步已提交',
+    };
   }
 
   async verifyLineByExternalApi(lineUrl: string) {
