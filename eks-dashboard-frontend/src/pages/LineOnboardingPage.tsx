@@ -1699,198 +1699,7 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤4：平台登记" style={{ marginBottom: 12 }}>
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
-          <Text type="secondary">登记动作会通过当前环境 kubeContext 代理调用集群内超级后台接口。</Text>
-          <Text strong>1) 在超级后台登记新线路</Text>
-          <Text>
-            当前环境：<Text code>{currentEnvironment?.name || currentEnvironment?.id || '-'}</Text>
-          </Text>
-          <Text>
-            大管理端地址：
-            {superAdminUrl ? (
-              <Link href={superAdminUrl} target="_blank" rel="noreferrer">
-                {superAdminUrl}
-              </Link>
-            ) : (
-              <Text type="warning">
-                {superAdminLoading ? '加载中...' : '未配置，请在“环境管理”中设置大管理端地址'}
-              </Text>
-            )}
-          </Text>
-          <Input value={superAdminLineUrl} placeholder="lineUrl（自动生成）" disabled />
-          <Input value={superAdminOtcUrl} placeholder="otcUrl（自动生成）" disabled />
-          <Input
-            value={superAdminLineZh}
-            onChange={(e) => {
-              setSuperAdminLineZh(e.target.value);
-              setSuperAdminRegistered(false);
-              setSuperAdminPendingUpdate(false);
-              setSuperAdminRegisterResult(null);
-            }}
-            placeholder="线路中文名（zh），例如：线路-l01"
-            disabled={!ingressApplied}
-          />
-          <Input
-            value={superAdminLineEn}
-            onChange={(e) => {
-              setSuperAdminLineEn(e.target.value);
-              setSuperAdminRegistered(false);
-              setSuperAdminPendingUpdate(false);
-              setSuperAdminRegisterResult(null);
-            }}
-            placeholder="线路英文名（en），例如：l01"
-            disabled={!ingressApplied}
-          />
-          <Alert type="info" showIcon message="平台登记默认停用" description="DCDN / Route53 尚未完整配置前，新线路会以停用状态登记；连通性验证通过后再手动点击下方按钮启用。" />
-          <Space>
-            <Text>状态（status）</Text>
-            <Switch
-              checked={superAdminLineStatus}
-              checkedChildren="启用"
-              unCheckedChildren="停用"
-              onChange={(checked) => {
-                setSuperAdminLineStatus(checked);
-                setSuperAdminRegistered(false);
-                setSuperAdminPendingUpdate(false);
-                setSuperAdminRegisterResult(null);
-              }}
-              disabled={!ingressApplied}
-            />
-          </Space>
-          <Space>
-            <Button
-              type="primary"
-              loading={superAdminRegistering}
-              onClick={handleConfirmSuperAdminRegistration}
-              disabled={!ingressApplied || !selectedTenantId || !confirmedSubdomain}
-            >
-              确认并自动登记新线路（默认停用）
-            </Button>
-            <Button
-              onClick={() => {
-                if (!selectedTenantId) {
-                  message.warning('请先在步骤1选择目标租户');
-                  return;
-                }
-                setSuperAdminLinesReloadKey((prev) => prev + 1);
-                setSuperAdminLinesOpen(true);
-              }}
-              disabled={!selectedTenantId}
-            >
-              查看当前租户全部线路
-            </Button>
-            {superAdminRegistered ? <Tag color="green">已登记</Tag> : null}
-          </Space>
-          {superAdminRegisterError ? <Alert type="error" showIcon message={superAdminRegisterError} /> : null}
-          {superAdminRegisterResult ? (
-            <Alert
-              type={superAdminRegisterResult.action === 'conflict' ? 'warning' : 'success'}
-              showIcon
-              message={superAdminRegisterResult.message}
-              description={
-                superAdminRegisterResult.action === 'conflict' && superAdminRegisterResult.differences?.length ? (
-                  <Space direction="vertical" size={4}>
-                    {superAdminRegisterResult.differences.map((item) => (
-                      <Text key={`line-diff-${item.field}`}>
-                        {item.field}: 现有=<Text code>{String(item.existing)}</Text>，目标=<Text code>{String(item.incoming)}</Text>
-                      </Text>
-                    ))}
-                    <Space>
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={superAdminRegistering}
-                        onClick={handleUpdateSuperAdminRegistration}
-                        disabled={!superAdminPendingUpdate}
-                      >
-                        更新已有线路
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          setSuperAdminPendingUpdate(false);
-                          setSuperAdminRegisterResult(null);
-                        }}
-                      >
-                        取消
-                      </Button>
-                    </Space>
-                  </Space>
-                ) : null
-              }
-            />
-          ) : null}
-
-          <Divider style={{ margin: '4px 0' }} />
-          <Text strong>2) tenant_domain 自动写入</Text>
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'tenant-domain-help',
-              label: '查看 tenant_domain 写入说明 / 测试阶段限制',
-              children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Text type="secondary">
-                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2线路域名。推荐使用自动写入 tenant_domain。
-                  </Text>
-                  <Alert type="warning" showIcon message="测试阶段已放开平台登记前置限制" description="当前只要求已选择租户并生成可用线路域名；步骤6连通性验证为非必要检查。" />
-                </Space>
-              ),
-            }]}
-          />
-          <Text>
-            目标租户：
-            {selectedTenant ? (
-              <Text code>
-                {selectedTenant.id} - {selectedTenant.name}
-              </Text>
-            ) : (
-              <Text type="warning">未选择（请回到步骤1选择）</Text>
-            )}
-          </Text>
-          <Collapse
-            size="small"
-            items={[{
-              key: 'tenant-domain-sql',
-              label: '展开查看备用 SQL',
-              children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph>,
-            }]}
-          />
-          <Space wrap>
-            <Button
-              type="primary"
-              loading={tenantDomainApplying}
-              onClick={handleApplyTenantDomain}
-              disabled={!selectedTenantId || !confirmedSubdomain}
-            >
-              自动写入 tenant_domain
-            </Button>
-            {tenantDomainApplyResult ? <Tag color="green">已写入</Tag> : null}
-          </Space>
-          {tenantDomainApplyError ? <Alert type="error" showIcon message={tenantDomainApplyError} /> : null}
-          {tenantDomainApplyResult ? (
-            <Alert
-              type="success"
-              showIcon
-              message={tenantDomainApplyResult.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在，未重复写入'}
-              description={
-                <Space direction="vertical" size={2}>
-                  <Text>Action：<Tag color={tenantDomainApplyResult.action === 'created' ? 'green' : 'blue'}>{tenantDomainApplyResult.action}</Tag></Text>
-                  <Text>ID：<Text code>{tenantDomainApplyResult.id || '-'}</Text></Text>
-                  <Text>Tenant ID：<Text code>{tenantDomainApplyResult.tenantId}</Text></Text>
-                  <Text>Domian：<Text code>{tenantDomainApplyResult.domain}</Text></Text>
-                  <Text>Status：<Text code>{tenantDomainApplyResult.status}</Text></Text>
-                </Space>
-              }
-            />
-          ) : null}
-        </Space>
-      </Card>
-
-      <Card title="步骤5：DCDN/HTTPS 配置" style={{ marginBottom: 12 }}>
+      <Card title="步骤4：DCDN/HTTPS 配置" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text type="secondary">
             使用步骤2确认的线路域名：{confirmedSubdomain || '(待确认)'}
@@ -2308,6 +2117,199 @@ const LineOnboardingPage: React.FC = () => {
             </Button>
             {dcdnConfirmed ? <Tag color="green">已确认</Tag> : null}
           </Space>
+        </Space>
+      </Card>
+
+      <Card title="步骤5：平台登记" style={{ marginBottom: 12 }}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
+          <Text type="secondary">登记动作会通过当前环境 kubeContext 代理调用集群内超级后台接口。</Text>
+          <Text strong>1) tenant_domain 自动写入</Text>
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'tenant-domain-help',
+              label: '查看 tenant_domain 写入说明',
+              children: (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text type="secondary">
+                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2线路域名。推荐使用自动写入 tenant_domain。
+                  </Text>
+                  <Alert type="warning" showIcon message="平台登记前先写入 tenant_domain" description="当前只要求已选择租户并生成可用线路域名；建议在步骤4完成 DCDN/HTTPS/Route53 后执行。" />
+                </Space>
+              ),
+            }]}
+          />
+          <Text>
+            目标租户：
+            {selectedTenant ? (
+              <Text code>
+                {selectedTenant.id} - {selectedTenant.name}
+              </Text>
+            ) : (
+              <Text type="warning">未选择（请回到步骤1选择）</Text>
+            )}
+          </Text>
+          <Collapse
+            size="small"
+            items={[{
+              key: 'tenant-domain-sql',
+              label: '展开查看备用 SQL',
+              children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph>,
+            }]}
+          />
+          <Space wrap>
+            <Button
+              type="primary"
+              loading={tenantDomainApplying}
+              onClick={handleApplyTenantDomain}
+              disabled={!dcdnConfirmed || !selectedTenantId || !confirmedSubdomain}
+            >
+              自动写入 tenant_domain
+            </Button>
+            {tenantDomainApplyResult ? <Tag color="green">已写入</Tag> : null}
+          </Space>
+          {tenantDomainApplyError ? <Alert type="error" showIcon message={tenantDomainApplyError} /> : null}
+          {tenantDomainApplyResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message={tenantDomainApplyResult.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在，未重复写入'}
+              description={
+                <Space direction="vertical" size={2}>
+                  <Text>Action：<Tag color={tenantDomainApplyResult.action === 'created' ? 'green' : 'blue'}>{tenantDomainApplyResult.action}</Tag></Text>
+                  <Text>ID：<Text code>{tenantDomainApplyResult.id || '-'}</Text></Text>
+                  <Text>Tenant ID：<Text code>{tenantDomainApplyResult.tenantId}</Text></Text>
+                  <Text>Domian：<Text code>{tenantDomainApplyResult.domain}</Text></Text>
+                  <Text>Status：<Text code>{tenantDomainApplyResult.status}</Text></Text>
+                </Space>
+              }
+            />
+          ) : null}
+
+
+          <Divider style={{ margin: '4px 0' }} />
+          <Text strong>2) 在超级后台登记新线路</Text>
+          <Text>
+            当前环境：<Text code>{currentEnvironment?.name || currentEnvironment?.id || '-'}</Text>
+          </Text>
+          <Text>
+            大管理端地址：
+            {superAdminUrl ? (
+              <Link href={superAdminUrl} target="_blank" rel="noreferrer">
+                {superAdminUrl}
+              </Link>
+            ) : (
+              <Text type="warning">
+                {superAdminLoading ? '加载中...' : '未配置，请在“环境管理”中设置大管理端地址'}
+              </Text>
+            )}
+          </Text>
+          <Input value={superAdminLineUrl} placeholder="lineUrl（自动生成）" disabled />
+          <Input value={superAdminOtcUrl} placeholder="otcUrl（自动生成）" disabled />
+          <Input
+            value={superAdminLineZh}
+            onChange={(e) => {
+              setSuperAdminLineZh(e.target.value);
+              setSuperAdminRegistered(false);
+              setSuperAdminPendingUpdate(false);
+              setSuperAdminRegisterResult(null);
+            }}
+            placeholder="线路中文名（zh），例如：线路-l01"
+            disabled={!dcdnConfirmed}
+          />
+          <Input
+            value={superAdminLineEn}
+            onChange={(e) => {
+              setSuperAdminLineEn(e.target.value);
+              setSuperAdminRegistered(false);
+              setSuperAdminPendingUpdate(false);
+              setSuperAdminRegisterResult(null);
+            }}
+            placeholder="线路英文名（en），例如：l01"
+            disabled={!dcdnConfirmed}
+          />
+          <Alert type="info" showIcon message="平台登记默认停用" description="新线路先以停用状态登记；步骤6 连通性验证通过后再启用。" />
+          <Space>
+            <Text>状态（status）</Text>
+            <Switch
+              checked={superAdminLineStatus}
+              checkedChildren="启用"
+              unCheckedChildren="停用"
+              onChange={(checked) => {
+                setSuperAdminLineStatus(checked);
+                setSuperAdminRegistered(false);
+                setSuperAdminPendingUpdate(false);
+                setSuperAdminRegisterResult(null);
+              }}
+              disabled={!dcdnConfirmed}
+            />
+          </Space>
+          <Space>
+            <Button
+              type="primary"
+              loading={superAdminRegistering}
+              onClick={handleConfirmSuperAdminRegistration}
+              disabled={!dcdnConfirmed || !selectedTenantId || !confirmedSubdomain}
+            >
+              确认并自动登记新线路（默认停用）
+            </Button>
+            <Button
+              onClick={() => {
+                if (!selectedTenantId) {
+                  message.warning('请先在步骤1选择目标租户');
+                  return;
+                }
+                setSuperAdminLinesReloadKey((prev) => prev + 1);
+                setSuperAdminLinesOpen(true);
+              }}
+              disabled={!selectedTenantId}
+            >
+              查看当前租户全部线路
+            </Button>
+            {superAdminRegistered ? <Tag color="green">已登记</Tag> : null}
+          </Space>
+          {superAdminRegisterError ? <Alert type="error" showIcon message={superAdminRegisterError} /> : null}
+          {superAdminRegisterResult ? (
+            <Alert
+              type={superAdminRegisterResult.action === 'conflict' ? 'warning' : 'success'}
+              showIcon
+              message={superAdminRegisterResult.message}
+              description={
+                superAdminRegisterResult.action === 'conflict' && superAdminRegisterResult.differences?.length ? (
+                  <Space direction="vertical" size={4}>
+                    {superAdminRegisterResult.differences.map((item) => (
+                      <Text key={`line-diff-${item.field}`}>
+                        {item.field}: 现有=<Text code>{String(item.existing)}</Text>，目标=<Text code>{String(item.incoming)}</Text>
+                      </Text>
+                    ))}
+                    <Space>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={superAdminRegistering}
+                        onClick={handleUpdateSuperAdminRegistration}
+                        disabled={!superAdminPendingUpdate}
+                      >
+                        更新已有线路
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          setSuperAdminPendingUpdate(false);
+                          setSuperAdminRegisterResult(null);
+                        }}
+                      >
+                        取消
+                      </Button>
+                    </Space>
+                  </Space>
+                ) : null
+              }
+            />
+          ) : null}
+
         </Space>
       </Card>
 
