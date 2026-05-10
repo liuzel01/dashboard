@@ -30,10 +30,17 @@ const { Header, Content, Sider } = Layout;
 const { Text } = Typography;
 
 const EnvironmentSwitcher: React.FC = () => {
-  const { environments, currentEnvironment, setCurrentEnvironment, loading, error } = useContext(EnvironmentContext);
+  const { environments, currentEnvironment, setCurrentEnvironment, refreshEnvironments, loading, error } = useContext(EnvironmentContext);
 
   if (loading) return <Spin size="small" />;
-  if (error) return <Alert message="无法加载环境" type="error" showIcon />;
+  if (error) {
+    return (
+      <Space size={8} style={{ marginRight: 24 }}>
+        <Alert message="无法加载环境" type="error" showIcon />
+        <Button size="small" loading={loading} onClick={() => refreshEnvironments()}>重试</Button>
+      </Space>
+    );
+  }
 
   return (
     <Select
