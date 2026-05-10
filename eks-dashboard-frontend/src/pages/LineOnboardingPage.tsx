@@ -36,7 +36,7 @@ import {
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import TenantLinesTable from '../components/TenantLinesTable';
-import { buildProbeDetailUrl } from '../utils/probeDashboard';
+import { buildProbeDetailUrl, getProbeDetailBaseUrl } from '../utils/probeDashboard';
 
 const { Text, Paragraph, Link } = Typography;
 
@@ -313,7 +313,8 @@ const LineOnboardingPage: React.FC = () => {
   const superAdminLineUrl = confirmedSubdomain ? `https://${confirmedSubdomain}` : '';
   const superAdminOtcUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/otc` : '';
   const connectivityUrl = confirmedSubdomain ? `https://${confirmedSubdomain}/pro/p/symbol/list` : '';
-  const probeDetailUrl = buildProbeDetailUrl(superAdminLineUrl);
+  const probeDetailBaseUrl = getProbeDetailBaseUrl();
+  const probeDetailUrl = buildProbeDetailUrl(superAdminLineUrl) || probeDetailBaseUrl;
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId),
     [tenants, selectedTenantId],
@@ -1396,10 +1397,6 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleOpenProbeDetail = () => {
-    if (!confirmedSubdomain) {
-      message.warning('请先完成步骤2');
-      return;
-    }
     if (!probeDetailUrl) {
       message.error('外部探测详情页地址未配置');
       return;
@@ -2353,7 +2350,7 @@ const LineOnboardingPage: React.FC = () => {
             }]}
           />
           <Space>
-            <Button onClick={handleOpenProbeDetail} disabled={!confirmedSubdomain || !probeDetailUrl}>
+            <Button onClick={handleOpenProbeDetail}>
               打开外部探测详情
             </Button>
             <Button type="primary" loading={verifying} onClick={handleVerifyExternal} disabled={!confirmedSubdomain}>
