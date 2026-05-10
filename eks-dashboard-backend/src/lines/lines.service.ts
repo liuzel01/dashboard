@@ -127,6 +127,11 @@ type SuperAdminLineItem = {
   otcUrl: string;
   status: boolean | null;
   tenantId: number | null;
+  tenantName?: string;
+  financialUrl?: string;
+  csUrl?: string;
+  isDel?: boolean;
+  raw?: any;
 };
 
 @Injectable()
@@ -2474,6 +2479,8 @@ export class LinesService {
               ? false
               : null;
     const id = raw?.id ?? raw?.lineId ?? raw?.line_id ?? null;
+    const isDelRaw = raw?.isDel ?? raw?.is_del ?? false;
+    const isDel = typeof isDelRaw === 'boolean' ? isDelRaw : String(isDelRaw).toLowerCase() === 'true' || String(isDelRaw) === '1';
     return {
       id,
       lineUrl,
@@ -2481,6 +2488,10 @@ export class LinesService {
       zh,
       en,
       tenantId,
+      tenantName: String(raw?.tenantName ?? raw?.tenant_name ?? '').trim(),
+      financialUrl: String(raw?.financialUrl ?? raw?.financial_url ?? '').trim(),
+      csUrl: String(raw?.csUrl ?? raw?.cs_url ?? '').trim(),
+      isDel,
       status,
       raw,
     };
@@ -2589,6 +2600,11 @@ export class LinesService {
         otcUrl: item.otcUrl,
         status: item.status,
         tenantId: item.tenantId,
+        tenantName: item.tenantName,
+        financialUrl: item.financialUrl,
+        csUrl: item.csUrl,
+        isDel: item.isDel,
+        raw: item.raw,
       }));
 
     const totalCandidates = [
@@ -2654,21 +2670,57 @@ export class LinesService {
     }
   }
 
+  private isSuperAdminSuccessResponse(response: any) {
+    const body = response?.body ?? response?.data ?? response;
+    if (body && typeof body === 'object' && 'code' in body) {
+      return Number(body.code) === 0;
+    }
+    return true;
+  }
+
+  private getSuperAdminErrorMessage(response: any) {
+    const body = response?.body ?? response?.data ?? response;
+    return String(body?.msg || body?.message || body?.error || 'unknown error');
+  }
+
+  private buildSuperAdminUpdatePayload(existing: SuperAdminLineItem, payload: any) {
+    return {
+      ...(existing.raw && typeof existing.raw === 'object' ? existing.raw : {}),
+      id: existing.id,
+      tenantId: payload.tenantId,
+      tenantName: existing.tenantName || existing.raw?.tenantName || existing.raw?.tenant_name || '',
+      lineUrl: payload.lineUrl,
+      en: payload.en,
+      zh: payload.zh,
+      status: payload.status,
+      isDel: existing.isDel ?? existing.raw?.isDel ?? false,
+      financialUrl: payload.financialUrl ?? existing.financialUrl ?? existing.raw?.financialUrl ?? '',
+      otcUrl: payload.otcUrl ?? existing.otcUrl ?? existing.raw?.otcUrl ?? '',
+      csUrl: payload.csUrl ?? existing.csUrl ?? existing.raw?.csUrl ?? '',
+    };
+  }
+
   private async tryUpdateSuperAdminLine(
     environmentId: string,
-    existingId: string | number | null,
+    existing: SuperAdminLineItem,
     payload: any,
   ) {
-    const updatePayload = existingId == null ? payload : { ...payload, id: existingId };
+    if (existing.id == null) {
+      return { ok: false, path: null, error: '平台线路记录缺少 id，拒绝自动更新' };
+    }
+    const updatePayload = this.buildSuperAdminUpdatePayload(existing, payload);
     for (const path of this.superAdminUpdatePathCandidates) {
       try {
-        await this.callSuperAdminService(environmentId, 'POST', path, undefined, updatePayload);
-        return { ok: true, path };
+        const response = await this.callSuperAdminService(environmentId, 'POST', path, undefined, updatePayload);
+        if (!this.isSuperAdminSuccessResponse(response)) {
+          return { ok: false, path, error: this.getSuperAdminErrorMessage(response), response, updatePayload };
+        }
+        return { ok: true, path, response, updatePayload };
       } catch (error) {
         // try next candidate endpoint
       }
     }
-    return { ok: false, path: null };
+    return { ok: false, path: null, error: '未匹配到可用更新接口', updatePayload };
   }
 
   async registerSuperAdminLine(environmentId: string, dto: RegisterSuperAdminLineDto) {
@@ -2784,10 +2836,10 @@ export class LinesService {
       };
     }
 
-    const updated = await this.tryUpdateSuperAdminLine(environmentId, existing.id, payload);
+    const updated = await this.tryUpdateSuperAdminLine(environmentId, existing, payload);
     if (!updated.ok) {
       throw new BadRequestException(
-        '检测到已有线路且存在差异，但自动更新失败（未匹配到可用更新接口）。请人工到超级后台修改。',
+        `检测到已有线路且存在差异，但自动更新失败：${updated.error || 'unknown error'}。请人工到超级后台修改。`,
       );
     }
 
@@ -2798,6 +2850,8 @@ export class LinesService {
       payload,
       differences,
       connectivityCheck,
+      updatePath: updated.path,
+      updatePayload: updated.updatePayload,
     };
   }
 
