@@ -1396,14 +1396,6 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const handleOpenProbeDetail = () => {
-    if (!probeDetailUrl) {
-      message.error('外部探测详情页地址未配置');
-      return;
-    }
-    window.open(probeDetailUrl, '_blank', 'noopener,noreferrer');
-  };
-
   const handleVerifyExternal = async () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2');
@@ -2350,7 +2342,11 @@ const LineOnboardingPage: React.FC = () => {
             }]}
           />
           <Space>
-            <Button onClick={handleOpenProbeDetail}>
+            <Button
+              href={probeDetailUrl || 'http://172.31.29.3:3000'}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               打开外部探测详情
             </Button>
             <Button type="primary" loading={verifying} onClick={handleVerifyExternal} disabled={!confirmedSubdomain}>

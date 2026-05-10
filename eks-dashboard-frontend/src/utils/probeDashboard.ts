@@ -1,6 +1,6 @@
 const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
 
-export const probeDashboardBaseUrl = String(viteEnv.VITE_PROBE_DASHBOARD_URL || '').trim();
+export const probeDashboardBaseUrl = String(viteEnv.VITE_PROBE_DASHBOARD_URL || 'http://172.31.29.3:3000').trim();
 
 export const getProbeDetailBaseUrl = (probeSourceApi?: string | null) => {
   if (probeDashboardBaseUrl) return probeDashboardBaseUrl;
