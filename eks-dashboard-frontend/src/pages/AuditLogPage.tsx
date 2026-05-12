@@ -126,6 +126,7 @@ const AuditLogPage: React.FC = () => {
     { title: '环境', dataIndex: 'environment_id', width: 120, render: (v) => v || '-' },
     { title: '方法', dataIndex: 'method', width: 80, render: (v) => v ? <Tag>{v}</Tag> : '-' },
     { title: '操作', dataIndex: 'path', width: 240, render: (_, row) => renderOperation(row) },
+    { title: '操作名称', dataIndex: 'action_name', width: 160, render: (_, row) => row.action_name || row.action || '-' },
     { title: '资源', dataIndex: 'target_id', ellipsis: true, render: (_, row) => row.target_id || row.target_type || '-' },
     { title: '状态', dataIndex: 'status', width: 100, render: (v) => <Tag color={v === 'failed' ? 'red' : 'green'}>{v || '-'}</Tag> },
     { title: '耗时', dataIndex: 'duration_ms', width: 90, render: (v) => v == null ? '-' : `${v}ms` },
