@@ -11,6 +11,7 @@ import SiteMonitorPage from './pages/SiteMonitorPage';
 import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import S3UploadPage from './pages/S3UploadPage';
 import AccountManagementPage from './pages/AccountManagementPage';
+import AuditLogPage from './pages/AuditLogPage';
 import LineOnboardingPage from './pages/LineOnboardingPage';
 import LineListPage from './pages/LineListPage';
 import ForbiddenPage from './pages/ForbiddenPage';
@@ -100,8 +101,19 @@ const AppLayout: React.FC = () => {
     { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
-    { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
+
+  const accessControlPermission = 'menu:access-control';
+
+  const accessControlGroup: NonNullable<MenuProps['items']>[number] = {
+    key: '/access-control',
+    label: '账号管理',
+    icon: <TeamOutlined />,
+    children: [
+      { key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link> },
+      { key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link> },
+    ],
+  };
 
   const signalMonitorPermission = 'menu:signal-monitor';
 
@@ -128,6 +140,7 @@ const AppLayout: React.FC = () => {
       label: <Link to={item.key}>{item.label}</Link>,
       disabled: authLoading,
     })),
+    ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
     ...((authLoading || hasPermission(signalMonitorPermission)) ? [signalMonitorGroup] : []),
   ];
 
@@ -147,7 +160,10 @@ const AppLayout: React.FC = () => {
   };
 
   const selectedKey = location.pathname;
-  const openKeys = location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : [];
+  const openKeys = [
+    ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
+    ...(location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : []),
+  ];
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -196,7 +212,9 @@ const AppLayout: React.FC = () => {
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
-              <Route path="/access-control" element={<ProtectedRoute required={['menu:access-control']}><AccountManagementPage /></ProtectedRoute>} />
+              <Route path="/access-control" element={<Navigate to="/access-control/users" replace />} />
+              <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />
+              <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
               <Route path="/signal-monitor/realtime" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorRealtimePage /></ProtectedRoute>} />
               <Route path="/signal-monitor/history" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorHistoryPage /></ProtectedRoute>} />

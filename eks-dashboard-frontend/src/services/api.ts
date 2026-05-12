@@ -263,6 +263,18 @@ export const uploadS3Object = async (
   return response.data;
 };
 
+
+// Audit Logs
+export const getAuditLogs = async (params: any) => {
+  const response = await api.get('/audit-logs', { params });
+  return response.data;
+};
+
+export const deleteOldAuditLogs = async () => {
+  const response = await api.post('/audit-logs/cleanup');
+  return response.data;
+};
+
 /**
  * 获取当前环境 LB 的安全组规则
  */
