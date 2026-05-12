@@ -45,6 +45,18 @@ const formatBeijingTime = (value?: string) => {
   return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`;
 };
 
+
+const renderNoWrap = (value: React.ReactNode) => (
+  <span style={{ whiteSpace: 'nowrap' }}>{value}</span>
+);
+
+const renderOperation = (row: AuditLog) => {
+  const method = row.method || '';
+  const path = row.path || '';
+  const operation = [method, path].filter(Boolean).join(' ') || row.action || '-';
+  return <Text code>{operation}</Text>;
+};
+
 const renderJson = (value: any) => {
   const parsed = parseJsonMaybe(value);
   if (parsed === null || parsed === undefined || parsed === '') return '-';
@@ -109,11 +121,11 @@ const AuditLogPage: React.FC = () => {
   };
 
   const columns: ColumnsType<AuditLog> = [
-    { title: '时间', dataIndex: 'created_at', width: 170, render: (v) => formatBeijingTime(v) },
+    { title: '时间', dataIndex: 'created_at', width: 190, render: (v) => renderNoWrap(formatBeijingTime(v)) },
     { title: '用户', dataIndex: 'actor_username', width: 140, render: (_, row) => row.actor_display_name || row.actor_username || '-' },
     { title: '环境', dataIndex: 'environment_id', width: 120, render: (v) => v || '-' },
     { title: '方法', dataIndex: 'method', width: 80, render: (v) => v ? <Tag>{v}</Tag> : '-' },
-    { title: '操作', dataIndex: 'action_name', width: 180, render: (_, row) => row.action_name || row.action || '-' },
+    { title: '操作', dataIndex: 'path', width: 240, render: (_, row) => renderOperation(row) },
     { title: '资源', dataIndex: 'target_id', ellipsis: true, render: (_, row) => row.target_id || row.target_type || '-' },
     { title: '状态', dataIndex: 'status', width: 100, render: (v) => <Tag color={v === 'failed' ? 'red' : 'green'}>{v || '-'}</Tag> },
     { title: '耗时', dataIndex: 'duration_ms', width: 90, render: (v) => v == null ? '-' : `${v}ms` },
@@ -182,7 +194,7 @@ const AuditLogPage: React.FC = () => {
             <Descriptions.Item label="用户">{selected.actor_display_name || selected.actor_username || '-'}</Descriptions.Item>
             <Descriptions.Item label="环境">{selected.environment_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="方法/路径">{selected.method} {selected.path}</Descriptions.Item>
-            <Descriptions.Item label="操作">{selected.action_name || selected.action}</Descriptions.Item>
+            <Descriptions.Item label="操作">{renderOperation(selected)}，Action: {selected.action_name || selected.action || '-'}</Descriptions.Item>
             <Descriptions.Item label="资源">{selected.target_type || '-'} / {selected.target_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="状态">{selected.status} / {selected.status_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="耗时">{selected.duration_ms == null ? '-' : `${selected.duration_ms}ms`}</Descriptions.Item>
