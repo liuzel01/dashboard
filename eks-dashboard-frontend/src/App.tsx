@@ -103,6 +103,8 @@ const AppLayout: React.FC = () => {
     { key: '/access-control', label: '账号管理', icon: <TeamOutlined />, permission: 'menu:access-control' },
   ];
 
+  const signalMonitorPermission = 'menu:signal-monitor';
+
   const signalMonitorGroup: NonNullable<MenuProps['items']>[number] = {
     key: '/signal-monitor',
     label: 'Signal Monitor',
@@ -126,7 +128,7 @@ const AppLayout: React.FC = () => {
       label: <Link to={item.key}>{item.label}</Link>,
       disabled: authLoading,
     })),
-    signalMonitorGroup,
+    ...((authLoading || hasPermission(signalMonitorPermission)) ? [signalMonitorGroup] : []),
   ];
 
   if (!authLoading && !isAuthenticated) {
@@ -196,10 +198,10 @@ const AppLayout: React.FC = () => {
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
               <Route path="/access-control" element={<ProtectedRoute required={['menu:access-control']}><AccountManagementPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
-              <Route path="/signal-monitor/realtime" element={<SignalMonitorRealtimePage />} />
-              <Route path="/signal-monitor/history" element={<SignalMonitorHistoryPage />} />
-              <Route path="/signal-monitor/stats" element={<SignalMonitorStatsPage />} />
-              <Route path="/signal-monitor/daily" element={<SignalMonitorDailyPage />} />
+              <Route path="/signal-monitor/realtime" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorRealtimePage /></ProtectedRoute>} />
+              <Route path="/signal-monitor/history" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorHistoryPage /></ProtectedRoute>} />
+              <Route path="/signal-monitor/stats" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorStatsPage /></ProtectedRoute>} />
+              <Route path="/signal-monitor/daily" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorDailyPage /></ProtectedRoute>} />
               <Route path="/403" element={<ForbiddenPage />} />
               <Route path="/" element={<Home />} />
             </Routes>

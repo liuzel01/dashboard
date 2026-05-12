@@ -20,6 +20,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:site-monitors', name: '站点监控' },
   { key: 'menu:access-control', name: '账号管理' },
   { key: 'menu:ai-ops', name: 'AI 运维' },
+  { key: 'menu:signal-monitor', name: 'Signal Monitor' },
   { key: 'aiops:qa', name: 'AI 问答' },
   { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
   { key: 'aiops:incident:analyze', name: '故障定位分析' },
