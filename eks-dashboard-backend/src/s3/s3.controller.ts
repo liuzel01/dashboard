@@ -5,6 +5,7 @@ import {
   Headers,
   Post,
   Get,
+  Query,
   UseInterceptors,
   UploadedFile,
   ValidationPipe,
@@ -54,6 +55,24 @@ export class S3Controller {
     try {
       const buckets = await this.s3Service.listBuckets(envId, env.aws_region);
       return { region: env.aws_region, buckets };
+    } catch (err: any) {
+      throw new BadRequestException(this.toErrorMessage(err));
+    }
+  }
+
+
+  @Get('prefixes')
+  async listPrefixes(
+    @Query('bucket') bucket: string | undefined,
+    @Query('prefix') prefix: string | undefined,
+    @Headers('x-target-environment') environmentId?: string,
+  ) {
+    const envId = this.requireEnvironment(environmentId);
+    if (!bucket) {
+      throw new BadRequestException('bucket is required');
+    }
+    try {
+      return await this.s3Service.listPrefixes(envId, bucket, prefix || '');
     } catch (err: any) {
       throw new BadRequestException(this.toErrorMessage(err));
     }

@@ -3,6 +3,7 @@ import {
   GetBucketLocationCommand,
   HeadObjectCommand,
   ListBucketsCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -41,6 +42,33 @@ export class S3Service {
       .map((r) => r.value)
       .filter((v): v is string => !!v)
       .sort();
+  }
+
+
+  async listPrefixes(environmentId: string, bucket: string, prefix = '') {
+    const client = this.getClient(environmentId);
+    const normalizedPrefix = prefix.trim();
+    const result = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: normalizedPrefix,
+        Delimiter: '/',
+        MaxKeys: 1000,
+      }),
+    );
+
+    const prefixes = (result.CommonPrefixes || [])
+      .map((item) => item.Prefix)
+      .filter((value): value is string => !!value)
+      .sort();
+
+    return {
+      bucket,
+      prefix: normalizedPrefix,
+      prefixes,
+      hasMore: Boolean(result.IsTruncated),
+      nextContinuationToken: result.NextContinuationToken,
+    };
   }
 
   async objectExists(environmentId: string, bucket: string, key: string) {

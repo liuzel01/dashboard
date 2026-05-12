@@ -231,6 +231,12 @@ export const getS3Buckets = async () => {
   return response.data;
 };
 
+
+export const getS3Prefixes = async (bucket: string, prefix?: string) => {
+  const response = await api.get('/s3/prefixes', { params: { bucket, prefix: prefix || '' } });
+  return response.data;
+};
+
 export const checkS3ObjectExists = async (bucket: string, key: string) => {
   const response = await api.post('/s3/object-exists', { bucket, key });
   return response.data;

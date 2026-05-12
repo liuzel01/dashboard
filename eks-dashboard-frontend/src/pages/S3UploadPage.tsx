@@ -1,13 +1,26 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Form, Input, Modal, Select, Space, Upload, message, Progress } from 'antd';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, AutoComplete, Button, Form, Input, Modal, Select, Space, Upload, message, Progress } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { UploadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
-import { checkS3ObjectExists, getS3Buckets, getEnvironmentConfigs, uploadS3Object } from '../services/api';
+import { checkS3ObjectExists, getS3Buckets, getEnvironmentConfigs, getS3Prefixes, uploadS3Object } from '../services/api';
 
 type BucketResponse = {
   region: string;
   buckets: string[];
+};
+
+type PrefixResponse = {
+  bucket: string;
+  prefix: string;
+  prefixes: string[];
+  hasMore?: boolean;
+};
+
+type PrefixOption = {
+  label: string;
+  value: string;
+  disabled?: boolean;
 };
 
 const S3UploadPage: React.FC = () => {
@@ -25,6 +38,10 @@ const S3UploadPage: React.FC = () => {
     file: File;
   } | null>(null);
   const [lastUrl, setLastUrl] = useState<string | null>(null);
+  const [prefixOptions, setPrefixOptions] = useState<PrefixOption[]>([]);
+  const [prefixLoading, setPrefixLoading] = useState(false);
+  const prefixCacheRef = useRef<Record<string, string[]>>({});
+  const prefixSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const envId = currentEnvironment?.id;
 
@@ -52,11 +69,90 @@ const S3UploadPage: React.FC = () => {
   useEffect(() => {
     form.resetFields(['bucket']);
     setBuckets([]);
+    setPrefixOptions([]);
+    prefixCacheRef.current = {};
+    if (prefixSearchTimerRef.current) {
+      clearTimeout(prefixSearchTimerRef.current);
+      prefixSearchTimerRef.current = null;
+    }
     setRegion('');
     setFileList([]);
     fetchBuckets();
     fetchRegionFromConfigs();
   }, [envId]);
+
+  const deriveLookupPrefix = (value?: string) => {
+    const raw = (value || '').trim();
+    if (!raw) return '';
+    if (raw.endsWith('/')) return raw;
+    const lastSlashIndex = raw.lastIndexOf('/');
+    return lastSlashIndex >= 0 ? raw.slice(0, lastSlashIndex + 1) : '';
+  };
+
+  const buildPrefixOptions = (input: string, prefixes: string[]) => {
+    const keyword = (input || '').trim();
+    const matched = keyword
+      ? prefixes.filter((prefix) => prefix.toLowerCase().startsWith(keyword.toLowerCase()))
+      : prefixes;
+
+    if (matched.length === 0) {
+      return [{ label: '当前路径下无匹配子目录，可直接上传到该路径', value: '__empty__', disabled: true }];
+    }
+
+    return matched.map((prefix) => ({ label: prefix, value: prefix }));
+  };
+
+  const loadPrefixOptions = async (input: string) => {
+    const bucket = form.getFieldValue('bucket');
+    if (!bucket) {
+      setPrefixOptions([{ label: '请先选择 S3 Bucket', value: '__no_bucket__', disabled: true }]);
+      return;
+    }
+
+    const lookupPrefix = deriveLookupPrefix(input);
+    const cacheKey = `${bucket}::${lookupPrefix}`;
+    const cached = prefixCacheRef.current[cacheKey];
+    if (cached) {
+      setPrefixOptions(buildPrefixOptions(input, cached));
+      return;
+    }
+
+    setPrefixLoading(true);
+    try {
+      const data: PrefixResponse = await getS3Prefixes(bucket, lookupPrefix);
+      const nextPrefixes = data.prefixes || [];
+      prefixCacheRef.current[cacheKey] = nextPrefixes;
+      setPrefixOptions(buildPrefixOptions(input, nextPrefixes));
+    } catch (e: any) {
+      setPrefixOptions([{ label: getErrorMessage(e) || '加载 S3 路径失败', value: '__error__', disabled: true }]);
+    } finally {
+      setPrefixLoading(false);
+    }
+  };
+
+  const schedulePrefixSearch = (input: string, delay = 300) => {
+    if (prefixSearchTimerRef.current) {
+      clearTimeout(prefixSearchTimerRef.current);
+    }
+    prefixSearchTimerRef.current = setTimeout(() => {
+      loadPrefixOptions(input);
+    }, delay);
+  };
+
+  const handleKeySearch = (value: string) => {
+    schedulePrefixSearch(value);
+  };
+
+  const handleKeyChange = (value: string) => {
+    form.setFieldsValue({ key: value });
+    schedulePrefixSearch(value);
+  };
+
+  const handleSelectPrefix = (value: string) => {
+    if (value.startsWith('__')) return;
+    form.setFieldsValue({ key: value });
+    loadPrefixOptions(value);
+  };
 
   const doUpload = async (bucket: string, key: string, file: File) => {
     setProgress(0);
@@ -159,15 +255,33 @@ const S3UploadPage: React.FC = () => {
             filterOption={(input, option) =>
               (option?.value as string).toLowerCase().includes(input.toLowerCase())
             }
+            onChange={() => {
+              setPrefixOptions([]);
+              prefixCacheRef.current = {};
+            }}
           />
         </Form.Item>
         <Form.Item
           label="Key（对象路径）"
           name="key"
           rules={[{ required: true, message: '请输入对象 Key' }]}
-          extra="支持自定义路径，例如：json/test-txt.json；如果以 / 结尾，将自动拼接文件名"
+          extra="支持手动输入；输入时会自动匹配当前层级下的 S3 目录，不存在也可以直接上传到新路径。如果以 / 结尾，将自动拼接文件名。"
         >
-          <Input />
+          <AutoComplete
+            options={prefixOptions}
+            onSearch={handleKeySearch}
+            onChange={handleKeyChange}
+            onSelect={handleSelectPrefix}
+            onDropdownVisibleChange={(open) => {
+              if (open) {
+                loadPrefixOptions(form.getFieldValue('key') || '');
+              }
+            }}
+            filterOption={false}
+            notFoundContent={prefixLoading ? '加载中...' : '当前路径下无匹配子目录，可直接上传到该路径'}
+          >
+            <Input placeholder="json/" />
+          </AutoComplete>
         </Form.Item>
         <Form.Item label="选择文件" required>
           <Upload
