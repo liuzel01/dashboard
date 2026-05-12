@@ -15,6 +15,7 @@ const exactRules: AuditRule[] = [
   { method: 'GET', path: '/s3/prefixes', action: 's3.listPrefixes', actionName: '查询 S3 路径', menuKey: 'menu:s3-upload', targetType: 's3_prefix', getResourceId: ({ query }) => [query?.bucket, query?.prefix].filter(Boolean).join(':') || null },
   { method: 'GET', path: '/deployments', action: 'deployments.list', actionName: '查询 EKS 部署', menuKey: 'menu:deployments', targetType: 'deployment' },
   { method: 'GET', path: '/environments/configs', action: 'environments.listConfigs', actionName: '查询环境配置', menuKey: 'menu:environments', targetType: 'environment' },
+  { method: 'GET', path: '/lines/inventory', action: 'lines.inventory', actionName: '查询线路库存', menuKey: 'menu:lines', targetType: 'line_inventory', getResourceId: ({ query }) => [query?.tenantId ? `tenant:${query.tenantId}` : null, query?.lineUrl].filter(Boolean).join(':') || null },
   { method: 'POST', path: '/s3/upload', action: 's3.upload', actionName: '上传 S3 对象', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/s3/object-exists', action: 's3.objectExists', actionName: '检查 S3 对象是否存在', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/users', action: 'users.create', actionName: '创建用户', menuKey: 'menu:access-control', targetType: 'user', getResourceId: ({ body }) => body?.username || null },
@@ -33,7 +34,8 @@ const patternRules: Array<AuditRule & { regex: RegExp }> = [
 const isAuditedGet = (path: string) => (
   path.startsWith('/s3/') ||
   path.startsWith('/deployments') ||
-  path.startsWith('/environments')
+  path.startsWith('/environments') ||
+  path.startsWith('/lines')
 );
 
 const shouldFallbackAudit = (method: string, path: string) => {

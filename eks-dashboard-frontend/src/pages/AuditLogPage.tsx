@@ -34,6 +34,17 @@ const parseJsonMaybe = (value: any) => {
   try { return JSON.parse(value); } catch { return value; }
 };
 
+
+const formatBeijingTime = (value?: string) => {
+  if (!value) return '-';
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const date = new Date(`${normalized.replace(/Z$/, '')}Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  const beijing = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`;
+};
+
 const renderJson = (value: any) => {
   const parsed = parseJsonMaybe(value);
   if (parsed === null || parsed === undefined || parsed === '') return '-';
@@ -98,7 +109,7 @@ const AuditLogPage: React.FC = () => {
   };
 
   const columns: ColumnsType<AuditLog> = [
-    { title: '时间', dataIndex: 'created_at', width: 170 },
+    { title: '时间', dataIndex: 'created_at', width: 170, render: (v) => formatBeijingTime(v) },
     { title: '用户', dataIndex: 'actor_username', width: 140, render: (_, row) => row.actor_display_name || row.actor_username || '-' },
     { title: '环境', dataIndex: 'environment_id', width: 120, render: (v) => v || '-' },
     { title: '方法', dataIndex: 'method', width: 80, render: (v) => v ? <Tag>{v}</Tag> : '-' },
@@ -167,7 +178,7 @@ const AuditLogPage: React.FC = () => {
       <Modal title="审计详情" open={!!selected} onCancel={() => setSelected(null)} footer={null} width={900}>
         {selected && (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="时间">{selected.created_at}</Descriptions.Item>
+            <Descriptions.Item label="时间">{formatBeijingTime(selected.created_at)} <Text type="secondary">UTC+8</Text></Descriptions.Item>
             <Descriptions.Item label="用户">{selected.actor_display_name || selected.actor_username || '-'}</Descriptions.Item>
             <Descriptions.Item label="环境">{selected.environment_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="方法/路径">{selected.method} {selected.path}</Descriptions.Item>

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Observable, catchError, tap, throwError } from 'rxjs';
 import type { Request, Response } from 'express';
+import * as jwt from 'jsonwebtoken';
 import { AuditService } from './audit.service';
 import { resolveAuditRule } from './audit.mapper';
 
@@ -20,10 +21,24 @@ const getUserFromRequest = (req: Request) => {
   const anyReq = req as any;
   const user = anyReq.user || anyReq.auth || anyReq.currentUser || null;
   const body = anyReq.body || {};
+  const auth = String(req.headers.authorization || '');
+  const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  const decoded = token ? jwt.decode(token) as any : null;
+
   return {
-    id: user?.id ?? user?.userId ?? user?.sub ?? null,
-    username: user?.username ?? body?.username ?? null,
-    displayName: user?.displayName ?? user?.display_name ?? user?.username ?? body?.username ?? null,
+    id: user?.id ?? user?.userId ?? user?.sub ?? decoded?.sub ?? null,
+    username: user?.username ?? decoded?.username ?? decoded?.preferred_username ?? decoded?.email ?? body?.username ?? null,
+    displayName:
+      user?.displayName ??
+      user?.display_name ??
+      decoded?.displayName ??
+      decoded?.display_name ??
+      decoded?.name ??
+      decoded?.username ??
+      decoded?.preferred_username ??
+      decoded?.email ??
+      body?.username ??
+      null,
   };
 };
 
