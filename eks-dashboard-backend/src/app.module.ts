@@ -18,6 +18,7 @@ import { S3Module } from './s3/s3.module';
 import { AccessControlModule } from './access-control/access-control.module';
 import { AuthModule } from './auth/auth.module';
 import { AiOpsModule } from './ai-ops/ai-ops.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AiOpsModule } from './ai-ops/ai-ops.module';
     AccessControlModule,
     AuthModule,
     AiOpsModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [AppService],
