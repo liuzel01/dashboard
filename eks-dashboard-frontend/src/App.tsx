@@ -168,7 +168,7 @@ const AppLayout: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider breakpoint="lg" collapsedWidth="0">
-        <div className="logo">运维平台</div>
+        <div className="logo">运维支持平台</div>
         <Menu
           theme="dark"
           mode="inline"
