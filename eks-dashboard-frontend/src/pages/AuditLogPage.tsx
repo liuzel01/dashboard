@@ -195,7 +195,7 @@ const AuditLogPage: React.FC = () => {
             <Descriptions.Item label="环境">{selected.environment_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="方法/路径">{selected.method} {selected.path}</Descriptions.Item>
             <Descriptions.Item label="操作">{renderOperation(selected)}</Descriptions.Item>
-            <Descriptions.Item label="操作名称">Action: {selected.action_name || selected.action || '-'}</Descriptions.Item>
+            <Descriptions.Item label="操作名称">{selected.action_name || selected.action || '-'}</Descriptions.Item>
             <Descriptions.Item label="资源">{selected.target_type || '-'} / {selected.target_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="状态">{selected.status} / {selected.status_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="耗时">{selected.duration_ms == null ? '-' : `${selected.duration_ms}ms`}</Descriptions.Item>
