@@ -2,7 +2,7 @@ import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined, RobotOutlined, LineChartOutlined } from '@ant-design/icons';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined, RobotOutlined, LineChartOutlined, BookOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -22,6 +22,7 @@ import SignalMonitorRealtimePage from './pages/SignalMonitorRealtimePage';
 import SignalMonitorHistoryPage from './pages/SignalMonitorHistoryPage';
 import SignalMonitorStatsPage from './pages/SignalMonitorStatsPage';
 import SignalMonitorDailyPage from './pages/SignalMonitorDailyPage';
+import CertStudyPage from './pages/CertStudyPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -129,6 +130,16 @@ const AppLayout: React.FC = () => {
     ],
   };
 
+  const certStudyPermission = 'menu:cert-study';
+  const certStudyGroup: NonNullable<MenuProps['items']>[number] = {
+    key: '/cert-study',
+    label: '证书题库',
+    icon: <BookOutlined />,
+    children: [
+      { key: '/cert-study/sap-c02', label: <Link to="/cert-study/sap-c02">SAP-C02</Link> },
+    ],
+  };
+
   const baseVisibleMenuItems = authLoading
     ? menuItems
     : menuItems.filter((item) => hasPermission(item.permission));
@@ -140,6 +151,7 @@ const AppLayout: React.FC = () => {
       label: <Link to={item.key}>{item.label}</Link>,
       disabled: authLoading,
     })),
+    ...((authLoading || hasPermission(certStudyPermission)) ? [certStudyGroup] : []),
     ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
     ...((authLoading || hasPermission(signalMonitorPermission)) ? [signalMonitorGroup] : []),
   ];
@@ -161,6 +173,7 @@ const AppLayout: React.FC = () => {
 
   const selectedKey = location.pathname;
   const openKeys = [
+    ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
     ...(location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : []),
   ];
@@ -216,6 +229,8 @@ const AppLayout: React.FC = () => {
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
+              <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
+              <Route path="/cert-study/sap-c02" element={<ProtectedRoute required={[certStudyPermission]}><CertStudyPage /></ProtectedRoute>} />
               <Route path="/signal-monitor/realtime" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorRealtimePage /></ProtectedRoute>} />
               <Route path="/signal-monitor/history" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorHistoryPage /></ProtectedRoute>} />
               <Route path="/signal-monitor/stats" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorStatsPage /></ProtectedRoute>} />

@@ -620,6 +620,205 @@ export const testAlert = async () => {
   return resp.data;
 };
 
+export type CertStudyQuestionOption = {
+  key: string;
+  text: string;
+};
+
+export type CertStudyQuestionNote = {
+  id: number;
+  question_id: number;
+  user_id: number | null;
+  note_type: string;
+  title: string | null;
+  content: string;
+  url: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CertStudyQuestionReview = {
+  status: 'new' | 'reviewing' | 'uncertain' | 'mastered' | 'archived' | string;
+  isImportant: boolean;
+  myFinalAnswer: string | null;
+  confidence: 'low' | 'medium' | 'high' | null;
+  reviewCount: number;
+  wrongCount: number;
+  correctStreak: number;
+  lastResult: 'correct' | 'wrong' | 'uncertain' | 'skipped' | null;
+  lastReviewedAt: string | null;
+  nextReviewAt: string | null;
+};
+
+export type CertStudyQuestionListItem = {
+  id: number;
+  examCode: string;
+  source: string;
+  sourceUrl: string | null;
+  sourceQuestionNo: string | null;
+  sourceTopic: string | null;
+  domain: string | null;
+  stem: string;
+  sourceAnswer: string | null;
+  explanation: string | null;
+  rawHtml: string | null;
+  createdAt: string;
+  updatedAt: string;
+  review: CertStudyQuestionReview;
+  tags: string[];
+};
+
+export const getCertStudyQuestions = async (params: {
+  examCode?: string;
+  keyword?: string;
+  status?: string;
+  important?: 0 | 1;
+  source?: string;
+  tag?: string;
+  page?: number;
+  pageSize?: number;
+}) => {
+  const response = await api.get('/cert-study/questions', { params });
+  return response.data as {
+    exam: { id: number; code: string; name: string; provider: string };
+    pagination: { page: number; pageSize: number; total: number };
+    statusSummary: Record<string, number>;
+    availableTags: string[];
+    items: CertStudyQuestionListItem[];
+  };
+};
+
+export const getCertStudyQuestionDetail = async (id: number) => {
+  const response = await api.get(`/cert-study/questions/${id}`);
+  return response.data as {
+    question: CertStudyQuestionListItem;
+    options: CertStudyQuestionOption[];
+    notes: CertStudyQuestionNote[];
+  };
+};
+
+export const createCertStudyQuestion = async (data: {
+  examCode?: string;
+  source: string;
+  sourceUrl?: string;
+  sourceQuestionNo?: string;
+  sourceTopic?: string;
+  domain?: string;
+  stem: string;
+  options: Record<string, string>;
+  sourceAnswer?: string;
+  explanation?: string;
+  rawHtml?: string;
+  tags?: string[];
+}) => {
+  const response = await api.post('/cert-study/questions', data);
+  return response.data as { created: boolean; questionId: number };
+};
+
+export const updateCertStudyQuestion = async (
+  id: number,
+  data: {
+    source?: string;
+    sourceUrl?: string;
+    sourceQuestionNo?: string;
+    sourceTopic?: string;
+    domain?: string;
+    stem?: string;
+    options?: Record<string, string>;
+    sourceAnswer?: string;
+    explanation?: string;
+    rawHtml?: string;
+    tags?: string[];
+  },
+) => {
+  const response = await api.patch(`/cert-study/questions/${id}`, data);
+  return response.data as { ok: boolean; questionId: number };
+};
+
+export const updateCertStudyReview = async (
+  id: number,
+  data: {
+    status?: 'new' | 'reviewing' | 'uncertain' | 'mastered' | 'archived';
+    isImportant?: boolean;
+    myFinalAnswer?: string;
+    confidence?: 'low' | 'medium' | 'high';
+    lastResult?: 'correct' | 'wrong' | 'uncertain' | 'skipped';
+    nextReviewAt?: string | null;
+  },
+) => {
+  const response = await api.patch(`/cert-study/questions/${id}/review`, data);
+  return response.data as { ok: boolean };
+};
+
+export const createCertStudyNote = async (
+  questionId: number,
+  data: { noteType: string; title?: string; content: string; url?: string },
+) => {
+  const response = await api.post(`/cert-study/questions/${questionId}/notes`, data);
+  return response.data as { ok: boolean; noteId: number };
+};
+
+export const updateCertStudyNote = async (
+  noteId: number,
+  data: { noteType?: string; title?: string; content?: string; url?: string },
+) => {
+  const response = await api.patch(`/cert-study/notes/${noteId}`, data);
+  return response.data as { ok: boolean; noteId: number };
+};
+
+export const deleteCertStudyNote = async (noteId: number) => {
+  const response = await api.delete(`/cert-study/notes/${noteId}`);
+  return response.data as { ok: boolean; noteId: number };
+};
+
+export const importCertStudyManual = async (data: {
+  examCode?: string;
+  source: string;
+  sourceUrl?: string;
+  sourceQuestionNo?: string;
+  sourceTopic?: string;
+  domain?: string;
+  stem: string;
+  options: Record<string, string>;
+  sourceAnswer?: string;
+  explanation?: string;
+  rawHtml?: string;
+  tags?: string[];
+}) => {
+  const response = await api.post('/cert-study/import/manual', data);
+  return response.data as {
+    total: number;
+    imported: number;
+    duplicated: number;
+    failed: number;
+    items: Array<{ index: number; questionId?: number; created?: boolean; error?: string }>;
+  };
+};
+
+export const importCertStudyJson = async (items: Array<{
+  examCode?: string;
+  source: string;
+  sourceUrl?: string;
+  sourceQuestionNo?: string;
+  sourceTopic?: string;
+  domain?: string;
+  stem: string;
+  options: Record<string, string>;
+  sourceAnswer?: string;
+  explanation?: string;
+  rawHtml?: string;
+  tags?: string[];
+}>) => {
+  const response = await api.post('/cert-study/import/json', { items });
+  return response.data as {
+    total: number;
+    imported: number;
+    duplicated: number;
+    failed: number;
+    items: Array<{ index: number; questionId?: number; created?: boolean; error?: string }>;
+  };
+};
+
 // Access control (users/roles/permissions)
 export const getAccessUsers = async () => {
   const response = await api.get('/users');
