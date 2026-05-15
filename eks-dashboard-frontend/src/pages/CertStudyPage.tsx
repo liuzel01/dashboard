@@ -54,9 +54,11 @@ const lastResultOptions = [
   { value: 'skipped', label: '跳过' },
 ];
 
+const DEFAULT_NOTE_TYPE = 'ai_explanation';
+
 const noteTypeOptions = [
   { value: 'personal_note', label: '个人备注' },
-  { value: 'ai_explanation', label: 'AI 解释' },
+  { value: 'ai_explanation', label: 'AI解释' },
   { value: 'aws_doc', label: 'AWS 文档' },
   { value: 'wrong_reason', label: '错题原因' },
   { value: 'option_analysis', label: '选项分析' },
@@ -322,6 +324,7 @@ const CertStudyPage: React.FC = () => {
         url: values.url?.trim() || undefined,
       });
       noteForm.resetFields();
+      noteForm.setFieldValue('noteType', DEFAULT_NOTE_TYPE);
       message.success('备注已添加');
       await loadQuestionDetail(selectedId);
     } catch (error) {
@@ -743,7 +746,7 @@ const CertStudyPage: React.FC = () => {
                   label="类型"
                   name="noteType"
                   rules={[{ required: true, message: '请选择备注类型' }]}
-                  initialValue="personal_note"
+                  initialValue={DEFAULT_NOTE_TYPE}
                 >
                   <Select options={noteTypeOptions} />
                 </Form.Item>
@@ -909,6 +912,7 @@ const CertStudyPage: React.FC = () => {
         }}
         onOk={() => void handleSaveEditedNote()}
         okText="保存"
+        zIndex={1200}
       >
         <Form form={editNoteForm} layout="vertical" requiredMark={false}>
           <Form.Item
