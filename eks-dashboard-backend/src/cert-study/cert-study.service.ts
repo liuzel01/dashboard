@@ -99,6 +99,9 @@ export class CertStudyService {
 
   private schemaChecked = false;
   private schemaCheckingPromise: Promise<void> | null = null;
+  private readonly listCacheTtlMs = 30_000;
+  private readonly detailCacheTtlMs = 60_000;
+  private readonly responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 
   constructor(
     private readonly db: PlatformDatabaseService,
@@ -161,6 +164,21 @@ export class CertStudyService {
     const source = (query.source || '').trim();
     const tag = (query.tag || '').trim();
     const important = query.important;
+
+    const cacheKey = this.makeCacheKey('list', actor.userId, {
+      examCode,
+      page,
+      pageSize,
+      keyword,
+      status,
+      source,
+      tag,
+      important,
+    });
+    const cached = this.getCachedResponse<Awaited<ReturnType<CertStudyService['listQuestions']>>>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const wherePack = this.buildQuestionWhere({
       examId: exam.id,
@@ -259,7 +277,7 @@ export class CertStudyService {
       return acc;
     }, {});
 
-    return {
+    const response = {
       exam: { id: exam.id, code: exam.code, name: exam.name, provider: exam.provider },
       pagination: {
         page,
@@ -270,11 +288,19 @@ export class CertStudyService {
       availableTags: tagRows.map((row) => row.tag),
       items: rows.map((row) => this.mapListRow(row)),
     };
+    this.setCachedResponse(cacheKey, response, this.listCacheTtlMs);
+    return response;
   }
 
   async getQuestionDetail(actor: ActorContext, questionId: number) {
     this.ensurePermissions(actor, ['menu:cert-study']);
     await this.ensureSchema();
+
+    const cacheKey = this.makeCacheKey('detail', actor.userId, { questionId });
+    const cached = this.getCachedResponse<Awaited<ReturnType<CertStudyService['getQuestionDetail']>>>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const questionRows = await this.db.query<QuestionRecord[]>(
       `SELECT
@@ -340,11 +366,13 @@ export class CertStudyService {
       [questionId, actor.userId],
     );
 
-    return {
+    const response = {
       question: this.mapListRow(question),
       options: options.map((row) => ({ key: row.option_key, text: row.option_text })),
       notes,
     };
+    this.setCachedResponse(cacheKey, response, this.detailCacheTtlMs);
+    return response;
   }
 
   async createQuestion(actor: ActorContext, dto: CreateQuestionDto) {
@@ -387,6 +415,7 @@ export class CertStudyService {
       return { created: true, questionId };
     });
 
+    this.clearResponseCache();
     return result;
   }
 
@@ -474,6 +503,7 @@ export class CertStudyService {
       }
     });
 
+    this.clearResponseCache();
     return { ok: true, questionId };
   }
 
@@ -565,6 +595,7 @@ export class CertStudyService {
           ],
         );
       }
+      this.clearResponseCache();
       return {
         ok: true,
         review: {
@@ -604,6 +635,7 @@ export class CertStudyService {
         this.nullableTrim(dto.url),
       ],
     );
+    this.clearResponseCache();
     return { ok: true, noteId: Number(result.insertId) };
   }
 
@@ -650,6 +682,7 @@ export class CertStudyService {
       `UPDATE cert_question_notes SET ${fields.join(', ')}, updated_at = UTC_TIMESTAMP() WHERE id = ?`,
       values,
     );
+    this.clearResponseCache();
     return { ok: true, noteId };
   }
 
@@ -669,6 +702,7 @@ export class CertStudyService {
     }
 
     await this.db.query('DELETE FROM cert_question_notes WHERE id = ?', [noteId]);
+    this.clearResponseCache();
     return { ok: true, noteId };
   }
 
@@ -722,6 +756,28 @@ export class CertStudyService {
     return String(examCode || 'SAP-C02')
       .trim()
       .toUpperCase();
+  }
+
+  private makeCacheKey(scope: string, userId: number, payload: Record<string, unknown>) {
+    return `${scope}:${userId}:${JSON.stringify(payload)}`;
+  }
+
+  private getCachedResponse<T>(key: string): T | null {
+    const item = this.responseCache.get(key);
+    if (!item) return null;
+    if (item.expiresAt <= Date.now()) {
+      this.responseCache.delete(key);
+      return null;
+    }
+    return item.value as T;
+  }
+
+  private setCachedResponse<T>(key: string, value: T, ttlMs: number) {
+    this.responseCache.set(key, { expiresAt: Date.now() + ttlMs, value });
+  }
+
+  private clearResponseCache() {
+    this.responseCache.clear();
   }
 
   private ensurePermissions(actor: ActorContext, required: string[]) {

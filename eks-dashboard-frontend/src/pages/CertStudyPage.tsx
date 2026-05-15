@@ -469,19 +469,21 @@ const CertStudyPage: React.FC = () => {
       {
         title: 'ID',
         dataIndex: 'id',
-        width: 80,
+        width: 72,
+        fixed: 'left',
       },
       {
         title: '题号',
         dataIndex: 'sourceQuestionNo',
-        width: 100,
+        width: 88,
         render: (value: string | null) => value || '-',
       },
       {
         title: '题干',
         dataIndex: 'stem',
+        minWidth: 520,
         render: (value: string) => (
-          <Paragraph ellipsis={{ rows: 2, expandable: false }} style={{ marginBottom: 0 }}>
+          <Paragraph ellipsis={{ rows: 3, expandable: false }} style={{ marginBottom: 0 }}>
             {value}
           </Paragraph>
         ),
@@ -489,17 +491,19 @@ const CertStudyPage: React.FC = () => {
       {
         title: '来源',
         dataIndex: 'source',
-        width: 110,
+        width: 88,
+        ellipsis: true,
       },
       {
         title: 'Domain',
         dataIndex: 'domain',
-        width: 180,
+        width: 120,
+        ellipsis: true,
         render: (value: string | null) => value || '-',
       },
       {
         title: '状态',
-        width: 110,
+        width: 92,
         render: (_unused, row) => {
           const color =
             row.review.status === 'mastered'
@@ -520,25 +524,27 @@ const CertStudyPage: React.FC = () => {
       },
       {
         title: '标签',
-        width: 220,
+        width: 132,
         render: (_unused, row) => (
           <Space size={[4, 4]} wrap>
-            {row.tags.map((item) => (
+            {row.tags.slice(0, 2).map((item) => (
               <Tag key={`${row.id}-${item}`}>{item}</Tag>
             ))}
+            {row.tags.length > 2 ? <Tag>{`+${row.tags.length - 2}`}</Tag> : null}
           </Space>
         ),
       },
       {
-        title: '复习/错题',
-        width: 120,
+        title: '复/错',
+        width: 82,
         render: (_unused, row) => `${row.review.reviewCount}/${row.review.wrongCount}`,
       },
       {
         title: '操作',
-        width: 220,
+        width: 190,
+        fixed: 'right',
         render: (_unused, row) => (
-          <Space>
+          <Space size={4}>
             <Button size="small" onClick={() => void openDetail(row.id)}>
               详情
             </Button>
@@ -643,6 +649,8 @@ const CertStudyPage: React.FC = () => {
         loading={loading}
         dataSource={items}
         columns={columns}
+        tableLayout="auto"
+        scroll={{ x: 1280 }}
         pagination={{
           current: page,
           pageSize,
