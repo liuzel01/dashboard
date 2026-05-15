@@ -248,19 +248,28 @@ export const uploadS3Object = async (
   file: File,
   onProgress?: (percent: number) => void,
 ) => {
-  const formData = new FormData();
-  formData.append('bucket', bucket);
-  formData.append('key', key);
-  formData.append('file', file);
-  const response = await api.post('/s3/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  const contentType = file.type || 'application/octet-stream';
+  const presignedResp = await api.post('/s3/presigned-upload', {
+    bucket,
+    key,
+    contentType,
+  });
+
+  await axios.put(presignedResp.data.uploadUrl, file, {
+    headers: { 'Content-Type': presignedResp.data.contentType || contentType },
     onUploadProgress: (evt) => {
       if (!evt.total) return;
       const percent = Math.round((evt.loaded / evt.total) * 100);
       onProgress?.(percent);
     },
   });
-  return response.data;
+
+  return {
+    ok: true,
+    bucket,
+    key,
+    expiresIn: presignedResp.data.expiresIn,
+  };
 };
 
 

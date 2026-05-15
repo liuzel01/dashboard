@@ -18,6 +18,7 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
   { method: 'GET', path: '/deployments', action: 'deployments.list', actionName: '查询 EKS 部署', menuKey: 'menu:deployments', targetType: 'deployment' },
   { method: 'GET', path: '/environments/configs', action: 'environments.listConfigs', actionName: '查询环境配置', menuKey: 'menu:environments', targetType: 'environment' },
   { method: 'GET', path: '/lines/inventory', action: 'lines.inventory', actionName: '查询线路库存', menuKey: 'menu:lines', targetType: 'line_inventory', getResourceId: ({ query }) => [query?.tenantId ? `tenant:${query.tenantId}` : null, query?.lineUrl].filter(Boolean).join(':') || null },
+  { method: 'POST', path: '/s3/presigned-upload', action: 's3.createPresignedUpload', actionName: '生成 S3 直传链接', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/s3/upload', action: 's3.upload', actionName: '上传 S3 对象', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/s3/object-exists', action: 's3.objectExists', actionName: '检查 S3 对象是否存在', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/users', action: 'users.create', actionName: '创建用户', menuKey: 'menu:access-control', targetType: 'user', getResourceId: ({ body }) => body?.username || null },

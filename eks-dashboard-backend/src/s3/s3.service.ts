@@ -7,6 +7,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { EnvironmentsService } from '../environments/environments.service';
 
 @Injectable()
@@ -81,6 +82,30 @@ export class S3Service {
       if (status === 404) return false;
       throw err;
     }
+  }
+
+  async createPresignedUploadUrl(
+    environmentId: string,
+    bucket: string,
+    key: string,
+    contentType?: string,
+  ) {
+    const client = this.getClient(environmentId);
+    const normalizedContentType = contentType?.trim() || 'application/octet-stream';
+    const expiresIn = 60 * 30; // 30 minutes
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: normalizedContentType,
+    });
+    const uploadUrl = await getSignedUrl(client as any, command as any, { expiresIn });
+    return {
+      bucket,
+      key,
+      uploadUrl,
+      expiresIn,
+      contentType: normalizedContentType,
+    };
   }
 
   async uploadObject(

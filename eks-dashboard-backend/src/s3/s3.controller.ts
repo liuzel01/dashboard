@@ -25,6 +25,12 @@ class UploadDto {
   key!: string;
 }
 
+class PresignedUploadDto {
+  bucket!: string;
+  key!: string;
+  contentType?: string;
+}
+
 @Controller('s3')
 export class S3Controller {
   constructor(
@@ -90,6 +96,28 @@ export class S3Controller {
     try {
       const exists = await this.s3Service.objectExists(envId, body.bucket, body.key);
       return { exists };
+    } catch (err: any) {
+      throw new BadRequestException(this.toErrorMessage(err));
+    }
+  }
+
+  @Post('presigned-upload')
+  async createPresignedUpload(
+    @Body(new ValidationPipe({ transform: true })) body: PresignedUploadDto,
+    @Headers('x-target-environment') environmentId: string,
+  ) {
+    const envId = this.requireEnvironment(environmentId);
+    if (!body.bucket || !body.key) {
+      throw new BadRequestException('bucket and key are required');
+    }
+    try {
+      const result = await this.s3Service.createPresignedUploadUrl(
+        envId,
+        body.bucket,
+        body.key,
+        body.contentType,
+      );
+      return { ok: true, ...result };
     } catch (err: any) {
       throw new BadRequestException(this.toErrorMessage(err));
     }
