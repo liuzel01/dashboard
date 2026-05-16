@@ -87,7 +87,10 @@ const renderInlineMarkdown = (text: string) => {
 };
 
 const markdownToHtml = (markdown: string) => {
-  const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+  const lines = String(markdown || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .split('\n');
   const blocks: string[] = [];
   let index = 0;
   while (index < lines.length) {
@@ -134,7 +137,7 @@ const markdownToHtml = (markdown: string) => {
       paragraphLines.push(lines[index]);
       index += 1;
     }
-    blocks.push(`<p>${renderInlineMarkdown(paragraphLines.join('<br/>'))}</p>`);
+    blocks.push(`<p>${paragraphLines.map((item) => renderInlineMarkdown(item)).join('<br/>')}</p>`);
   }
   return blocks.join('');
 };
