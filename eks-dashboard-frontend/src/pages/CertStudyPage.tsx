@@ -799,52 +799,6 @@ const CertStudyPage: React.FC = () => {
               </Space>
             </Card>
 
-            <Card size="small" title="复习状态">
-              <Form form={reviewForm} layout="vertical" requiredMark={false}>
-                <Space wrap style={{ width: '100%' }} align="start">
-                  <Form.Item name="status" label="状态" style={{ minWidth: 140 }}>
-                    <Select options={statusOptions} />
-                  </Form.Item>
-                  <Form.Item name="isImportant" label="重点" valuePropName="checked">
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item name="myFinalAnswer" label="我的最终答案" style={{ minWidth: 140 }}>
-                    <Input placeholder="例如 A,C" />
-                  </Form.Item>
-                  <Form.Item name="confidence" label="把握度" style={{ minWidth: 140 }}>
-                    <Select
-                      allowClear
-                      options={[
-                        { value: 'low', label: 'low' },
-                        { value: 'medium', label: 'medium' },
-                        { value: 'high', label: 'high' },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item name="lastResult" label="本次结果" style={{ minWidth: 140 }}>
-                    <Select allowClear options={lastResultOptions} />
-                  </Form.Item>
-                  <Form.Item name="nextReviewAt" label="下次复习时间" style={{ minWidth: 220 }}>
-                    <DatePicker showTime style={{ width: '100%' }} />
-                  </Form.Item>
-                </Space>
-              </Form>
-              <Space style={{ marginBottom: 8 }}>
-                <Text type="secondary">
-                  已复习 {detail.question.review.reviewCount} 次，错题 {detail.question.review.wrongCount} 次，连续答对{' '}
-                  {detail.question.review.correctStreak} 次
-                </Text>
-              </Space>
-              <Space>
-                <Button type="primary" onClick={() => void handleSaveReview()}>
-                  保存状态
-                </Button>
-                <Text type="secondary">
-                  上次复习：{formatDateTime(detail.question.review.lastReviewedAt)}
-                </Text>
-              </Space>
-            </Card>
-
             <Card size="small" title="备注（支持 Markdown）">
               <Form form={noteForm} layout="vertical" requiredMark={false}>
                 <Form.Item
@@ -917,6 +871,52 @@ const CertStudyPage: React.FC = () => {
                 ))}
               </Space>
             </Card>
+            <Card size="small" title="复习状态">
+              <Form form={reviewForm} layout="vertical" requiredMark={false}>
+                <Space wrap style={{ width: '100%' }} align="start">
+                  <Form.Item name="status" label="状态" style={{ minWidth: 140 }}>
+                    <Select options={statusOptions} />
+                  </Form.Item>
+                  <Form.Item name="isImportant" label="重点" valuePropName="checked">
+                    <Switch />
+                  </Form.Item>
+                  <Form.Item name="myFinalAnswer" label="我的最终答案" style={{ minWidth: 140 }}>
+                    <Input placeholder="例如 A,C" />
+                  </Form.Item>
+                  <Form.Item name="confidence" label="把握度" style={{ minWidth: 140 }}>
+                    <Select
+                      allowClear
+                      options={[
+                        { value: 'low', label: 'low' },
+                        { value: 'medium', label: 'medium' },
+                        { value: 'high', label: 'high' },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item name="lastResult" label="本次结果" style={{ minWidth: 140 }}>
+                    <Select allowClear options={lastResultOptions} />
+                  </Form.Item>
+                  <Form.Item name="nextReviewAt" label="下次复习时间" style={{ minWidth: 220 }}>
+                    <DatePicker showTime style={{ width: '100%' }} />
+                  </Form.Item>
+                </Space>
+              </Form>
+              <Space style={{ marginBottom: 8 }}>
+                <Text type="secondary">
+                  已复习 {detail.question.review.reviewCount} 次，错题 {detail.question.review.wrongCount} 次，连续答对{' '}
+                  {detail.question.review.correctStreak} 次
+                </Text>
+              </Space>
+              <Space>
+                <Button type="primary" onClick={() => void handleSaveReview()}>
+                  保存状态
+                </Button>
+                <Text type="secondary">
+                  上次复习：{formatDateTime(detail.question.review.lastReviewedAt)}
+                </Text>
+              </Space>
+            </Card>
+
           </Space>
         )}
       </Drawer>
