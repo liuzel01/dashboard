@@ -64,6 +64,33 @@ const defaultVisibleColumns: CertStudyColumnKey[] = [
   'actions',
 ];
 
+
+const CERT_STUDY_VISIBLE_COLUMNS_STORAGE_KEY = 'cert-study.visibleColumns.v1';
+const validColumnKeys = new Set<CertStudyColumnKey>([
+  ...columnOptions.map((item) => item.value),
+  'actions',
+]);
+
+const normalizeVisibleColumns = (values: unknown): CertStudyColumnKey[] => {
+  if (!Array.isArray(values)) return defaultVisibleColumns;
+  const next = values.filter((item): item is CertStudyColumnKey =>
+    typeof item === 'string' && validColumnKeys.has(item as CertStudyColumnKey),
+  );
+  const unique = Array.from(new Set<CertStudyColumnKey>([...next, 'actions']));
+  return unique.length > 1 ? unique : defaultVisibleColumns;
+};
+
+const loadVisibleColumns = (): CertStudyColumnKey[] => {
+  if (typeof window === 'undefined') return defaultVisibleColumns;
+  try {
+    const raw = window.localStorage.getItem(CERT_STUDY_VISIBLE_COLUMNS_STORAGE_KEY);
+    if (!raw) return defaultVisibleColumns;
+    return normalizeVisibleColumns(JSON.parse(raw));
+  } catch {
+    return defaultVisibleColumns;
+  }
+};
+
 const statusOptions = [
   { value: 'new', label: '未开始' },
   { value: 'reviewing', label: '复习中' },
@@ -226,13 +253,20 @@ const CertStudyPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [editNoteOpen, setEditNoteOpen] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(defaultVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(loadVisibleColumns);
 
   const [reviewForm] = Form.useForm();
   const [noteForm] = Form.useForm();
   const [editNoteForm] = Form.useForm();
   const [manualImportForm] = Form.useForm();
   const [jsonImportForm] = Form.useForm();
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      CERT_STUDY_VISIBLE_COLUMNS_STORAGE_KEY,
+      JSON.stringify(visibleColumns),
+    );
+  }, [visibleColumns]);
 
   const loadQuestions = useCallback(async () => {
     setLoading(true);
@@ -685,8 +719,7 @@ const CertStudyPage: React.FC = () => {
               options={columnOptions}
               value={visibleColumns.filter((item) => item !== 'actions')}
               onChange={(values) => {
-                const next = values as CertStudyColumnKey[];
-                setVisibleColumns([...next, 'actions']);
+                setVisibleColumns(normalizeVisibleColumns(values));
               }}
             />
           </Space>
