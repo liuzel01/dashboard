@@ -20,6 +20,22 @@ import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
+type DcdnOwnerVerification = {
+  required: boolean;
+  domainName: string;
+  rootDomain: string;
+  verifyType: 'dnsCheck';
+  recordType: 'TXT';
+  hostRecord: string;
+  recordName: string;
+  recordValue: string | null;
+  ttl: number;
+  providerHint: string;
+  command?: string | null;
+  source: 'aliyun-dcdn-api' | 'aliyun-cdn-api' | 'fallback';
+  error?: string | null;
+};
+
 type DcdnProvisionResult = {
   domainName: string;
   originDomain: string;
@@ -45,6 +61,7 @@ type DcdnProvisionResult = {
   resourceGroupId?: string | null;
   tags?: Array<{ key: string; value: string }>;
   verifyRequired?: boolean;
+  ownerVerification?: DcdnOwnerVerification | null;
   warnings?: string[];
   message: string;
 };
@@ -1447,6 +1464,193 @@ export class LinesService {
     );
   }
 
+  private isIcpFilingRequiredError(error: any) {
+    const combined = [
+      error?.code,
+      error?.Code,
+      error?.data?.Code,
+      error?.message,
+      error?.data?.Message,
+    ]
+      .map((item) => String(item || '').toLowerCase())
+      .join(' ');
+    return combined.includes('icp') || combined.includes('filed') || combined.includes('备案');
+  }
+
+  private isDomainOwnerVerificationError(error: any) {
+    const combined = [
+      error?.code,
+      error?.Code,
+      error?.data?.Code,
+      error?.message,
+      error?.data?.Message,
+    ]
+      .map((item) => String(item || '').toLowerCase())
+      .join(' ');
+    return (
+      combined.includes('domainowner') ||
+      combined.includes('owner verification') ||
+      combined.includes('ownership') ||
+      combined.includes('归属') ||
+      combined.includes('verify')
+    );
+  }
+
+  private async buildDcdnOwnerVerification(
+    dcdnClient: any,
+    domainName: string,
+    sourceError?: any,
+  ): Promise<DcdnOwnerVerification> {
+    let rootDomain = this.deriveRegistrableDomain(domainName);
+    let verifyKey = 'verification';
+    let recordValue: string | null = null;
+    let source: DcdnOwnerVerification['source'] = 'fallback';
+    let errorMessage: string | null = null;
+
+    try {
+      const resp = await this.describeDcdnDomainVerifyData(dcdnClient, domainName);
+      const verifyData = this.extractDcdnDomainVerifyData(resp);
+      rootDomain = verifyData.rootDomain || rootDomain;
+      verifyKey = verifyData.verifyKey || verifyKey;
+      recordValue = verifyData.verifyCode || null;
+      if (recordValue) source = 'aliyun-dcdn-api';
+    } catch (error) {
+      errorMessage = error?.message || error?.data?.Message || sourceError?.message || null;
+    }
+
+    if (!recordValue) {
+      try {
+        const cdnClient = this.createCdnClient();
+        const resp = await cdnClient.request(
+          'VerifyDomainOwner',
+          {
+            DomainName: domainName,
+            VerifyType: 'dnsCheck',
+          },
+          {
+            method: 'POST',
+            timeout: 10000,
+          },
+        );
+        recordValue = this.extractVerificationContent(resp);
+        if (recordValue) source = 'aliyun-cdn-api';
+      } catch (error) {
+        errorMessage = errorMessage || error?.message || error?.data?.Message || sourceError?.message || null;
+        recordValue = this.extractVerificationContent(error) || this.extractVerificationContent(sourceError);
+      }
+    }
+
+    const hostRecord = `${verifyKey}.${rootDomain}`;
+    const recordName = `${hostRecord}.`;
+    const command = recordValue ? `nslookup -type=TXT ${hostRecord}` : null;
+    return {
+      required: true,
+      domainName,
+      rootDomain,
+      verifyType: 'dnsCheck',
+      recordType: 'TXT',
+      hostRecord,
+      recordName,
+      recordValue,
+      ttl: 600,
+      providerHint: '请到该域名当前实际 DNS 托管商处添加 TXT 记录；不要求 DNS 托管商是阿里云。TXT 生效后回到 Dashboard 重新点击“创建/复用 DCDN 域名”。',
+      command,
+      source,
+      error: errorMessage,
+    };
+  }
+
+  private async describeDcdnDomainVerifyData(dcdnClient: any, domainName: string) {
+    try {
+      return await dcdnClient.request(
+        'DescribeDcdnDomainVerifyData',
+        { DomainName: domainName },
+        { method: 'POST', timeout: 10000 },
+      );
+    } catch (error) {
+      return await dcdnClient.request(
+        'DescribeDcdnDomainVerifyData',
+        {},
+        { method: 'POST', timeout: 10000 },
+      );
+    }
+  }
+
+  private extractDcdnDomainVerifyData(payload: any) {
+    const content = payload?.Content || payload?.data?.Content || payload?.Data?.Content || payload?.data?.content || {};
+    return {
+      verifyCode: this.pickFirstString([
+        content?.VerifyCode,
+        content?.verifyCode,
+        payload?.VerifyCode,
+        payload?.data?.VerifyCode,
+      ]),
+      rootDomain: this.pickFirstString([
+        content?.RootDomain,
+        content?.rootDomain,
+        payload?.RootDomain,
+        payload?.data?.RootDomain,
+      ]),
+      verifyKey: this.pickFirstString([
+        content?.VerifyKey,
+        content?.verifyKey,
+        payload?.VerifyKey,
+        payload?.data?.VerifyKey,
+      ]),
+    };
+  }
+
+  private pickFirstString(values: unknown[]) {
+    const value = values.find((item) => typeof item === 'string' && item.trim());
+    return typeof value === 'string' ? value.trim() : null;
+  }
+
+  private createCdnClient() {
+    if (!this.dcdnAccessKeyId || !this.dcdnAccessKeySecret) {
+      throw new InternalServerErrorException(
+        'ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET is not configured',
+      );
+    }
+    return new RPCClient({
+      accessKeyId: this.dcdnAccessKeyId,
+      accessKeySecret: this.dcdnAccessKeySecret,
+      endpoint: 'https://cdn.aliyuncs.com',
+      apiVersion: '2018-05-10',
+    });
+  }
+
+  private extractVerificationContent(payload: any): string | null {
+    const candidates = [
+      payload?.Content,
+      payload?.content,
+      payload?.Data?.Content,
+      payload?.data?.Content,
+      payload?.data?.content,
+      payload?.VerifyContent,
+      payload?.data?.VerifyContent,
+      payload?.message,
+      payload?.data?.Message,
+    ].filter((value) => typeof value === 'string' && value.trim()) as string[];
+    for (const item of candidates) {
+      const exact = item.match(/verify_[A-Za-z0-9_*.-]+/);
+      if (exact) return exact[0];
+      if (item.startsWith('verify_')) return item.trim();
+    }
+    return null;
+  }
+
+  private deriveRegistrableDomain(domainName: string) {
+    const parts = domainName.split('.').filter(Boolean);
+    if (parts.length <= 2) return domainName;
+    const secondLevelSuffixes = new Set(['com.cn', 'net.cn', 'org.cn', 'co.uk', 'com.hk', 'com.sg', 'co.jp']);
+    const suffix2 = parts.slice(-2).join('.');
+    const suffix3 = parts.slice(-3).join('.');
+    if (secondLevelSuffixes.has(suffix2) && parts.length >= 3) {
+      return suffix3;
+    }
+    return suffix2;
+  }
+
   private extractCname(payload: any): string | null {
     const candidates = [
       payload?.Cname,
@@ -1973,6 +2177,8 @@ export class LinesService {
 
     let created = false;
     let verifyRequired = false;
+    let warnings: string[] = [];
+    let ownerVerification: DcdnOwnerVerification | null = null;
 
     try {
       await client.request(
@@ -1989,8 +2195,17 @@ export class LinesService {
       );
       created = true;
     } catch (error) {
-      if (!this.isDomainAlreadyExistsError(error)) {
+      if (this.isDomainOwnerVerificationError(error)) {
+        verifyRequired = true;
+        ownerVerification = await this.buildDcdnOwnerVerification(client, domainName, error);
+        warnings.push('当前域名需要先完成阿里云 DCDN 归属权 TXT 验证。请在第三方 DNS 托管商添加下方 TXT 记录后，再重试创建/复用 DCDN 域名。');
+      } else if (!this.isDomainAlreadyExistsError(error)) {
         console.error('AddDcdnDomain failed:', error);
+        if (this.isIcpFilingRequiredError(error)) {
+          throw new BadRequestException(
+            '当前加速区域要求 ICP 备案，但该域名未备案。请将 DCDN 加速区域改为 overseas（海外）后重试，或先完成 ICP 备案。',
+          );
+        }
         const msg = error?.message || error?.data?.Message || 'Failed to create DCDN domain';
         throw new InternalServerErrorException(msg);
       }
@@ -2015,8 +2230,7 @@ export class LinesService {
     let updatedAt: string | null = null;
     let resourceGroupId: string | null = null;
     let tags: Array<{ key: string; value: string }> = [];
-    let warnings: string[] = [];
-    try {
+    if (!verifyRequired) try {
       const snapshot = await this.getDcdnDomainStatusInternal(client, domainName);
       cname = snapshot.cname;
       domainStatus = snapshot.domainStatus;
@@ -2069,7 +2283,10 @@ export class LinesService {
       resourceGroupId,
       tags,
       verifyRequired,
-      message: created
+      ownerVerification,
+      message: ownerVerification
+        ? 'DCDN 域名需要先完成归属权 TXT 验证，请按提示添加记录后重试'
+        : created
         ? 'DCDN 域名创建成功，请继续完成 DNS 与人工校验'
         : 'DCDN 域名已存在，已返回当前配置信息',
       warnings,

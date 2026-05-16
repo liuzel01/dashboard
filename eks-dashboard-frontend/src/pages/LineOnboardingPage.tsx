@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Collapse,
+  Descriptions,
   Divider,
   Input,
   Modal,
@@ -49,6 +50,22 @@ type VerifyResult = {
   discoveredHosts: string[];
 };
 
+type DcdnOwnerVerification = {
+  required: boolean;
+  domainName: string;
+  rootDomain: string;
+  verifyType: 'dnsCheck';
+  recordType: 'TXT';
+  hostRecord: string;
+  recordName: string;
+  recordValue: string | null;
+  ttl: number;
+  providerHint: string;
+  command?: string | null;
+  source: 'aliyun-cdn-api' | 'fallback';
+  error?: string | null;
+};
+
 type DcdnProvisionResult = {
   domainName: string;
   fetchedAt?: string;
@@ -77,6 +94,7 @@ type DcdnProvisionResult = {
   tags?: Array<{ key: string; value: string }>;
   warnings?: string[];
   verifyRequired?: boolean;
+  ownerVerification?: DcdnOwnerVerification | null;
   message: string;
 };
 
@@ -729,6 +747,60 @@ const LineOnboardingPage: React.FC = () => {
     message.success(`已选择源站域名：${selected.originDomain}`);
   };
 
+  const renderOwnerVerificationGuide = (verification?: DcdnOwnerVerification | null) => {
+    if (!verification?.required) return null;
+    const copy = async (text?: string | null) => {
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
+      message.success('已复制');
+    };
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message="需要先完成阿里云 DCDN 域名归属权 TXT 验证"
+        description={
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Text>{verification.providerHint}</Text>
+            <Descriptions bordered size="small" column={1} style={{ maxWidth: 760 }}>
+              <Descriptions.Item label="根域名">{verification.rootDomain}</Descriptions.Item>
+              <Descriptions.Item label="记录类型"><Text code>{verification.recordType}</Text></Descriptions.Item>
+              <Descriptions.Item label="主机记录">
+                <Space>
+                  <Text code>{verification.hostRecord}</Text>
+                  <Button size="small" onClick={() => copy(verification.hostRecord)}>复制</Button>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="记录名/FQDN">
+                <Space>
+                  <Text code>{verification.recordName}</Text>
+                  <Button size="small" onClick={() => copy(verification.recordName)}>复制</Button>
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="记录值">
+                {verification.recordValue ? (
+                  <Space wrap>
+                    <Text code copyable>{verification.recordValue}</Text>
+                    <Button size="small" onClick={() => copy(verification.recordValue)}>复制</Button>
+                  </Space>
+                ) : (
+                  <Text type="danger">暂未从阿里云接口取到 TXT 记录值，请到阿里云控制台查看一次。</Text>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="TTL 建议">{verification.ttl} 秒</Descriptions.Item>
+              {verification.command ? (
+                <Descriptions.Item label="验证命令"><Text code>{verification.command}</Text></Descriptions.Item>
+              ) : null}
+            </Descriptions>
+            <Text type="secondary">
+              TXT 解析生效后，重新点击“1) 创建/复用 DCDN 域名”。Dashboard 不会自动修改第三方 DNS。
+            </Text>
+          </Space>
+        }
+      />
+    );
+  };
+
   const handleProvisionDcdn = async () => {
     if (!confirmedSubdomain) {
       message.warning('请先完成步骤2');
@@ -762,12 +834,17 @@ const LineOnboardingPage: React.FC = () => {
       setVerifyError(null);
       message.success(result.created ? 'DCDN 域名创建成功' : 'DCDN 域名已存在，已获取当前信息');
     } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+      const data = error?.response?.data;
+      const backendMsg = data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || 'DCDN 自动创建失败';
       setDcdnAutoError(msg);
-      setDcdnAutoResult(null);
+      if (data?.ownerVerification) {
+        setDcdnAutoResult(data as DcdnProvisionResult);
+      } else {
+        setDcdnAutoResult(null);
+      }
       setDcdnConfirmed(false);
       message.error(msg);
       return false;
@@ -1800,7 +1877,8 @@ const LineOnboardingPage: React.FC = () => {
                       ? dcdnAutoResult.tags.map((tag) => `${tag.key}:${tag.value}`).join(', ')
                       : '-'}
                   </Text>
-                  {dcdnAutoResult.verifyRequired ? (
+                  {renderOwnerVerificationGuide(dcdnAutoResult.ownerVerification)}
+                  {dcdnAutoResult.verifyRequired && !dcdnAutoResult.ownerVerification ? (
                     <Text type="warning">可能仍需人工做域名校验/等待配置生效。</Text>
                   ) : null}
                   {(dcdnAutoResult.warnings || []).map((item, index) => (
