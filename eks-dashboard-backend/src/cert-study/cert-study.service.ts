@@ -238,7 +238,7 @@ export class CertStudyService {
          GROUP BY question_id
        ) tags ON tags.question_id = q.id
        WHERE ${whereSql}
-       ORDER BY q.id DESC
+       ORDER BY q.id ASC
        LIMIT ? OFFSET ?`,
       [actor.userId, ...wherePack.params, pageSize, offset],
     );

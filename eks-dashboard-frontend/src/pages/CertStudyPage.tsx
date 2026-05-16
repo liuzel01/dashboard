@@ -10,6 +10,7 @@ import {
   Modal,
   Popconfirm,
   Select,
+  Checkbox,
   Space,
   Switch,
   Table,
@@ -38,6 +39,30 @@ type QuestionDetailState = {
   options: Array<{ key: string; text: string }>;
   notes: CertStudyQuestionNote[];
 };
+
+type CertStudyColumnKey = 'id' | 'sourceQuestionNo' | 'stem' | 'source' | 'domain' | 'status' | 'important' | 'tags' | 'reviewStats' | 'actions';
+
+const columnOptions: Array<{ label: string; value: CertStudyColumnKey }> = [
+  { label: 'ID', value: 'id' },
+  { label: '题号', value: 'sourceQuestionNo' },
+  { label: '题干', value: 'stem' },
+  { label: '来源', value: 'source' },
+  { label: 'Domain', value: 'domain' },
+  { label: '状态', value: 'status' },
+  { label: '重点', value: 'important' },
+  { label: '标签', value: 'tags' },
+  { label: '复/错', value: 'reviewStats' },
+];
+
+const defaultVisibleColumns: CertStudyColumnKey[] = [
+  'sourceQuestionNo',
+  'stem',
+  'source',
+  'status',
+  'important',
+  'tags',
+  'actions',
+];
 
 const statusOptions = [
   { value: 'new', label: '未开始' },
@@ -144,7 +169,18 @@ const markdownToHtml = (markdown: string) => {
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
-  return dayjs(value).format('YYYY-MM-DD HH:mm');
+  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).replace(/\//g, '-');
 };
 
 const parseOptionsFromText = (text: string) => {
@@ -190,6 +226,7 @@ const CertStudyPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [editNoteOpen, setEditNoteOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(defaultVisibleColumns);
 
   const [reviewForm] = Form.useForm();
   const [noteForm] = Form.useForm();
@@ -468,20 +505,24 @@ const CertStudyPage: React.FC = () => {
   };
 
   const columns: ColumnsType<CertStudyQuestionListItem> = useMemo(
-    () => [
+    () => {
+      const allColumns: Array<ColumnsType<CertStudyQuestionListItem>[number] & { columnKey: CertStudyColumnKey }> = [
       {
+        columnKey: 'id',
         title: 'ID',
         dataIndex: 'id',
         width: 72,
         fixed: 'left',
       },
       {
+        columnKey: 'sourceQuestionNo',
         title: '题号',
         dataIndex: 'sourceQuestionNo',
         width: 88,
         render: (value: string | null) => value || '-',
       },
       {
+        columnKey: 'stem',
         title: '题干',
         dataIndex: 'stem',
         minWidth: 520,
@@ -492,12 +533,14 @@ const CertStudyPage: React.FC = () => {
         ),
       },
       {
+        columnKey: 'source',
         title: '来源',
         dataIndex: 'source',
         width: 88,
         ellipsis: true,
       },
       {
+        columnKey: 'domain',
         title: 'Domain',
         dataIndex: 'domain',
         width: 120,
@@ -505,6 +548,7 @@ const CertStudyPage: React.FC = () => {
         render: (value: string | null) => value || '-',
       },
       {
+        columnKey: 'status',
         title: '状态',
         width: 92,
         render: (_unused, row) => {
@@ -520,12 +564,14 @@ const CertStudyPage: React.FC = () => {
         },
       },
       {
+        columnKey: 'important',
         title: '重点',
         width: 80,
         render: (_unused, row) =>
           row.review.isImportant ? <Tag color="red">重点</Tag> : <Text type="secondary">-</Text>,
       },
       {
+        columnKey: 'tags',
         title: '标签',
         width: 132,
         render: (_unused, row) => (
@@ -538,11 +584,13 @@ const CertStudyPage: React.FC = () => {
         ),
       },
       {
+        columnKey: 'reviewStats',
         title: '复/错',
         width: 82,
         render: (_unused, row) => `${row.review.reviewCount}/${row.review.wrongCount}`,
       },
       {
+        columnKey: 'actions',
         title: '操作',
         width: 190,
         fixed: 'right',
@@ -568,8 +616,10 @@ const CertStudyPage: React.FC = () => {
           </Space>
         ),
       },
-    ],
-    [],
+    ];
+      return allColumns.filter((column) => visibleColumns.includes(column.columnKey));
+    },
+    [visibleColumns],
   );
 
   return (
@@ -626,6 +676,17 @@ const CertStudyPage: React.FC = () => {
               onChange={(checked) => {
                 setImportant(checked);
                 setPage(1);
+              }}
+            />
+          </Space>
+          <Space direction="vertical" size={2}>
+            <Text type="secondary">列显示</Text>
+            <Checkbox.Group
+              options={columnOptions}
+              value={visibleColumns.filter((item) => item !== 'actions')}
+              onChange={(values) => {
+                const next = values as CertStudyColumnKey[];
+                setVisibleColumns([...next, 'actions']);
               }}
             />
           </Space>
