@@ -347,8 +347,17 @@ const CertStudyPage: React.FC = () => {
         lastResult: values.lastResult,
         nextReviewAt: values.nextReviewAt ? dayjs(values.nextReviewAt).toISOString() : null,
       });
+      const refreshedDetail = await getCertStudyQuestionDetail(selectedId);
+      const nextDetail: QuestionDetailState = {
+        question: refreshedDetail.question,
+        options: refreshedDetail.options || [],
+        notes: refreshedDetail.notes || [],
+      };
+      setDetail(nextDetail);
+      setItems((prev) =>
+        prev.map((item) => (item.id === selectedId ? nextDetail.question : item)),
+      );
       message.success('复习状态已更新');
-      await Promise.all([loadQuestions(), loadQuestionDetail(selectedId)]);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
       message.error(err?.response?.data?.message || err?.message || '复习状态更新失败');
