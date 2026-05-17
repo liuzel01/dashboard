@@ -253,6 +253,9 @@ const CertStudyPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [editNoteOpen, setEditNoteOpen] = useState(false);
+  const [savingReview, setSavingReview] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
+  const [savingEditedNote, setSavingEditedNote] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(loadVisibleColumns);
 
   const [reviewForm] = Form.useForm();
@@ -336,8 +339,9 @@ const CertStudyPage: React.FC = () => {
   };
 
   const handleSaveReview = async () => {
-    if (!selectedId) return;
+    if (!selectedId || savingReview) return;
     const values = await reviewForm.validateFields();
+    setSavingReview(true);
     try {
       await updateCertStudyReview(selectedId, {
         status: values.status,
@@ -361,6 +365,8 @@ const CertStudyPage: React.FC = () => {
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
       message.error(err?.response?.data?.message || err?.message || '复习状态更新失败');
+    } finally {
+      setSavingReview(false);
     }
   };
 
@@ -397,8 +403,9 @@ const CertStudyPage: React.FC = () => {
   };
 
   const handleAddNote = async () => {
-    if (!selectedId) return;
+    if (!selectedId || addingNote) return;
     const values = await noteForm.validateFields();
+    setAddingNote(true);
     try {
       await createCertStudyNote(selectedId, {
         noteType: values.noteType,
@@ -408,21 +415,43 @@ const CertStudyPage: React.FC = () => {
       });
       noteForm.resetFields();
       noteForm.setFieldValue('noteType', DEFAULT_NOTE_TYPE);
+      const refreshedDetail = await getCertStudyQuestionDetail(selectedId);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              notes: refreshedDetail.notes || [],
+              question: refreshedDetail.question || prev.question,
+              options: refreshedDetail.options || prev.options,
+            }
+          : prev,
+      );
       message.success('备注已添加');
-      await loadQuestionDetail(selectedId);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
       message.error(err?.response?.data?.message || err?.message || '添加备注失败');
+    } finally {
+      setAddingNote(false);
     }
   };
 
   const handleDeleteNote = async (noteId: number) => {
     try {
       await deleteCertStudyNote(noteId);
-      message.success('备注已删除');
       if (selectedId) {
-        await loadQuestionDetail(selectedId);
+        const refreshedDetail = await getCertStudyQuestionDetail(selectedId);
+        setDetail((prev) =>
+          prev
+            ? {
+                ...prev,
+                notes: refreshedDetail.notes || [],
+                question: refreshedDetail.question || prev.question,
+                options: refreshedDetail.options || prev.options,
+              }
+            : prev,
+        );
       }
+      message.success('备注已删除');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
       message.error(err?.response?.data?.message || err?.message || '删除备注失败');
@@ -441,8 +470,9 @@ const CertStudyPage: React.FC = () => {
   };
 
   const handleSaveEditedNote = async () => {
-    if (!editingNoteId) return;
+    if (!editingNoteId || savingEditedNote) return;
     const values = await editNoteForm.validateFields();
+    setSavingEditedNote(true);
     try {
       await updateCertStudyNote(editingNoteId, {
         noteType: values.noteType,
@@ -455,11 +485,23 @@ const CertStudyPage: React.FC = () => {
       setEditingNoteId(null);
       editNoteForm.resetFields();
       if (selectedId) {
-        await loadQuestionDetail(selectedId);
+        const refreshedDetail = await getCertStudyQuestionDetail(selectedId);
+        setDetail((prev) =>
+          prev
+            ? {
+                ...prev,
+                notes: refreshedDetail.notes || [],
+                question: refreshedDetail.question || prev.question,
+                options: refreshedDetail.options || prev.options,
+              }
+            : prev,
+        );
       }
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
       message.error(err?.response?.data?.message || err?.message || '更新备注失败');
+    } finally {
+      setSavingEditedNote(false);
     }
   };
 
@@ -831,8 +873,8 @@ const CertStudyPage: React.FC = () => {
                 <Form.Item label="链接" name="url">
                   <Input placeholder="https://docs.aws.amazon.com/..." />
                 </Form.Item>
-                <Button type="primary" onClick={() => void handleAddNote()}>
-                  添加备注
+                <Button type="primary" loading={addingNote} onClick={() => void handleAddNote()}>
+                  {addingNote ? '添加中...' : '添加备注'}
                 </Button>
               </Form>
               <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
@@ -917,8 +959,8 @@ const CertStudyPage: React.FC = () => {
                 </Text>
               </Space>
               <Space>
-                <Button type="primary" onClick={() => void handleSaveReview()}>
-                  保存状态
+                <Button type="primary" loading={savingReview} onClick={() => void handleSaveReview()}>
+                  {savingReview ? '保存中...' : '保存状态'}
                 </Button>
                 <Text type="secondary">
                   上次复习：{formatDateTime(detail.question.review.lastReviewedAt)}
@@ -1026,6 +1068,7 @@ const CertStudyPage: React.FC = () => {
         }}
         onOk={() => void handleSaveEditedNote()}
         okText="保存"
+        confirmLoading={savingEditedNote}
         zIndex={1200}
       >
         <Form form={editNoteForm} layout="vertical" requiredMark={false}>
