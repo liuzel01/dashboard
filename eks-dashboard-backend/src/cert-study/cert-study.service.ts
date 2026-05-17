@@ -912,6 +912,8 @@ export class CertStudyService {
     if (input.includeStatus && input.status) {
       where.push("COALESCE(r.status, 'new') = ?");
       params.push(input.status);
+    } else if (input.includeStatus) {
+      where.push("COALESCE(r.status, 'new') <> 'archived'");
     }
     return { where, params };
   }
