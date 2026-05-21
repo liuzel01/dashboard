@@ -2,7 +2,7 @@ import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, TeamOutlined, RobotOutlined, LineChartOutlined, BookOutlined } from '@ant-design/icons';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -91,25 +91,46 @@ const AppLayout: React.FC = () => {
     return permissions.includes(key);
   };
 
-  const menuItems = [
-    { key: '/s3-upload', label: 'S3 上传', icon: <CloudUploadOutlined />, permission: 'menu:s3-upload' },
-    { key: '/deployments', label: 'EKS 部署', icon: <DeploymentUnitOutlined />, permission: 'menu:deployments' },
-    { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
-    { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
-    { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
-    { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines' },
-    { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
-    { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
-    { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
-    { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
-  ];
+  const menuItems = {
+    s3Upload: { key: '/s3-upload', label: 'S3 上传', icon: <CloudUploadOutlined />, permission: 'menu:s3-upload' },
+    deployments: { key: '/deployments', label: 'EKS 部署', icon: <DeploymentUnitOutlined />, permission: 'menu:deployments' },
+    jumpServers: { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
+    dataQuery: { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
+    securityGroups: { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
+    lines: { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines' },
+    lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
+    siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
+    aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
+    environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
+  };
+
+  const createMenuLink = (item: { key: string; label: string }) => <Link to={item.key}>{item.label}</Link>;
+
+  const createMenuGroup = (
+    key: string,
+    label: string,
+    icon: React.ReactNode,
+    items: Array<{ key: string; label: string; icon: React.ReactNode; permission: string }>,
+  ): NonNullable<MenuProps['items']>[number] | null => {
+    const visibleItems = authLoading ? items : items.filter((item) => hasPermission(item.permission));
+    if (!authLoading && visibleItems.length === 0) return null;
+    return {
+      key,
+      label,
+      icon,
+      children: visibleItems.map((item) => ({
+        key: item.key,
+        label: createMenuLink(item),
+        disabled: authLoading,
+      })),
+    };
+  };
 
   const accessControlPermission = 'menu:access-control';
 
   const accessControlGroup: NonNullable<MenuProps['items']>[number] = {
     key: '/access-control',
     label: '账号管理',
-    icon: <TeamOutlined />,
     children: [
       { key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link> },
       { key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link> },
@@ -140,21 +161,64 @@ const AppLayout: React.FC = () => {
     ],
   };
 
-  const baseVisibleMenuItems = authLoading
-    ? menuItems
-    : menuItems.filter((item) => hasPermission(item.permission));
+  const cloudResourceGroup = createMenuGroup(
+    '/cloud-resources',
+    '云资源',
+    <DeploymentUnitOutlined />,
+    [menuItems.deployments, menuItems.jumpServers, menuItems.securityGroups, menuItems.s3Upload],
+  );
+
+  const lineManagementGroup = createMenuGroup(
+    '/line-management',
+    '线路管理',
+    <GlobalOutlined />,
+    [menuItems.lines, menuItems.lineOnboarding],
+  );
+
+  const monitoringGroup = createMenuGroup(
+    '/monitoring',
+    '监控与告警',
+    <AimOutlined />,
+    [menuItems.siteMonitors],
+  );
+
+  const opsToolsGroup = createMenuGroup(
+    '/ops-tools',
+    '运维工具',
+    <RobotOutlined />,
+    [menuItems.dataQuery, menuItems.aiOps],
+  );
+
+  const systemManagementChildren: NonNullable<MenuProps['items']> = [
+    ...((authLoading || hasPermission(menuItems.environments.permission))
+      ? [{
+          key: menuItems.environments.key,
+          label: createMenuLink(menuItems.environments),
+          disabled: authLoading,
+        }]
+      : []),
+    ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
+  ];
+
+  const systemManagementGroup: NonNullable<MenuProps['items']>[number] | null =
+    !authLoading && systemManagementChildren.length === 0
+      ? null
+      : {
+          key: '/system-management',
+          label: '系统管理',
+          icon: <SettingOutlined />,
+          children: systemManagementChildren,
+        };
 
   const visibleMenuItems: MenuProps['items'] = [
-    ...baseVisibleMenuItems.map((item) => ({
-      key: item.key,
-      icon: item.icon,
-      label: <Link to={item.key}>{item.label}</Link>,
-      disabled: authLoading,
-    })),
+    cloudResourceGroup,
+    lineManagementGroup,
+    monitoringGroup,
+    opsToolsGroup,
     ...((authLoading || hasPermission(certStudyPermission)) ? [certStudyGroup] : []),
-    ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
+    systemManagementGroup,
     ...((authLoading || hasPermission(signalMonitorPermission)) ? [signalMonitorGroup] : []),
-  ];
+  ].filter(Boolean) as MenuProps['items'];
 
   if (!authLoading && !isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -173,7 +237,12 @@ const AppLayout: React.FC = () => {
 
   const selectedKey = location.pathname;
   const openKeys = [
+    ...(['/deployments', '/jump-servers', '/security-groups', '/s3-upload'].some((path) => location.pathname.startsWith(path)) ? ['/cloud-resources'] : []),
+    ...(['/lines', '/line-onboarding'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
+    ...(location.pathname.startsWith('/site-monitors') ? ['/monitoring'] : []),
+    ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
+    ...(['/environments', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
     ...(location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : []),
   ];
