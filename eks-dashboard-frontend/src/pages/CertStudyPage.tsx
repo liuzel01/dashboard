@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Select,
   Checkbox,
+  Collapse,
   Space,
   Switch,
   Table,
@@ -256,6 +257,7 @@ const CertStudyPage: React.FC = () => {
   const [savingReview, setSavingReview] = useState(false);
   const [addingNote, setAddingNote] = useState(false);
   const [savingEditedNote, setSavingEditedNote] = useState(false);
+  const [noteComposerOpen, setNoteComposerOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(loadVisibleColumns);
 
   const [reviewForm] = Form.useForm();
@@ -307,6 +309,7 @@ const CertStudyPage: React.FC = () => {
           notes: response.notes || [],
         };
         setDetail(nextDetail);
+        setNoteComposerOpen(nextDetail.notes.length === 0);
         reviewForm.setFieldsValue({
           status: nextDetail.question.review.status,
           isImportant: nextDetail.question.review.isImportant,
@@ -426,6 +429,7 @@ const CertStudyPage: React.FC = () => {
             }
           : prev,
       );
+      setNoteComposerOpen(false);
       message.success('备注已添加');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
@@ -440,16 +444,18 @@ const CertStudyPage: React.FC = () => {
       await deleteCertStudyNote(noteId);
       if (selectedId) {
         const refreshedDetail = await getCertStudyQuestionDetail(selectedId);
+        const refreshedNotes = refreshedDetail.notes || [];
         setDetail((prev) =>
           prev
             ? {
                 ...prev,
-                notes: refreshedDetail.notes || [],
+                notes: refreshedNotes,
                 question: refreshedDetail.question || prev.question,
                 options: refreshedDetail.options || prev.options,
               }
             : prev,
         );
+        setNoteComposerOpen(refreshedNotes.length === 0);
       }
       message.success('备注已删除');
     } catch (error) {
@@ -820,6 +826,7 @@ const CertStudyPage: React.FC = () => {
           setDetailOpen(false);
           setDetail(null);
           setSelectedId(null);
+          setNoteComposerOpen(false);
           noteForm.resetFields();
         }}
         destroyOnClose
@@ -851,33 +858,49 @@ const CertStudyPage: React.FC = () => {
             </Card>
 
             <Card size="small" title="备注（支持 Markdown）">
-              <Form form={noteForm} layout="vertical" requiredMark={false}>
-                <Form.Item
-                  label="类型"
-                  name="noteType"
-                  rules={[{ required: true, message: '请选择备注类型' }]}
-                  initialValue={DEFAULT_NOTE_TYPE}
-                >
-                  <Select options={noteTypeOptions} />
-                </Form.Item>
-                <Form.Item label="标题" name="title">
-                  <Input placeholder="可选" />
-                </Form.Item>
-                <Form.Item
-                  label="内容（Markdown）"
-                  name="content"
-                  rules={[{ required: true, message: '请输入备注内容' }]}
-                >
-                  <TextArea rows={4} placeholder="支持 **加粗**、`代码`、- 列表、[链接](https://...)" />
-                </Form.Item>
-                <Form.Item label="链接" name="url">
-                  <Input placeholder="https://docs.aws.amazon.com/..." />
-                </Form.Item>
-                <Button type="primary" loading={addingNote} onClick={() => void handleAddNote()}>
-                  {addingNote ? '添加中...' : '添加备注'}
-                </Button>
-              </Form>
-              <Space direction="vertical" style={{ width: '100%', marginTop: 16 }}>
+              <Collapse
+                ghost
+                activeKey={noteComposerOpen ? ['noteComposer'] : []}
+                onChange={(keys) => {
+                  const activeKeys = Array.isArray(keys) ? keys : [keys];
+                  setNoteComposerOpen(activeKeys.includes('noteComposer'));
+                }}
+                items={[
+                  {
+                    key: 'noteComposer',
+                    label: detail.notes.length > 0 ? '添加新备注' : '添加备注',
+                    children: (
+                      <Form form={noteForm} layout="vertical" requiredMark={false}>
+                        <Form.Item
+                          label="类型"
+                          name="noteType"
+                          rules={[{ required: true, message: '请选择备注类型' }]}
+                          initialValue={DEFAULT_NOTE_TYPE}
+                        >
+                          <Select options={noteTypeOptions} />
+                        </Form.Item>
+                        <Form.Item label="标题" name="title">
+                          <Input placeholder="可选" />
+                        </Form.Item>
+                        <Form.Item
+                          label="内容（Markdown）"
+                          name="content"
+                          rules={[{ required: true, message: '请输入备注内容' }]}
+                        >
+                          <TextArea rows={4} placeholder="支持 **加粗**、`代码`、- 列表、[链接](https://...)" />
+                        </Form.Item>
+                        <Form.Item label="链接" name="url">
+                          <Input placeholder="https://docs.aws.amazon.com/..." />
+                        </Form.Item>
+                        <Button type="primary" loading={addingNote} onClick={() => void handleAddNote()}>
+                          {addingNote ? '添加中...' : '添加备注'}
+                        </Button>
+                      </Form>
+                    ),
+                  },
+                ]}
+              />
+              <Space direction="vertical" style={{ width: '100%', marginTop: detail.notes.length > 0 ? 16 : 0 }}>
                 {detail.notes.map((note) => (
                   <Card
                     key={note.id}
