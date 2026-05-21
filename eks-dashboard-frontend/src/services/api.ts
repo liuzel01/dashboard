@@ -533,6 +533,16 @@ export const syncRoute53CnameForLineOnboarding = async (data: {
   return response.data;
 };
 
+export const previewDcdnSslSyncForLine = async (data: { lineUrl: string; namespace?: string }) => {
+  const response = await api.post('/lines/dcdn/ssl-sync/preview', data);
+  return response.data;
+};
+
+export const syncDcdnSslForLine = async (data: { lineUrl: string; namespace?: string }) => {
+  const response = await api.post('/lines/dcdn/ssl-sync', data);
+  return response.data;
+};
+
 export const applyDcdnSecurity = async (data: {
   domainName: string;
   sslPub?: string;

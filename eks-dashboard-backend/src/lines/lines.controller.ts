@@ -15,6 +15,7 @@ import { ResolveIngressSourceDto } from './dto/resolve-ingress-source.dto';
 import { ListIngressSourceCandidatesDto } from './dto/list-ingress-source-candidates.dto';
 import { ApplyTenantDomainDto } from './dto/apply-tenant-domain.dto';
 import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
+import { SyncDcdnSslDto } from './dto/sync-dcdn-ssl.dto';
 
 @Controller('lines')
 export class LinesController {
@@ -69,6 +70,30 @@ export class LinesController {
     @Body() body: ApplyDcdnSecurityDto,
   ) {
     return this.linesService.applyDcdnSecurity(body, environmentId);
+  }
+
+  @Post('dcdn/ssl-sync/preview')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  previewDcdnSslSync(
+    @Headers('x-target-environment') environmentId: string | undefined,
+    @Body() body: SyncDcdnSslDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.previewDcdnSslSyncFromK8sLineUrl(environmentId, body);
+  }
+
+  @Post('dcdn/ssl-sync')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  syncDcdnSsl(
+    @Headers('x-target-environment') environmentId: string | undefined,
+    @Body() body: SyncDcdnSslDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    return this.linesService.syncDcdnSslFromK8sLineUrl(environmentId, body);
   }
 
   @Get('dcdn/cas-certificates')

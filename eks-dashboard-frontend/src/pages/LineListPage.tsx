@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Alert, Button, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, message } from 'antd';
-import { getLineInventory, getTenantsForEnvironment } from '../services/api';
+import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { getLineInventory, getTenantsForEnvironment, previewDcdnSslSyncForLine, syncDcdnSslForLine } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import { buildProbeDetailUrl } from '../utils/probeDashboard';
 
@@ -38,6 +38,20 @@ type InventoryItem = {
   totalRegions?: number;
 };
 
+type DcdnSslSyncPreview = {
+  domainName?: string;
+  lineUrl?: string;
+  namespace?: string;
+  ingressName?: string;
+  tlsSecretName?: string;
+  uploadCertName?: string;
+  k8sCertNotBefore?: string | null;
+  k8sCertNotAfter?: string | null;
+  dcdnCertName?: string | null;
+  dcdnCertId?: string | null;
+  dcdnCertExpireTime?: string | null;
+};
+
 type InventoryResponse = {
   page?: number;
   size?: number;
@@ -63,6 +77,11 @@ const LineListPage: React.FC = () => {
   const [warning, setWarning] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [probeSourceApi, setProbeSourceApi] = useState<string | null>(null);
+  const [syncingSslLineUrl, setSyncingSslLineUrl] = useState<string | null>(null);
+  const [sslPreviewLoadingLineUrl, setSslPreviewLoadingLineUrl] = useState<string | null>(null);
+  const [sslPreviewOpen, setSslPreviewOpen] = useState(false);
+  const [sslPreview, setSslPreview] = useState<DcdnSslSyncPreview | null>(null);
+  const [sslPreviewLineUrl, setSslPreviewLineUrl] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -194,6 +213,56 @@ const LineListPage: React.FC = () => {
       return;
     }
     void loadInventory(page, size, query, true);
+  };
+
+  const handlePreviewSyncSsl = async (record: InventoryItem) => {
+    const lineUrl = record.lineUrl?.trim();
+    if (!lineUrl) {
+      message.warning('当前行缺少 lineUrl，无法同步 SSL');
+      return;
+    }
+    setSslPreviewLoadingLineUrl(lineUrl);
+    setSslPreview(null);
+    setSslPreviewLineUrl(lineUrl);
+    try {
+      const result = await previewDcdnSslSyncForLine({ lineUrl, namespace: 'default' }) as DcdnSslSyncPreview;
+      setSslPreview(result);
+      setSslPreviewOpen(true);
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || error?.message || '解析 SSL 同步信息失败';
+      message.error(msg);
+      setSslPreviewLineUrl(null);
+    } finally {
+      setSslPreviewLoadingLineUrl(null);
+    }
+  };
+
+  const handleConfirmSyncSsl = async () => {
+    const lineUrl = sslPreview?.lineUrl || sslPreviewLineUrl;
+    if (!lineUrl) {
+      message.warning('缺少 lineUrl，无法同步 SSL');
+      return;
+    }
+    setSyncingSslLineUrl(lineUrl);
+    try {
+      const result = await syncDcdnSslForLine({ lineUrl, namespace: sslPreview?.namespace || 'default' }) as { message?: string; tlsSecretName?: string; certName?: string };
+      message.success(result?.message || 'SSL 证书已同步到阿里云 DCDN');
+      setSslPreviewOpen(false);
+      setSslPreview(null);
+      setSslPreviewLineUrl(null);
+      void loadInventory(page, size, query, true);
+    } catch (error: any) {
+      const backendMsg = error?.response?.data?.message;
+      const msg = Array.isArray(backendMsg)
+        ? backendMsg.join('; ')
+        : backendMsg || error?.message || '同步 SSL 证书失败';
+      message.error(msg);
+    } finally {
+      setSyncingSslLineUrl(null);
+    }
   };
 
   const renderStatusTag = (value: boolean | null | undefined) => {
@@ -391,15 +460,33 @@ const LineListPage: React.FC = () => {
               },
               { title: '错误摘要', dataIndex: 'error', width: 140, render: (value) => value || '-' },
               {
-                title: '探测详情',
-                width: 110,
+                title: '操作',
+                width: 180,
+                fixed: 'right',
                 render: (_, record) => {
+                  const lineUrl = record.lineUrl?.trim() || '';
                   const link = buildProbeDetailUrl(record.lineUrl, probeSourceApi);
-                  if (!link) return '-';
+                  const canSyncSsl = record.provider === 'aliyun_dcdn' && Boolean(lineUrl);
                   return (
-                    <a href={link} target="_blank" rel="noreferrer">
-                      查看
-                    </a>
+                    <Space size={8}>
+                      {link ? (
+                        <a href={link} target="_blank" rel="noreferrer">
+                          查看
+                        </a>
+                      ) : null}
+                      {canSyncSsl ? (
+                        <Button
+                          type="link"
+                          size="small"
+                          loading={sslPreviewLoadingLineUrl === lineUrl || syncingSslLineUrl === lineUrl}
+                          disabled={Boolean(sslPreviewLoadingLineUrl) || Boolean(syncingSslLineUrl)}
+                          onClick={() => handlePreviewSyncSsl(record)}
+                        >
+                          同步SSL
+                        </Button>
+                      ) : null}
+                      {!link && !canSyncSsl ? '-' : null}
+                    </Space>
                   );
                 },
               },
@@ -410,6 +497,43 @@ const LineListPage: React.FC = () => {
           />
         </>
       )}
+
+      <Modal
+        title="同步 SSL 证书到阿里云 DCDN"
+        open={sslPreviewOpen}
+        onCancel={() => {
+          if (syncingSslLineUrl) return;
+          setSslPreviewOpen(false);
+          setSslPreview(null);
+          setSslPreviewLineUrl(null);
+        }}
+        onOk={handleConfirmSyncSsl}
+        okText="确认同步"
+        cancelText="取消"
+        confirmLoading={Boolean(syncingSslLineUrl)}
+        okButtonProps={{ disabled: !sslPreview }}
+        destroyOnClose
+      >
+        {sslPreview ? (
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label="lineUrl">{sslPreview.lineUrl || sslPreview.domainName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Ingress">{sslPreview.ingressName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Namespace">{sslPreview.namespace || '-'}</Descriptions.Item>
+            <Descriptions.Item label="TLS Secret">{sslPreview.tlsSecretName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="将上传证书名称">{sslPreview.uploadCertName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="K8s 证书到期时间">{toDisplayTime(sslPreview.k8sCertNotAfter)}</Descriptions.Item>
+            <Descriptions.Item label="DCDN 当前证书到期时间">{toDisplayTime(sslPreview.dcdnCertExpireTime)}</Descriptions.Item>
+          </Descriptions>
+        ) : (
+          <Text type="secondary">正在解析 SSL 同步信息...</Text>
+        )}
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 12 }}
+          message="确认后会上传当前 K8s TLS Secret 到阿里云 CAS，并重新绑定该 DCDN 域名证书。"
+        />
+      </Modal>
     </div>
   );
 };

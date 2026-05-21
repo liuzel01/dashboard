@@ -21,6 +21,7 @@ import { AgentTenantDomainService } from './agent-tenant-domain.service';
 import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
 import { AgentCloneIngressDto } from './dto/agent-clone-ingress.dto';
 import { AgentResolveIngressSourceDto } from './dto/agent-resolve-ingress-source.dto';
+import { AgentResolveIngressTlsSecretDto } from './dto/agent-resolve-ingress-tls-secret.dto';
 import { AgentListIngressSourceCandidatesDto } from './dto/agent-list-ingress-source-candidates.dto';
 import { AgentApplyTenantDomainDto } from './dto/agent-apply-tenant-domain.dto';
 import { AgentReadTlsSecretDto } from './dto/agent-read-tls-secret.dto';
@@ -321,6 +322,31 @@ export class AgentController {
       `[AgentIngress] resolve-source env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
     );
     return this.ingressService.resolveSource({
+      environmentId: envId,
+      namespace: body.namespace,
+      lineUrl: body.lineUrl,
+      keyword: body.keyword,
+      requestId,
+      userId,
+      username,
+    });
+  }
+
+  @Post('v1/ingress/resolve-tls-secret')
+  async resolveIngressTlsSecret(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentResolveIngressTlsSecretDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentIngress] resolve-tls-secret env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
+    );
+    return this.ingressService.resolveTlsSecretForHost({
       environmentId: envId,
       namespace: body.namespace,
       lineUrl: body.lineUrl,

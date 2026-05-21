@@ -17,6 +17,7 @@ import { IngressGatewayClientService } from './ingress-gateway-client.service';
 import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-client.service';
 import { EnvironmentsService } from '../environments/environments.service';
 import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
+import { SyncDcdnSslDto } from './dto/sync-dcdn-ssl.dto';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -2382,6 +2383,103 @@ export class LinesService {
     };
   }
 
+  async previewDcdnSslSyncFromK8sLineUrl(environmentId: string, dto: SyncDcdnSslDto) {
+    const domainName = this.normalizeToHost(dto.lineUrl);
+    const namespace = (dto.namespace || 'default').trim() || 'default';
+    if (!domainName) {
+      throw new BadRequestException('lineUrl is required');
+    }
+    if (!this.hasAliyunCredentials()) {
+      throw new BadRequestException('Aliyun DCDN credentials are not configured');
+    }
+    const tlsInfo = await this.resolveDcdnSslSyncTlsInfo(environmentId, domainName, namespace);
+    const client = this.createDcdnClient();
+    const dcdnStatus = await this.getDcdnDomainStatusInternal(client, domainName);
+    const uploadCertName = this.buildDcdnSslSyncCertName(domainName);
+    return {
+      domainName,
+      lineUrl: dto.lineUrl,
+      namespace: tlsInfo.namespace || namespace,
+      ingressName: tlsInfo.ingressName,
+      tlsSecretName: tlsInfo.tlsSecretName,
+      tlsHosts: tlsInfo.tlsHosts || [],
+      uploadCertName,
+      k8sCertNotBefore: tlsInfo.tlsNotBefore || null,
+      k8sCertNotAfter: tlsInfo.tlsNotAfter || null,
+      dcdnCertName: dcdnStatus.certName || null,
+      dcdnCertId: dcdnStatus.certId || null,
+      dcdnCertExpireTime: dcdnStatus.certExpireTime || null,
+      dcdnStatus,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  private async resolveDcdnSslSyncTlsInfo(environmentId: string, domainName: string, namespace: string) {
+    const resolved = await this.ingressGatewayClient.resolveTlsSecret(environmentId, {
+      namespace,
+      lineUrl: domainName,
+    });
+    const tlsInfo = resolved?.data;
+    if (!tlsInfo?.tlsSecretName || !tlsInfo?.ingressName) {
+      throw new BadRequestException(`未找到 ${domainName} 对应的 Ingress TLS Secret`);
+    }
+    return tlsInfo;
+  }
+
+  async syncDcdnSslFromK8sLineUrl(environmentId: string, dto: SyncDcdnSslDto) {
+    const domainName = this.normalizeToHost(dto.lineUrl);
+    const namespace = (dto.namespace || 'default').trim() || 'default';
+    if (!domainName) {
+      throw new BadRequestException('lineUrl is required');
+    }
+    if (!this.hasAliyunCredentials()) {
+      throw new BadRequestException('Aliyun DCDN credentials are not configured');
+    }
+
+    const tlsInfo = await this.resolveDcdnSslSyncTlsInfo(environmentId, domainName, namespace);
+    const tlsSecretResp = await this.ingressGatewayClient.readTlsSecret(environmentId, {
+      namespace: tlsInfo.namespace || namespace,
+      secretName: tlsInfo.tlsSecretName,
+    });
+    const tlsSecret = tlsSecretResp?.data;
+    if (!tlsSecret?.cert || !tlsSecret?.key) {
+      throw new BadRequestException('Agent 未返回有效 TLS Secret 证书内容');
+    }
+
+    const certName = this.buildDcdnSslSyncCertName(domainName);
+    const casClient = this.createCasClient();
+    const casUpload = await this.uploadCertificateToCas(casClient, certName, tlsSecret.cert, tlsSecret.key);
+    const client = this.createDcdnClient();
+    await client.request(
+      'SetDcdnDomainSSLCertificate',
+      {
+        DomainName: domainName,
+        SSLProtocol: 'on',
+        CertType: 'cas',
+        CertName: casUpload.certName,
+        CertId: String(casUpload.certId),
+        CertRegion: this.dcdnCertRegion,
+      },
+      {
+        method: 'POST',
+        timeout: 15000,
+      },
+    );
+
+    const status = await this.getDcdnDomainStatusInternal(client, domainName);
+    return {
+      domainName,
+      namespace: tlsInfo.namespace || namespace,
+      ingressName: tlsInfo.ingressName,
+      tlsSecretName: tlsInfo.tlsSecretName,
+      certName: casUpload.certName,
+      certId: casUpload.certId,
+      certRegion: this.dcdnCertRegion,
+      status,
+      message: '已同步 K8s TLS Secret 到阿里云 DCDN',
+    };
+  }
+
   async applyDcdnSecurity(dto: ApplyDcdnSecurityDto, environmentId?: string) {
     const domainName = this.normalizeToHost(dto.domainName);
     const client = this.createDcdnClient();
@@ -2607,6 +2705,20 @@ export class LinesService {
           ? 'DCDN HTTPS/WebSocket/WAF/缓存 配置已完成'
           : 'DCDN 配置部分失败，请根据 errors 排查',
     };
+  }
+
+  private buildDcdnSslSyncCertName(domainName: string) {
+    return `${domainName}-cert-${this.formatCompactTimestamp(new Date())}`;
+  }
+
+  private formatCompactTimestamp(now: Date) {
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `${y}${m}${d}${hh}${mm}${ss}`;
   }
 
   private normalizeAbsoluteHttpUrl(raw: string, fallbackPath = ''): string {

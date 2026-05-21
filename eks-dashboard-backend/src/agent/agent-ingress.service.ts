@@ -147,6 +147,81 @@ export class AgentIngressService {
     };
   }
 
+  async resolveTlsSecretForHost(input: {
+    environmentId: string;
+    namespace: string;
+    lineUrl: string;
+    keyword?: string;
+    requestId?: string;
+    userId?: string;
+    username?: string;
+  }) {
+    const namespace = String(input.namespace || '').trim();
+    const lineHost = this.normalizeToHost(input.lineUrl);
+    if (!namespace) throw new BadRequestException('namespace is required');
+    if (!lineHost) throw new BadRequestException('lineUrl is required');
+
+    this.logger.log(
+      `[AgentIngressResolveTls] start env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} namespace=${namespace} lineHost=${lineHost}`,
+    );
+
+    const { body } = await this.networkingV1Api.listIngressForAllNamespaces();
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const matched = items.find((item) => {
+      const itemNamespace = String(item?.metadata?.namespace || 'default');
+      if (itemNamespace !== namespace) return false;
+      const rules = Array.isArray(item?.spec?.rules) ? item.spec.rules : [];
+      return rules.some((rule: any) => String(rule?.host || '').trim().toLowerCase() === lineHost);
+    });
+
+    if (!matched) {
+      throw new NotFoundException(`Ingress for host ${lineHost} not found in namespace ${namespace}`);
+    }
+
+    const tlsEntries = Array.isArray(matched?.spec?.tls) ? matched.spec.tls : [];
+    const tlsEntry = tlsEntries.find((tls: any) =>
+      Array.isArray(tls?.hosts) && tls.hosts.some((host: any) => String(host || '').trim().toLowerCase() === lineHost),
+    ) || (tlsEntries.length === 1 ? tlsEntries[0] : null);
+    const tlsSecretName = String(tlsEntry?.secretName || '').trim();
+    if (!tlsSecretName) {
+      throw new NotFoundException(`TLS Secret for host ${lineHost} not found on ingress ${namespace}/${String(matched?.metadata?.name || '')}`);
+    }
+
+    let tlsNotBefore: string | null = null;
+    let tlsNotAfter: string | null = null;
+    try {
+      const secret = await this.readTlsSecret({
+        environmentId: input.environmentId,
+        namespace,
+        secretName: tlsSecretName,
+        requestId: input.requestId,
+        userId: input.userId,
+        username: input.username,
+      });
+      const cert = secret?.data?.cert;
+      if (cert) {
+        const parsed = new (require('node:crypto').X509Certificate)(cert);
+        tlsNotBefore = parsed.validFrom ? new Date(parsed.validFrom).toISOString() : null;
+        tlsNotAfter = parsed.validTo ? new Date(parsed.validTo).toISOString() : null;
+      }
+    } catch (error: any) {
+      this.logger.warn(`[AgentIngressResolveTls] failed to inspect tls certificate: ${String(error?.message || error)}`);
+    }
+
+    return {
+      success: true,
+      data: {
+        namespace,
+        lineHost,
+        ingressName: String(matched?.metadata?.name || ''),
+        tlsSecretName,
+        tlsHosts: Array.isArray(tlsEntry?.hosts) ? tlsEntry.hosts.map((host: any) => String(host || '').trim()).filter(Boolean) : [],
+        tlsNotBefore,
+        tlsNotAfter,
+      },
+    };
+  }
+
   async cloneIngress(input: {
     environmentId: string;
     namespace: string;

@@ -48,6 +48,18 @@ export class IngressGatewayClientService {
     return this.postToAgent(environmentId, '/v1/ingress/resolve-source', input, context, 'resolve-source');
   }
 
+  async resolveTlsSecret(
+    environmentId: string,
+    input: {
+      namespace: string;
+      lineUrl: string;
+      keyword?: string;
+    },
+    context?: IngressGatewayContext,
+  ) {
+    return this.postToAgent(environmentId, '/v1/ingress/resolve-tls-secret', input, context, 'resolve-tls-secret');
+  }
+
   async previewCloneIngress(
     environmentId: string,
     input: {
