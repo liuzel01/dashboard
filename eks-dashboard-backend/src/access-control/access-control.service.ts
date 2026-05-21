@@ -96,7 +96,12 @@ export class AccessControlService {
   async listPermissions() {
     await this.ensureDefaultPermissions();
     return this.db.query(
-      'SELECT id, `key`, name, created_at, updated_at FROM permissions WHERE `key` <> ? ORDER BY id ASC',
+      `SELECT id, \`key\`, name, created_at, updated_at
+       FROM permissions
+       WHERE \`key\` <> ?
+       ORDER BY
+         CASE WHEN \`key\` LIKE 'menu:%' THEN 0 ELSE 1 END ASC,
+         \`key\` ASC`,
       ['aiops:sql:execute'],
     );
   }
