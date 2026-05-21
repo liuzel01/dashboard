@@ -258,6 +258,7 @@ const CertStudyPage: React.FC = () => {
   const [addingNote, setAddingNote] = useState(false);
   const [savingEditedNote, setSavingEditedNote] = useState(false);
   const [noteComposerOpen, setNoteComposerOpen] = useState(false);
+  const [detailNavLoading, setDetailNavLoading] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(loadVisibleColumns);
 
   const [reviewForm] = Form.useForm();
@@ -273,19 +274,24 @@ const CertStudyPage: React.FC = () => {
     );
   }, [visibleColumns]);
 
+  const buildQuestionListParams = useCallback(
+    (targetPage: number, targetPageSize = pageSize) => ({
+      examCode: 'SAP-C02',
+      keyword: keyword.trim() || undefined,
+      status,
+      important: important ? 1 as const : undefined,
+      source,
+      tag,
+      page: targetPage,
+      pageSize: targetPageSize,
+    }),
+    [important, keyword, pageSize, source, status, tag],
+  );
+
   const loadQuestions = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await getCertStudyQuestions({
-        examCode: 'SAP-C02',
-        keyword: keyword.trim() || undefined,
-        status,
-        important: important ? 1 : undefined,
-        source,
-        tag,
-        page,
-        pageSize,
-      });
+      const response = await getCertStudyQuestions(buildQuestionListParams(page));
       setItems(response.items || []);
       setAvailableTags(response.availableTags || []);
       setStatusSummary(response.statusSummary || {});
@@ -296,7 +302,7 @@ const CertStudyPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [important, keyword, message, page, pageSize, source, status, tag]);
+  }, [buildQuestionListParams, message, page]);
 
   const loadQuestionDetail = useCallback(
     async (questionId: number) => {
@@ -339,6 +345,57 @@ const CertStudyPage: React.FC = () => {
     setDetailOpen(true);
     setShowAnswer(false);
     await loadQuestionDetail(questionId);
+  };
+
+  const currentDetailIndex = selectedId === null ? -1 : items.findIndex((item) => item.id === selectedId);
+  const hasPreviousDetail = currentDetailIndex > 0 || page > 1;
+  const hasNextDetail =
+    currentDetailIndex >= 0 && (currentDetailIndex < items.length - 1 || page * pageSize < total);
+
+  const handleNavigateDetail = async (direction: 'previous' | 'next') => {
+    if (detailNavLoading || detailLoading || selectedId === null) return;
+
+    const currentIndex = items.findIndex((item) => item.id === selectedId);
+    if (currentIndex < 0) return;
+
+    let targetQuestion: CertStudyQuestionListItem | undefined;
+    let targetPage = page;
+
+    if (direction === 'previous') {
+      if (currentIndex > 0) {
+        targetQuestion = items[currentIndex - 1];
+      } else if (page > 1) {
+        targetPage = page - 1;
+      }
+    } else if (currentIndex < items.length - 1) {
+      targetQuestion = items[currentIndex + 1];
+    } else if (page * pageSize < total) {
+      targetPage = page + 1;
+    }
+
+    setDetailNavLoading(true);
+    try {
+      if (!targetQuestion && targetPage !== page) {
+        const response = await getCertStudyQuestions(buildQuestionListParams(targetPage));
+        const nextItems = response.items || [];
+        targetQuestion = direction === 'previous' ? nextItems[nextItems.length - 1] : nextItems[0];
+        setItems(nextItems);
+        setAvailableTags(response.availableTags || []);
+        setStatusSummary(response.statusSummary || {});
+        setTotal(Number(response.pagination?.total || 0));
+        setPage(targetPage);
+      }
+
+      if (!targetQuestion) return;
+      setSelectedId(targetQuestion.id);
+      setShowAnswer(false);
+      await loadQuestionDetail(targetQuestion.id);
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: string } }; message?: string };
+      message.error(err?.response?.data?.message || err?.message || '切换题目失败');
+    } finally {
+      setDetailNavLoading(false);
+    }
   };
 
   const handleSaveReview = async () => {
@@ -820,6 +877,24 @@ const CertStudyPage: React.FC = () => {
 
       <Drawer
         title={detail ? `题目详情 #${detail.question.id}` : '题目详情'}
+        extra={
+          <Space>
+            <Button
+              disabled={!hasPreviousDetail || detailLoading || detailNavLoading}
+              loading={detailNavLoading}
+              onClick={() => void handleNavigateDetail('previous')}
+            >
+              上一题
+            </Button>
+            <Button
+              disabled={!hasNextDetail || detailLoading || detailNavLoading}
+              loading={detailNavLoading}
+              onClick={() => void handleNavigateDetail('next')}
+            >
+              下一题
+            </Button>
+          </Space>
+        }
         open={detailOpen}
         width={820}
         onClose={() => {
