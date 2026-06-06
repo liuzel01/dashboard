@@ -29,7 +29,7 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   refreshMe: () => Promise<void>;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, otpCode?: string) => Promise<any>;
   applyToken: (token: string) => Promise<void>;
   logout: () => void;
 }
@@ -81,14 +81,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  const login = async (username: string, password: string) => {
-    const resp = await loginApi({ username, password });
+  const login = async (username: string, password: string, otpCode?: string) => {
+    const resp = await loginApi({ username, password, otpCode });
     const token = resp?.token as string | undefined;
-    if (token) {
-      localStorage.setItem('authToken', token);
-      setAuthToken(token);
+    if (!token) {
+      return resp;
     }
+    localStorage.setItem('authToken', token);
+    setAuthToken(token);
     await fetchMe();
+    return resp;
   };
 
   const applyToken = async (token: string) => {

@@ -9,7 +9,7 @@ export class AuthController {
 
   @Post('login')
   login(@Body(new ValidationPipe({ transform: true })) body: LoginDto) {
-    return this.authService.login(body.username, body.password);
+    return this.authService.login(body.username, body.password, body.otpCode || body.mfaCode);
   }
 
   @Get('keycloak/login')

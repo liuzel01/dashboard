@@ -895,7 +895,7 @@ export const getMe = async () => {
   return response.data;
 };
 
-export const login = async (data: { username: string; password: string }) => {
+export const login = async (data: { username: string; password: string; otpCode?: string }) => {
   const response = await api.post('/auth/login', data);
   return response.data;
 };

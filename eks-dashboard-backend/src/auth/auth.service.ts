@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
+import { generateSecret, generateURI, verifySync } from 'otplib';
+import * as qrcode from 'qrcode';
 import * as jwt from 'jsonwebtoken';
 import jwksRsa from 'jwks-rsa';
 import axios from 'axios';
@@ -13,6 +15,13 @@ const verifyPassword = (password: string, stored: string) => {
   const computed = createHash('sha256').update(`${salt}:${password}`).digest('hex');
   return computed === hash;
 };
+
+const normalizeOtpCode = (code?: string) => String(code || '').replace(/\s+/g, '');
+
+const isAdminUsername = (username: string) => username.trim().toLowerCase() === 'admin';
+
+const buildMfaOtpAuthUrl = (username: string, secret: string) =>
+  generateURI({ strategy: 'totp', issuer: 'EKS Dashboard', label: username, secret });
 
 @Injectable()
 export class AuthService {
@@ -234,12 +243,35 @@ export class AuthService {
     };
   }
 
-  async login(usernameRaw: string, password: string) {
+  private async buildAdminMfaSetup(user: { id: number; username: string; mfa_secret?: string | null }) {
+    const secret = user.mfa_secret || generateSecret();
+    if (!user.mfa_secret) {
+      await this.db.query('UPDATE users SET mfa_secret = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', [secret, user.id]);
+    }
+    const otpauthUrl = buildMfaOtpAuthUrl(user.username, secret);
+    const qrCodeDataUrl = await qrcode.toDataURL(otpauthUrl);
+    return {
+      mfaSetupRequired: true,
+      username: user.username,
+      secret,
+      otpauthUrl,
+      qrCodeDataUrl,
+      message: '管理员账号需要先绑定 Google Authenticator MFA',
+    };
+  }
+
+  private verifyMfaCode(secret: string, code?: string) {
+    const token = normalizeOtpCode(code);
+    if (!secret || !token) return false;
+    return verifySync({ strategy: 'totp', secret, token });
+  }
+
+  async login(usernameRaw: string, password: string, otpCode?: string) {
     const username = usernameRaw.trim();
     if (!username) throw new BadRequestException('用户名不能为空');
 
     const rows = await this.db.query<any[]>(
-      'SELECT id, username, password_hash, status FROM users WHERE username = ? LIMIT 1',
+      'SELECT id, username, password_hash, status, mfa_enabled, mfa_secret, mfa_confirmed_at FROM users WHERE username = ? LIMIT 1',
       [username],
     );
 
@@ -250,6 +282,28 @@ export class AuthService {
 
     if (user.status !== 'active') {
       throw new UnauthorizedException('账号已被禁用');
+    }
+
+    if (isAdminUsername(user.username)) {
+      const mfaEnabled = Number(user.mfa_enabled || 0) === 1 && !!user.mfa_secret;
+      if (!mfaEnabled) {
+        if (!otpCode) {
+          return this.buildAdminMfaSetup(user);
+        }
+        const setupSecret = user.mfa_secret || generateSecret();
+        if (!user.mfa_secret) {
+          await this.db.query('UPDATE users SET mfa_secret = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', [setupSecret, user.id]);
+        }
+        if (!this.verifyMfaCode(setupSecret, otpCode)) {
+          throw new UnauthorizedException('用户名、密码或验证码错误');
+        }
+        await this.db.query(
+          'UPDATE users SET mfa_enabled = 1, mfa_confirmed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
+          [user.id],
+        );
+      } else if (!this.verifyMfaCode(user.mfa_secret, otpCode)) {
+        return { mfaRequired: true, username: user.username, message: '请输入 Google Authenticator 验证码' };
+      }
     }
 
     await this.db.query('UPDATE users SET last_login_at = UTC_TIMESTAMP() WHERE id = ?', [user.id]);

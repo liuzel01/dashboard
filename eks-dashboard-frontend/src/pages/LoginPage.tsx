@@ -1,20 +1,36 @@
 import React, { useEffect, useState } from 'react';
-import { Button, Card, Form, Input, Typography, message } from 'antd';
+import { Alert, Button, Card, Form, Input, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContext';
 import { getRuntimeConfig } from '../services/runtimeConfig';
 import { resolveSsoRedirectUri } from '../services/sso';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
+
+type LocalLoginValues = {
+  username: string;
+  password: string;
+  otpCode?: string;
+};
+
+type MfaSetupState = {
+  username: string;
+  secret: string;
+  qrCodeDataUrl?: string;
+  otpauthUrl?: string;
+  message?: string;
+};
 
 const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login } = React.useContext(AuthContext);
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<LocalLoginValues>();
   const [ssoReady, setSsoReady] = useState(false);
   const [ssoError, setSsoError] = useState<string | null>(null);
   const [showLocal, setShowLocal] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaSetup, setMfaSetup] = useState<MfaSetupState | null>(null);
   const [config, setConfig] = useState<{ redirectUri: string } | null>(null);
 
   useEffect(() => {
@@ -31,11 +47,29 @@ const LoginPage: React.FC = () => {
     load();
   }, []);
 
-  const handleSubmit = async (values: { username: string; password: string }) => {
+  const handleSubmit = async (values: LocalLoginValues) => {
     if (loggingIn) return;
     setLoggingIn(true);
     try {
-      await login(values.username, values.password);
+      const resp = await login(values.username, values.password, values.otpCode);
+      if (resp?.mfaSetupRequired) {
+        setMfaSetup({
+          username: resp.username,
+          secret: resp.secret,
+          qrCodeDataUrl: resp.qrCodeDataUrl,
+          otpauthUrl: resp.otpauthUrl,
+          message: resp.message,
+        });
+        setMfaRequired(false);
+        message.info('请先绑定管理员 MFA，再输入验证码完成登录');
+        return;
+      }
+      if (resp?.mfaRequired) {
+        setMfaRequired(true);
+        setMfaSetup(null);
+        message.info(resp.message || '请输入 Google Authenticator 验证码');
+        return;
+      }
       navigate('/', { replace: true });
     } catch (err: any) {
       message.error(err?.response?.data?.message || err?.message || '登录失败');
@@ -90,16 +124,65 @@ const LoginPage: React.FC = () => {
               <Input
                 autoComplete="username"
                 onPressEnter={() => !loggingIn && form.submit()}
+                onChange={() => {
+                  setMfaRequired(false);
+                  setMfaSetup(null);
+                }}
               />
             </Form.Item>
             <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
               <Input.Password
                 autoComplete="current-password"
                 onPressEnter={() => !loggingIn && form.submit()}
+                onChange={() => {
+                  setMfaRequired(false);
+                  setMfaSetup(null);
+                }}
               />
             </Form.Item>
+
+            {mfaSetup && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={mfaSetup.message || '管理员账号需要绑定 MFA'}
+                description={
+                  <div>
+                    <Paragraph style={{ marginBottom: 8 }}>
+                      使用 Google Authenticator / Authy 扫描二维码，然后输入 6 位验证码完成绑定。
+                    </Paragraph>
+                    {mfaSetup.qrCodeDataUrl && (
+                      <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                        <img src={mfaSetup.qrCodeDataUrl} alt="Admin MFA QR Code" style={{ width: 180, height: 180 }} />
+                      </div>
+                    )}
+                    <Paragraph copyable style={{ marginBottom: 0 }}>
+                      {mfaSetup.secret}
+                    </Paragraph>
+                  </div>
+                }
+              />
+            )}
+
+            {(mfaRequired || mfaSetup) && (
+              <Form.Item
+                name="otpCode"
+                label="Google 验证码"
+                rules={[{ required: true, message: '请输入 6 位验证码' }]}
+              >
+                <Input
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="6 位验证码"
+                  onPressEnter={() => !loggingIn && form.submit()}
+                />
+              </Form.Item>
+            )}
+
             <Button type="default" block htmlType="submit" loading={loggingIn}>
-              管理员登录
+              {mfaSetup ? '绑定并登录' : mfaRequired ? '验证并登录' : '管理员登录'}
             </Button>
           </Form>
         )}
