@@ -2,7 +2,7 @@ import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined } from '@ant-design/icons';
+import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -23,6 +23,7 @@ import SignalMonitorHistoryPage from './pages/SignalMonitorHistoryPage';
 import SignalMonitorStatsPage from './pages/SignalMonitorStatsPage';
 import SignalMonitorDailyPage from './pages/SignalMonitorDailyPage';
 import CertStudyPage from './pages/CertStudyPage';
+import AssetManagementPage from './pages/AssetManagementPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -161,6 +162,22 @@ const AppLayout: React.FC = () => {
     ],
   };
 
+
+  const assetManagementPermission = 'menu:asset-management';
+  const assetManagementGroup: NonNullable<MenuProps['items']>[number] = {
+    key: '/asset-management',
+    label: '资产管理',
+    icon: <DatabaseOutlined />,
+    children: [
+      { key: '/asset-management/overview', label: <Link to="/asset-management/overview">资产总览</Link> },
+      { key: '/asset-management/accounts', label: <Link to="/asset-management/accounts">账号管理</Link> },
+      { key: '/asset-management/resources', label: <Link to="/asset-management/resources">服务资源</Link> },
+      { key: '/asset-management/domains', label: <Link to="/asset-management/domains">域名管理</Link> },
+      { key: '/asset-management/credential-refs', label: <Link to="/asset-management/credential-refs">凭证索引</Link> },
+      { key: '/asset-management/change-logs', label: <Link to="/asset-management/change-logs">变更记录</Link> },
+    ],
+  };
+
   const cloudResourceGroup = createMenuGroup(
     '/cloud-resources',
     '云资源',
@@ -212,6 +229,7 @@ const AppLayout: React.FC = () => {
 
   const visibleMenuItems: MenuProps['items'] = [
     cloudResourceGroup,
+    ...((authLoading || hasPermission(assetManagementPermission)) ? [assetManagementGroup] : []),
     lineManagementGroup,
     monitoringGroup,
     opsToolsGroup,
@@ -238,6 +256,7 @@ const AppLayout: React.FC = () => {
   const selectedKey = location.pathname;
   const openKeys = [
     ...(['/deployments', '/jump-servers', '/security-groups', '/s3-upload'].some((path) => location.pathname.startsWith(path)) ? ['/cloud-resources'] : []),
+    ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
     ...(['/lines', '/line-onboarding'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
     ...(location.pathname.startsWith('/site-monitors') ? ['/monitoring'] : []),
     ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
@@ -289,6 +308,13 @@ const AppLayout: React.FC = () => {
               <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
               <Route path="/data-query" element={<ProtectedRoute required={['menu:data-query']}><DataQueryPage /></ProtectedRoute>} />
               <Route path="/security-groups" element={<ProtectedRoute required={['menu:security-groups']}><SecurityGroupPage /></ProtectedRoute>} />
+              <Route path="/asset-management" element={<Navigate to="/asset-management/overview" replace />} />
+              <Route path="/asset-management/overview" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="overview" /></ProtectedRoute>} />
+              <Route path="/asset-management/accounts" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="accounts" /></ProtectedRoute>} />
+              <Route path="/asset-management/resources" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="resources" /></ProtectedRoute>} />
+              <Route path="/asset-management/domains" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="domains" /></ProtectedRoute>} />
+              <Route path="/asset-management/credential-refs" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="credential-refs" /></ProtectedRoute>} />
+              <Route path="/asset-management/change-logs" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="change-logs" /></ProtectedRoute>} />
               <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />

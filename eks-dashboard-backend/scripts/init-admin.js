@@ -10,6 +10,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:jump-servers', name: 'Windows 跳板机' },
   { key: 'menu:data-query', name: '查询中心' },
   { key: 'menu:security-groups', name: '安全组管理' },
+  { key: 'menu:asset-management', name: '资产管理' },
   { key: 'menu:lines', name: '线路列表' },
   { key: 'menu:site-monitors', name: '站点监控' },
   { key: 'menu:access-control', name: '账号管理' },

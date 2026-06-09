@@ -15,6 +15,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:jump-servers', name: 'Windows 跳板机' },
   { key: 'menu:data-query', name: '查询中心' },
   { key: 'menu:security-groups', name: '安全组管理' },
+  { key: 'menu:asset-management', name: '资产管理' },
   { key: 'menu:cert-study', name: '证书题库' },
   { key: 'menu:lines', name: '线路总览' },
   { key: 'menu:line-onboarding', name: '新增线路向导' },

@@ -20,6 +20,7 @@ import { AuthModule } from './auth/auth.module';
 import { AiOpsModule } from './ai-ops/ai-ops.module';
 import { AuditModule } from './audit/audit.module';
 import { CertStudyModule } from './cert-study/cert-study.module';
+import { AssetsModule } from './assets/assets.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { CertStudyModule } from './cert-study/cert-study.module';
     AiOpsModule,
     AuditModule,
     CertStudyModule,
+    AssetsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

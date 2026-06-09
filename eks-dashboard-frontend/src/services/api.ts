@@ -889,6 +889,232 @@ export const getAccessPermissions = async () => {
   return response.data;
 };
 
+// Asset management
+export type AssetListParams = {
+  keyword?: string;
+  status?: string;
+  provider?: string;
+  type?: string;
+  environment?: string;
+  tenant?: string;
+  owner?: string;
+  includeDeleted?: boolean;
+  page?: number;
+  pageSize?: number;
+};
+
+export type AssetAccount = {
+  id: number;
+  account_name: string;
+  account_type: string;
+  provider: string | null;
+  login_url: string | null;
+  account_identifier: string | null;
+  owner: string | null;
+  department: string | null;
+  usage_scope: string | null;
+  environment_scope: string | null;
+  credential_ref_id: number | null;
+  mfa_enabled: number | boolean;
+  status: string;
+  remark: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssetResource = {
+  id: number;
+  resource_name: string;
+  resource_type: string;
+  provider: string | null;
+  account_id: number | null;
+  resource_identifier: string | null;
+  console_url: string | null;
+  environment: string | null;
+  tenant: string | null;
+  business: string | null;
+  usage_desc: string | null;
+  owner: string | null;
+  status: string;
+  remark: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssetDomain = {
+  id: number;
+  domain: string;
+  root_domain: string | null;
+  provider: string | null;
+  account_id: number | null;
+  resource_id: number | null;
+  icp_status: string;
+  icp_entity: string | null;
+  dns_provider: string | null;
+  cdn_provider: string | null;
+  environment: string | null;
+  tenant: string | null;
+  business: string | null;
+  usage_desc: string | null;
+  owner: string | null;
+  status: string;
+  remark: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CredentialRef = {
+  id: number;
+  ref_name: string;
+  ref_type: string;
+  storage_type: string;
+  storage_path: string | null;
+  related_account_id: number | null;
+  visibility_level: string | null;
+  owner: string | null;
+  remark: string | null;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AssetChangeLog = {
+  id: number;
+  asset_type: string;
+  asset_id: number | null;
+  action: string;
+  before_data?: Record<string, unknown> | null;
+  after_data?: Record<string, unknown> | null;
+  operator: string | null;
+  remark: string | null;
+  created_at: string;
+};
+
+export type AssetListResponse<T> = {
+  items: T[];
+  pagination: { page: number; pageSize: number; total: number };
+};
+
+export const getAssetOverview = async () => {
+  const response = await api.get('/assets/overview');
+  return response.data as {
+    accounts: { total: number; byStatus: Record<string, number> };
+    resources: { total: number; byStatus: Record<string, number> };
+    domains: { total: number; byStatus: Record<string, number> };
+    credentialRefs: { total: number; byStatus: Record<string, number> };
+    missingOwners: { accounts: number; resources: number; domains: number; credentialRefs: number; total: number };
+    recentChanges: AssetChangeLog[];
+  };
+};
+
+export const getAssetAccounts = async (params: AssetListParams = {}) => {
+  const response = await api.get('/assets/accounts', { params });
+  return response.data as AssetListResponse<AssetAccount>;
+};
+
+export const createAssetAccount = async (data: Partial<AssetAccount>) => {
+  const response = await api.post('/assets/accounts', data);
+  return response.data;
+};
+
+export const updateAssetAccount = async (id: number, data: Partial<AssetAccount>) => {
+  const response = await api.patch(`/assets/accounts/${id}`, data);
+  return response.data;
+};
+
+export const deleteAssetAccount = async (id: number) => {
+  const response = await api.delete(`/assets/accounts/${id}`);
+  return response.data;
+};
+
+export const restoreAssetAccount = async (id: number) => {
+  const response = await api.post(`/assets/accounts/${id}/restore`);
+  return response.data;
+};
+
+export const getAssetResources = async (params: AssetListParams = {}) => {
+  const response = await api.get('/assets/resources', { params });
+  return response.data as AssetListResponse<AssetResource>;
+};
+
+export const createAssetResource = async (data: Partial<AssetResource>) => {
+  const response = await api.post('/assets/resources', data);
+  return response.data;
+};
+
+export const updateAssetResource = async (id: number, data: Partial<AssetResource>) => {
+  const response = await api.patch(`/assets/resources/${id}`, data);
+  return response.data;
+};
+
+export const deleteAssetResource = async (id: number) => {
+  const response = await api.delete(`/assets/resources/${id}`);
+  return response.data;
+};
+
+export const restoreAssetResource = async (id: number) => {
+  const response = await api.post(`/assets/resources/${id}/restore`);
+  return response.data;
+};
+
+export const getAssetDomains = async (params: AssetListParams = {}) => {
+  const response = await api.get('/assets/domains', { params });
+  return response.data as AssetListResponse<AssetDomain>;
+};
+
+export const createAssetDomain = async (data: Partial<AssetDomain>) => {
+  const response = await api.post('/assets/domains', data);
+  return response.data;
+};
+
+export const updateAssetDomain = async (id: number, data: Partial<AssetDomain>) => {
+  const response = await api.patch(`/assets/domains/${id}`, data);
+  return response.data;
+};
+
+export const deleteAssetDomain = async (id: number) => {
+  const response = await api.delete(`/assets/domains/${id}`);
+  return response.data;
+};
+
+export const restoreAssetDomain = async (id: number) => {
+  const response = await api.post(`/assets/domains/${id}/restore`);
+  return response.data;
+};
+
+export const getCredentialRefs = async (params: AssetListParams = {}) => {
+  const response = await api.get('/assets/credential-refs', { params });
+  return response.data as AssetListResponse<CredentialRef>;
+};
+
+export const createCredentialRef = async (data: Partial<CredentialRef>) => {
+  const response = await api.post('/assets/credential-refs', data);
+  return response.data;
+};
+
+export const updateCredentialRef = async (id: number, data: Partial<CredentialRef>) => {
+  const response = await api.patch(`/assets/credential-refs/${id}`, data);
+  return response.data;
+};
+
+export const deleteCredentialRef = async (id: number) => {
+  const response = await api.delete(`/assets/credential-refs/${id}`);
+  return response.data;
+};
+
+export const restoreCredentialRef = async (id: number) => {
+  const response = await api.post(`/assets/credential-refs/${id}/restore`);
+  return response.data;
+};
+
+export const getAssetChangeLogs = async (params: { assetType?: string; assetId?: number; action?: string; page?: number; pageSize?: number } = {}) => {
+  const response = await api.get('/assets/change-logs', { params });
+  return response.data as AssetListResponse<AssetChangeLog>;
+};
+
 // Auth / Me
 export const getMe = async () => {
   const response = await api.get('/me');
