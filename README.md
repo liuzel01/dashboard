@@ -126,7 +126,7 @@ aws eks update-kubeconfig \
   --profile dashboard-hashex \
   --region ap-east-1 \
   --name hash \
-  --alias hash
+  --alias megadev-hash
 ```
 
 ##### 2) EKS access entry
@@ -195,7 +195,192 @@ kubectl --context megadev-hash auth can-i create services/proxy -n default
 kubectl --context megadev-hash -n default get svc dashboard-db-gateway-agent kylin-admin-kylin-admin-impl
 ```
 
-##### 4) Agent 自身还需要的集群内权限
+##### 4) Kubernetes RBAC：允许 Dashboard Backend 读取 Ingress
+
+部分线路来源/源站候选接口会直接使用 Dashboard 后端运行机的 kubeconfig 调用 Kubernetes API，例如：
+
+```text
+GET /api/lines/ingress/origin-candidates
+```
+
+该接口会执行类似 `listIngressForAllNamespaces()` 的操作，因此除了 Service Proxy 权限外，还需要给同一个 EKS access group 增加 Ingress 只读权限：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-backend-ingress-readonly
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-hashex-ingress-readonly
+subjects:
+  - kind: Group
+    name: dashboard-hashex
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: dashboard-backend-ingress-readonly
+  apiGroup: rbac.authorization.k8s.io
+```
+
+验证：
+
+```bash
+kubectl --context megadev-hash auth can-i list ingresses.networking.k8s.io --all-namespaces
+kubectl --context megadev-hash get ing -A
+```
+
+##### 5) IAM：允许 Dashboard Backend 同步 Route53 CNAME
+
+以下接口由 Dashboard 后端直接使用环境配置中的 AWS Route53 client：
+
+```text
+POST /api/lines/route53/cname/preview
+POST /api/lines/route53/cname/sync
+```
+
+因此 `dashboard-hashex` IAM 用户除了 EKS 权限，还需要 Route53 权限。hashex 当前使用的托管区示例：
+
+| Zone | Hosted Zone ID | 用途 |
+|---|---|---|
+| `lines.hashex.net.` | `Z08076543Q82R370VMGD0` | hashex 线路子域 |
+| `hashdev.822jx.com.` | `Z014973030WAB8XNR4KR0` | 兼容/历史委派子域 |
+
+推荐给 `dashboard-hashex` 增加独立 inline policy，例如 `dashboard-hashex-route53-cname`：
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Route53ReadForCnamePreview",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZonesByName",
+        "route53:ListResourceRecordSets",
+        "route53:GetChange"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Route53ChangeCnameInManagedZones",
+      "Effect": "Allow",
+      "Action": ["route53:ChangeResourceRecordSets"],
+      "Resource": [
+        "arn:aws:route53:::hostedzone/Z08076543Q82R370VMGD0",
+        "arn:aws:route53:::hostedzone/Z014973030WAB8XNR4KR0"
+      ]
+    }
+  ]
+}
+```
+
+验证：
+
+```bash
+aws route53 list-resource-record-sets \
+  --profile dashboard-hashex \
+  --hosted-zone-id Z08076543Q82R370VMGD0 \
+  --max-items 1
+
+aws route53 list-resource-record-sets \
+  --profile dashboard-hashex \
+  --hosted-zone-id Z014973030WAB8XNR4KR0 \
+  --max-items 1
+```
+
+注意：如果接口仍返回 500，优先检查 Dashboard 后端实际环境配置是否仍指向旧 profile（例如 `hashex`）或旧 kubeContext，并重启后端进程清理 AWS client / K8s client 缓存。
+
+##### 6) cert-manager / ACME DNS-01：Route53 权限与 ClusterIssuer solver
+
+如果需要在 `megadev-hash` 集群内由 cert-manager 自动签发 Kubernetes TLS Secret，需要：
+
+1. 安装 cert-manager（当前实践版本：`v1.16.2`）。
+2. 为 `cert-manager/cert-manager` ServiceAccount 创建独立 IRSA role。
+3. IAM policy 允许 cert-manager 在对应 Route53 Hosted Zone 内写 `_acme-challenge` TXT。
+4. `letsencrypt-dns-staging` / `letsencrypt-dns-prod` 的 solver 显式配置 `selector.dnsZones` 与 `hostedZoneID`。
+
+hash 环境当前独立资源示例：
+
+```text
+IAM Policy: arn:aws:iam::290368114919:policy/cert-manager-route53-policy-hash
+IAM Role:   arn:aws:iam::290368114919:role/cert-manager-route53-role-hash
+OIDC:       oidc.eks.ap-east-1.amazonaws.com/id/45891C32435E6EFC0D305C7F29350699
+SA:         cert-manager/cert-manager
+```
+
+IRSA trust policy 需限定到：
+
+```text
+sub = system:serviceaccount:cert-manager:cert-manager
+aud = sts.amazonaws.com
+```
+
+Route53 写权限示例：
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["route53:ChangeResourceRecordSets"],
+  "Resource": [
+    "arn:aws:route53:::hostedzone/Z08076543Q82R370VMGD0",
+    "arn:aws:route53:::hostedzone/Z014973030WAB8XNR4KR0"
+  ]
+}
+```
+
+ClusterIssuer solver 示例：
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns-prod
+spec:
+  acme:
+    email: lemo@mgbx.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-dns-prod-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - lines.hashex.net
+        dns01:
+          route53:
+            region: ap-east-1
+            hostedZoneID: Z08076543Q82R370VMGD0
+      - selector:
+          dnsZones:
+            - hashdev.822jx.com
+        dns01:
+          route53:
+            region: ap-east-1
+            hostedZoneID: Z014973030WAB8XNR4KR0
+```
+
+Ingress 触发签发示例：
+
+```yaml
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns-prod
+spec:
+  tls:
+    - hosts:
+        - hh46423d459a02a1.lines.hashex.net
+      secretName: hh46423d459a02a1-tls
+```
+
+重要边界：如果外部 443 由 NLB/ACM 终止 TLS，浏览器看到的是 ACM 证书，不是 Kubernetes Secret。cert-manager 只负责生成/续期集群内 TLS Secret；如需浏览器证书匹配，还要单独处理 ACM 与 NLB 绑定。
+
+##### 7) Agent 自身还需要的集群内权限
 
 `eks-dashboard-backend/src/agent/` 是运行在集群内的 `dashboard-db-gateway-agent` 逻辑。它自己会优先 `loadFromCluster()` 使用 Pod ServiceAccount。该 agent 的 Ingress/TLS 功能需要它自己的 ServiceAccount 具备：
 
