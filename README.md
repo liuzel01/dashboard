@@ -85,11 +85,12 @@ Dashboard Frontend
 
 以 `hashex` 环境为例：
 
-- IAM 用户：`arn:aws:iam::017820696647:user/dashboard-hashex`
-- AWS profile：`dashboard-hashex`
+- IAM 用户：`arn:aws:iam::290368114919:user/dashboard-hashex`
+- Dashboard 后端运行时 AWS profile：`dashboard-hashex`（由该 IAM 用户 AK/SK 配置）
+- 管理/创建该用户时使用的本地 AWS profile：`megadev`
 - EKS 集群：`hash`（region: `ap-east-1`）
 - Dashboard 环境 ID：`hashex`
-- `environments.json` 中的 `kubeContext`：通常为 `hash`（不要求与 environmentId 同名）
+- `environments.json` 中的 `kubeContext`：`megadev-hash`（不要求与 environmentId 同名）
 
 ##### 1) IAM 最小权限
 
@@ -109,7 +110,7 @@ Dashboard Frontend
       "Sid": "DescribeHashCluster",
       "Effect": "Allow",
       "Action": ["eks:DescribeCluster"],
-      "Resource": "arn:aws:eks:ap-east-1:017820696647:cluster/hash"
+      "Resource": "arn:aws:eks:ap-east-1:290368114919:cluster/hash"
     }
   ]
 }
@@ -134,10 +135,10 @@ IAM 用户有 AWS 权限后，还必须被 EKS/Kubernetes 识别。推荐使用 
 
 ```bash
 aws eks create-access-entry \
-  --profile hashex \
+  --profile megadev \
   --region ap-east-1 \
   --cluster-name hash \
-  --principal-arn arn:aws:iam::017820696647:user/dashboard-hashex \
+  --principal-arn arn:aws:iam::290368114919:user/dashboard-hashex \
   --type STANDARD \
   --kubernetes-groups dashboard-hashex
 ```
@@ -146,10 +147,10 @@ aws eks create-access-entry \
 
 ```bash
 aws eks describe-access-entry \
-  --profile hashex \
+  --profile megadev \
   --region ap-east-1 \
   --cluster-name hash \
-  --principal-arn arn:aws:iam::017820696647:user/dashboard-hashex
+  --principal-arn arn:aws:iam::290368114919:user/dashboard-hashex
 ```
 
 ##### 3) Kubernetes RBAC：允许 Dashboard Backend 走 Service Proxy
@@ -188,10 +189,10 @@ roleRef:
 验证：
 
 ```bash
-kubectl --context hash auth can-i get services -n default
-kubectl --context hash auth can-i get services/proxy -n default
-kubectl --context hash auth can-i create services/proxy -n default
-kubectl --context hash -n default get svc dashboard-db-gateway-agent kylin-admin-kylin-admin-impl
+kubectl --context megadev-hash auth can-i get services -n default
+kubectl --context megadev-hash auth can-i get services/proxy -n default
+kubectl --context megadev-hash auth can-i create services/proxy -n default
+kubectl --context megadev-hash -n default get svc dashboard-db-gateway-agent kylin-admin-kylin-admin-impl
 ```
 
 ##### 4) Agent 自身还需要的集群内权限
