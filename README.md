@@ -70,6 +70,139 @@ cd <project-folder>
   3. 两者都没有，则走默认 AWS 凭证链（如 EC2 Role / IRSA）
 - **Kube Context**：访问集群仍依赖 `kubeContext`，即使 AK/SK 正确也需要配置该字段。
 
+#### Dashboard 后端专用 IAM 用户与 EKS RBAC（hashex 示例）
+
+当 Dashboard 后端部署在集群外部服务器上，并需要通过 Kubernetes Service Proxy 调用集群内接口时，需要同时配置 **AWS IAM 权限** 与 **Kubernetes RBAC**。
+
+典型调用链路：
+
+```text
+Dashboard Frontend
+  -> Dashboard Backend /api/...
+  -> Kubernetes API service proxy
+  -> default/dashboard-db-gateway-agent:8080 或 default/kylin-admin-kylin-admin-impl:80
+```
+
+以 `hashex` 环境为例：
+
+- IAM 用户：`arn:aws:iam::017820696647:user/dashboard-hashex`
+- AWS profile：`dashboard-hashex`
+- EKS 集群：`hash`（region: `ap-east-1`）
+- Dashboard 环境 ID：`hashex`
+- `environments.json` 中的 `kubeContext`：通常为 `hash`（不要求与 environmentId 同名）
+
+##### 1) IAM 最小权限
+
+用于生成 kubeconfig / 获取 EKS token 的 IAM policy 至少需要：
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EksTokenBase",
+      "Effect": "Allow",
+      "Action": ["sts:GetCallerIdentity"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DescribeHashCluster",
+      "Effect": "Allow",
+      "Action": ["eks:DescribeCluster"],
+      "Resource": "arn:aws:eks:ap-east-1:017820696647:cluster/hash"
+    }
+  ]
+}
+```
+
+> 注意：如果 `aws eks update-kubeconfig` 报 `UnrecognizedClientException: The security token included in the request is invalid`，优先检查 AccessKey 是否填错、过期或处于 `Inactive`。这不是权限不足；权限不足通常是 `AccessDeniedException`。
+
+在 Dashboard 后端服务器上配置 profile 后验证：
+
+```bash
+aws sts get-caller-identity --profile dashboard-hashex --region ap-east-1
+aws eks update-kubeconfig \
+  --profile dashboard-hashex \
+  --region ap-east-1 \
+  --name hash \
+  --alias hash
+```
+
+##### 2) EKS access entry
+
+IAM 用户有 AWS 权限后，还必须被 EKS/Kubernetes 识别。推荐使用 EKS Access Entry 映射到一个固定 Kubernetes group：
+
+```bash
+aws eks create-access-entry \
+  --profile hashex \
+  --region ap-east-1 \
+  --cluster-name hash \
+  --principal-arn arn:aws:iam::017820696647:user/dashboard-hashex \
+  --type STANDARD \
+  --kubernetes-groups dashboard-hashex
+```
+
+已存在时可用以下命令检查：
+
+```bash
+aws eks describe-access-entry \
+  --profile hashex \
+  --region ap-east-1 \
+  --cluster-name hash \
+  --principal-arn arn:aws:iam::017820696647:user/dashboard-hashex
+```
+
+##### 3) Kubernetes RBAC：允许 Dashboard Backend 走 Service Proxy
+
+Dashboard 后端通过 `KubernetesService.requestServiceProxy()` 调用集群内 Service。当前至少涉及：
+
+- `GET default/kylin-admin-kylin-admin-impl:80/admin/app/line/url/list`
+- `POST default/dashboard-db-gateway-agent:8080/v1/...`
+
+因此需要给映射后的 group 授权 `services` 与 `services/proxy`。示例：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dashboard-backend-service-proxy
+rules:
+  - apiGroups: [""]
+    resources: ["services", "services/proxy"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dashboard-hashex-service-proxy
+subjects:
+  - kind: Group
+    name: dashboard-hashex
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: dashboard-backend-service-proxy
+  apiGroup: rbac.authorization.k8s.io
+```
+
+验证：
+
+```bash
+kubectl --context hash auth can-i get services -n default
+kubectl --context hash auth can-i get services/proxy -n default
+kubectl --context hash auth can-i create services/proxy -n default
+kubectl --context hash -n default get svc dashboard-db-gateway-agent kylin-admin-kylin-admin-impl
+```
+
+##### 4) Agent 自身还需要的集群内权限
+
+`eks-dashboard-backend/src/agent/` 是运行在集群内的 `dashboard-db-gateway-agent` 逻辑。它自己会优先 `loadFromCluster()` 使用 Pod ServiceAccount。该 agent 的 Ingress/TLS 功能需要它自己的 ServiceAccount 具备：
+
+- `networking.k8s.io/ingresses`：`list`、`get`、`create`
+- core `secrets`：`get`（读取 TLS Secret）
+
+这部分是 **agent Pod 的 ServiceAccount 权限**，不是外部 Dashboard 后端 IAM 用户的权限。外部 IAM 用户只需要能通过 service proxy 调到 `dashboard-db-gateway-agent`。
+
 #### 通过 EKS 集群内网代理调用接口（后续可复用）
 
 当目标系统接口只在集群/VPC 内可达（例如超级后台内部接口），而部署 Dashboard 的主机无法直接公网访问时，可采用“基于 `kubeContext` 的集群内代理调用”模式。
