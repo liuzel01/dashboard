@@ -5,6 +5,7 @@ require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
 
 const DEFAULT_PERMISSIONS = [
   { key: 'menu:environments', name: '环境管理' },
+  { key: 'menu:site-conf', name: 'siteconf 配置' },
   { key: 'menu:s3-upload', name: 'S3 上传' },
   { key: 'menu:deployments', name: 'EKS 部署' },
   { key: 'menu:jump-servers', name: 'Windows 跳板机' },

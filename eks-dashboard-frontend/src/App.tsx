@@ -24,6 +24,7 @@ import SignalMonitorStatsPage from './pages/SignalMonitorStatsPage';
 import SignalMonitorDailyPage from './pages/SignalMonitorDailyPage';
 import CertStudyPage from './pages/CertStudyPage';
 import AssetManagementPage from './pages/AssetManagementPage';
+import SiteConfPage from './pages/SiteConfPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -103,6 +104,7 @@ const AppLayout: React.FC = () => {
     siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
+    siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
   };
 
   const createMenuLink = (item: { key: string; label: string }) => <Link to={item.key}>{item.label}</Link>;
@@ -214,6 +216,13 @@ const AppLayout: React.FC = () => {
           disabled: authLoading,
         }]
       : []),
+    ...((authLoading || hasPermission(menuItems.siteConf.permission))
+      ? [{
+          key: menuItems.siteConf.key,
+          label: createMenuLink(menuItems.siteConf),
+          disabled: authLoading,
+        }]
+      : []),
     ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
   ];
 
@@ -261,7 +270,7 @@ const AppLayout: React.FC = () => {
     ...(location.pathname.startsWith('/site-monitors') ? ['/monitoring'] : []),
     ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
-    ...(['/environments', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
+    ...(['/environments', '/site-conf', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
     ...(location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : []),
   ];
@@ -319,6 +328,7 @@ const AppLayout: React.FC = () => {
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
+              <Route path="/site-conf" element={<ProtectedRoute required={['menu:site-conf']}><SiteConfPage /></ProtectedRoute>} />
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
               <Route path="/access-control" element={<Navigate to="/access-control/users" replace />} />
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />

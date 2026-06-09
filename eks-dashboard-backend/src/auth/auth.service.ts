@@ -8,6 +8,7 @@ import jwksRsa from 'jwks-rsa';
 import axios from 'axios';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AccessControlService } from '../access-control/access-control.service';
+import { SiteConfService } from '../site-conf/site-conf.service';
 
 const verifyPassword = (password: string, stored: string) => {
   const [salt, hash] = String(stored || '').split('$');
@@ -31,6 +32,7 @@ export class AuthService {
     private readonly db: PlatformDatabaseService,
     private readonly accessControl: AccessControlService,
     private readonly config: ConfigService,
+    private readonly siteConf: SiteConfService,
   ) {}
 
   private getJwtSecret() {
@@ -41,26 +43,26 @@ export class AuthService {
     return this.config.get<string>('AUTH_JWT_EXPIRES_IN') || '7d';
   }
 
-  private getKeycloakIssuer() {
-    return this.config.get<string>('KEYCLOAK_ISSUER') || '';
+  private async getKeycloakIssuer() {
+    return this.siteConf.getString('sso.keycloak.issuer', this.config.get<string>('KEYCLOAK_ISSUER') || '');
   }
 
-  private getKeycloakClientId() {
-    return this.config.get<string>('KEYCLOAK_CLIENT_ID') || '';
+  private async getKeycloakClientId() {
+    return this.siteConf.getString('sso.keycloak.client_id', this.config.get<string>('KEYCLOAK_CLIENT_ID') || '');
   }
 
-  private getKeycloakAllowedRedirectUris() {
-    const list = this.config.get<string>('KEYCLOAK_REDIRECT_URIS') || '';
-    const single = this.config.get<string>('KEYCLOAK_REDIRECT_URI') || '';
+  private async getKeycloakAllowedRedirectUris() {
+    const list = await this.siteConf.getString('sso.keycloak.redirect_uris', this.config.get<string>('KEYCLOAK_REDIRECT_URIS') || '');
+    const single = await this.siteConf.getString('sso.keycloak.redirect_uri', this.config.get<string>('KEYCLOAK_REDIRECT_URI') || '');
     const all = [...list.split(','), single]
       .map((s) => s.trim())
       .filter(Boolean);
     return Array.from(new Set(all));
   }
 
-  private getFrontendRedirectUris() {
-    const list = this.config.get<string>('SSO_FRONTEND_REDIRECT_URIS') || '';
-    const single = this.config.get<string>('SSO_FRONTEND_REDIRECT_URI') || '';
+  private async getFrontendRedirectUris() {
+    const list = await this.siteConf.getString('sso.frontend.redirect_uris', this.config.get<string>('SSO_FRONTEND_REDIRECT_URIS') || '');
+    const single = await this.siteConf.getString('sso.frontend.redirect_uri', this.config.get<string>('SSO_FRONTEND_REDIRECT_URI') || '');
     const all = [...list.split(','), single]
       .map((s) => s.trim())
       .filter(Boolean);
@@ -71,12 +73,12 @@ export class AuthService {
     return this.config.get<string>('AUTH_SSO_STATE_SECRET') || this.getJwtSecret();
   }
 
-  private getKeycloakCallbackUri() {
-    return (this.config.get<string>('KEYCLOAK_REDIRECT_URI') || '').trim();
+  private async getKeycloakCallbackUri() {
+    return (await this.siteConf.getString('sso.keycloak.redirect_uri', this.config.get<string>('KEYCLOAK_REDIRECT_URI') || '')).trim();
   }
 
-  private resolveFrontendRedirectUri(requested?: string) {
-    const allowed = this.getFrontendRedirectUris();
+  private async resolveFrontendRedirectUri(requested?: string) {
+    const allowed = await this.getFrontendRedirectUris();
     if (requested && requested.trim()) {
       const uri = requested.trim();
       if (allowed.length > 0 && !allowed.includes(uri)) {
@@ -114,17 +116,17 @@ export class AuthService {
     return `${redirectUri}#${hash}`;
   }
 
-  private getKeycloakJwksUri() {
+  private async getKeycloakJwksUri() {
     const explicit = this.config.get<string>('KEYCLOAK_JWKS_URI');
     if (explicit) return explicit;
-    const issuer = this.getKeycloakIssuer();
+    const issuer = await this.getKeycloakIssuer();
     if (!issuer) return '';
     return `${issuer.replace(/\/+$/, '')}/protocol/openid-connect/certs`;
   }
 
-  private getJwksClient() {
+  private async getJwksClient() {
     if (this.jwksClient) return this.jwksClient;
-    const jwksUri = this.getKeycloakJwksUri();
+    const jwksUri = await this.getKeycloakJwksUri();
     if (!jwksUri) {
       throw new UnauthorizedException('Keycloak JWKS URI is not configured');
     }
@@ -159,7 +161,7 @@ export class AuthService {
         throw new UnauthorizedException('Invalid token');
       }
 
-      const issuer = this.getKeycloakIssuer();
+      const issuer = await this.getKeycloakIssuer();
       if (issuer && (decoded.payload as any)?.iss === issuer) {
         return await this.verifyKeycloakToken(token);
       }
@@ -198,16 +200,16 @@ export class AuthService {
       throw new UnauthorizedException('Invalid token');
     }
 
-    const client = this.getJwksClient();
+    const client = await this.getJwksClient();
     const signingKey = await client.getSigningKey(kid);
     const publicKey = signingKey.getPublicKey();
-    const issuer = this.getKeycloakIssuer();
+    const issuer = await this.getKeycloakIssuer();
     const payload = jwt.verify(token, publicKey, {
       issuer: issuer || undefined,
       algorithms: ['RS256'],
     }) as jwt.JwtPayload;
 
-    const clientId = this.getKeycloakClientId();
+    const clientId = await this.getKeycloakClientId();
     if (clientId) {
       const aud = payload.aud;
       const azp = (payload as any).azp;
@@ -320,10 +322,10 @@ export class AuthService {
   }
 
   async exchangeKeycloakCode(params: { code: string; redirectUri: string; codeVerifier?: string }) {
-    const issuer = this.getKeycloakIssuer();
-    const clientId = this.getKeycloakClientId();
+    const issuer = await this.getKeycloakIssuer();
+    const clientId = await this.getKeycloakClientId();
     const clientSecret = this.config.get<string>('KEYCLOAK_CLIENT_SECRET') || '';
-    const allowedRedirects = this.getKeycloakAllowedRedirectUris();
+    const allowedRedirects = await this.getKeycloakAllowedRedirectUris();
     const tokenEndpoint = `${issuer.replace(/\/+$/, '')}/protocol/openid-connect/token`;
 
     if (!issuer || !clientId || !clientSecret) {
@@ -369,12 +371,12 @@ export class AuthService {
     return { token, user: me };
   }
 
-  buildKeycloakAuthorizeUrl(frontendRedirectUri?: string) {
-    const issuer = this.getKeycloakIssuer();
-    const clientId = this.getKeycloakClientId();
-    const callbackUri = this.getKeycloakCallbackUri();
-    const allowedRedirects = this.getKeycloakAllowedRedirectUris();
-    const frontendRedirect = this.resolveFrontendRedirectUri(frontendRedirectUri);
+  async buildKeycloakAuthorizeUrl(frontendRedirectUri?: string) {
+    const issuer = await this.getKeycloakIssuer();
+    const clientId = await this.getKeycloakClientId();
+    const callbackUri = await this.getKeycloakCallbackUri();
+    const allowedRedirects = await this.getKeycloakAllowedRedirectUris();
+    const frontendRedirect = await this.resolveFrontendRedirectUri(frontendRedirectUri);
 
     if (!issuer || !clientId || !callbackUri) {
       throw new UnauthorizedException('Keycloak client is not configured');
@@ -401,12 +403,12 @@ export class AuthService {
     error?: string;
     errorDescription?: string;
   }) {
-    let frontendRedirectUri = this.resolveFrontendRedirectUri();
+    let frontendRedirectUri = await this.resolveFrontendRedirectUri();
     if (params.state) {
       try {
         frontendRedirectUri = this.parseSsoState(params.state);
       } catch {
-        frontendRedirectUri = this.resolveFrontendRedirectUri();
+        frontendRedirectUri = await this.resolveFrontendRedirectUri();
       }
     }
 
@@ -427,7 +429,7 @@ export class AuthService {
     }
 
     try {
-      const callbackUri = this.getKeycloakCallbackUri();
+      const callbackUri = await this.getKeycloakCallbackUri();
       this.parseSsoState(params.state);
       const result = await this.exchangeKeycloakCode({
         code: params.code,

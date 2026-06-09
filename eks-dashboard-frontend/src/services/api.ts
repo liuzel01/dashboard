@@ -225,6 +225,38 @@ export const updateEnvironmentConfig = async (id: string, data: any) => {
   return response.data;
 };
 
+
+// Dashboard SiteConf
+export const getDashboardSiteConfList = async (params: { page?: number; size?: number; keyword?: string; category?: string } = {}) => {
+  const response = await api.get('/site-conf', { params });
+  return response.data;
+};
+
+export const getDashboardSiteConfCategories = async () => {
+  const response = await api.get('/site-conf/categories');
+  return response.data;
+};
+
+export const saveDashboardSiteConf = async (data: {
+  confKey: string;
+  confValue: string;
+  valueType: 'string' | 'number' | 'boolean' | 'json';
+  category?: string;
+  description?: string;
+  isSensitive?: boolean;
+  isRuntimeEditable?: boolean;
+  defaultValue?: string;
+  validationJson?: string;
+}) => {
+  const response = await api.post('/site-conf', data);
+  return response.data;
+};
+
+export const deleteDashboardSiteConf = async (confKey: string) => {
+  const response = await api.delete(`/site-conf/${encodeURIComponent(confKey)}`);
+  return response.data;
+};
+
 // S3 Upload
 export const getS3Buckets = async () => {
   const response = await api.get('/s3/buckets');

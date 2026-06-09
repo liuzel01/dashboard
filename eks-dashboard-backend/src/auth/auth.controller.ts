@@ -13,8 +13,8 @@ export class AuthController {
   }
 
   @Get('keycloak/login')
-  keycloakLogin(@Query('redirectUri') redirectUri: string | undefined, @Res() res: Response) {
-    const url = this.authService.buildKeycloakAuthorizeUrl(redirectUri);
+  async keycloakLogin(@Query('redirectUri') redirectUri: string | undefined, @Res() res: Response) {
+    const url = await this.authService.buildKeycloakAuthorizeUrl(redirectUri);
     return res.redirect(url);
   }
 

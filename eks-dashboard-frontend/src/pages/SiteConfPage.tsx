@@ -1,0 +1,247 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { deleteDashboardSiteConf, getDashboardSiteConfCategories, getDashboardSiteConfList, saveDashboardSiteConf } from '../services/api';
+
+const { Text, Paragraph } = Typography;
+
+type ValueType = 'string' | 'number' | 'boolean' | 'json';
+
+type SiteConfItem = {
+  id: number;
+  confKey: string;
+  confValue: string;
+  valueType: ValueType;
+  category?: string;
+  description?: string;
+  isSensitive: boolean;
+  isRuntimeEditable: boolean;
+  defaultValue?: string;
+  validationJson?: string;
+  updatedAt?: string;
+};
+
+const validateValueByType = (value: string, type: ValueType) => {
+  if (type === 'number' && !Number.isFinite(Number(value))) return 'number 类型必须填写合法数字';
+  if (type === 'boolean' && !['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(String(value).trim().toLowerCase())) return 'boolean 类型只支持 true/false/1/0/yes/no/on/off';
+  if (type === 'json') {
+    try { JSON.parse(value); } catch { return 'json 类型必须填写合法 JSON'; }
+  }
+  return '';
+};
+
+const SiteConfPage: React.FC = () => {
+  const [loading, setLoading] = useState(false);
+  const [list, setList] = useState<SiteConfItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(20);
+  const [keyword, setKeyword] = useState('');
+  const [category, setCategory] = useState<string | undefined>();
+  const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<SiteConfItem | null>(null);
+  const [form] = Form.useForm();
+  const valueType = Form.useWatch('valueType', form) as ValueType | undefined;
+
+  const fetchCategories = async () => {
+    try {
+      setCategories(await getDashboardSiteConfCategories());
+    } catch {
+      // categories are non-critical
+    }
+  };
+
+  const fetchList = async (nextPage = page, nextSize = size, nextKeyword = keyword, nextCategory = category) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getDashboardSiteConfList({ page: nextPage, size: nextSize, keyword: nextKeyword, category: nextCategory });
+      setList(data?.list || []);
+      setTotal(Number(data?.total || 0));
+      setPage(nextPage);
+      setSize(nextSize);
+    } catch (e: any) {
+      setError(e?.message || '加载 siteconf 配置失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCategories();
+    fetchList(1, size, keyword, category);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const openCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    form.setFieldsValue({ valueType: 'string', isSensitive: false, isRuntimeEditable: true });
+    setModalOpen(true);
+  };
+
+  const openEdit = (record: SiteConfItem) => {
+    setEditing(record);
+    form.resetFields();
+    form.setFieldsValue({
+      confKey: record.confKey,
+      confValue: record.confValue,
+      valueType: record.valueType,
+      category: record.category,
+      description: record.description,
+      isSensitive: record.isSensitive,
+      isRuntimeEditable: record.isRuntimeEditable,
+      defaultValue: record.defaultValue,
+      validationJson: record.validationJson,
+    });
+    setModalOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    const values = await form.validateFields();
+    const validationError = validateValueByType(values.confValue, values.valueType);
+    if (validationError) {
+      message.error(validationError);
+      return;
+    }
+    if (values.validationJson) {
+      try { JSON.parse(values.validationJson); } catch { message.error('validationJson 必须是合法 JSON'); return; }
+    }
+    try {
+      setLoading(true);
+      await saveDashboardSiteConf({
+        confKey: values.confKey,
+        confValue: values.confValue,
+        valueType: values.valueType,
+        category: values.category || undefined,
+        description: values.description || undefined,
+        isSensitive: values.isSensitive,
+        isRuntimeEditable: values.isRuntimeEditable,
+        defaultValue: values.defaultValue || undefined,
+        validationJson: values.validationJson || undefined,
+      });
+      message.success('siteconf 配置已保存');
+      setModalOpen(false);
+      await fetchCategories();
+      await fetchList(page, size, keyword, category);
+    } catch (e: any) {
+      message.error(e?.message || '保存 siteconf 配置失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (record: SiteConfItem) => {
+    Modal.confirm({
+      title: '删除配置？',
+      content: `确认删除 ${record.confKey}？删除后程序会回退到 legacy env 或默认值。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        await deleteDashboardSiteConf(record.confKey);
+        message.success('配置已删除');
+        await fetchList(page, size, keyword, category);
+      },
+    });
+  };
+
+  const columns = useMemo(
+    () => [
+      { title: 'Key', dataIndex: 'confKey', width: 280, render: (v: string) => <Text code copyable>{v}</Text> },
+      { title: '分类', dataIndex: 'category', width: 130, render: (v: string) => v ? <Tag>{v}</Tag> : '-' },
+      { title: '类型', dataIndex: 'valueType', width: 100, render: (v: string) => <Tag color="blue">{v}</Tag> },
+      {
+        title: 'Value',
+        dataIndex: 'confValue',
+        render: (v: string, record: SiteConfItem) => (
+          <Space direction="vertical" size={2} style={{ maxWidth: 620 }}>
+            <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }} copyable={!record.isSensitive}>
+              {record.isSensitive ? '********' : (v || '-')}
+            </Paragraph>
+            {record.isSensitive && <Tag color="orange">敏感配置</Tag>}
+          </Space>
+        ),
+      },
+      { title: '说明', dataIndex: 'description', width: 260, ellipsis: true, render: (v: string) => v || '-' },
+      { title: '更新时间', dataIndex: 'updatedAt', width: 180, render: (v: string) => v || '-' },
+      {
+        title: '操作',
+        key: 'action',
+        width: 150,
+        render: (_: any, record: SiteConfItem) => (
+          <Space>
+            <Button type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>编辑</Button>
+            <Button type="link" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)}>删除</Button>
+          </Space>
+        ),
+      },
+    ],
+    [page, size, keyword, category],
+  );
+
+  return (
+    <>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="dashboard 内部 siteconf 配置"
+        description="这里维护 dashboard 项目自身运行期配置。启动必需配置（例如 DB_*）仍保留在 .env；Keycloak client secret 等密钥第一版建议继续由 .env / Secret 管理。"
+      />
+
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Input allowClear placeholder="搜索 key / 说明" value={keyword} onChange={(e) => setKeyword(e.target.value)} onPressEnter={() => fetchList(1, size, keyword, category)} style={{ width: 280 }} />
+        <Select allowClear placeholder="分类" value={category} onChange={(v) => setCategory(v)} options={categories.map((c) => ({ label: c, value: c }))} style={{ width: 180 }} />
+        <Button type="primary" icon={<SearchOutlined />} onClick={() => fetchList(1, size, keyword, category)}>搜索</Button>
+        <Button icon={<ReloadOutlined />} onClick={() => fetchList(page, size, keyword, category)}>刷新</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增配置</Button>
+      </Space>
+
+      {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />}
+
+      <Spin spinning={loading}>
+        <Table
+          rowKey="confKey"
+          columns={columns}
+          dataSource={list}
+          pagination={{
+            current: page,
+            pageSize: size,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: [10, 20, 50, 100],
+            showTotal: (n) => `共 ${n} 条`,
+            onChange: (nextPage, nextSize) => fetchList(nextPage, nextSize, keyword, category),
+          }}
+        />
+      </Spin>
+
+      <Modal title={editing ? '编辑 siteconf 配置' : '新增 siteconf 配置'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleSubmit} okText="保存" width={860} destroyOnClose>
+        <Form form={form} layout="vertical">
+          <Form.Item label="Key" name="confKey" rules={[{ required: true, message: '请输入 key' }]}>
+            <Input disabled={!!editing} placeholder="例如：sso.keycloak.issuer" />
+          </Form.Item>
+          <Form.Item label="类型" name="valueType" rules={[{ required: true, message: '请选择类型' }]}>
+            <Select options={['string', 'number', 'boolean', 'json'].map((v) => ({ label: v, value: v }))} />
+          </Form.Item>
+          <Form.Item label="Value" name="confValue" rules={[{ required: true, message: '请输入 value' }]}>
+            {valueType === 'json' ? <Input.TextArea rows={8} placeholder='{"enabled":true}' /> : <Input.TextArea rows={4} />}
+          </Form.Item>
+          <Form.Item label="分类" name="category"><Input placeholder="例如：sso / line / aiops" /></Form.Item>
+          <Form.Item label="说明" name="description"><Input.TextArea rows={3} /></Form.Item>
+          <Space size={32}>
+            <Form.Item label="敏感配置" name="isSensitive" valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item label="运行期可编辑" name="isRuntimeEditable" valuePropName="checked"><Switch /></Form.Item>
+          </Space>
+          <Form.Item label="默认值" name="defaultValue"><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item label="校验规则 JSON" name="validationJson"><Input.TextArea rows={3} placeholder='例如：{"min":1000} 或 {"enum":["k8s-proxy","direct-url"]}' /></Form.Item>
+        </Form>
+      </Modal>
+    </>
+  );
+};
+
+export default SiteConfPage;
