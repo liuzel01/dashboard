@@ -21,6 +21,7 @@ import { SqlPreviewDto } from './dto/sql-preview.dto';
 import { SqlExecuteDto } from './dto/sql-execute.dto';
 import { CloudWatchEventDto } from './dto/cloudwatch-event.dto';
 import { SlowQueryEventDto } from './dto/slow-query-event.dto';
+import { SiteConfService } from '../site-conf/site-conf.service';
 
 type ActorContext = {
   userId: number | null;
@@ -95,7 +96,6 @@ export class AiOpsService {
   private readonly fewshotCacheTtlMs = 2 * 60 * 1000;
   private readonly fewshotPromptMaxCases = 6;
   private readonly fewshotPromptMaxChars = 5000;
-  private readonly openClawRequestTimeoutMs: number;
   private fewshotCache: { expiresAt: number; sourcePath: string; rows: FewshotCaseRow[] } | null =
     null;
 
@@ -106,17 +106,8 @@ export class AiOpsService {
     private readonly authService: AuthService,
     private readonly accessControl: AccessControlService,
     private readonly environments: EnvironmentsService,
-  ) {
-    const openClawTimeoutMs = Number(
-      this.config.get<string>('AIOPS_OPENCLAW_TIMEOUT_MS') || 20000,
-    );
-    this.openClawRequestTimeoutMs = this.boundNumber(
-      openClawTimeoutMs,
-      1000,
-      120000,
-      20000,
-    );
-  }
+    private readonly siteConf: SiteConfService,
+  ) {}
 
   async resolveActorFromAuthorization(authorization?: string): Promise<ActorContext> {
     const auth = String(authorization || '');
@@ -159,7 +150,7 @@ export class AiOpsService {
   async previewSql(environmentId: string, actor: ActorContext, body: SqlPreviewDto) {
     this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:sql:generate']);
     const actionStartedAt = Date.now();
-    const policy = this.getSqlPolicy(environmentId, body.maxRows);
+    const policy = await this.getSqlPolicy(environmentId, body.maxRows);
     const llmSessionKey = this.buildLlmSessionKey(environmentId, actor, body.sessionId);
 
     let actionId: number | null = null;
@@ -513,7 +504,7 @@ export class AiOpsService {
     };
   }
 
-  private getSqlPolicy(environmentId: string, requestMaxRows?: number): SqlPolicy {
+  private async getSqlPolicy(environmentId: string, requestMaxRows?: number): Promise<SqlPolicy> {
     const env = this.environments.getEnvironmentById(environmentId);
     const aiops =
       (env?.database?.aiops as Record<string, unknown>) ||
@@ -535,13 +526,13 @@ export class AiOpsService {
     );
 
     const defaultLimitFromCfg = Number(
-      aiops.default_limit || aiops.defaultLimit || this.config.get<string>('AIOPS_SQL_DEFAULT_LIMIT') || 200,
+      aiops.default_limit || aiops.defaultLimit || (await this.siteConf.getNumber('aiops.sql.default_limit', 200)),
     );
     const maxLimitFromCfg = Number(
-      aiops.max_limit || aiops.maxLimit || this.config.get<string>('AIOPS_SQL_MAX_LIMIT') || 1000,
+      aiops.max_limit || aiops.maxLimit || (await this.siteConf.getNumber('aiops.sql.max_limit', 1000)),
     );
     const timeoutMs = Number(
-      aiops.timeout_ms || aiops.timeoutMs || this.config.get<string>('AIOPS_SQL_TIMEOUT_MS') || 5000,
+      aiops.timeout_ms || aiops.timeoutMs || (await this.siteConf.getNumber('aiops.sql.timeout_ms', 5000)),
     );
 
     const maxLimit = this.boundNumber(maxLimitFromCfg, 1, 10000, 1000);
@@ -1005,13 +996,13 @@ export class AiOpsService {
             'Content-Type': 'application/json',
             'x-openclaw-session-key': llmSessionKey,
           },
-          timeout: this.openClawRequestTimeoutMs,
+          timeout: await this.getOpenClawRequestTimeoutMs(),
         },
       );
     } catch (error) {
       const elapsedMs = Date.now() - requestStartedAt;
       throw new BadGatewayException(
-        `OpenClaw request failed (endpoint=${endpoint}, model=${llm.model}, timeoutMs=${this.openClawRequestTimeoutMs}, elapsedMs=${elapsedMs}): ${this.errorMessage(error)}`,
+        `OpenClaw request failed (endpoint=${endpoint}, model=${llm.model}, timeoutMs=${await this.getOpenClawRequestTimeoutMs()}, elapsedMs=${elapsedMs}): ${this.errorMessage(error)}`,
       );
     }
 
@@ -1281,7 +1272,7 @@ export class AiOpsService {
     }
 
     const withScore = scored.filter((item) => item.score > 0);
-    const maxCases = this.getFewshotMaxCases();
+    const maxCases = await this.getFewshotMaxCases();
     const picked = (withScore.length > 0 ? withScore : scored)
       .slice(0, maxCases)
       .map((item) => item.row);
@@ -1311,14 +1302,17 @@ export class AiOpsService {
     return `${text.slice(0, this.fewshotPromptMaxChars)}\n...(few-shot context truncated)`;
   }
 
-  private getFewshotMaxCases(): number {
-    const configured = Number(
-      String(this.config.get<string>('AIOPS_NL2SQL_FEWSHOT_MAX_CASES') || '').trim(),
-    );
+  private async getFewshotMaxCases(): Promise<number> {
+    const configured = await this.siteConf.getNumber('aiops.nl2sql.fewshot_max_cases', this.fewshotPromptMaxCases);
     if (Number.isFinite(configured) && configured > 0) {
       return Math.min(12, Math.floor(configured));
     }
     return this.fewshotPromptMaxCases;
+  }
+
+  private async getOpenClawRequestTimeoutMs(): Promise<number> {
+    const openClawTimeoutMs = await this.siteConf.getNumber('aiops.openclaw.timeout_ms', 20000);
+    return this.boundNumber(openClawTimeoutMs, 1000, 120000, 20000);
   }
 
   private async getFewshotRows(): Promise<FewshotCaseRow[]> {

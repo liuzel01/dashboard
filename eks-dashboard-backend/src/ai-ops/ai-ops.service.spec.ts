@@ -74,6 +74,9 @@ const createService = (overrides?: Record<string, string>) => {
   const environments = {
     getEnvironmentById: jest.fn(() => envConfig),
   };
+  const siteConf = {
+    getNumber: jest.fn(async (key: string, fallback: number) => fallback),
+  };
 
   const service = new AiOpsService(
     config as any,
@@ -82,6 +85,7 @@ const createService = (overrides?: Record<string, string>) => {
     authService as any,
     accessControl as any,
     environments as any,
+    siteConf as any,
   );
 
   return {
@@ -90,6 +94,7 @@ const createService = (overrides?: Record<string, string>) => {
     platformDb,
     config,
     environments,
+    siteConf,
   };
 };
 
