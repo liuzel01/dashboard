@@ -1048,6 +1048,13 @@ export type WangsuCdnDomainPreviewResponse = {
   items: WangsuCdnDomainPreviewItem[];
 };
 
+export type WangsuCdnDomainSyncResponse = {
+  provider: 'wangsu';
+  fetchedAt: string;
+  summary: { total: number; created: number; updated: number; unchanged: number; dryRun: boolean };
+  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged'; id?: number }>;
+};
+
 
 export type AssetListResponse<T> = {
   items: T[];
@@ -1174,6 +1181,11 @@ export const getAssetChangeLogs = async (params: { assetType?: string; assetId?:
 export const previewWangsuCdnDomains = async () => {
   const response = await api.get('/assets/cdn/wangsu/domains/preview');
   return response.data as WangsuCdnDomainPreviewResponse;
+};
+
+export const syncWangsuCdnDomains = async (data: { dryRun?: boolean } = {}) => {
+  const response = await api.post('/assets/cdn/wangsu/domains/sync', data);
+  return response.data as WangsuCdnDomainSyncResponse;
 };
 
 // Auth / Me

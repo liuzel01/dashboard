@@ -34,6 +34,7 @@ import {
   getAssetResources,
   getCredentialRefs,
   previewWangsuCdnDomains,
+  syncWangsuCdnDomains,
   restoreAssetAccount,
   restoreAssetDomain,
   restoreAssetResource,
@@ -53,6 +54,7 @@ import type {
   CredentialRef,
   WangsuCdnDomainPreviewItem,
   WangsuCdnDomainPreviewResponse,
+  WangsuCdnDomainSyncResponse,
 } from '../services/api';
 
 const { Text, Paragraph } = Typography;
@@ -469,6 +471,8 @@ const CdnSyncTab: React.FC = () => {
   const [data, setData] = useState<WangsuCdnDomainPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<WangsuCdnDomainSyncResponse | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const { message } = AntApp.useApp();
 
   const load = async () => {
@@ -487,6 +491,23 @@ const CdnSyncTab: React.FC = () => {
     }
   };
 
+  const runSync = async (dryRun: boolean) => {
+    setSyncing(true);
+    try {
+      setPreviewError(null);
+      const result = await syncWangsuCdnDomains({ dryRun });
+      setSyncResult(result);
+      const { created, updated, unchanged, total } = result.summary;
+      message.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${total} 条，新增 ${created}，更新 ${updated}，不变 ${unchanged}`);
+    } catch (e: any) {
+      const errorMessage = getErrorMessage(e, dryRun ? '网宿 CDN 同步预检失败' : '同步网宿 CDN 域名失败');
+      setPreviewError(errorMessage);
+      message.error(errorMessage);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Alert
@@ -497,9 +518,21 @@ const CdnSyncTab: React.FC = () => {
       />
       <Space wrap>
         <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
+        <Button loading={syncing} onClick={() => runSync(true)}>Dry Run 同步预检</Button>
+        <Popconfirm title="确认同步网宿 CDN 域名到域名管理？" description="将按域名 upsert 到资产域名表，已有域名会更新状态和 remark。" onConfirm={() => runSync(false)}>
+          <Button type="primary" danger loading={syncing}>同步到域名管理</Button>
+        </Popconfirm>
         {data && <Text type="secondary">来源：{data.endpoint}；抓取时间：{formatDateTime(data.fetchedAt)}；共 {data.total} 条</Text>}
       </Space>
-      {previewError && <Alert type="error" showIcon message="网宿域名预览加载失败" description={previewError} />}
+      {previewError && <Alert type="error" showIcon message="网宿 CDN 操作失败" description={previewError} />}
+      {syncResult && (
+        <Alert
+          type={syncResult.summary.dryRun ? 'warning' : 'success'}
+          showIcon
+          message={syncResult.summary.dryRun ? '同步预检结果' : '同步完成'}
+          description={`共 ${syncResult.summary.total} 条，新增 ${syncResult.summary.created}，更新 ${syncResult.summary.updated}，不变 ${syncResult.summary.unchanged}`}
+        />
+      )}
       <Table<WangsuCdnDomainPreviewItem>
         rowKey={(record) => record.domainId || record.domain}
         loading={loading}

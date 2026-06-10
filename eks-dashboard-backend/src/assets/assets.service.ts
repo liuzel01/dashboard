@@ -13,6 +13,7 @@ import {
   CreateCredentialRefDto,
   ListAssetsDto,
   ListChangeLogsDto,
+  SyncWangsuDomainsDto,
   UpdateAssetAccountDto,
   UpdateAssetDomainDto,
   UpdateAssetResourceDto,
@@ -247,6 +248,60 @@ export class AssetsService {
     };
   }
 
+  async syncWangsuDomains(actor: ActorContext, dto: SyncWangsuDomainsDto = {}) {
+    this.ensureAssetPermission(actor);
+    const preview = await this.previewWangsuDomains(actor);
+    const dryRun = dto.dryRun !== false;
+    const planned = preview.items.map((item) => this.buildWangsuDomainSyncPayload(item));
+
+    return this.db.withTransaction(async (conn) => {
+      const summary = { total: planned.length, created: 0, updated: 0, unchanged: 0, dryRun };
+      const items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged'; id?: number; before?: DbRow | null; after: Record<string, unknown> }> = [];
+
+      for (const payload of planned) {
+        const before = await this.findDomainByDomain(conn, String(payload.domain));
+        if (!before) {
+          summary.created += 1;
+          items.push({ domain: String(payload.domain), action: 'create', after: payload });
+          if (!dryRun) {
+            const columns = Object.keys(payload);
+            const result = await conn.execute<mysql.ResultSetHeader>(
+              `INSERT INTO asset_domains (${columns.join(', ')}, created_by, updated_by, created_at, updated_at) VALUES (${columns.map(() => '?').join(', ')}, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+              [...columns.map((column) => payload[column]), actor.username, actor.username],
+            );
+            const id = result[0].insertId;
+            const after = await this.getRowById(conn, domainConfig, id, true);
+            await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: id, action: 'sync_wangsu_create', beforeData: null, afterData: after, remark: 'sync from wangsu cdn preview' });
+            items[items.length - 1] = { domain: String(payload.domain), action: 'create', id, after: after || payload };
+          }
+          continue;
+        }
+
+        const patch = this.diffDomainPayload(before, payload);
+        if (Object.keys(patch).length === 0) {
+          summary.unchanged += 1;
+          items.push({ domain: String(payload.domain), action: 'unchanged', id: Number(before.id), before, after: before });
+          continue;
+        }
+
+        summary.updated += 1;
+        items.push({ domain: String(payload.domain), action: 'update', id: Number(before.id), before, after: { ...before, ...patch } });
+        if (!dryRun) {
+          const keys = Object.keys(patch);
+          await conn.execute(
+            `UPDATE asset_domains SET ${keys.map((key) => `${key} = ?`).join(', ')}, updated_by = ?, updated_at = UTC_TIMESTAMP(), deleted_at = NULL WHERE id = ?`,
+            [...keys.map((key) => patch[key]), actor.username, Number(before.id)],
+          );
+          const after = await this.getRowById(conn, domainConfig, Number(before.id), true);
+          await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: Number(before.id), action: 'sync_wangsu_update', beforeData: before, afterData: after, remark: 'sync from wangsu cdn preview' });
+          items[items.length - 1] = { domain: String(payload.domain), action: 'update', id: Number(before.id), before, after: after || { ...before, ...patch } };
+        }
+      }
+
+      return { provider: 'wangsu', fetchedAt: preview.fetchedAt, summary, items };
+    });
+  }
+
   async getOverview(actor: ActorContext) {
     this.ensureAssetPermission(actor);
     const [accountStats, resourceStats, domainStats, credentialStats, ownerStats, recentChanges] =
@@ -437,6 +492,49 @@ export class AssetsService {
     const message = this.extractXmlValue(body, 'message');
     if (code || message) return `${code || 'UNKNOWN'} ${message || ''}`.trim();
     return body.slice(0, 300);
+  }
+
+  private buildWangsuDomainSyncPayload(item: WangsuDomainPreviewItem) {
+    const status = item.enabled === 'true' || item.cdnServiceStatus === 'true' || item.status === 'Deployed' ? 'active' : (item.status || 'unknown').toLowerCase();
+    return this.normalizePayload({
+      domain: item.domain,
+      root_domain: this.guessRootDomain(item.domain),
+      cdn_provider: 'wangsu',
+      provider: 'wangsu',
+      status,
+      usage_desc: item.serviceType ? `Wangsu CDN ${item.serviceType}` : 'Wangsu CDN',
+      remark: JSON.stringify({
+        source: 'wangsu_cdn_api',
+        domainId: item.domainId || null,
+        cname: item.cname || null,
+        serviceType: item.serviceType || null,
+        cdnServiceStatus: item.cdnServiceStatus || null,
+        enabled: item.enabled || null,
+        billingAreas: item.billingAreas || null,
+        lastModified: item.lastModified || null,
+      }, null, 2),
+    });
+  }
+
+  private diffDomainPayload(before: DbRow, payload: Record<string, unknown>) {
+    const patch: Record<string, unknown> = {};
+    Object.entries(payload).forEach(([key, value]) => {
+      const normalizedBefore = before[key] === undefined || before[key] === null ? null : String(before[key]);
+      const normalizedValue = value === undefined || value === null ? null : String(value);
+      if (normalizedBefore !== normalizedValue) patch[key] = value;
+    });
+    return patch;
+  }
+
+  private async findDomainByDomain(conn: mysql.PoolConnection, domain: string) {
+    const result = await conn.execute(`SELECT * FROM asset_domains WHERE domain = ? LIMIT 1`, [domain]);
+    const rows = result[0] as DbRow[];
+    return rows[0] || null;
+  }
+
+  private guessRootDomain(domain: string) {
+    const parts = domain.split('.').filter(Boolean);
+    return parts.length >= 2 ? parts.slice(-2).join('.') : domain;
   }
 
   private parseWangsuDomainResponse(body: string): WangsuDomainPreviewItem[] {

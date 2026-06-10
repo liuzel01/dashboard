@@ -91,6 +91,14 @@ export class ListChangeLogsDto {
   pageSize?: number;
 }
 
+
+export class SyncWangsuDomainsDto {
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  dryRun?: boolean;
+}
+
 export class CreateAssetAccountDto {
   @IsString()
   @IsNotEmpty()

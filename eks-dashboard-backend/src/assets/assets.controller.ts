@@ -19,6 +19,7 @@ import {
   CreateCredentialRefDto,
   ListAssetsDto,
   ListChangeLogsDto,
+  SyncWangsuDomainsDto,
   UpdateAssetAccountDto,
   UpdateAssetDomainDto,
   UpdateAssetResourceDto,
@@ -41,6 +42,15 @@ export class AssetsController {
   async previewWangsuDomains(@Headers('authorization') authorization?: string) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
     return this.service.previewWangsuDomains(actor);
+  }
+
+  @Post('cdn/wangsu/domains/sync')
+  async syncWangsuDomains(
+    @Headers('authorization') authorization: string | undefined,
+    @Body(validation) body: SyncWangsuDomainsDto,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.syncWangsuDomains(actor, body);
   }
 
   @Get('accounts')
