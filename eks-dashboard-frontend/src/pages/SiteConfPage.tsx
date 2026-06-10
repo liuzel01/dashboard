@@ -30,14 +30,13 @@ const validateValueByType = (value: string, type: ValueType) => {
   return '';
 };
 
-type SiteConfColumnKey = 'confKey' | 'category' | 'confValue' | 'description' | 'action';
+type SiteConfColumnKey = 'confKey' | 'category' | 'confValue' | 'description';
 
 const defaultColumnWidths: Record<SiteConfColumnKey, number> = {
   confKey: 330,
   category: 130,
   confValue: 520,
   description: 320,
-  action: 150,
 };
 
 const minColumnWidths: Record<SiteConfColumnKey, number> = {
@@ -45,7 +44,6 @@ const minColumnWidths: Record<SiteConfColumnKey, number> = {
   category: 100,
   confValue: 260,
   description: 180,
-  action: 130,
 };
 
 const SiteConfPage: React.FC = () => {
@@ -240,14 +238,15 @@ const SiteConfPage: React.FC = () => {
         render: (v: string) => v || '-',
       },
       {
-        title: renderResizableTitle('action', '操作'),
+        title: '操作',
         key: 'action',
-        width: columnWidths.action,
+        width: 96,
         fixed: 'right' as const,
+        align: 'center' as const,
         render: (_: any, record: SiteConfItem) => (
-          <Space>
-            <Button type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>编辑</Button>
-            <Button type="link" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)}>删除</Button>
+          <Space size={4}>
+            <Button aria-label="编辑" title="编辑" type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+            <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)} />
           </Space>
         ),
       },
@@ -281,7 +280,7 @@ const SiteConfPage: React.FC = () => {
           columns={columns}
           dataSource={list}
           tableLayout="fixed"
-          scroll={{ x: Object.values(columnWidths).reduce((sum, width) => sum + width, 0) }}
+          scroll={{ x: Object.values(columnWidths).reduce((sum, width) => sum + width, 96) }}
           pagination={{
             current: page,
             pageSize: size,
