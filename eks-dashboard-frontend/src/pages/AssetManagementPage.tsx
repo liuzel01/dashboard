@@ -489,6 +489,30 @@ const CdnSyncTab: React.FC = () => {
 
 type SyncPanelProps = { messageApi: ReturnType<typeof AntApp.useApp>['message'] };
 
+type AliyunDcdnColumnKey = 'domain' | 'domainId' | 'cname' | 'status' | 'sslProtocol' | 'sources' | 'gmtCreated' | 'gmtModified';
+
+const aliyunDcdnDefaultColumnWidths: Record<AliyunDcdnColumnKey, number> = {
+  domain: 300,
+  domainId: 150,
+  cname: 340,
+  status: 120,
+  sslProtocol: 100,
+  sources: 360,
+  gmtCreated: 180,
+  gmtModified: 180,
+};
+
+const aliyunDcdnMinColumnWidths: Record<AliyunDcdnColumnKey, number> = {
+  domain: 220,
+  domainId: 120,
+  cname: 220,
+  status: 100,
+  sslProtocol: 80,
+  sources: 220,
+  gmtCreated: 150,
+  gmtModified: 150,
+};
+
 const WangsuCdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
   const [data, setData] = useState<WangsuCdnDomainPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -586,6 +610,69 @@ const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
   const [syncResult, setSyncResult] = useState<AliyunDcdnDomainSyncResponse | null>(null);
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [columnWidths, setColumnWidths] = useState<Record<AliyunDcdnColumnKey, number>>(aliyunDcdnDefaultColumnWidths);
+
+  const renderResizableTitle = (key: AliyunDcdnColumnKey, title: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', userSelect: 'none' }}>
+      <span>{title}</span>
+      <span
+        title="拖拽调整列宽"
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const startX = event.clientX;
+          const startWidth = columnWidths[key];
+          const onMouseMove = (moveEvent: MouseEvent) => {
+            const nextWidth = Math.max(aliyunDcdnMinColumnWidths[key], startWidth + moveEvent.clientX - startX);
+            setColumnWidths((current) => ({ ...current, [key]: nextWidth }));
+          };
+          const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+        }}
+        style={{
+          cursor: 'col-resize',
+          display: 'inline-block',
+          height: 18,
+          marginLeft: 8,
+          width: 8,
+          borderRight: '2px solid #d9d9d9',
+        }}
+      />
+    </div>
+  );
+
+  const columns = useMemo<ColumnsType<AliyunDcdnDomainPreviewItem>>(
+    () => [
+      { title: renderResizableTitle('domain', '域名'), dataIndex: 'domain', width: columnWidths.domain, render: (value: string) => <Text copyable>{value}</Text> },
+      { title: renderResizableTitle('domainId', 'Domain ID'), dataIndex: 'domainId', width: columnWidths.domainId, render: renderValue },
+      { title: renderResizableTitle('cname', 'CNAME'), dataIndex: 'cname', width: columnWidths.cname, render: renderValue },
+      { title: renderResizableTitle('status', '状态'), dataIndex: 'status', width: columnWidths.status, render: (value: string) => value ? <Tag color={value === 'online' ? 'green' : undefined}>{value}</Tag> : '-' },
+      { title: renderResizableTitle('sslProtocol', 'SSL'), dataIndex: 'sslProtocol', width: columnWidths.sslProtocol, render: renderValue },
+      {
+        title: renderResizableTitle('sources', '源站'),
+        dataIndex: 'sources',
+        width: columnWidths.sources,
+        render: (value: unknown) => (
+          <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+            {JSON.stringify(value || '') || '-'}
+          </Paragraph>
+        ),
+      },
+      { title: renderResizableTitle('gmtCreated', '创建时间'), dataIndex: 'gmtCreated', width: columnWidths.gmtCreated, render: renderValue },
+      { title: renderResizableTitle('gmtModified', '更新时间'), dataIndex: 'gmtModified', width: columnWidths.gmtModified, render: renderValue },
+    ],
+    [columnWidths],
+  );
+
 
   const load = async () => {
     setLoading(true);
@@ -652,17 +739,9 @@ const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
         loading={loading}
         dataSource={data?.items || []}
         pagination={{ pageSize: 20, showSizeChanger: true }}
-        scroll={{ x: 1400 }}
-        columns={[
-          { title: '域名', dataIndex: 'domain', width: 260, render: (value: string) => <Text copyable>{value}</Text> },
-          { title: 'Domain ID', dataIndex: 'domainId', width: 150, render: renderValue },
-          { title: 'CNAME', dataIndex: 'cname', width: 300, render: renderValue },
-          { title: '状态', dataIndex: 'status', width: 120, render: (value: string) => value ? <Tag color={value === 'online' ? 'green' : undefined}>{value}</Tag> : '-' },
-          { title: 'SSL', dataIndex: 'sslProtocol', width: 100, render: renderValue },
-          { title: '源站', dataIndex: 'sources', width: 260, render: (value: unknown) => <Text ellipsis>{JSON.stringify(value || '') || '-'}</Text> },
-          { title: '创建时间', dataIndex: 'gmtCreated', width: 180, render: renderValue },
-          { title: '更新时间', dataIndex: 'gmtModified', width: 180, render: renderValue },
-        ]}
+        scroll={{ x: Object.values(columnWidths).reduce((sum, width) => sum + width, 0) }}
+        tableLayout="fixed"
+        columns={columns}
       />
     </Space>
   );
