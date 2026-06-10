@@ -1042,6 +1042,7 @@ export type WangsuCdnDomainPreviewItem = {
 export type WangsuCdnDomainPreviewResponse = {
   provider: 'wangsu';
   endpoint: string;
+  enabled: boolean;
   fetchedAt: string;
   total: number;
   items: WangsuCdnDomainPreviewItem[];

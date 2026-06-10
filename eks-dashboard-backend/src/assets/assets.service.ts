@@ -210,10 +210,6 @@ export class AssetsService {
   async previewWangsuDomains(actor: ActorContext) {
     this.ensureAssetPermission(actor);
     const enabled = await this.siteConf.getBoolean('cdn.wangsu.enabled', false);
-    if (!enabled) {
-      throw new BadRequestException('cdn.wangsu.enabled is false. Please enable Wangsu CDN integration in siteconf first.');
-    }
-
     const endpoint = (await this.siteConf.getString('cdn.wangsu.endpoint', 'https://open.chinanetcenter.com')).replace(/\/+$/, '');
     const accessKeyId = (await this.siteConf.getString('cdn.wangsu.access_key_id', '')).trim();
     const accessKeySecret = (await this.siteConf.getString('cdn.wangsu.access_key_secret', '')).trim();
@@ -242,6 +238,7 @@ export class AssetsService {
     return {
       provider: 'wangsu',
       endpoint,
+      enabled,
       fetchedAt: new Date().toISOString(),
       total: items.length,
       items,

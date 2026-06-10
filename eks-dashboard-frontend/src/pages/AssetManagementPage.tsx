@@ -457,19 +457,31 @@ const OverviewTab: React.FC = () => {
   );
 };
 
+const getErrorMessage = (error: any, fallback: string) => {
+  const serverMessage = error?.response?.data?.message;
+  if (Array.isArray(serverMessage)) return serverMessage.join('；');
+  if (serverMessage) return String(serverMessage);
+  if (error?.response?.data?.error) return String(error.response.data.error);
+  return error?.message || fallback;
+};
+
 const CdnSyncTab: React.FC = () => {
   const [data, setData] = useState<WangsuCdnDomainPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const { message } = AntApp.useApp();
 
   const load = async () => {
     setLoading(true);
     try {
+      setPreviewError(null);
       const next = await previewWangsuCdnDomains();
       setData(next);
       message.success(`已加载 ${next.total} 个网宿 CDN 域名`);
     } catch (e: any) {
-      message.error(e?.message || '加载网宿 CDN 域名预览失败');
+      const errorMessage = getErrorMessage(e, '加载网宿 CDN 域名预览失败');
+      setPreviewError(errorMessage);
+      message.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -487,6 +499,7 @@ const CdnSyncTab: React.FC = () => {
         <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
         {data && <Text type="secondary">来源：{data.endpoint}；抓取时间：{formatDateTime(data.fetchedAt)}；共 {data.total} 条</Text>}
       </Space>
+      {previewError && <Alert type="error" showIcon message="网宿域名预览加载失败" description={previewError} />}
       <Table<WangsuCdnDomainPreviewItem>
         rowKey={(record) => record.domainId || record.domain}
         loading={loading}
