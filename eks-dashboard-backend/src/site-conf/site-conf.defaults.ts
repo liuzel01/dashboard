@@ -15,6 +15,7 @@ export type SiteConfDefault = {
 export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'line.availability.window_ms', envKey: 'LINE_AVAILABILITY_WINDOW_MS', valueType: 'number', category: 'line', description: '线路可用性判定时间窗（毫秒）', defaultValue: '120000', validation: { min: 1000 } },
   { key: 'line.availability.cache_ttl_ms', envKey: 'LINE_AVAILABILITY_CACHE_TTL_MS', valueType: 'number', category: 'line', description: '线路探测快照缓存 TTL（毫秒）', defaultValue: '15000', validation: { min: 0 } },
+  { key: 'line.availability.http_timeout_ms', envKey: 'LINE_AVAILABILITY_HTTP_TIMEOUT_MS', valueType: 'number', category: 'line', description: '线路探测聚合接口 HTTP 超时（毫秒）', defaultValue: '3000', validation: { min: 1000 } },
   { key: 'line.availability.up_threshold', envKey: 'LINE_AVAILABILITY_UP_THRESHOLD', valueType: 'number', category: 'line', description: '线路可用判定阈值，支持 0~1 或 0~100', defaultValue: '0.8', validation: { min: 0, max: 100 } },
   { key: 'line.provider.cache_ttl_ms', envKey: 'LINE_PROVIDER_CACHE_TTL_MS', valueType: 'number', category: 'line', description: '线路 provider 识别缓存 TTL（毫秒）', defaultValue: '3600000', validation: { min: 0 } },
   { key: 'line.provider.rules_json', envKey: 'LINE_PROVIDER_RULES_JSON', valueType: 'json', category: 'line', description: '线路 provider 规则扩展（JSON 数组）', defaultValue: '[]' },

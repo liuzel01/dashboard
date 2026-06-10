@@ -18,6 +18,7 @@ import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-cl
 import { EnvironmentsService } from '../environments/environments.service';
 import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
 import { SyncDcdnSslDto } from './dto/sync-dcdn-ssl.dto';
+import { SiteConfService } from '../site-conf/site-conf.service';
 
 const { RPCClient } = require('@alicloud/pop-core');
 
@@ -171,15 +172,6 @@ export class LinesService {
   private readonly superAdminListPath: string;
   private readonly superAdminUpdatePathCandidates: string[];
   private readonly lineInventoryProbeApiUrl: string;
-  private readonly availabilityWindowMs: number;
-  private readonly availabilityCacheTtlMs: number;
-  private readonly availabilityHttpTimeoutMs: number;
-  private readonly availabilityUpThreshold: number;
-  private readonly providerCacheTtlMs: number;
-  private readonly sslCacheTtlMs: number;
-  private readonly sslTlsTimeoutMs: number;
-  private readonly sslResolveConcurrency: number;
-  private readonly providerRules: ProviderRule[];
   private probeSnapshotCache: { expiresAt: number; snapshot: ProbeSnapshot } | null = null;
   private readonly providerCache = new Map<
     string,
@@ -198,6 +190,7 @@ export class LinesService {
     private readonly ingressGatewayClient: IngressGatewayClientService,
     private readonly lineOnboardingGatewayClient: LineOnboardingGatewayClientService,
     private readonly environmentsService: EnvironmentsService,
+    private readonly siteConf: SiteConfService,
   ) {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
@@ -230,41 +223,43 @@ export class LinesService {
       this.configService.get<string>('LINE_INVENTORY_PROBE_API_URL') ||
       this.configService.get<string>('LINE_PROBE_LATEST_API_URL') ||
       this.deriveProbeApiFromLineVerify(this.lineVerifyApiUrl);
-    this.availabilityWindowMs = this.parsePositiveInt(
-      this.configService.get<string>('LINE_AVAILABILITY_WINDOW_MS'),
-      120000,
-    );
-    this.availabilityCacheTtlMs = this.parsePositiveInt(
-      this.configService.get<string>('LINE_AVAILABILITY_CACHE_TTL_MS'),
-      15000,
-    );
-    this.availabilityHttpTimeoutMs = this.parsePositiveInt(
-      this.configService.get<string>('LINE_AVAILABILITY_HTTP_TIMEOUT_MS'),
-      3000,
-    );
-    this.availabilityUpThreshold = this.parsePositiveFloat(
-      this.configService.get<string>('LINE_AVAILABILITY_UP_THRESHOLD'),
-      0.8,
-    );
-    this.providerCacheTtlMs = this.parsePositiveInt(
-      this.configService.get<string>('LINE_PROVIDER_CACHE_TTL_MS'),
-      3600000,
-    );
-    this.sslCacheTtlMs = this.parsePositiveInt(
-      this.configService.get<string>('LINE_SSL_CACHE_TTL_MS'),
-      300000,
-    );
-    this.sslTlsTimeoutMs = this.parsePositiveInt(
-      this.configService.get<string>('LINE_SSL_TLS_TIMEOUT_MS'),
-      5000,
-    );
-    this.sslResolveConcurrency = this.parsePositiveInt(
-      this.configService.get<string>('LINE_SSL_RESOLVE_CONCURRENCY'),
-      8,
-    );
-    this.providerRules = this.buildProviderRules(
-      this.configService.get<string>('LINE_PROVIDER_RULES_JSON'),
-    );
+  }
+
+  private async getAvailabilityWindowMs() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.availability.window_ms', 120000)), 120000);
+  }
+
+  private async getAvailabilityCacheTtlMs() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.availability.cache_ttl_ms', 15000)), 15000);
+  }
+
+  private async getAvailabilityHttpTimeoutMs() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.availability.http_timeout_ms', 3000)), 3000);
+  }
+
+  private async getAvailabilityUpThreshold() {
+    const raw = await this.siteConf.getNumber('line.availability.up_threshold', 0.8);
+    return this.parsePositiveFloat(String(raw), 0.8);
+  }
+
+  private async getProviderCacheTtlMs() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.provider.cache_ttl_ms', 3600000)), 3600000);
+  }
+
+  private async getProviderRules() {
+    return this.buildProviderRules(JSON.stringify(await this.siteConf.getJson('line.provider.rules_json', [])));
+  }
+
+  private async getSslCacheTtlMs() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.ssl.cache_ttl_ms', 300000)), 300000);
+  }
+
+  private async getSslTlsTimeoutMs() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.ssl.tls_timeout_ms', 5000)), 5000);
+  }
+
+  private async getSslResolveConcurrency() {
+    return this.parsePositiveInt(String(await this.siteConf.getNumber('line.ssl.resolve_concurrency', 8)), 8);
   }
 
   async getLines(environmentId: string, query: ListLineDto) {
@@ -365,12 +360,12 @@ export class LinesService {
       forceRefresh,
     );
 
-    let enrichedItems: LineInventoryItem[] = itemsToEnrich.map((item) => {
+    let enrichedItems: LineInventoryItem[] = await Promise.all(itemsToEnrich.map(async (item) => {
       const host = this.safeNormalizeToHost(item.lineUrl || '');
       const providerInfo = host ? providerMap.get(host) : null;
       const sslSummary = host ? sslMap.get(host) : null;
       const availabilitySummary = host
-        ? this.buildAvailabilitySummaryByHost(host, probeSnapshot.records, probeSourceUnavailable)
+        ? await this.buildAvailabilitySummaryByHost(host, probeSnapshot.records, probeSourceUnavailable)
         : {
             availability: 'unknown' as LineInventoryAvailability,
             error: 'unknown_error' as LineInventoryErrorCode,
@@ -401,7 +396,7 @@ export class LinesService {
         unknownRegions: availabilitySummary.unknownRegions,
         totalRegions: availabilitySummary.totalRegions,
       };
-    });
+    }));
     let pagedItems = enrichedItems;
     if (fullEnrichmentRequired) {
       enrichedItems = this.applyLineInventoryEnrichmentFilters(enrichedItems, query);
@@ -692,7 +687,7 @@ export class LinesService {
     try {
       const response = await firstValueFrom(
         this.httpService.get(this.lineInventoryProbeApiUrl, {
-          timeout: this.availabilityHttpTimeoutMs,
+          timeout: await this.getAvailabilityHttpTimeoutMs(),
         }),
       );
       const rawRecords: any[] = [];
@@ -715,7 +710,7 @@ export class LinesService {
         sourceApi: this.lineInventoryProbeApiUrl,
       };
       this.probeSnapshotCache = {
-        expiresAt: now + this.availabilityCacheTtlMs,
+        expiresAt: now + await this.getAvailabilityCacheTtlMs(),
         snapshot,
       };
       return snapshot;
@@ -759,7 +754,7 @@ export class LinesService {
     const cnameValues = await this.resolveCnameValues(host);
     const candidates = [host, ...cnameValues].map((item) => item.toLowerCase());
     let provider: LineInventoryProvider = 'unknown';
-    for (const rule of this.providerRules) {
+    for (const rule of await this.getProviderRules()) {
       if (candidates.some((candidate) => rule.pattern.test(candidate))) {
         provider = rule.provider;
         break;
@@ -769,7 +764,7 @@ export class LinesService {
     this.providerCache.set(host, {
       provider,
       cnameValues,
-      expiresAt: now + this.providerCacheTtlMs,
+      expiresAt: now + await this.getProviderCacheTtlMs(),
     });
     return { provider, cnameValues };
   }
@@ -835,12 +830,13 @@ export class LinesService {
       });
       if (pendingHosts.length > 0) {
         const dbCached = await this.loadSslSummaryFromDbCache(environmentId, pendingHosts);
+        const sslCacheTtlMs = await this.getSslCacheTtlMs();
         dbCached.forEach((summary, host) => {
           result.set(host, summary);
           const cacheKey = this.buildSslCacheKey(environmentId, host);
           this.sslSummaryCache.set(cacheKey, {
             summary,
-            expiresAt: now + this.sslCacheTtlMs,
+            expiresAt: now + sslCacheTtlMs,
           });
         });
         pendingHosts = pendingHosts.filter((host) => !dbCached.has(host));
@@ -851,7 +847,7 @@ export class LinesService {
 
     const needDcdn = pendingHosts.some((host) => providerMap.get(host)?.provider === 'aliyun_dcdn');
     const dcdnClient = needDcdn && this.hasAliyunCredentials() ? this.createDcdnClient() : null;
-    const batchSize = Math.max(1, Math.min(this.sslResolveConcurrency, 50));
+    const batchSize = Math.max(1, Math.min(await this.getSslResolveConcurrency(), 50));
     const upsertRows: Array<{
       host: string;
       provider: LineInventoryProvider;
@@ -960,7 +956,7 @@ export class LinesService {
           last_error = VALUES(last_error),
           updated_at = UTC_TIMESTAMP()
       `;
-      const ttlSeconds = Math.max(1, Math.floor(this.sslCacheTtlMs / 1000));
+      const ttlSeconds = Math.max(1, Math.floor(await this.getSslCacheTtlMs() / 1000));
       const params: any[] = [];
       rows.forEach((row) => {
         params.push(
@@ -1029,7 +1025,7 @@ export class LinesService {
     };
     this.sslSummaryCache.set(cacheKey, {
       summary,
-      expiresAt: now + this.sslCacheTtlMs,
+      expiresAt: now + await this.getSslCacheTtlMs(),
     });
     return {
       summary,
@@ -1055,7 +1051,7 @@ export class LinesService {
     host: string,
   ): Promise<{ expireAt: string | null; error: string | null }> {
     try {
-      const cert = await this.fetchTlsCertificate(host, 443, this.sslTlsTimeoutMs);
+      const cert = await this.fetchTlsCertificate(host, 443, await this.getSslTlsTimeoutMs());
       return { expireAt: cert.notAfter ? cert.notAfter.toISOString() : null, error: null };
     } catch (error: any) {
       return { expireAt: null, error: error?.message || 'resolve tls certificate failed' };
@@ -1160,11 +1156,11 @@ export class LinesService {
     return failures.length > 0 ? 'unknown_error' : 'no_data';
   }
 
-  private buildAvailabilitySummaryByHost(
+  private async buildAvailabilitySummaryByHost(
     host: string,
     records: ProbeRecord[],
     sourceUnavailable: boolean,
-  ): {
+  ): Promise<{
     availability: LineInventoryAvailability;
     error: LineInventoryErrorCode;
     lastCheckedAt: string | null;
@@ -1173,7 +1169,7 @@ export class LinesService {
     failedRegions: number;
     unknownRegions: number;
     totalRegions: number;
-  } {
+  }> {
     const hostRecords = records.filter((record) => record.host === host);
     if (hostRecords.length === 0) {
       return {
@@ -1192,9 +1188,10 @@ export class LinesService {
       .map((record) => record.checkedAt?.getTime() ?? 0)
       .reduce((prev, current) => Math.max(prev, current), 0);
     const now = Date.now();
+    const availabilityWindowMs = await this.getAvailabilityWindowMs();
     const freshRecords = hostRecords.filter((record) => {
       const ts = record.checkedAt?.getTime();
-      return typeof ts === 'number' && ts > 0 && now - ts <= this.availabilityWindowMs;
+      return typeof ts === 'number' && ts > 0 && now - ts <= availabilityWindowMs;
     });
     if (freshRecords.length === 0) {
       return {
@@ -1238,7 +1235,8 @@ export class LinesService {
     }
 
     const availabilityScore = Number(((successRegions / effectiveRegions) * 100).toFixed(2));
-    const isUp = availabilityScore >= this.availabilityUpThreshold * 100;
+    const availabilityUpThreshold = await this.getAvailabilityUpThreshold();
+    const isUp = availabilityScore >= availabilityUpThreshold * 100;
     return {
       availability: isUp ? 'up' : 'down',
       error: isUp ? 'none' : this.mapErrorFromProbe(failures, sourceUnavailable),

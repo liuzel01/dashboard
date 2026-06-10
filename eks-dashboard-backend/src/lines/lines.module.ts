@@ -7,9 +7,10 @@ import { SiteMonitorModule } from '../site-monitor/site-monitor.module';
 import { EnvironmentsModule } from '../environments/environments.module';
 import { IngressGatewayClientService } from './ingress-gateway-client.service';
 import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-client.service';
+import { SiteConfModule } from '../site-conf/site-conf.module';
 
 @Module({
-  imports: [HttpModule, KubernetesModule, SiteMonitorModule, EnvironmentsModule],
+  imports: [HttpModule, KubernetesModule, SiteMonitorModule, EnvironmentsModule, SiteConfModule],
   controllers: [LinesController],
   providers: [LinesService, IngressGatewayClientService, LineOnboardingGatewayClientService],
 })
