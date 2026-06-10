@@ -157,8 +157,6 @@ type SuperAdminLineItem = {
 export class LinesService {
   private readonly logger = new Logger(LinesService.name);
   private readonly lineVerifyApiUrl: string;
-  private readonly dcdnAccessKeyId: string;
-  private readonly dcdnAccessKeySecret: string;
   private readonly dcdnWafClientIpTag: string;
   private readonly casEndpoint: string;
   private readonly casApiVersion: string;
@@ -193,8 +191,6 @@ export class LinesService {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
       'http://172.31.29.3:3000/api/lines';
-    this.dcdnAccessKeyId = this.configService.get<string>('ALIYUN_ACCESS_KEY_ID') || '';
-    this.dcdnAccessKeySecret = this.configService.get<string>('ALIYUN_ACCESS_KEY_SECRET') || '';
     this.dcdnWafClientIpTag = this.configService.get<string>('DCDN_WAF_CLIENT_IP_TAG') || '';
     this.casEndpoint =
       this.configService.get<string>('CAS_ENDPOINT') || 'https://cas.ap-southeast-1.aliyuncs.com';
@@ -215,6 +211,14 @@ export class LinesService {
       '/admin/app/line/url/edit',
       '/admin/app/line/url/modify',
     ];
+  }
+
+  private async getAliyunAccessKeyId() {
+    return (await this.siteConf.getString('cdn.aliyun.access_key_id', '')).trim();
+  }
+
+  private async getAliyunAccessKeySecret() {
+    return (await this.siteConf.getString('cdn.aliyun.access_key_secret', '')).trim();
   }
 
   private async getDcdnEndpoint() {
@@ -803,8 +807,8 @@ export class LinesService {
     return results;
   }
 
-  private hasAliyunCredentials(): boolean {
-    return Boolean(this.dcdnAccessKeyId && this.dcdnAccessKeySecret);
+  private async hasAliyunCredentials() {
+    return Boolean((await this.getAliyunAccessKeyId()) && (await this.getAliyunAccessKeySecret()));
   }
 
   private buildSslCacheKey(environmentId: string, host: string): string {
@@ -850,7 +854,7 @@ export class LinesService {
     if (!pendingHosts.length) return result;
 
     const needDcdn = pendingHosts.some((host) => providerMap.get(host)?.provider === 'aliyun_dcdn');
-    const dcdnClient = needDcdn && this.hasAliyunCredentials() ? await this.createDcdnClient() : null;
+    const dcdnClient = needDcdn && (await this.hasAliyunCredentials()) ? await this.createDcdnClient() : null;
     const batchSize = Math.max(1, Math.min(await this.getSslResolveConcurrency(), 50));
     const upsertRows: Array<{
       host: string;
@@ -1425,29 +1429,33 @@ export class LinesService {
   }
 
   private async createDcdnClient() {
-    if (!this.dcdnAccessKeyId || !this.dcdnAccessKeySecret) {
+    const accessKeyId = await this.getAliyunAccessKeyId();
+    const accessKeySecret = await this.getAliyunAccessKeySecret();
+    if (!accessKeyId || !accessKeySecret) {
       throw new InternalServerErrorException(
         'ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET is not configured',
       );
     }
 
     return new RPCClient({
-      accessKeyId: this.dcdnAccessKeyId,
-      accessKeySecret: this.dcdnAccessKeySecret,
+      accessKeyId,
+      accessKeySecret,
       endpoint: await this.getDcdnEndpoint(),
       apiVersion: '2018-01-15',
     });
   }
 
-  private createCasClient() {
-    if (!this.dcdnAccessKeyId || !this.dcdnAccessKeySecret) {
+  private async createCasClient() {
+    const accessKeyId = await this.getAliyunAccessKeyId();
+    const accessKeySecret = await this.getAliyunAccessKeySecret();
+    if (!accessKeyId || !accessKeySecret) {
       throw new InternalServerErrorException(
         'ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET is not configured',
       );
     }
     return new RPCClient({
-      accessKeyId: this.dcdnAccessKeyId,
-      accessKeySecret: this.dcdnAccessKeySecret,
+      accessKeyId,
+      accessKeySecret,
       endpoint: this.casEndpoint,
       apiVersion: this.casApiVersion,
     });
@@ -1523,7 +1531,7 @@ export class LinesService {
 
     if (!recordValue) {
       try {
-        const cdnClient = this.createCdnClient();
+        const cdnClient = await this.createCdnClient();
         const resp = await cdnClient.request(
           'VerifyDomainOwner',
           {
@@ -1608,15 +1616,17 @@ export class LinesService {
     return typeof value === 'string' ? value.trim() : null;
   }
 
-  private createCdnClient() {
-    if (!this.dcdnAccessKeyId || !this.dcdnAccessKeySecret) {
+  private async createCdnClient() {
+    const accessKeyId = await this.getAliyunAccessKeyId();
+    const accessKeySecret = await this.getAliyunAccessKeySecret();
+    if (!accessKeyId || !accessKeySecret) {
       throw new InternalServerErrorException(
         'ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET is not configured',
       );
     }
     return new RPCClient({
-      accessKeyId: this.dcdnAccessKeyId,
-      accessKeySecret: this.dcdnAccessKeySecret,
+      accessKeyId,
+      accessKeySecret,
       endpoint: 'https://cdn.aliyuncs.com',
       apiVersion: '2018-05-10',
     });
@@ -2311,7 +2321,7 @@ export class LinesService {
   async listCasCertificates(rootDomainRaw: string, targetDomainRaw?: string) {
     const rootDomain = this.normalizeToHost(rootDomainRaw);
     const targetDomain = targetDomainRaw ? this.normalizeToHost(targetDomainRaw) : null;
-    const casClient = this.createCasClient();
+    const casClient = await this.createCasClient();
     const requestList = async (orderType: 'UPLOAD' | 'CERT') => {
       try {
         return await casClient.request(
@@ -2391,7 +2401,7 @@ export class LinesService {
     if (!domainName) {
       throw new BadRequestException('lineUrl is required');
     }
-    if (!this.hasAliyunCredentials()) {
+    if (!(await this.hasAliyunCredentials())) {
       throw new BadRequestException('Aliyun DCDN credentials are not configured');
     }
     const tlsInfo = await this.resolveDcdnSslSyncTlsInfo(environmentId, domainName, namespace);
@@ -2434,7 +2444,7 @@ export class LinesService {
     if (!domainName) {
       throw new BadRequestException('lineUrl is required');
     }
-    if (!this.hasAliyunCredentials()) {
+    if (!(await this.hasAliyunCredentials())) {
       throw new BadRequestException('Aliyun DCDN credentials are not configured');
     }
 
@@ -2449,7 +2459,7 @@ export class LinesService {
     }
 
     const certName = this.buildDcdnSslSyncCertName(domainName);
-    const casClient = this.createCasClient();
+    const casClient = await this.createCasClient();
     const casUpload = await this.uploadCertificateToCas(casClient, certName, tlsSecret.cert, tlsSecret.key);
     const client = await this.createDcdnClient();
     await client.request(
@@ -2528,7 +2538,7 @@ export class LinesService {
           if (!tlsSecret?.cert || !tlsSecret?.key) {
             throw new BadRequestException('Agent 未返回有效 TLS Secret 证书内容');
           }
-          const casClient = this.createCasClient();
+          const casClient = await this.createCasClient();
           const casUpload = await this.uploadCertificateToCas(casClient, certName, tlsSecret.cert, tlsSecret.key);
           appliedCertName = casUpload.certName;
           appliedCertId = casUpload.certId;
@@ -2543,7 +2553,7 @@ export class LinesService {
           if (!sslPub || !sslPri) {
             throw new BadRequestException('CAS 模式未选择复用证书时，必须提供 cert.crt 与 privkey.key');
           }
-          const casClient = this.createCasClient();
+          const casClient = await this.createCasClient();
           const casUpload = await this.uploadCertificateToCas(casClient, certName, sslPub, sslPri);
           appliedCertName = casUpload.certName;
           appliedCertId = casUpload.certId;

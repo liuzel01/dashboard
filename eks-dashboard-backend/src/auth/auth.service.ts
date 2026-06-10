@@ -324,7 +324,7 @@ export class AuthService {
   async exchangeKeycloakCode(params: { code: string; redirectUri: string; codeVerifier?: string }) {
     const issuer = await this.getKeycloakIssuer();
     const clientId = await this.getKeycloakClientId();
-    const clientSecret = this.config.get<string>('KEYCLOAK_CLIENT_SECRET') || '';
+    const clientSecret = await this.siteConf.getString('sso.keycloak.client_secret', '');
     const allowedRedirects = await this.getKeycloakAllowedRedirectUris();
     const tokenEndpoint = `${issuer.replace(/\/+$/, '')}/protocol/openid-connect/token`;
 

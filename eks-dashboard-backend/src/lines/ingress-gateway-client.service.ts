@@ -105,7 +105,7 @@ export class IngressGatewayClientService {
     const requestId = context?.requestId || randomUUID();
     const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
     const timeoutMs = await this.siteConf.getNumber('query_center.gateway.timeout_ms', 15_000);
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
 
     this.logger.log(
       `[IngressGateway] forwarding ${action} via k8s proxy env=${environmentId} target=${namespace}/${serviceName}:${servicePort} requestId=${requestId}`,
@@ -133,6 +133,10 @@ export class IngressGatewayClientService {
     } catch (error: any) {
       this.rethrowAgentError(error);
     }
+  }
+
+  private async getAgentToken() {
+    return (await this.siteConf.getString('query_center.agent.token', '')).trim();
   }
 
   private async getAgentK8sTarget() {

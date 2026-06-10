@@ -41,7 +41,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
 
     const transport = await this.getGatewayTransport();
     if (transport === 'k8s-proxy') {
@@ -151,7 +151,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -205,7 +205,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -259,7 +259,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -310,7 +310,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -362,7 +362,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -415,7 +415,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -467,7 +467,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -520,7 +520,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -572,7 +572,7 @@ export class QueryGatewayClientService {
     if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
-    const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
+    const token = await this.getAgentToken();
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
@@ -615,6 +615,10 @@ export class QueryGatewayClientService {
       },
     );
     return response.data;
+  }
+
+  private async getAgentToken() {
+    return (await this.siteConf.getString('query_center.agent.token', '')).trim();
   }
 
   private async getAgentK8sTarget() {

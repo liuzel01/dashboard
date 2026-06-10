@@ -346,7 +346,7 @@ export class AiOpsService {
     tokenHeader: string | undefined,
     payload: CloudWatchEventDto,
   ) {
-    this.ensureIngestToken(tokenHeader);
+    await this.ensureIngestToken(tokenHeader);
 
     const environmentId =
       (environmentIdHeader || '').trim() || this.inferEnvironmentIdFromCloudWatch(payload);
@@ -392,7 +392,7 @@ export class AiOpsService {
     tokenHeader: string | undefined,
     payload: SlowQueryEventDto,
   ) {
-    this.ensureIngestToken(tokenHeader);
+    await this.ensureIngestToken(tokenHeader);
 
     const environmentId =
       (environmentIdHeader || '').trim() ||
@@ -1657,7 +1657,7 @@ export class AiOpsService {
     if (!baseUrl) {
       throw new BadRequestException('AIOPS_OPENCLAW_BASE_URL is not configured.');
     }
-    const token = String(this.config.get<string>('AIOPS_OPENCLAW_TOKEN') || '').trim();
+    const token = (await this.siteConf.getString('aiops.openclaw.token', '')).trim();
     if (!token) {
       throw new BadRequestException('AIOPS_OPENCLAW_TOKEN is not configured.');
     }
@@ -1697,8 +1697,8 @@ export class AiOpsService {
       .filter(Boolean);
   }
 
-  private ensureIngestToken(tokenHeader?: string) {
-    const expected = (this.config.get<string>('AIOPS_EVENT_INGEST_TOKEN') || '').trim();
+  private async ensureIngestToken(tokenHeader?: string) {
+    const expected = (await this.siteConf.getString('aiops.event_ingest.token', '')).trim();
     if (!expected) {
       return;
     }
