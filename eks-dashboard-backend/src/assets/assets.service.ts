@@ -211,26 +211,32 @@ export class AssetsService {
     this.ensureAssetPermission(actor);
     const enabled = await this.siteConf.getBoolean('cdn.wangsu.enabled', false);
     const endpoint = (await this.siteConf.getString('cdn.wangsu.endpoint', 'https://open.chinanetcenter.com')).replace(/\/+$/, '');
-    const accessKeyId = (await this.siteConf.getString('cdn.wangsu.access_key_id', '')).trim();
-    const accessKeySecret = (await this.siteConf.getString('cdn.wangsu.access_key_secret', '')).trim();
+    const username = (
+      (await this.siteConf.getString('cdn.wangsu.username', '')).trim() ||
+      (await this.siteConf.getString('cdn.wangsu.access_key_id', '')).trim()
+    );
+    const apiKey = (
+      (await this.siteConf.getString('cdn.wangsu.api_key', '')).trim() ||
+      (await this.siteConf.getString('cdn.wangsu.access_key_secret', '')).trim()
+    );
     const timeoutMs = await this.siteConf.getNumber('cdn.wangsu.timeout_ms', 15000);
-    if (!accessKeyId || !accessKeySecret) {
-      throw new BadRequestException('cdn.wangsu.access_key_id or cdn.wangsu.access_key_secret is empty.');
+    if (!username || !apiKey) {
+      throw new BadRequestException('Wangsu CDN credentials are incomplete. Please configure cdn.wangsu.username and cdn.wangsu.api_key in siteconf.');
     }
 
     const date = new Date().toUTCString();
-    const password = createHmac('sha1', accessKeySecret).update(date).digest('base64');
+    const password = createHmac('sha1', apiKey).update(date).digest('base64');
     const url = `${endpoint}/api/domain`;
     const response = await axios.get(url, {
       timeout: timeoutMs,
-      auth: { username: accessKeyId, password },
+      auth: { username, password },
       headers: { Date: date, Accept: 'application/xml' },
       responseType: 'text',
       validateStatus: (status) => status >= 200 && status < 500,
     });
 
     if (response.status < 200 || response.status >= 300) {
-      throw new BadRequestException(`Wangsu API request failed: HTTP ${response.status} ${String(response.data || '').slice(0, 300)}`);
+      throw new BadRequestException(`Wangsu API request failed: HTTP ${response.status} ${this.summarizeWangsuError(response.data)}`);
     }
 
     const xml = String(response.data || '');
@@ -387,6 +393,14 @@ export class AssetsService {
     );
 
     return { items: items.map((row) => this.parseJsonColumns(row)), pagination: { page, pageSize, total: Number(totalRows[0]?.total || 0) } };
+  }
+
+  private summarizeWangsuError(data: unknown) {
+    const body = String(data || '').replace(/\s+/g, ' ').trim();
+    const code = this.extractXmlValue(body, 'code');
+    const message = this.extractXmlValue(body, 'message');
+    if (code || message) return `${code || 'UNKNOWN'} ${message || ''}`.trim();
+    return body.slice(0, 300);
   }
 
   private parseWangsuDomainXml(xml: string): WangsuDomainPreviewItem[] {
