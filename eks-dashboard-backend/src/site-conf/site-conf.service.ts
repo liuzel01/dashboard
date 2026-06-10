@@ -216,13 +216,6 @@ export class SiteConfService implements OnModuleInit {
           (conf_key, conf_value, value_type, category, description, is_sensitive, is_runtime_editable, default_value, validation_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
          ON DUPLICATE KEY UPDATE
-          value_type = VALUES(value_type),
-          category = VALUES(category),
-          description = VALUES(description),
-          is_sensitive = VALUES(is_sensitive),
-          is_runtime_editable = VALUES(is_runtime_editable),
-          default_value = VALUES(default_value),
-          validation_json = VALUES(validation_json),
           updated_at = updated_at`,
         [
           item.key,

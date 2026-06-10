@@ -34,6 +34,12 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'query_center.gateway.env_denylist', envKey: 'QUERY_CENTER_GATEWAY_ENV_DENYLIST', valueType: 'string', category: 'query-center', description: '禁止走网关的环境 ID，逗号分隔', defaultValue: '' },
   { key: 'query_center.gateway.transport', envKey: 'QUERY_CENTER_GATEWAY_TRANSPORT', valueType: 'string', category: 'query-center', description: '查询中心网关传输模式：k8s-proxy 或 direct-url', defaultValue: 'k8s-proxy', validation: { enum: ['k8s-proxy', 'direct-url'] } },
 
+  { key: 'cdn.wangsu.enabled', envKey: 'WANGSU_CDN_ENABLED', valueType: 'boolean', category: 'cdn', description: '是否启用网宿 CDN OpenAPI 集成', defaultValue: 'false' },
+  { key: 'cdn.wangsu.endpoint', envKey: 'WANGSU_CDN_ENDPOINT', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI Endpoint', defaultValue: 'https://open.chinanetcenter.com' },
+  { key: 'cdn.wangsu.access_key_id', envKey: 'WANGSU_CDN_ACCESS_KEY_ID', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI AccessKey ID / username', defaultValue: '', sensitive: true },
+  { key: 'cdn.wangsu.access_key_secret', envKey: 'WANGSU_CDN_ACCESS_KEY_SECRET', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI AccessKey Secret / apiKey', defaultValue: '', sensitive: true },
+  { key: 'cdn.wangsu.timeout_ms', envKey: 'WANGSU_CDN_TIMEOUT_MS', valueType: 'number', category: 'cdn', description: '网宿 CDN OpenAPI 请求超时（毫秒）', defaultValue: '15000', validation: { min: 1000 } },
+
   { key: 'sso.keycloak.issuer', envKey: 'KEYCLOAK_ISSUER', valueType: 'string', category: 'sso', description: 'Keycloak issuer/realm 地址', defaultValue: '' },
   { key: 'sso.keycloak.client_id', envKey: 'KEYCLOAK_CLIENT_ID', valueType: 'string', category: 'sso', description: 'Keycloak Client ID', defaultValue: '' },
   { key: 'sso.keycloak.redirect_uri', envKey: 'KEYCLOAK_REDIRECT_URI', valueType: 'string', category: 'sso', description: 'Keycloak 后端回调地址', defaultValue: '' },

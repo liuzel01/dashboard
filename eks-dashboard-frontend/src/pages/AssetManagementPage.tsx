@@ -72,6 +72,8 @@ type FieldConfig<T extends AssetEntity> = {
   number?: boolean;
   boolean?: boolean;
   options?: Array<{ label: string; value: string }>;
+  placeholder?: string;
+  help?: string;
 };
 
 type EntityTabProps<T extends AssetEntity> = {
@@ -368,6 +370,7 @@ function EntityTab<T extends AssetEntity>({
               label={field.label}
               rules={field.required ? [{ required: true, message: `请输入${field.label}` }] : undefined}
               valuePropName={field.boolean ? 'checked' : 'value'}
+              help={field.help}
             >
               {field.boolean ? (
                 <Checkbox />
@@ -378,7 +381,7 @@ function EntityTab<T extends AssetEntity>({
               ) : field.textarea ? (
                 <TextArea rows={3} />
               ) : (
-                <Input />
+                <Input placeholder={field.placeholder} />
               )}
             </Form.Item>
           ))}
@@ -512,7 +515,7 @@ const ChangeLogsTab: React.FC = () => {
 const accountFields: FieldConfig<AssetAccount>[] = [
   { name: 'account_name', label: '账号名称', required: true },
   { name: 'account_type', label: '账号类型', options: accountTypeOptions },
-  { name: 'provider', label: '服务商' },
+  { name: 'provider', label: '服务商', placeholder: '如 wangsu / knownsec / aliyun', help: '手动输入服务商 code，建议使用稳定英文标识；例如网宿 wangsu、知道创宇 knownsec。' },
   { name: 'account_identifier', label: '账号标识' },
   { name: 'login_url', label: '登录地址', table: false },
   { name: 'owner', label: '负责人' },
@@ -528,7 +531,7 @@ const accountFields: FieldConfig<AssetAccount>[] = [
 const resourceFields: FieldConfig<AssetResource>[] = [
   { name: 'resource_name', label: '资源名称', required: true },
   { name: 'resource_type', label: '资源类型', options: resourceTypeOptions },
-  { name: 'provider', label: '服务商' },
+  { name: 'provider', label: '服务商', placeholder: '如 wangsu / knownsec / aliyun', help: '手动输入服务商 code，建议与账号管理保持一致；例如网宿 wangsu、知道创宇 knownsec。' },
   { name: 'account_id', label: '所属账号ID', number: true },
   { name: 'resource_identifier', label: '资源标识' },
   { name: 'console_url', label: '控制台链接', table: false },
@@ -544,13 +547,13 @@ const resourceFields: FieldConfig<AssetResource>[] = [
 const domainFields: FieldConfig<AssetDomain>[] = [
   { name: 'domain', label: '域名', required: true },
   { name: 'root_domain', label: '根域名' },
-  { name: 'provider', label: '注册/管理服务商' },
+  { name: 'provider', label: '注册/管理服务商', placeholder: '如 aliyun / godaddy / cloudflare' },
   { name: 'account_id', label: '所属账号ID', number: true },
   { name: 'resource_id', label: '关联资源ID', number: true },
   { name: 'icp_status', label: '备案状态', options: icpStatusOptions },
   { name: 'icp_entity', label: '备案主体', table: false },
   { name: 'dns_provider', label: 'DNS服务商' },
-  { name: 'cdn_provider', label: 'CDN服务商', table: false },
+  { name: 'cdn_provider', label: 'CDN服务商', table: false, placeholder: '如 wangsu / knownsec / aliyun_dcdn', help: '手动输入当前域名实际使用的 CDN 服务商 code。' },
   { name: 'environment', label: '环境' },
   { name: 'tenant', label: '租户' },
   { name: 'business', label: '业务' },
