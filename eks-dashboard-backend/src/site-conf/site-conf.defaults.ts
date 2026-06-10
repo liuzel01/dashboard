@@ -38,8 +38,8 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'cdn.wangsu.endpoint', envKey: 'WANGSU_CDN_ENDPOINT', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI Endpoint', defaultValue: 'https://open.chinanetcenter.com' },
   { key: 'cdn.wangsu.username', envKey: 'WANGSU_CDN_USERNAME', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI 账号名 / username（用于 Basic Auth username）', defaultValue: '', sensitive: true },
   { key: 'cdn.wangsu.api_key', envKey: 'WANGSU_CDN_API_KEY', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI API Key（用于 HMAC-SHA1 Date 签名）', defaultValue: '', sensitive: true },
-  { key: 'cdn.wangsu.access_key_id', envKey: 'WANGSU_CDN_ACCESS_KEY_ID', valueType: 'string', category: 'cdn', description: '兼容旧配置：网宿 CDN OpenAPI 账号名 / username', defaultValue: '', sensitive: true },
-  { key: 'cdn.wangsu.access_key_secret', envKey: 'WANGSU_CDN_ACCESS_KEY_SECRET', valueType: 'string', category: 'cdn', description: '兼容旧配置：网宿 CDN OpenAPI API Key', defaultValue: '', sensitive: true },
+  { key: 'cdn.wangsu.access_key_id', envKey: 'WANGSU_CDN_ACCESS_KEY_ID', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI AccessKey ID（AKSK 鉴权优先使用）', defaultValue: '', sensitive: true },
+  { key: 'cdn.wangsu.access_key_secret', envKey: 'WANGSU_CDN_ACCESS_KEY_SECRET', valueType: 'string', category: 'cdn', description: '网宿 CDN OpenAPI AccessKey Secret（AKSK 鉴权优先使用）', defaultValue: '', sensitive: true },
   { key: 'cdn.wangsu.timeout_ms', envKey: 'WANGSU_CDN_TIMEOUT_MS', valueType: 'number', category: 'cdn', description: '网宿 CDN OpenAPI 请求超时（毫秒）', defaultValue: '15000', validation: { min: 1000 } },
 
   { key: 'sso.keycloak.issuer', envKey: 'KEYCLOAK_ISSUER', valueType: 'string', category: 'sso', description: 'Keycloak issuer/realm 地址', defaultValue: '' },

@@ -211,26 +211,22 @@ export class AssetsService {
     this.ensureAssetPermission(actor);
     const enabled = await this.siteConf.getBoolean('cdn.wangsu.enabled', false);
     const endpoint = (await this.siteConf.getString('cdn.wangsu.endpoint', 'https://open.chinanetcenter.com')).replace(/\/+$/, '');
-    const username = (
-      (await this.siteConf.getString('cdn.wangsu.username', '')).trim() ||
-      (await this.siteConf.getString('cdn.wangsu.access_key_id', '')).trim()
-    );
-    const apiKey = (
-      (await this.siteConf.getString('cdn.wangsu.api_key', '')).trim() ||
-      (await this.siteConf.getString('cdn.wangsu.access_key_secret', '')).trim()
-    );
+    const accessKeyId = (await this.siteConf.getString('cdn.wangsu.access_key_id', '')).trim();
+    const accessKeySecret = (await this.siteConf.getString('cdn.wangsu.access_key_secret', '')).trim();
+    const username = (await this.siteConf.getString('cdn.wangsu.username', '')).trim();
+    const apiKey = (await this.siteConf.getString('cdn.wangsu.api_key', '')).trim();
     const timeoutMs = await this.siteConf.getNumber('cdn.wangsu.timeout_ms', 15000);
-    if (!username || !apiKey) {
-      throw new BadRequestException('Wangsu CDN credentials are incomplete. Please configure cdn.wangsu.username and cdn.wangsu.api_key in siteconf.');
+    if ((!accessKeyId || !accessKeySecret) && (!username || !apiKey)) {
+      throw new BadRequestException('Wangsu CDN credentials are incomplete. Configure cdn.wangsu.access_key_id/access_key_secret for AKSK, or cdn.wangsu.username/api_key for legacy auth.');
     }
 
-    const date = new Date().toUTCString();
-    const password = createHmac('sha1', apiKey).update(date).digest('base64');
     const url = `${endpoint}/api/domain`;
+    const headers = accessKeyId && accessKeySecret
+      ? this.buildWangsuAkskHeaders({ endpoint, method: 'GET', path: '/api/domain', accessKeyId, accessKeySecret })
+      : this.buildWangsuBasicHeaders({ username, apiKey });
     const response = await axios.get(url, {
       timeout: timeoutMs,
-      auth: { username, password },
-      headers: { Date: date, Accept: 'application/xml' },
+      headers,
       responseType: 'text',
       validateStatus: (status) => status >= 200 && status < 500,
     });
@@ -393,6 +389,45 @@ export class AssetsService {
     );
 
     return { items: items.map((row) => this.parseJsonColumns(row)), pagination: { page, pageSize, total: Number(totalRows[0]?.total || 0) } };
+  }
+
+  private buildWangsuAkskHeaders(input: { endpoint: string; method: string; path: string; accessKeyId: string; accessKeySecret: string }) {
+    const host = new URL(input.endpoint).host;
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const contentType = 'application/json';
+    const signedHeaders = 'content-type;host';
+    const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
+    const canonicalRequest = [
+      input.method.toUpperCase(),
+      input.path,
+      '',
+      canonicalHeaders,
+      signedHeaders,
+      '',
+    ].join('\n');
+    const stringToSign = ['CNC-HMAC-SHA256', timestamp, canonicalRequest].join('\n');
+    const signature = createHmac('sha256', input.accessKeySecret).update(stringToSign).digest('hex');
+    return {
+      Authorization: `CNC-HMAC-SHA256 Credential=${input.accessKeyId}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+      Accept: 'application/json',
+      'content-type': contentType,
+      Host: host,
+      'Request-Method': input.method.toUpperCase(),
+      'Request-Uri': input.path,
+      'x-cnc-timestamp': timestamp,
+      'x-cnc-accessKey': input.accessKeyId,
+      'x-cnc-auth-method': 'AKSK',
+    };
+  }
+
+  private buildWangsuBasicHeaders(input: { username: string; apiKey: string }) {
+    const date = new Date().toUTCString();
+    const password = createHmac('sha1', input.apiKey).update(date).digest('base64');
+    return {
+      Date: date,
+      Accept: 'application/xml',
+      Authorization: `Basic ${Buffer.from(`${input.username}:${password}`).toString('base64')}`,
+    };
   }
 
   private summarizeWangsuError(data: unknown) {

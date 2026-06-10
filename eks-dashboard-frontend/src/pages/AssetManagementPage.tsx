@@ -493,7 +493,7 @@ const CdnSyncTab: React.FC = () => {
         type="info"
         showIcon
         message="CDN 域名预览"
-        description="当前阶段只从网宿 OpenAPI 拉取域名列表并展示预览，不会写入资产表。账号名/API Key 从 系统管理 → siteconf 配置 的 cdn.wangsu.username 与 cdn.wangsu.api_key 读取。"
+        description="当前阶段只从网宿 OpenAPI 拉取域名列表并展示预览，不会写入资产表。优先使用 系统管理 → siteconf 配置 的 cdn.wangsu.access_key_id 与 cdn.wangsu.access_key_secret 走 AKSK 鉴权；未配置时兼容 username/api_key 旧鉴权。"
       />
       <Space wrap>
         <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
