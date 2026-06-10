@@ -1055,6 +1055,37 @@ export type WangsuCdnDomainSyncResponse = {
   items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged'; id?: number }>;
 };
 
+export type AliyunDcdnDomainPreviewItem = {
+  provider: 'aliyun_dcdn';
+  domain: string;
+  domainId?: string;
+  cname?: string;
+  status?: string;
+  sslProtocol?: string;
+  gmtCreated?: string;
+  gmtModified?: string;
+  resourceGroupId?: string;
+  description?: string;
+  sources?: unknown;
+  raw: Record<string, unknown>;
+};
+
+export type AliyunDcdnDomainPreviewResponse = {
+  provider: 'aliyun_dcdn';
+  endpoint: string;
+  fetchedAt: string;
+  total: number;
+  totalCount: number;
+  items: AliyunDcdnDomainPreviewItem[];
+};
+
+export type AliyunDcdnDomainSyncResponse = {
+  provider: 'aliyun_dcdn';
+  fetchedAt: string;
+  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; dryRun: boolean };
+  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }>;
+};
+
 
 export type AssetListResponse<T> = {
   items: T[];
@@ -1186,6 +1217,16 @@ export const previewWangsuCdnDomains = async () => {
 export const syncWangsuCdnDomains = async (data: { dryRun?: boolean } = {}) => {
   const response = await api.post('/assets/cdn/wangsu/domains/sync', data);
   return response.data as WangsuCdnDomainSyncResponse;
+};
+
+export const previewAliyunDcdnDomains = async () => {
+  const response = await api.get('/assets/cdn/aliyun/dcdn/domains/preview');
+  return response.data as AliyunDcdnDomainPreviewResponse;
+};
+
+export const syncAliyunDcdnDomains = async (data: { dryRun?: boolean } = {}) => {
+  const response = await api.post('/assets/cdn/aliyun/dcdn/domains/sync', data);
+  return response.data as AliyunDcdnDomainSyncResponse;
 };
 
 // Auth / Me

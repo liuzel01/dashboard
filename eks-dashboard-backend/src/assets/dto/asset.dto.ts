@@ -92,6 +92,13 @@ export class ListChangeLogsDto {
 }
 
 
+export class SyncAliyunDcdnDomainsDto {
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  dryRun?: boolean;
+}
+
 export class SyncWangsuDomainsDto {
   @IsOptional()
   @Transform(toOptionalBoolean)

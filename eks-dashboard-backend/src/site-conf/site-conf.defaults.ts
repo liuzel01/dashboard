@@ -48,6 +48,11 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'query_center.gateway.transport', envKey: 'QUERY_CENTER_GATEWAY_TRANSPORT', valueType: 'string', category: 'query-center', description: '查询中心网关传输模式：k8s-proxy 或 direct-url', defaultValue: 'k8s-proxy', validation: { enum: ['k8s-proxy', 'direct-url'] } },
 
   { key: 'cdn.aliyun.dcdn_endpoint', envKey: 'DCDN_ENDPOINT', valueType: 'string', category: 'cdn', description: '阿里云 DCDN API Endpoint', defaultValue: 'https://dcdn.aliyuncs.com' },
+  { key: 'cdn.aliyun.dcdn.enabled', envKey: 'ALIYUN_DCDN_ENABLED', valueType: 'boolean', category: 'cdn', description: '是否启用阿里云 DCDN 域名同步', defaultValue: 'true' },
+  { key: 'cdn.aliyun.dcdn.timeout_ms', envKey: 'ALIYUN_DCDN_TIMEOUT_MS', valueType: 'number', category: 'cdn', description: '阿里云 DCDN OpenAPI 请求超时（毫秒）', defaultValue: '15000', validation: { min: 1000 } },
+  { key: 'cdn.aliyun.esa.enabled', envKey: 'ALIYUN_ESA_ENABLED', valueType: 'boolean', category: 'cdn', description: '是否启用阿里云 ESA 域名同步（当前仅占位）', defaultValue: 'false' },
+  { key: 'cdn.aliyun.esa.endpoint', envKey: 'ALIYUN_ESA_ENDPOINT', valueType: 'string', category: 'cdn', description: '阿里云 ESA OpenAPI Endpoint（占位）', defaultValue: 'https://esa.cn-hangzhou.aliyuncs.com' },
+  { key: 'cdn.aliyun.esa.timeout_ms', envKey: 'ALIYUN_ESA_TIMEOUT_MS', valueType: 'number', category: 'cdn', description: '阿里云 ESA OpenAPI 请求超时（毫秒，占位）', defaultValue: '15000', validation: { min: 1000 } },
   { key: 'cdn.aliyun.access_key_id', envKey: 'ALIYUN_ACCESS_KEY_ID', valueType: 'string', category: 'cdn', description: '阿里云 RAM AccessKey ID', defaultValue: '', sensitive: true },
   { key: 'cdn.aliyun.access_key_secret', envKey: 'ALIYUN_ACCESS_KEY_SECRET', valueType: 'string', category: 'cdn', description: '阿里云 RAM AccessKey Secret', defaultValue: '', sensitive: true },
   { key: 'cdn.wangsu.enabled', envKey: 'WANGSU_CDN_ENABLED', valueType: 'boolean', category: 'cdn', description: '是否启用网宿 CDN OpenAPI 集成', defaultValue: 'false' },

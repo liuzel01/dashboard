@@ -13,6 +13,7 @@ import {
   Space,
   Statistic,
   Table,
+  Tabs,
   Tag,
   Typography,
   Alert,
@@ -34,7 +35,9 @@ import {
   getAssetResources,
   getCredentialRefs,
   previewWangsuCdnDomains,
+  previewAliyunDcdnDomains,
   syncWangsuCdnDomains,
+  syncAliyunDcdnDomains,
   restoreAssetAccount,
   restoreAssetDomain,
   restoreAssetResource,
@@ -55,6 +58,9 @@ import type {
   WangsuCdnDomainPreviewItem,
   WangsuCdnDomainPreviewResponse,
   WangsuCdnDomainSyncResponse,
+  AliyunDcdnDomainPreviewItem,
+  AliyunDcdnDomainPreviewResponse,
+  AliyunDcdnDomainSyncResponse,
 } from '../services/api';
 
 const { Text, Paragraph } = Typography;
@@ -468,13 +474,28 @@ const getErrorMessage = (error: any, fallback: string) => {
 };
 
 const CdnSyncTab: React.FC = () => {
+  const { message } = AntApp.useApp();
+
+  return (
+    <Tabs
+      items={[
+        { key: 'wangsu', label: '网宿 CDN', children: <WangsuCdnSyncPanel messageApi={message} /> },
+        { key: 'aliyun_dcdn', label: '阿里云 DCDN', children: <AliyunDcdnSyncPanel messageApi={message} /> },
+        { key: 'aliyun_esa', label: '阿里云 ESA（占位）', children: <AliyunEsaPlaceholder /> },
+      ]}
+    />
+  );
+};
+
+type SyncPanelProps = { messageApi: ReturnType<typeof AntApp.useApp>['message'] };
+
+const WangsuCdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
   const [data, setData] = useState<WangsuCdnDomainPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<WangsuCdnDomainSyncResponse | null>(null);
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
-  const { message } = AntApp.useApp();
 
   const load = async () => {
     setLoading(true);
@@ -482,38 +503,32 @@ const CdnSyncTab: React.FC = () => {
       setPreviewError(null);
       const next = await previewWangsuCdnDomains();
       setData(next);
-      message.success(`已加载 ${next.total} 个网宿 CDN 域名`);
+      messageApi.success(`已加载 ${next.total} 个网宿 CDN 域名`);
     } catch (e: any) {
       const errorMessage = getErrorMessage(e, '加载网宿 CDN 域名预览失败');
       setPreviewError(errorMessage);
-      message.error(errorMessage);
+      messageApi.error(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
   const runSync = async (dryRun: boolean) => {
-    if (dryRun) {
-      setDryRunLoading(true);
-    } else {
-      setSyncLoading(true);
-    }
+    if (dryRun) setDryRunLoading(true);
+    else setSyncLoading(true);
     try {
       setPreviewError(null);
       const result = await syncWangsuCdnDomains({ dryRun });
       setSyncResult(result);
       const { created, updated, unchanged, total } = result.summary;
-      message.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${total} 条，新增 ${created}，更新 ${updated}，不变 ${unchanged}`);
+      messageApi.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${total} 条，新增 ${created}，更新 ${updated}，不变 ${unchanged}`);
     } catch (e: any) {
       const errorMessage = getErrorMessage(e, dryRun ? '网宿 CDN 同步预检失败' : '同步网宿 CDN 域名失败');
       setPreviewError(errorMessage);
-      message.error(errorMessage);
+      messageApi.error(errorMessage);
     } finally {
-      if (dryRun) {
-        setDryRunLoading(false);
-      } else {
-        setSyncLoading(false);
-      }
+      if (dryRun) setDryRunLoading(false);
+      else setSyncLoading(false);
     }
   };
 
@@ -522,8 +537,8 @@ const CdnSyncTab: React.FC = () => {
       <Alert
         type="info"
         showIcon
-        message="CDN 域名预览"
-        description="当前阶段只从网宿 OpenAPI 拉取域名列表并展示预览，不会写入资产表。优先使用 系统管理 → siteconf 配置 的 cdn.wangsu.access_key_id 与 cdn.wangsu.access_key_secret 走 AKSK 鉴权；未配置时兼容 username/api_key 旧鉴权。"
+        message="网宿 CDN 域名预览"
+        description="从网宿 OpenAPI 拉取域名列表，可 Dry Run 或同步到资产域名表。优先使用 siteconf 的 cdn.wangsu.access_key_id/access_key_secret 走 AKSK 鉴权。"
       />
       <Space wrap>
         <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
@@ -563,6 +578,104 @@ const CdnSyncTab: React.FC = () => {
     </Space>
   );
 };
+
+const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
+  const [data, setData] = useState<AliyunDcdnDomainPreviewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<AliyunDcdnDomainSyncResponse | null>(null);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      setPreviewError(null);
+      const next = await previewAliyunDcdnDomains();
+      setData(next);
+      messageApi.success(`已加载 ${next.total} 个阿里云 DCDN 域名`);
+    } catch (e: any) {
+      const errorMessage = getErrorMessage(e, '加载阿里云 DCDN 域名预览失败');
+      setPreviewError(errorMessage);
+      messageApi.error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runSync = async (dryRun: boolean) => {
+    if (dryRun) setDryRunLoading(true);
+    else setSyncLoading(true);
+    try {
+      setPreviewError(null);
+      const result = await syncAliyunDcdnDomains({ dryRun });
+      setSyncResult(result);
+      const { created, updated, unchanged, conflicts, total } = result.summary;
+      messageApi.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${total} 条，新增 ${created}，更新 ${updated}，不变 ${unchanged}，冲突 ${conflicts}`);
+    } catch (e: any) {
+      const errorMessage = getErrorMessage(e, dryRun ? '阿里云 DCDN 同步预检失败' : '同步阿里云 DCDN 域名失败');
+      setPreviewError(errorMessage);
+      messageApi.error(errorMessage);
+    } finally {
+      if (dryRun) setDryRunLoading(false);
+      else setSyncLoading(false);
+    }
+  };
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert
+        type="info"
+        showIcon
+        message="阿里云 DCDN 域名预览"
+        description="从阿里云 DCDN OpenAPI 拉取域名列表。若域名已存在且 cdn_provider 不同，同步会标记 provider_conflict 并跳过覆盖，避免覆盖网宿等已有来源。"
+      />
+      <Space wrap>
+        <Button type="primary" loading={loading} onClick={load}>加载阿里云 DCDN 域名预览</Button>
+        <Button loading={dryRunLoading} disabled={syncLoading} onClick={() => runSync(true)}>Dry Run 同步预检</Button>
+        <Popconfirm title="确认同步阿里云 DCDN 域名到域名管理？" description="将按域名 upsert 到资产域名表；不同 CDN provider 的已有域名会标记冲突并跳过覆盖。" onConfirm={() => runSync(false)}>
+          <Button type="primary" danger loading={syncLoading} disabled={dryRunLoading}>同步到域名管理</Button>
+        </Popconfirm>
+        {data && <Text type="secondary">来源：{data.endpoint}；抓取时间：{formatDateTime(data.fetchedAt)}；共 {data.total} 条</Text>}
+      </Space>
+      {previewError && <Alert type="error" showIcon message="阿里云 DCDN 操作失败" description={previewError} />}
+      {syncResult && (
+        <Alert
+          type={syncResult.summary.dryRun ? 'warning' : 'success'}
+          showIcon
+          message={syncResult.summary.dryRun ? '同步预检结果' : '同步完成'}
+          description={`共 ${syncResult.summary.total} 条，新增 ${syncResult.summary.created}，更新 ${syncResult.summary.updated}，不变 ${syncResult.summary.unchanged}，冲突 ${syncResult.summary.conflicts}`}
+        />
+      )}
+      <Table<AliyunDcdnDomainPreviewItem>
+        rowKey={(record) => record.domainId || record.domain}
+        loading={loading}
+        dataSource={data?.items || []}
+        pagination={{ pageSize: 20, showSizeChanger: true }}
+        scroll={{ x: 1400 }}
+        columns={[
+          { title: '域名', dataIndex: 'domain', width: 260, render: (value: string) => <Text copyable>{value}</Text> },
+          { title: 'Domain ID', dataIndex: 'domainId', width: 150, render: renderValue },
+          { title: 'CNAME', dataIndex: 'cname', width: 300, render: renderValue },
+          { title: '状态', dataIndex: 'status', width: 120, render: (value: string) => value ? <Tag color={value === 'online' ? 'green' : undefined}>{value}</Tag> : '-' },
+          { title: 'SSL', dataIndex: 'sslProtocol', width: 100, render: renderValue },
+          { title: '源站', dataIndex: 'sources', width: 260, render: (value: unknown) => <Text ellipsis>{JSON.stringify(value || '') || '-'}</Text> },
+          { title: '创建时间', dataIndex: 'gmtCreated', width: 180, render: renderValue },
+          { title: '更新时间', dataIndex: 'gmtModified', width: 180, render: renderValue },
+        ]}
+      />
+    </Space>
+  );
+};
+
+const AliyunEsaPlaceholder: React.FC = () => (
+  <Alert
+    type="warning"
+    showIcon
+    message="阿里云 ESA 同步占位"
+    description="ESA ListSites 接口已只读验证可用，但当前返回为站点维度，域名级同步字段仍需进一步确认。本阶段先不提供正式同步，后续再完善 ESA 域名接入。"
+  />
+);
 
 const ChangeLogsTab: React.FC = () => {
   const [items, setItems] = useState<AssetChangeLog[]>([]);

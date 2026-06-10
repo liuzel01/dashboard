@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import axios from 'axios';
 import { createHash, createHmac } from 'crypto';
+const { RPCClient } = require('@alicloud/pop-core');
 import type * as mysql from 'mysql2/promise';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
@@ -14,6 +15,7 @@ import {
   ListAssetsDto,
   ListChangeLogsDto,
   SyncWangsuDomainsDto,
+  SyncAliyunDcdnDomainsDto,
   UpdateAssetAccountDto,
   UpdateAssetDomainDto,
   UpdateAssetResourceDto,
@@ -55,6 +57,21 @@ type WangsuDomainPreviewItem = {
   lastModified?: string;
   billingAreas?: string;
   provider: 'wangsu';
+  raw: Record<string, unknown>;
+};
+
+type AliyunDcdnDomainPreviewItem = {
+  provider: 'aliyun_dcdn';
+  domain: string;
+  domainId?: string;
+  cname?: string;
+  status?: string;
+  sslProtocol?: string;
+  gmtCreated?: string;
+  gmtModified?: string;
+  resourceGroupId?: string;
+  description?: string;
+  sources?: unknown;
   raw: Record<string, unknown>;
 };
 
@@ -302,6 +319,96 @@ export class AssetsService {
     });
   }
 
+  async previewAliyunDcdnDomains(actor: ActorContext) {
+    this.ensureAssetPermission(actor);
+    const client = await this.createAliyunDcdnClient();
+    const timeoutMs = await this.getAliyunTimeoutMs();
+    const pageSize = 100;
+    let pageNumber = 1;
+    const items: AliyunDcdnDomainPreviewItem[] = [];
+    let totalCount = 0;
+
+    do {
+      const resp = await client.request('DescribeDcdnUserDomains', { PageNumber: pageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+      totalCount = Number(resp?.TotalCount || 0);
+      const pageData = resp?.Domains?.PageData || [];
+      const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
+      items.push(...rows.map((row: Record<string, unknown>) => this.parseAliyunDcdnDomain(row)).filter((item: AliyunDcdnDomainPreviewItem | null): item is AliyunDcdnDomainPreviewItem => Boolean(item)));
+      pageNumber += 1;
+    } while (items.length < totalCount && pageNumber <= 1000);
+
+    return {
+      provider: 'aliyun_dcdn',
+      endpoint: await this.getAliyunDcdnEndpoint(),
+      fetchedAt: new Date().toISOString(),
+      total: items.length,
+      totalCount,
+      items,
+    };
+  }
+
+  async syncAliyunDcdnDomains(actor: ActorContext, dto: SyncAliyunDcdnDomainsDto = {}) {
+    this.ensureAssetPermission(actor);
+    const preview = await this.previewAliyunDcdnDomains(actor);
+    const dryRun = dto.dryRun !== false;
+    const planned = preview.items.map((item) => this.buildAliyunDcdnDomainSyncPayload(item));
+
+    return this.db.withTransaction(async (conn) => {
+      const summary = { total: planned.length, created: 0, updated: 0, unchanged: 0, conflicts: 0, dryRun };
+      const items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; before?: DbRow | null; after: Record<string, unknown>; conflictProvider?: string | null }> = [];
+
+      for (const payload of planned) {
+        const domain = String(payload.domain);
+        const before = await this.findDomainByDomain(conn, domain);
+        if (!before) {
+          summary.created += 1;
+          items.push({ domain, action: 'create', after: payload });
+          if (!dryRun) {
+            const columns = Object.keys(payload);
+            const result = await conn.execute<mysql.ResultSetHeader>(
+              `INSERT INTO asset_domains (${columns.join(', ')}, created_by, updated_by, created_at, updated_at) VALUES (${columns.map(() => '?').join(', ')}, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+              [...columns.map((column) => payload[column]), actor.username, actor.username],
+            );
+            const id = result[0].insertId;
+            const after = await this.getRowById(conn, domainConfig, id, true);
+            await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: id, action: 'sync_aliyun_dcdn_create', beforeData: null, afterData: after, remark: 'sync from aliyun dcdn preview' });
+            items[items.length - 1] = { domain, action: 'create', id, after: after || payload };
+          }
+          continue;
+        }
+
+        const beforeProvider = before.cdn_provider === undefined || before.cdn_provider === null ? '' : String(before.cdn_provider);
+        if (beforeProvider && beforeProvider !== 'aliyun_dcdn') {
+          summary.conflicts += 1;
+          items.push({ domain, action: 'provider_conflict', id: Number(before.id), before, after: before, conflictProvider: beforeProvider });
+          continue;
+        }
+
+        const patch = this.diffDomainPayload(before, payload);
+        if (Object.keys(patch).length === 0) {
+          summary.unchanged += 1;
+          items.push({ domain, action: 'unchanged', id: Number(before.id), before, after: before });
+          continue;
+        }
+
+        summary.updated += 1;
+        items.push({ domain, action: 'update', id: Number(before.id), before, after: { ...before, ...patch } });
+        if (!dryRun) {
+          const keys = Object.keys(patch);
+          await conn.execute(
+            `UPDATE asset_domains SET ${keys.map((key) => `${key} = ?`).join(', ')}, updated_by = ?, updated_at = UTC_TIMESTAMP(), deleted_at = NULL WHERE id = ?`,
+            [...keys.map((key) => patch[key]), actor.username, Number(before.id)],
+          );
+          const after = await this.getRowById(conn, domainConfig, Number(before.id), true);
+          await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: Number(before.id), action: 'sync_aliyun_dcdn_update', beforeData: before, afterData: after, remark: 'sync from aliyun dcdn preview' });
+          items[items.length - 1] = { domain, action: 'update', id: Number(before.id), before, after: after || { ...before, ...patch } };
+        }
+      }
+
+      return { provider: 'aliyun_dcdn', fetchedAt: preview.fetchedAt, summary, items };
+    });
+  }
+
   async getOverview(actor: ActorContext) {
     this.ensureAssetPermission(actor);
     const [accountStats, resourceStats, domainStats, credentialStats, ownerStats, recentChanges] =
@@ -492,6 +599,82 @@ export class AssetsService {
     const message = this.extractXmlValue(body, 'message');
     if (code || message) return `${code || 'UNKNOWN'} ${message || ''}`.trim();
     return body.slice(0, 300);
+  }
+
+  private async getAliyunDcdnEndpoint() {
+    return (await this.siteConf.getString('cdn.aliyun.dcdn_endpoint', 'https://dcdn.aliyuncs.com')).trim() || 'https://dcdn.aliyuncs.com';
+  }
+
+  private async getAliyunTimeoutMs() {
+    const timeoutMs = await this.siteConf.getNumber('cdn.aliyun.dcdn.timeout_ms', 15000);
+    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
+  }
+
+  private async createAliyunDcdnClient() {
+    const accessKeyId = (await this.siteConf.getString('cdn.aliyun.access_key_id', '')).trim();
+    const accessKeySecret = (await this.siteConf.getString('cdn.aliyun.access_key_secret', '')).trim();
+    if (!accessKeyId || !accessKeySecret) {
+      throw new BadRequestException('Aliyun credentials are incomplete. Configure cdn.aliyun.access_key_id and cdn.aliyun.access_key_secret.');
+    }
+    return new RPCClient({
+      accessKeyId,
+      accessKeySecret,
+      endpoint: await this.getAliyunDcdnEndpoint(),
+      apiVersion: '2018-01-15',
+      opts: { timeout: await this.getAliyunTimeoutMs() },
+    });
+  }
+
+  private parseAliyunDcdnDomain(row: Record<string, unknown>): AliyunDcdnDomainPreviewItem | null {
+    const domain = String(row.DomainName || '').trim();
+    if (!domain) return null;
+    return {
+      provider: 'aliyun_dcdn',
+      domain,
+      domainId: row.DomainId === undefined || row.DomainId === null ? undefined : String(row.DomainId),
+      cname: row.Cname === undefined || row.Cname === null ? undefined : String(row.Cname),
+      status: row.DomainStatus === undefined || row.DomainStatus === null ? undefined : String(row.DomainStatus),
+      sslProtocol: row.SSLProtocol === undefined || row.SSLProtocol === null ? undefined : String(row.SSLProtocol),
+      gmtCreated: row.GmtCreated === undefined || row.GmtCreated === null ? undefined : String(row.GmtCreated),
+      gmtModified: row.GmtModified === undefined || row.GmtModified === null ? undefined : String(row.GmtModified),
+      resourceGroupId: row.ResourceGroupId === undefined || row.ResourceGroupId === null ? undefined : String(row.ResourceGroupId),
+      description: row.Description === undefined || row.Description === null ? undefined : String(row.Description),
+      sources: row.Sources,
+      raw: row,
+    };
+  }
+
+  private mapAliyunDcdnStatus(status: string) {
+    if (status === 'online') return 'active';
+    if (['configuring', 'checking', 'configure_failed', 'check_failed'].includes(status)) return 'migrating';
+    if (['offline', 'stopped', 'stopping', 'deleting', 'deleted'].includes(status)) return 'unused';
+    return status || 'unknown';
+  }
+
+  private buildAliyunDcdnDomainSyncPayload(item: AliyunDcdnDomainPreviewItem) {
+    const normalizedStatus = String(item.status || '').toLowerCase();
+    const status = this.mapAliyunDcdnStatus(normalizedStatus);
+    return this.normalizePayload({
+      domain: item.domain,
+      root_domain: this.guessRootDomain(item.domain),
+      cdn_provider: 'aliyun_dcdn',
+      provider: 'aliyun',
+      status,
+      usage_desc: 'Aliyun DCDN',
+      remark: JSON.stringify({
+        source: 'aliyun_dcdn_api',
+        domainId: item.domainId || null,
+        cname: item.cname || null,
+        status: item.status || null,
+        sslProtocol: item.sslProtocol || null,
+        gmtCreated: item.gmtCreated || null,
+        gmtModified: item.gmtModified || null,
+        resourceGroupId: item.resourceGroupId || null,
+        description: item.description || null,
+        sources: item.sources || null,
+        raw: item.raw || null,
+      }, null, 2),
+    });
   }
 
   private buildWangsuDomainSyncPayload(item: WangsuDomainPreviewItem) {

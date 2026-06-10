@@ -20,6 +20,7 @@ import {
   ListAssetsDto,
   ListChangeLogsDto,
   SyncWangsuDomainsDto,
+  SyncAliyunDcdnDomainsDto,
   UpdateAssetAccountDto,
   UpdateAssetDomainDto,
   UpdateAssetResourceDto,
@@ -51,6 +52,21 @@ export class AssetsController {
   ) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
     return this.service.syncWangsuDomains(actor, body);
+  }
+
+  @Get('cdn/aliyun/dcdn/domains/preview')
+  async previewAliyunDcdnDomains(@Headers('authorization') authorization?: string) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.previewAliyunDcdnDomains(actor);
+  }
+
+  @Post('cdn/aliyun/dcdn/domains/sync')
+  async syncAliyunDcdnDomains(
+    @Headers('authorization') authorization: string | undefined,
+    @Body(validation) body: SyncAliyunDcdnDomainsDto,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.syncAliyunDcdnDomains(actor, body);
   }
 
   @Get('accounts')
