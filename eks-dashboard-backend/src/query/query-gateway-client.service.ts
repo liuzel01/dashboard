@@ -3,6 +3,7 @@ import axios from 'axios';
 import { randomUUID } from 'node:crypto';
 import { EnvironmentsService } from '../environments/environments.service';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { SiteConfService } from '../site-conf/site-conf.service';
 import { QueryRequestContext } from './query-request-context';
 
 @Injectable()
@@ -12,20 +13,19 @@ export class QueryGatewayClientService {
   constructor(
     private readonly environmentsService: EnvironmentsService,
     private readonly kubernetesService: KubernetesService,
+    private readonly siteConf: SiteConfService,
   ) {}
 
-  isGatewayEnabled() {
-    return String(process.env.QUERY_CENTER_GATEWAY_ENABLED || '')
-      .trim()
-      .toLowerCase() === 'true';
+  async isGatewayEnabled() {
+    return this.siteConf.getBoolean('query_center.gateway.enabled', false);
   }
 
-  isGatewayEnabledForEnvironment(environmentId: string) {
-    if (!this.isGatewayEnabled()) return false;
-    const denylist = this.parseList(process.env.QUERY_CENTER_GATEWAY_ENV_DENYLIST);
+  async isGatewayEnabledForEnvironment(environmentId: string) {
+    if (!(await this.isGatewayEnabled())) return false;
+    const denylist = this.parseList(await this.siteConf.getString('query_center.gateway.env_denylist', ''));
     if (denylist.has(environmentId)) return false;
     const allowlist = this.parseList(
-      process.env.QUERY_CENTER_GATEWAY_ENV_ALLOWLIST,
+      await this.siteConf.getString('query_center.gateway.env_allowlist', ''),
     );
     if (allowlist.size === 0) return true;
     return allowlist.has(environmentId);
@@ -38,12 +38,12 @@ export class QueryGatewayClientService {
     tenantId?: number,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
 
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
     if (transport === 'k8s-proxy') {
       return this.aggregateViaK8sServiceProxy(
         environmentId,
@@ -82,7 +82,7 @@ export class QueryGatewayClientService {
     const servicePort = Number(
       process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080,
     );
-    const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+    const timeoutMs = await this.getGatewayTimeoutMs();
 
     this.logger.log(
       `[QueryGateway] forwarding aggregate via k8s proxy env=${environmentId} target=${namespace}/${serviceName}:${servicePort} requestId=${requestId}`,
@@ -124,7 +124,7 @@ export class QueryGatewayClientService {
     if (!baseUrl) return null;
 
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/aggregate`;
-    const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+    const timeoutMs = await this.getGatewayTimeoutMs();
 
     this.logger.log(
       `[QueryGateway] forwarding aggregate via direct url env=${environmentId} url=${url} requestId=${requestId}`,
@@ -153,18 +153,18 @@ export class QueryGatewayClientService {
     data: { email?: string | null; tel?: string | null; tel_country_code?: string | null },
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -191,7 +191,7 @@ export class QueryGatewayClientService {
       url,
       { tenantId, ...data },
       {
-        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        timeout: await this.getGatewayTimeoutMs(),
         headers: {
           'X-Environment-Id': environmentId,
           'X-Request-Id': requestId,
@@ -210,18 +210,18 @@ export class QueryGatewayClientService {
     tenantId: number,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -248,7 +248,7 @@ export class QueryGatewayClientService {
       url,
       { tenantId },
       {
-        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        timeout: await this.getGatewayTimeoutMs(),
         headers: {
           'X-Environment-Id': environmentId,
           'X-Request-Id': requestId,
@@ -267,18 +267,18 @@ export class QueryGatewayClientService {
     tenantId: number,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -302,7 +302,7 @@ export class QueryGatewayClientService {
     if (!baseUrl) return null;
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/trader/${encodeURIComponent(uid)}`;
     const response = await axios.get(url, {
-      timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+      timeout: await this.getGatewayTimeoutMs(),
       params: { tenantId },
       headers: {
         'X-Environment-Id': environmentId,
@@ -321,18 +321,18 @@ export class QueryGatewayClientService {
     tenantId: number,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -356,7 +356,7 @@ export class QueryGatewayClientService {
     if (!baseUrl) return null;
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/otc-merchant/${encodeURIComponent(uid)}`;
     const response = await axios.get(url, {
-      timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+      timeout: await this.getGatewayTimeoutMs(),
       params: { tenantId },
       headers: {
         'X-Environment-Id': environmentId,
@@ -376,18 +376,18 @@ export class QueryGatewayClientService {
     name: string,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -414,7 +414,7 @@ export class QueryGatewayClientService {
       url,
       { tenantId, name },
       {
-        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        timeout: await this.getGatewayTimeoutMs(),
         headers: {
           'X-Environment-Id': environmentId,
           'X-Request-Id': requestId,
@@ -432,18 +432,18 @@ export class QueryGatewayClientService {
     key: string,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -467,7 +467,7 @@ export class QueryGatewayClientService {
     if (!baseUrl) return null;
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/redis-key`;
     const response = await axios.get(url, {
-      timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+      timeout: await this.getGatewayTimeoutMs(),
       params: { key },
       headers: {
         'X-Environment-Id': environmentId,
@@ -487,18 +487,18 @@ export class QueryGatewayClientService {
     ttlSeconds?: number,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -525,7 +525,7 @@ export class QueryGatewayClientService {
       url,
       { key, value, ttlSeconds },
       {
-        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        timeout: await this.getGatewayTimeoutMs(),
         headers: {
           'X-Environment-Id': environmentId,
           'X-Request-Id': requestId,
@@ -543,18 +543,18 @@ export class QueryGatewayClientService {
     key: string,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -578,7 +578,7 @@ export class QueryGatewayClientService {
     if (!baseUrl) return null;
     const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/redis-key`;
     const response = await axios.delete(url, {
-      timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+      timeout: await this.getGatewayTimeoutMs(),
       params: { key },
       headers: {
         'X-Environment-Id': environmentId,
@@ -598,18 +598,18 @@ export class QueryGatewayClientService {
     tenantId: number,
     context?: QueryRequestContext,
   ): Promise<any | null> {
-    if (!this.isGatewayEnabledForEnvironment(environmentId)) return null;
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
 
     const requestId = context?.requestId || randomUUID();
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
-    const transport = this.getGatewayTransport();
+    const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
       const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
       const serviceName =
         process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
       const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-      const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+      const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
         serviceName,
@@ -636,7 +636,7 @@ export class QueryGatewayClientService {
       url,
       { nick_name: nickName, tenantId },
       {
-        timeout: Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000),
+        timeout: await this.getGatewayTimeoutMs(),
         headers: {
           'X-Environment-Id': environmentId,
           'X-Request-Id': requestId,
@@ -649,11 +649,16 @@ export class QueryGatewayClientService {
     return response.data;
   }
 
-  private getGatewayTransport(): 'k8s-proxy' | 'direct-url' {
-    const mode = String(process.env.QUERY_CENTER_GATEWAY_TRANSPORT || 'k8s-proxy')
+  private async getGatewayTransport(): Promise<'k8s-proxy' | 'direct-url'> {
+    const mode = (await this.siteConf.getString('query_center.gateway.transport', 'k8s-proxy'))
       .trim()
       .toLowerCase();
     return mode === 'direct-url' ? 'direct-url' : 'k8s-proxy';
+  }
+
+  private async getGatewayTimeoutMs() {
+    const timeoutMs = await this.siteConf.getNumber('query_center.gateway.timeout_ms', 15_000);
+    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000;
   }
 
   private parseList(raw?: string) {
