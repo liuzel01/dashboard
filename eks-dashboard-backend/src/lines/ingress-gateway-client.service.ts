@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { SiteConfService } from '../site-conf/site-conf.service';
 
 export type IngressGatewayContext = {
   requestId?: string;
@@ -12,7 +13,10 @@ export type IngressGatewayContext = {
 export class IngressGatewayClientService {
   private readonly logger = new Logger(IngressGatewayClientService.name);
 
-  constructor(private readonly kubernetesService: KubernetesService) {}
+  constructor(
+    private readonly kubernetesService: KubernetesService,
+    private readonly siteConf: SiteConfService,
+  ) {}
 
   async readTlsSecret(
     environmentId: string,
@@ -99,11 +103,8 @@ export class IngressGatewayClientService {
     action: string,
   ) {
     const requestId = context?.requestId || randomUUID();
-    const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-    const serviceName =
-      process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-    const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
-    const timeoutMs = Number(process.env.QUERY_CENTER_GATEWAY_TIMEOUT_MS || 15_000);
+    const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
+    const timeoutMs = await this.siteConf.getNumber('query_center.gateway.timeout_ms', 15_000);
     const token = process.env.QUERY_CENTER_AGENT_TOKEN || '';
 
     this.logger.log(
@@ -132,6 +133,14 @@ export class IngressGatewayClientService {
     } catch (error: any) {
       this.rethrowAgentError(error);
     }
+  }
+
+  private async getAgentK8sTarget() {
+    const namespace = (await this.siteConf.getString('query_center.agent.k8s_namespace', 'default')).trim() || 'default';
+    const serviceName = (await this.siteConf.getString('query_center.agent.k8s_service', 'dashboard-db-gateway-agent')).trim() || 'dashboard-db-gateway-agent';
+    const configuredPort = await this.siteConf.getNumber('query_center.agent.k8s_port', 8080);
+    const servicePort = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 8080;
+    return { namespace, serviceName, servicePort };
   }
 
   private rethrowAgentError(error: any): never {

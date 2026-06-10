@@ -76,12 +76,7 @@ export class QueryGatewayClientService {
     token: string,
     context?: QueryRequestContext,
   ) {
-    const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-    const serviceName =
-      process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-    const servicePort = Number(
-      process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080,
-    );
+    const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
     const timeoutMs = await this.getGatewayTimeoutMs();
 
     this.logger.log(
@@ -160,10 +155,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -217,10 +209,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -274,10 +263,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -328,10 +314,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -383,10 +366,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -439,10 +419,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -494,10 +471,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -550,10 +524,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -605,10 +576,7 @@ export class QueryGatewayClientService {
     const transport = await this.getGatewayTransport();
 
     if (transport === 'k8s-proxy') {
-      const namespace = process.env.QUERY_CENTER_AGENT_K8S_NAMESPACE || 'default';
-      const serviceName =
-        process.env.QUERY_CENTER_AGENT_K8S_SERVICE || 'dashboard-db-gateway-agent';
-      const servicePort = Number(process.env.QUERY_CENTER_AGENT_K8S_PORT || 8080);
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
       const timeoutMs = await this.getGatewayTimeoutMs();
       const response = await this.kubernetesService.requestServiceProxy(environmentId, {
         namespace,
@@ -647,6 +615,14 @@ export class QueryGatewayClientService {
       },
     );
     return response.data;
+  }
+
+  private async getAgentK8sTarget() {
+    const namespace = (await this.siteConf.getString('query_center.agent.k8s_namespace', 'default')).trim() || 'default';
+    const serviceName = (await this.siteConf.getString('query_center.agent.k8s_service', 'dashboard-db-gateway-agent')).trim() || 'dashboard-db-gateway-agent';
+    const configuredPort = await this.siteConf.getNumber('query_center.agent.k8s_port', 8080);
+    const servicePort = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 8080;
+    return { namespace, serviceName, servicePort };
   }
 
   private async getGatewayTransport(): Promise<'k8s-proxy' | 'direct-url'> {

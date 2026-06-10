@@ -157,7 +157,6 @@ type SuperAdminLineItem = {
 export class LinesService {
   private readonly logger = new Logger(LinesService.name);
   private readonly lineVerifyApiUrl: string;
-  private readonly dcdnEndpoint: string;
   private readonly dcdnAccessKeyId: string;
   private readonly dcdnAccessKeySecret: string;
   private readonly dcdnWafClientIpTag: string;
@@ -171,7 +170,6 @@ export class LinesService {
   private readonly superAdminAddPath: string;
   private readonly superAdminListPath: string;
   private readonly superAdminUpdatePathCandidates: string[];
-  private readonly lineInventoryProbeApiUrl: string;
   private probeSnapshotCache: { expiresAt: number; snapshot: ProbeSnapshot } | null = null;
   private readonly providerCache = new Map<
     string,
@@ -195,8 +193,6 @@ export class LinesService {
     this.lineVerifyApiUrl =
       this.configService.get<string>('LINE_VERIFY_API_URL') ||
       'http://172.31.29.3:3000/api/lines';
-    this.dcdnEndpoint =
-      this.configService.get<string>('DCDN_ENDPOINT') || 'https://dcdn.aliyuncs.com';
     this.dcdnAccessKeyId = this.configService.get<string>('ALIYUN_ACCESS_KEY_ID') || '';
     this.dcdnAccessKeySecret = this.configService.get<string>('ALIYUN_ACCESS_KEY_SECRET') || '';
     this.dcdnWafClientIpTag = this.configService.get<string>('DCDN_WAF_CLIENT_IP_TAG') || '';
@@ -219,8 +215,14 @@ export class LinesService {
       '/admin/app/line/url/edit',
       '/admin/app/line/url/modify',
     ];
-    this.lineInventoryProbeApiUrl =
-      this.configService.get<string>('LINE_INVENTORY_PROBE_API_URL') ||
+  }
+
+  private async getDcdnEndpoint() {
+    return (await this.siteConf.getString('cdn.aliyun.dcdn_endpoint', 'https://dcdn.aliyuncs.com')).trim() || 'https://dcdn.aliyuncs.com';
+  }
+
+  private async getLineInventoryProbeApiUrl() {
+    return (await this.siteConf.getString('line.inventory_probe.api_url', '')).trim() ||
       this.configService.get<string>('LINE_PROBE_LATEST_API_URL') ||
       this.deriveProbeApiFromLineVerify(this.lineVerifyApiUrl);
   }
@@ -325,10 +327,11 @@ export class LinesService {
       itemsToEnrich = baseFilteredItems.slice(start, start + size);
     }
 
+    const lineInventoryProbeApiUrl = await this.getLineInventoryProbeApiUrl();
     let probeSnapshot: ProbeSnapshot = {
       records: [],
       fetchedAt: new Date().toISOString(),
-      sourceApi: this.lineInventoryProbeApiUrl || '(not configured)',
+      sourceApi: lineInventoryProbeApiUrl || '(not configured)',
       warning: '未获取探测快照',
     };
     let probeSourceUnavailable = false;
@@ -339,7 +342,7 @@ export class LinesService {
       probeSnapshot = {
         records: [],
         fetchedAt: new Date().toISOString(),
-        sourceApi: this.lineInventoryProbeApiUrl || '(not configured)',
+        sourceApi: lineInventoryProbeApiUrl || '(not configured)',
         warning: error?.message || '探测接口不可用',
       };
     }
@@ -675,7 +678,8 @@ export class LinesService {
     if (!forceRefresh && this.probeSnapshotCache && this.probeSnapshotCache.expiresAt > now) {
       return this.probeSnapshotCache.snapshot;
     }
-    if (!this.lineInventoryProbeApiUrl) {
+    const lineInventoryProbeApiUrl = await this.getLineInventoryProbeApiUrl();
+    if (!lineInventoryProbeApiUrl) {
       return {
         records: [],
         fetchedAt: new Date().toISOString(),
@@ -686,7 +690,7 @@ export class LinesService {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.get(this.lineInventoryProbeApiUrl, {
+        this.httpService.get(lineInventoryProbeApiUrl, {
           timeout: await this.getAvailabilityHttpTimeoutMs(),
         }),
       );
@@ -707,7 +711,7 @@ export class LinesService {
       const snapshot: ProbeSnapshot = {
         records: Array.from(latestByHostRegion.values()),
         fetchedAt: new Date().toISOString(),
-        sourceApi: this.lineInventoryProbeApiUrl,
+        sourceApi: lineInventoryProbeApiUrl,
       };
       this.probeSnapshotCache = {
         expiresAt: now + await this.getAvailabilityCacheTtlMs(),
@@ -846,7 +850,7 @@ export class LinesService {
     if (!pendingHosts.length) return result;
 
     const needDcdn = pendingHosts.some((host) => providerMap.get(host)?.provider === 'aliyun_dcdn');
-    const dcdnClient = needDcdn && this.hasAliyunCredentials() ? this.createDcdnClient() : null;
+    const dcdnClient = needDcdn && this.hasAliyunCredentials() ? await this.createDcdnClient() : null;
     const batchSize = Math.max(1, Math.min(await this.getSslResolveConcurrency(), 50));
     const upsertRows: Array<{
       host: string;
@@ -1420,7 +1424,7 @@ export class LinesService {
     }
   }
 
-  private createDcdnClient() {
+  private async createDcdnClient() {
     if (!this.dcdnAccessKeyId || !this.dcdnAccessKeySecret) {
       throw new InternalServerErrorException(
         'ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET is not configured',
@@ -1430,7 +1434,7 @@ export class LinesService {
     return new RPCClient({
       accessKeyId: this.dcdnAccessKeyId,
       accessKeySecret: this.dcdnAccessKeySecret,
-      endpoint: this.dcdnEndpoint,
+      endpoint: await this.getDcdnEndpoint(),
       apiVersion: '2018-01-15',
     });
   }
@@ -2163,7 +2167,7 @@ export class LinesService {
     const originDomain = this.normalizeToHost(dto.originDomain);
     const scope = (dto.scope || 'global') as 'global' | 'domestic' | 'overseas';
 
-    const client = this.createDcdnClient();
+    const client = await this.createDcdnClient();
     const sourcePayload = JSON.stringify([
       {
         content: originDomain,
@@ -2294,7 +2298,7 @@ export class LinesService {
 
   async getDcdnDomainStatus(domainNameRaw: string) {
     const domainName = this.normalizeToHost(domainNameRaw);
-    const client = this.createDcdnClient();
+    const client = await this.createDcdnClient();
     try {
       return await this.getDcdnDomainStatusInternal(client, domainName);
     } catch (error) {
@@ -2391,7 +2395,7 @@ export class LinesService {
       throw new BadRequestException('Aliyun DCDN credentials are not configured');
     }
     const tlsInfo = await this.resolveDcdnSslSyncTlsInfo(environmentId, domainName, namespace);
-    const client = this.createDcdnClient();
+    const client = await this.createDcdnClient();
     const dcdnStatus = await this.getDcdnDomainStatusInternal(client, domainName);
     const uploadCertName = this.buildDcdnSslSyncCertName(domainName);
     return {
@@ -2447,7 +2451,7 @@ export class LinesService {
     const certName = this.buildDcdnSslSyncCertName(domainName);
     const casClient = this.createCasClient();
     const casUpload = await this.uploadCertificateToCas(casClient, certName, tlsSecret.cert, tlsSecret.key);
-    const client = this.createDcdnClient();
+    const client = await this.createDcdnClient();
     await client.request(
       'SetDcdnDomainSSLCertificate',
       {
@@ -2480,7 +2484,7 @@ export class LinesService {
 
   async applyDcdnSecurity(dto: ApplyDcdnSecurityDto, environmentId?: string) {
     const domainName = this.normalizeToHost(dto.domainName);
-    const client = this.createDcdnClient();
+    const client = await this.createDcdnClient();
     const certName = (dto.certName || `${domainName}-cert`).trim();
     const certSource = (dto.certSource || this.dcdnCertSourceDefault) as 'k8s-secret' | 'cas' | 'upload';
     const enableWebsocket = dto.enableWebsocket ?? true;

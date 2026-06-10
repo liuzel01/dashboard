@@ -310,7 +310,7 @@ export class AiOpsService {
 
   async checkLlmHealth(environmentId: string, actor: ActorContext) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
-    const llm = this.getOpenClawConfig();
+    const llm = await this.getOpenClawConfig();
     const startedAt = Date.now();
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/models`;
 
@@ -519,10 +519,10 @@ export class AiOpsService {
     );
 
     const fallbackTables = this.normalizeStringArray(
-      this.config.get<string>('AIOPS_SQL_WHITELIST_TABLES') || '',
+      await this.siteConf.getString('aiops.sql.whitelist_tables', ''),
     );
     const fallbackDatabases = this.normalizeStringArray(
-      this.config.get<string>('AIOPS_SQL_WHITELIST_DATABASES') || '',
+      await this.siteConf.getString('aiops.sql.whitelist_databases', ''),
     );
 
     const defaultLimitFromCfg = Number(
@@ -916,7 +916,7 @@ export class AiOpsService {
       throw new BadRequestException('question is empty.');
     }
 
-    const llm = this.getOpenClawConfig();
+    const llm = await this.getOpenClawConfig();
 
     const tableHint = policy.whitelistTables.length > 0
       ? `Allowed tables: ${policy.whitelistTables.join(', ')}`
@@ -1349,7 +1349,7 @@ export class AiOpsService {
 
   private async resolveFewshotCasesPath(): Promise<string | null> {
     const configured = String(
-      this.config.get<string>('AIOPS_NL2SQL_FEWSHOT_CASES_PATH') || '',
+      await this.siteConf.getString('aiops.nl2sql.fewshot_cases_path', ''),
     ).trim();
     const candidates = [
       configured ? path.resolve(configured) : '',
@@ -1643,8 +1643,8 @@ export class AiOpsService {
     return normalized || 'default';
   }
 
-  private getOpenClawConfig(): OpenClawConfig {
-    const provider = (this.config.get<string>('AIOPS_LLM_PROVIDER') || 'openclaw')
+  private async getOpenClawConfig(): Promise<OpenClawConfig> {
+    const provider = (await this.siteConf.getString('aiops.llm.provider', 'openclaw'))
       .trim()
       .toLowerCase();
     if (provider !== 'openclaw') {
@@ -1653,7 +1653,7 @@ export class AiOpsService {
       );
     }
 
-    const baseUrl = String(this.config.get<string>('AIOPS_OPENCLAW_BASE_URL') || '').trim();
+    const baseUrl = (await this.siteConf.getString('aiops.openclaw.base_url', '')).trim();
     if (!baseUrl) {
       throw new BadRequestException('AIOPS_OPENCLAW_BASE_URL is not configured.');
     }
@@ -1662,7 +1662,7 @@ export class AiOpsService {
       throw new BadRequestException('AIOPS_OPENCLAW_TOKEN is not configured.');
     }
     const model =
-      String(this.config.get<string>('AIOPS_OPENCLAW_MODEL') || '').trim() ||
+      (await this.siteConf.getString('aiops.openclaw.model', 'openclaw/default')).trim() ||
       'openclaw/default';
 
     return {
