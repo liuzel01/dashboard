@@ -15,6 +15,7 @@ import {
   Table,
   Tag,
   Typography,
+  Alert,
 } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
@@ -32,6 +33,7 @@ import {
   getAssetOverview,
   getAssetResources,
   getCredentialRefs,
+  previewWangsuCdnDomains,
   restoreAssetAccount,
   restoreAssetDomain,
   restoreAssetResource,
@@ -49,6 +51,8 @@ import type {
   AssetListResponse,
   AssetResource,
   CredentialRef,
+  WangsuCdnDomainPreviewItem,
+  WangsuCdnDomainPreviewResponse,
 } from '../services/api';
 
 const { Text, Paragraph } = Typography;
@@ -453,6 +457,58 @@ const OverviewTab: React.FC = () => {
   );
 };
 
+const CdnSyncTab: React.FC = () => {
+  const [data, setData] = useState<WangsuCdnDomainPreviewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const { message } = AntApp.useApp();
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const next = await previewWangsuCdnDomains();
+      setData(next);
+      message.success(`已加载 ${next.total} 个网宿 CDN 域名`);
+    } catch (e: any) {
+      message.error(e?.message || '加载网宿 CDN 域名预览失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert
+        type="info"
+        showIcon
+        message="CDN 域名预览"
+        description="当前阶段只从网宿 OpenAPI 拉取域名列表并展示预览，不会写入资产表。AK/SK 从 系统管理 → siteconf 配置 的 cdn.wangsu.* 读取。"
+      />
+      <Space wrap>
+        <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
+        {data && <Text type="secondary">来源：{data.endpoint}；抓取时间：{formatDateTime(data.fetchedAt)}；共 {data.total} 条</Text>}
+      </Space>
+      <Table<WangsuCdnDomainPreviewItem>
+        rowKey={(record) => record.domainId || record.domain}
+        loading={loading}
+        dataSource={data?.items || []}
+        pagination={{ pageSize: 20, showSizeChanger: true }}
+        scroll={{ x: 1200 }}
+        columns={[
+          { title: '域名', dataIndex: 'domain', width: 240, render: (value: string) => <Text copyable>{value}</Text> },
+          { title: 'Domain ID', dataIndex: 'domainId', width: 150, render: renderValue },
+          { title: 'CNAME', dataIndex: 'cname', width: 260, render: renderValue },
+          { title: '服务类型', dataIndex: 'serviceType', width: 130, render: renderValue },
+          { title: '状态', dataIndex: 'status', width: 120, render: (value: string) => value ? <Tag>{value}</Tag> : '-' },
+          { title: 'CDN状态', dataIndex: 'cdnServiceStatus', width: 130, render: (value: string) => value ? <Tag>{value}</Tag> : '-' },
+          { title: '启用', dataIndex: 'enabled', width: 100, render: renderValue },
+          { title: '计费区域', dataIndex: 'billingAreas', width: 160, render: renderValue },
+          { title: '更新时间', dataIndex: 'lastModified', width: 180, render: renderValue },
+        ]}
+      />
+    </Space>
+  );
+};
+
 const ChangeLogsTab: React.FC = () => {
   const [items, setItems] = useState<AssetChangeLog[]>([]);
   const [loading, setLoading] = useState(false);
@@ -574,7 +630,7 @@ const credentialFields: FieldConfig<CredentialRef>[] = [
   { name: 'remark', label: '备注', textarea: true, table: false },
 ];
 
-export type AssetManagementSection = 'overview' | 'accounts' | 'resources' | 'domains' | 'credential-refs' | 'change-logs';
+export type AssetManagementSection = 'overview' | 'accounts' | 'resources' | 'domains' | 'credential-refs' | 'cdn-sync' | 'change-logs';
 
 type AssetManagementPageProps = {
   activeTab?: AssetManagementSection;
@@ -647,6 +703,7 @@ const AssetManagementPage: React.FC<AssetManagementPageProps> = ({ activeTab = '
         />
       ),
     },
+    { key: 'cdn-sync', label: 'CDN同步', children: <CdnSyncTab /> },
     { key: 'change-logs', label: '变更记录', children: <ChangeLogsTab /> },
   ], []);
 

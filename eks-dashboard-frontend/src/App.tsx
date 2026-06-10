@@ -176,6 +176,7 @@ const AppLayout: React.FC = () => {
       { key: '/asset-management/resources', label: <Link to="/asset-management/resources">服务资源</Link> },
       { key: '/asset-management/domains', label: <Link to="/asset-management/domains">域名管理</Link> },
       { key: '/asset-management/credential-refs', label: <Link to="/asset-management/credential-refs">凭证索引</Link> },
+      { key: '/asset-management/cdn-sync', label: <Link to="/asset-management/cdn-sync">CDN同步</Link> },
       { key: '/asset-management/change-logs', label: <Link to="/asset-management/change-logs">变更记录</Link> },
     ],
   };
@@ -323,6 +324,7 @@ const AppLayout: React.FC = () => {
               <Route path="/asset-management/resources" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="resources" /></ProtectedRoute>} />
               <Route path="/asset-management/domains" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="domains" /></ProtectedRoute>} />
               <Route path="/asset-management/credential-refs" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="credential-refs" /></ProtectedRoute>} />
+              <Route path="/asset-management/cdn-sync" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="cdn-sync" /></ProtectedRoute>} />
               <Route path="/asset-management/change-logs" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="change-logs" /></ProtectedRoute>} />
               <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />

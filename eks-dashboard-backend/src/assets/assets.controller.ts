@@ -37,6 +37,12 @@ export class AssetsController {
     return this.service.getOverview(actor);
   }
 
+  @Get('cdn/wangsu/domains/preview')
+  async previewWangsuDomains(@Headers('authorization') authorization?: string) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.previewWangsuDomains(actor);
+  }
+
   @Get('accounts')
   async listAccounts(
     @Headers('authorization') authorization: string | undefined,

@@ -1025,6 +1025,29 @@ export type AssetChangeLog = {
   created_at: string;
 };
 
+export type WangsuCdnDomainPreviewItem = {
+  domain: string;
+  domainId?: string;
+  cname?: string;
+  serviceType?: string;
+  status?: string;
+  cdnServiceStatus?: string;
+  enabled?: string;
+  lastModified?: string;
+  billingAreas?: string;
+  provider: 'wangsu';
+  raw: Record<string, unknown>;
+};
+
+export type WangsuCdnDomainPreviewResponse = {
+  provider: 'wangsu';
+  endpoint: string;
+  fetchedAt: string;
+  total: number;
+  items: WangsuCdnDomainPreviewItem[];
+};
+
+
 export type AssetListResponse<T> = {
   items: T[];
   pagination: { page: number; pageSize: number; total: number };
@@ -1145,6 +1168,11 @@ export const restoreCredentialRef = async (id: number) => {
 export const getAssetChangeLogs = async (params: { assetType?: string; assetId?: number; action?: string; page?: number; pageSize?: number } = {}) => {
   const response = await api.get('/assets/change-logs', { params });
   return response.data as AssetListResponse<AssetChangeLog>;
+};
+
+export const previewWangsuCdnDomains = async () => {
+  const response = await api.get('/assets/cdn/wangsu/domains/preview');
+  return response.data as WangsuCdnDomainPreviewResponse;
 };
 
 // Auth / Me

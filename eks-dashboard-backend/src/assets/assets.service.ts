@@ -1,8 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import axios from 'axios';
+import { createHmac } from 'crypto';
 import type * as mysql from 'mysql2/promise';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuthService } from '../auth/auth.service';
+import { SiteConfService } from '../site-conf/site-conf.service';
 import {
   CreateAssetAccountDto,
   CreateAssetDomainDto,
@@ -39,6 +42,20 @@ type AssetConfig = {
 };
 
 type DbRow = Record<string, any>;
+
+type WangsuDomainPreviewItem = {
+  domain: string;
+  domainId?: string;
+  cname?: string;
+  serviceType?: string;
+  status?: string;
+  cdnServiceStatus?: string;
+  enabled?: string;
+  lastModified?: string;
+  billingAreas?: string;
+  provider: 'wangsu';
+  raw: Record<string, unknown>;
+};
 
 const MENU_PERMISSION = 'menu:asset-management';
 
@@ -156,6 +173,7 @@ export class AssetsService {
     private readonly db: PlatformDatabaseService,
     private readonly authService: AuthService,
     private readonly accessControl: AccessControlService,
+    private readonly siteConf: SiteConfService,
   ) {}
 
   async resolveActorFromAuthorization(authorization?: string): Promise<ActorContext> {
@@ -187,6 +205,47 @@ export class AssetsService {
     };
     this.ensureAssetPermission(actor);
     return actor;
+  }
+
+  async previewWangsuDomains(actor: ActorContext) {
+    this.ensureAssetPermission(actor);
+    const enabled = await this.siteConf.getBoolean('cdn.wangsu.enabled', false);
+    if (!enabled) {
+      throw new BadRequestException('cdn.wangsu.enabled is false. Please enable Wangsu CDN integration in siteconf first.');
+    }
+
+    const endpoint = (await this.siteConf.getString('cdn.wangsu.endpoint', 'https://open.chinanetcenter.com')).replace(/\/+$/, '');
+    const accessKeyId = (await this.siteConf.getString('cdn.wangsu.access_key_id', '')).trim();
+    const accessKeySecret = (await this.siteConf.getString('cdn.wangsu.access_key_secret', '')).trim();
+    const timeoutMs = await this.siteConf.getNumber('cdn.wangsu.timeout_ms', 15000);
+    if (!accessKeyId || !accessKeySecret) {
+      throw new BadRequestException('cdn.wangsu.access_key_id or cdn.wangsu.access_key_secret is empty.');
+    }
+
+    const date = new Date().toUTCString();
+    const password = createHmac('sha1', accessKeySecret).update(date).digest('base64');
+    const url = `${endpoint}/api/domain`;
+    const response = await axios.get(url, {
+      timeout: timeoutMs,
+      auth: { username: accessKeyId, password },
+      headers: { Date: date, Accept: 'application/xml' },
+      responseType: 'text',
+      validateStatus: (status) => status >= 200 && status < 500,
+    });
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new BadRequestException(`Wangsu API request failed: HTTP ${response.status} ${String(response.data || '').slice(0, 300)}`);
+    }
+
+    const xml = String(response.data || '');
+    const items = this.parseWangsuDomainXml(xml);
+    return {
+      provider: 'wangsu',
+      endpoint,
+      fetchedAt: new Date().toISOString(),
+      total: items.length,
+      items,
+    };
   }
 
   async getOverview(actor: ActorContext) {
@@ -331,6 +390,65 @@ export class AssetsService {
     );
 
     return { items: items.map((row) => this.parseJsonColumns(row)), pagination: { page, pageSize, total: Number(totalRows[0]?.total || 0) } };
+  }
+
+  private parseWangsuDomainXml(xml: string): WangsuDomainPreviewItem[] {
+    const domainBlocks = this.extractXmlBlocks(xml, 'domain-summary');
+    const sourceBlocks = domainBlocks.length ? domainBlocks : this.extractXmlBlocks(xml, 'domain');
+    return sourceBlocks
+      .map((block) => {
+        const raw: Record<string, unknown> = {
+          'domain-name': this.extractXmlValue(block, 'domain-name'),
+          'domain-id': this.extractXmlValue(block, 'domain-id'),
+          cname: this.extractXmlValue(block, 'cname'),
+          'service-type': this.extractXmlValue(block, 'service-type'),
+          status: this.extractXmlValue(block, 'status'),
+          'cdn-service-status': this.extractXmlValue(block, 'cdn-service-status'),
+          enabled: this.extractXmlValue(block, 'enabled'),
+          'last-modified': this.extractXmlValue(block, 'last-modified'),
+          'billing-areas': this.extractXmlValue(block, 'billing-areas'),
+        };
+        const domain = String(raw['domain-name'] || '').trim();
+        return {
+          domain,
+          domainId: String(raw['domain-id'] || '').trim() || undefined,
+          cname: String(raw.cname || '').trim() || undefined,
+          serviceType: String(raw['service-type'] || '').trim() || undefined,
+          status: String(raw.status || '').trim() || undefined,
+          cdnServiceStatus: String(raw['cdn-service-status'] || '').trim() || undefined,
+          enabled: String(raw.enabled || '').trim() || undefined,
+          lastModified: String(raw['last-modified'] || '').trim() || undefined,
+          billingAreas: String(raw['billing-areas'] || '').trim() || undefined,
+          provider: 'wangsu' as const,
+          raw: Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== undefined && value !== '')),
+        };
+      })
+      .filter((item) => item.domain);
+  }
+
+  private extractXmlBlocks(xml: string, tagName: string) {
+    const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, 'gi');
+    const blocks: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(xml))) blocks.push(match[1]);
+    return blocks;
+  }
+
+  private extractXmlValue(xml: string, tagName: string) {
+    const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, 'i').exec(xml);
+    if (!match) return undefined;
+    return this.decodeXmlEntities(match[1].replace(/<[^>]+>/g, '').trim());
+  }
+
+  private decodeXmlEntities(value: string) {
+    return value
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&');
   }
 
   private ensureAssetPermission(actor: ActorContext) {
