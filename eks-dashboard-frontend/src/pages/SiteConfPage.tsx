@@ -30,6 +30,24 @@ const validateValueByType = (value: string, type: ValueType) => {
   return '';
 };
 
+type SiteConfColumnKey = 'confKey' | 'category' | 'confValue' | 'description' | 'action';
+
+const defaultColumnWidths: Record<SiteConfColumnKey, number> = {
+  confKey: 330,
+  category: 130,
+  confValue: 520,
+  description: 320,
+  action: 150,
+};
+
+const minColumnWidths: Record<SiteConfColumnKey, number> = {
+  confKey: 220,
+  category: 100,
+  confValue: 260,
+  description: 180,
+  action: 130,
+};
+
 const SiteConfPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<SiteConfItem[]>([]);
@@ -44,6 +62,7 @@ const SiteConfPage: React.FC = () => {
   const [editing, setEditing] = useState<SiteConfItem | null>(null);
   const [form] = Form.useForm();
   const valueType = Form.useWatch('valueType', form) as ValueType | undefined;
+  const [columnWidths, setColumnWidths] = useState<Record<SiteConfColumnKey, number>>(defaultColumnWidths);
 
   const fetchCategories = async () => {
     try {
@@ -148,16 +167,64 @@ const SiteConfPage: React.FC = () => {
     });
   };
 
+  const renderResizableTitle = (key: SiteConfColumnKey, title: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', userSelect: 'none' }}>
+      <span>{title}</span>
+      <span
+        title="拖拽调整列宽"
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const startX = event.clientX;
+          const startWidth = columnWidths[key];
+          const onMouseMove = (moveEvent: MouseEvent) => {
+            const nextWidth = Math.max(minColumnWidths[key], startWidth + moveEvent.clientX - startX);
+            setColumnWidths((current) => ({ ...current, [key]: nextWidth }));
+          };
+          const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
+        }}
+        style={{
+          cursor: 'col-resize',
+          display: 'inline-block',
+          height: 18,
+          marginLeft: 8,
+          width: 8,
+          borderRight: '2px solid #d9d9d9',
+        }}
+      />
+    </div>
+  );
+
   const columns = useMemo(
     () => [
-      { title: 'Key', dataIndex: 'confKey', width: 280, render: (v: string) => <Text code copyable>{v}</Text> },
-      { title: '分类', dataIndex: 'category', width: 130, render: (v: string) => v ? <Tag>{v}</Tag> : '-' },
-      { title: '类型', dataIndex: 'valueType', width: 100, render: (v: string) => <Tag color="blue">{v}</Tag> },
       {
-        title: 'Value',
+        title: renderResizableTitle('confKey', 'Key'),
+        dataIndex: 'confKey',
+        width: columnWidths.confKey,
+        render: (v: string) => <Text code copyable>{v}</Text>,
+      },
+      {
+        title: renderResizableTitle('category', '分类'),
+        dataIndex: 'category',
+        width: columnWidths.category,
+        render: (v: string) => v ? <Tag>{v}</Tag> : '-',
+      },
+      {
+        title: renderResizableTitle('confValue', 'Value'),
         dataIndex: 'confValue',
+        width: columnWidths.confValue,
         render: (v: string, record: SiteConfItem) => (
-          <Space direction="vertical" size={2} style={{ maxWidth: 620 }}>
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
             <Paragraph style={{ margin: 0 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }} copyable={!record.isSensitive}>
               {record.isSensitive ? '********' : (v || '-')}
             </Paragraph>
@@ -165,12 +232,18 @@ const SiteConfPage: React.FC = () => {
           </Space>
         ),
       },
-      { title: '说明', dataIndex: 'description', width: 260, ellipsis: true, render: (v: string) => v || '-' },
-      { title: '更新时间', dataIndex: 'updatedAt', width: 180, render: (v: string) => v || '-' },
       {
-        title: '操作',
+        title: renderResizableTitle('description', '说明'),
+        dataIndex: 'description',
+        width: columnWidths.description,
+        ellipsis: true,
+        render: (v: string) => v || '-',
+      },
+      {
+        title: renderResizableTitle('action', '操作'),
         key: 'action',
-        width: 150,
+        width: columnWidths.action,
+        fixed: 'right' as const,
         render: (_: any, record: SiteConfItem) => (
           <Space>
             <Button type="link" icon={<EditOutlined />} onClick={() => openEdit(record)}>编辑</Button>
@@ -179,7 +252,7 @@ const SiteConfPage: React.FC = () => {
         ),
       },
     ],
-    [page, size, keyword, category],
+    [columnWidths, page, size, keyword, category],
   );
 
   return (
@@ -189,7 +262,7 @@ const SiteConfPage: React.FC = () => {
         showIcon
         style={{ marginBottom: 16 }}
         message="dashboard 内部 siteconf 配置"
-        description="这里维护 dashboard 项目自身运行期配置。启动必需配置（例如 DB_*）仍保留在 .env；Keycloak client secret 等密钥第一版建议继续由 .env / Secret 管理。"
+        description="这里维护 dashboard 项目自身运行期配置。启动必需配置（例如 DB_*）仍保留在 .env；敏感配置仅管理员可维护，当前接口仍会返回明文，请谨慎授权。"
       />
 
       <Space style={{ marginBottom: 16 }} wrap>
@@ -207,6 +280,8 @@ const SiteConfPage: React.FC = () => {
           rowKey="confKey"
           columns={columns}
           dataSource={list}
+          tableLayout="fixed"
+          scroll={{ x: Object.values(columnWidths).reduce((sum, width) => sum + width, 0) }}
           pagination={{
             current: page,
             pageSize: size,
