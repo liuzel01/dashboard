@@ -472,7 +472,8 @@ const CdnSyncTab: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<WangsuCdnDomainSyncResponse | null>(null);
-  const [syncing, setSyncing] = useState(false);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
   const { message } = AntApp.useApp();
 
   const load = async () => {
@@ -492,7 +493,11 @@ const CdnSyncTab: React.FC = () => {
   };
 
   const runSync = async (dryRun: boolean) => {
-    setSyncing(true);
+    if (dryRun) {
+      setDryRunLoading(true);
+    } else {
+      setSyncLoading(true);
+    }
     try {
       setPreviewError(null);
       const result = await syncWangsuCdnDomains({ dryRun });
@@ -504,7 +509,11 @@ const CdnSyncTab: React.FC = () => {
       setPreviewError(errorMessage);
       message.error(errorMessage);
     } finally {
-      setSyncing(false);
+      if (dryRun) {
+        setDryRunLoading(false);
+      } else {
+        setSyncLoading(false);
+      }
     }
   };
 
@@ -518,9 +527,9 @@ const CdnSyncTab: React.FC = () => {
       />
       <Space wrap>
         <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
-        <Button loading={syncing} onClick={() => runSync(true)}>Dry Run 同步预检</Button>
+        <Button loading={dryRunLoading} disabled={syncLoading} onClick={() => runSync(true)}>Dry Run 同步预检</Button>
         <Popconfirm title="确认同步网宿 CDN 域名到域名管理？" description="将按域名 upsert 到资产域名表，已有域名会更新状态和 remark。" onConfirm={() => runSync(false)}>
-          <Button type="primary" danger loading={syncing}>同步到域名管理</Button>
+          <Button type="primary" danger loading={syncLoading} disabled={dryRunLoading}>同步到域名管理</Button>
         </Popconfirm>
         {data && <Text type="secondary">来源：{data.endpoint}；抓取时间：{formatDateTime(data.fetchedAt)}；共 {data.total} 条</Text>}
       </Space>
