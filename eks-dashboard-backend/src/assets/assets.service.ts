@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import axios from 'axios';
-import { createHmac } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import type * as mysql from 'mysql2/promise';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
@@ -235,8 +235,8 @@ export class AssetsService {
       throw new BadRequestException(`Wangsu API request failed: HTTP ${response.status} ${this.summarizeWangsuError(response.data)}`);
     }
 
-    const xml = String(response.data || '');
-    const items = this.parseWangsuDomainXml(xml);
+    const body = String(response.data || '');
+    const items = this.parseWangsuDomainResponse(body);
     return {
       provider: 'wangsu',
       endpoint,
@@ -397,15 +397,16 @@ export class AssetsService {
     const contentType = 'application/json';
     const signedHeaders = 'content-type;host';
     const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
+    const payloadHash = this.sha256Hex('');
     const canonicalRequest = [
       input.method.toUpperCase(),
       input.path,
       '',
       canonicalHeaders,
       signedHeaders,
-      '',
+      payloadHash,
     ].join('\n');
-    const stringToSign = ['CNC-HMAC-SHA256', timestamp, canonicalRequest].join('\n');
+    const stringToSign = ['CNC-HMAC-SHA256', timestamp, this.sha256Hex(canonicalRequest)].join('\n');
     const signature = createHmac('sha256', input.accessKeySecret).update(stringToSign).digest('hex');
     return {
       Authorization: `CNC-HMAC-SHA256 Credential=${input.accessKeyId}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
@@ -436,6 +437,38 @@ export class AssetsService {
     const message = this.extractXmlValue(body, 'message');
     if (code || message) return `${code || 'UNKNOWN'} ${message || ''}`.trim();
     return body.slice(0, 300);
+  }
+
+  private parseWangsuDomainResponse(body: string): WangsuDomainPreviewItem[] {
+    const trimmed = body.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : Array.isArray(parsed?.result) ? parsed.result : [];
+        return rows.map((row: Record<string, unknown>) => this.normalizeWangsuDomainRow(row)).filter((item: WangsuDomainPreviewItem) => item.domain);
+      } catch {
+        return this.parseWangsuDomainXml(body);
+      }
+    }
+    return this.parseWangsuDomainXml(body);
+  }
+
+  private normalizeWangsuDomainRow(row: Record<string, unknown>): WangsuDomainPreviewItem {
+    const domain = String(row['domain-name'] || row.domainName || row.domain || '').trim();
+    return {
+      domain,
+      domainId: String(row['domain-id'] || row.domainId || '').trim() || undefined,
+      cname: String(row.cname || row.CNAME || '').trim() || undefined,
+      serviceType: String(row['service-type'] || row.serviceType || '').trim() || undefined,
+      status: String(row.status || '').trim() || undefined,
+      cdnServiceStatus: String(row['cdn-service-status'] || row.cdnServiceStatus || '').trim() || undefined,
+      enabled: String(row.enabled || '').trim() || undefined,
+      lastModified: String(row['last-modified'] || row.lastModified || '').trim() || undefined,
+      billingAreas: String(row['billing-areas'] || row.billingAreas || '').trim() || undefined,
+      provider: 'wangsu' as const,
+      raw: row,
+    };
   }
 
   private parseWangsuDomainXml(xml: string): WangsuDomainPreviewItem[] {
@@ -486,6 +519,10 @@ export class AssetsService {
     const match = new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, 'i').exec(xml);
     if (!match) return undefined;
     return this.decodeXmlEntities(match[1].replace(/<[^>]+>/g, '').trim());
+  }
+
+  private sha256Hex(value: string) {
+    return createHash('sha256').update(value).digest('hex');
   }
 
   private decodeXmlEntities(value: string) {
