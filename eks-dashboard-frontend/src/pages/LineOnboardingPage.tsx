@@ -339,8 +339,8 @@ const LineOnboardingPage: React.FC = () => {
   );
   const tenantIdNormalized = selectedTenantId ? String(selectedTenantId) : '{租户ID}';
   const insertSql = confirmedSubdomain
-    ? `INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES (${tenantIdNormalized}, '${confirmedSubdomain}', 1, NOW());`
-    : "INSERT INTO tenant_domain (tenant_id, domian, status, created_time) VALUES ({租户ID}, '{步骤2子域名}', 1, NOW());";
+    ? `INSERT INTO tenant.tenant_domain (tenant_id, domian, status, created_time) VALUES (${tenantIdNormalized}, '${confirmedSubdomain}', 1, NOW());`
+    : "INSERT INTO tenant.tenant_domain (tenant_id, domian, status, created_time) VALUES ({租户ID}, '{步骤2子域名}', 1, NOW());";
   const selectedCasCert = useMemo(
     () => casCertOptions.find((item) => item.certificateId === selectedCasCertId),
     [casCertOptions, selectedCasCertId],
@@ -1527,15 +1527,6 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤1：域名准备" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'tenant-help',
-              label: '查看目标租户说明',
-              children: <Alert type="info" showIcon message="先选择目标租户" description="步骤4 的 tenant_domain 写入会自动使用这里选择的租户 ID。" />,
-            }]}
-          />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标租户（当前环境）</Text>
             <Select
@@ -1633,15 +1624,6 @@ const LineOnboardingPage: React.FC = () => {
 
       <Card title="步骤3：Ingress/TLS 应用" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'ingress-clone-help',
-              label: '查看 Ingress 克隆说明',
-              children: <Alert type="info" showIcon message="手动选择 source ingress，先预览 YAML，再确认创建" description="目标 host 固定使用步骤2生成的新子域名。推荐使用“新 TLS Secret”模式，先生成 Ingress YAML 预览，确认无误后再执行创建。" />,
-            }]}
-          />
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>目标环境：<Text code>{currentEnvironment?.id || '-'}</Text></Text>
             <Text>目标 host（来自步骤2）：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
@@ -2202,22 +2184,6 @@ const LineOnboardingPage: React.FC = () => {
           <Text type="secondary">同一个环境仅有一个超级后台，与租户无关。</Text>
           <Text type="secondary">登记动作会通过当前环境 kubeContext 代理调用集群内超级后台接口。</Text>
           <Text strong>1) tenant_domain 自动写入</Text>
-          <Collapse
-            ghost
-            size="small"
-            items={[{
-              key: 'tenant-domain-help',
-              label: '查看 tenant_domain 写入说明',
-              children: (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                  <Text type="secondary">
-                    tenant_id 自动取自步骤1选择的目标租户；domian 自动取自步骤2线路域名。推荐使用自动写入 tenant_domain。
-                  </Text>
-                  <Alert type="warning" showIcon message="平台登记前先写入 tenant_domain" description="当前只要求已选择租户并生成可用线路域名；建议在步骤4完成 DCDN/HTTPS/Route53 后执行。" />
-                </Space>
-              ),
-            }]}
-          />
           <Text>
             目标租户：
             {selectedTenant ? (
