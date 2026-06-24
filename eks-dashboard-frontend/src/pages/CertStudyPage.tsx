@@ -913,18 +913,17 @@ const CertStudyPage: React.FC = () => {
         scroll={{ x: 1280 }}
         onChange={(_pagination, _filters, sorter) => {
           if (Array.isArray(sorter)) return;
+          if (!sorter?.order) {
+            setReviewSort('default');
+            setPage(1);
+            return;
+          }
           const activeSortKey =
-            sorter?.columnKey ??
-            (typeof sorter?.field === 'string' ? sorter.field : undefined) ??
-            (typeof sorter?.column?.key === 'string' ? sorter.column.key : undefined);
+            sorter.columnKey ??
+            (typeof sorter.field === 'string' ? sorter.field : undefined) ??
+            (typeof sorter.column?.key === 'string' ? sorter.column.key : undefined);
           if (activeSortKey !== 'reviewStats') return;
-          const nextSort =
-            sorter.order === 'descend'
-              ? 'reviewCountDesc'
-              : sorter.order === 'ascend'
-                ? 'reviewCountAsc'
-                : 'default';
-          setReviewSort(nextSort);
+          setReviewSort(sorter.order === 'descend' ? 'reviewCountDesc' : 'reviewCountAsc');
           setPage(1);
         }}
         pagination={{
