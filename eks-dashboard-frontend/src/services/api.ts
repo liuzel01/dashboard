@@ -724,8 +724,11 @@ export const getCertStudyQuestions = async (params: {
   keyword?: string;
   status?: string;
   important?: 0 | 1;
+  reviewedOnly?: 0 | 1;
   source?: string;
   tag?: string;
+  sortBy?: 'reviewCount';
+  sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
 }) => {

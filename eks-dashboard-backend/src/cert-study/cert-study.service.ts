@@ -164,6 +164,13 @@ export class CertStudyService {
     const source = (query.source || '').trim();
     const tag = (query.tag || '').trim();
     const important = query.important;
+    const reviewedOnly = query.reviewedOnly;
+    const sortBy = (query.sortBy || '').trim();
+    const sortOrder = (query.sortOrder || '').trim().toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const orderBySql =
+      sortBy === 'reviewCount'
+        ? `COALESCE(r.review_count, 0) ${sortOrder}, q.id ASC`
+        : 'q.id ASC';
 
     const cacheKey = this.makeCacheKey('list', actor.userId, {
       examCode,
@@ -174,6 +181,9 @@ export class CertStudyService {
       source,
       tag,
       important,
+      reviewedOnly,
+      sortBy,
+      sortOrder,
     });
     const cached = this.getCachedResponse<Awaited<ReturnType<CertStudyService['listQuestions']>>>(cacheKey);
     if (cached) {
@@ -186,6 +196,7 @@ export class CertStudyService {
       source,
       tag,
       important,
+      reviewedOnly,
       status,
       includeStatus: true,
     });
@@ -195,6 +206,7 @@ export class CertStudyService {
       source,
       tag,
       important,
+      reviewedOnly,
       status,
       includeStatus: false,
     });
@@ -238,7 +250,7 @@ export class CertStudyService {
          GROUP BY question_id
        ) tags ON tags.question_id = q.id
        WHERE ${whereSql}
-       ORDER BY q.id ASC
+       ORDER BY ${orderBySql}
        LIMIT ? OFFSET ?`,
       [actor.userId, ...wherePack.params, pageSize, offset],
     );
@@ -884,6 +896,7 @@ export class CertStudyService {
     source: string;
     tag: string;
     important?: number;
+    reviewedOnly?: number;
     status: string;
     includeStatus: boolean;
   }) {
@@ -908,6 +921,9 @@ export class CertStudyService {
     if (typeof input.important === 'number') {
       where.push('COALESCE(r.is_important, 0) = ?');
       params.push(input.important);
+    }
+    if (input.reviewedOnly === 1) {
+      where.push('COALESCE(r.review_count, 0) > 0');
     }
     if (input.includeStatus && input.status) {
       where.push("COALESCE(r.status, 'new') = ?");

@@ -100,6 +100,12 @@ const statusOptions = [
   { value: 'archived', label: '已归档' },
 ];
 
+const reviewSortOptions = [
+  { value: 'default', label: '默认排序' },
+  { value: 'reviewCountDesc', label: '按复习次数降序' },
+  { value: 'reviewCountAsc', label: '按复习次数升序' },
+];
+
 const lastResultOptions = [
   { value: 'correct', label: '答对' },
   { value: 'wrong', label: '答错' },
@@ -242,6 +248,8 @@ const CertStudyPage: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [important, setImportant] = useState<boolean>(false);
+  const [reviewedOnly, setReviewedOnly] = useState<boolean>(false);
+  const [reviewSort, setReviewSort] = useState<'default' | 'reviewCountDesc' | 'reviewCountAsc'>('default');
   const [source, setSource] = useState<string | undefined>(undefined);
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -275,17 +283,30 @@ const CertStudyPage: React.FC = () => {
   }, [visibleColumns]);
 
   const buildQuestionListParams = useCallback(
-    (targetPage: number, targetPageSize = pageSize) => ({
-      examCode: 'SAP-C02',
-      keyword: keyword.trim() || undefined,
-      status,
-      important: important ? 1 as const : undefined,
-      source,
-      tag,
-      page: targetPage,
-      pageSize: targetPageSize,
-    }),
-    [important, keyword, pageSize, source, status, tag],
+    (targetPage: number, targetPageSize = pageSize) => {
+      const sortBy: 'reviewCount' | undefined =
+        reviewSort === 'default' ? undefined : 'reviewCount';
+      const sortOrder: 'asc' | 'desc' | undefined =
+        reviewSort === 'reviewCountAsc'
+          ? 'asc'
+          : reviewSort === 'reviewCountDesc'
+            ? 'desc'
+            : undefined;
+      return {
+        examCode: 'SAP-C02',
+        keyword: keyword.trim() || undefined,
+        status,
+        important: important ? 1 as const : undefined,
+        reviewedOnly: reviewedOnly ? 1 as const : undefined,
+        source,
+        tag,
+        sortBy,
+        sortOrder,
+        page: targetPage,
+        pageSize: targetPageSize,
+      };
+    },
+    [important, keyword, pageSize, reviewSort, reviewedOnly, source, status, tag],
   );
 
   const loadQuestions = useCallback(async () => {
@@ -732,9 +753,17 @@ const CertStudyPage: React.FC = () => {
         ),
       },
       {
+        key: 'reviewStats',
         columnKey: 'reviewStats',
         title: '复/错',
         width: 82,
+        sorter: true,
+        sortOrder:
+          reviewSort === 'reviewCountDesc'
+            ? 'descend'
+            : reviewSort === 'reviewCountAsc'
+              ? 'ascend'
+              : null,
         render: (_unused, row) => `${row.review.reviewCount}/${row.review.wrongCount}`,
       },
       {
@@ -767,7 +796,7 @@ const CertStudyPage: React.FC = () => {
     ];
       return allColumns.filter((column) => visibleColumns.includes(column.columnKey));
     },
-    [visibleColumns],
+    [reviewSort, visibleColumns],
   );
 
   return (
@@ -827,6 +856,26 @@ const CertStudyPage: React.FC = () => {
               }}
             />
           </Space>
+          <Space>
+            <Text>只看已复习</Text>
+            <Switch
+              checked={reviewedOnly}
+              onChange={(checked) => {
+                setReviewedOnly(checked);
+                setPage(1);
+                setReviewSort((prev) => (checked && prev === 'default' ? 'reviewCountDesc' : prev));
+              }}
+            />
+          </Space>
+          <Select
+            value={reviewSort}
+            onChange={(value) => {
+              setReviewSort(value);
+              setPage(1);
+            }}
+            options={reviewSortOptions}
+            style={{ width: 180 }}
+          />
           <Space direction="vertical" size={2}>
             <Text type="secondary">列显示</Text>
             <Checkbox.Group
@@ -862,6 +911,22 @@ const CertStudyPage: React.FC = () => {
         columns={columns}
         tableLayout="auto"
         scroll={{ x: 1280 }}
+        onChange={(_pagination, _filters, sorter) => {
+          if (Array.isArray(sorter)) return;
+          const activeSortKey =
+            sorter?.columnKey ??
+            (typeof sorter?.field === 'string' ? sorter.field : undefined) ??
+            (typeof sorter?.column?.key === 'string' ? sorter.column.key : undefined);
+          if (activeSortKey !== 'reviewStats') return;
+          const nextSort =
+            sorter.order === 'descend'
+              ? 'reviewCountDesc'
+              : sorter.order === 'ascend'
+                ? 'reviewCountAsc'
+                : 'default';
+          setReviewSort(nextSort);
+          setPage(1);
+        }}
         pagination={{
           current: page,
           pageSize,

@@ -1,6 +1,13 @@
 import { Transform } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
+const transformBooleanNumber = ({ value }: { value: unknown }) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (value === true || value === 'true' || value === '1' || value === 1) return 1;
+  if (value === false || value === 'false' || value === '0' || value === 0) return 0;
+  return undefined;
+};
+
 export class ListQuestionsDto {
   @IsOptional()
   @IsString()
@@ -15,16 +22,26 @@ export class ListQuestionsDto {
   status?: string;
 
   @IsOptional()
-  @Transform(({ value }) => {
-    if (value === undefined || value === null || value === '') return undefined;
-    if (value === true || value === 'true' || value === '1' || value === 1) return 1;
-    if (value === false || value === 'false' || value === '0' || value === 0) return 0;
-    return undefined;
-  })
+  @Transform(transformBooleanNumber)
   @IsInt()
   @Min(0)
   @Max(1)
   important?: number;
+
+  @IsOptional()
+  @Transform(transformBooleanNumber)
+  @IsInt()
+  @Min(0)
+  @Max(1)
+  reviewedOnly?: number;
+
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @IsOptional()
+  @IsString()
+  sortOrder?: string;
 
   @IsOptional()
   @IsString()
