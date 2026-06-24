@@ -911,7 +911,8 @@ const CertStudyPage: React.FC = () => {
         columns={columns}
         tableLayout="auto"
         scroll={{ x: 1280 }}
-        onChange={(_pagination, _filters, sorter) => {
+        onChange={(_pagination, _filters, sorter, extra) => {
+          if (extra?.action !== 'sort') return;
           if (Array.isArray(sorter)) return;
           if (!sorter?.order) {
             setReviewSort('default');
