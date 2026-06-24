@@ -160,7 +160,16 @@ Dashboard 后端通过 `KubernetesService.requestServiceProxy()` 调用集群内
 - `GET default/kylin-admin-kylin-admin-impl:80/admin/app/line/url/list`
 - `POST default/dashboard-db-gateway-agent:8080/v1/...`
 
-因此需要给映射后的 group 授权 `services` 与 `services/proxy`。示例：
+因此需要给映射后的 group 授权 `services` 与 `services/proxy`。
+
+注意：
+
+- 只读查询通常只需要 `get/list`；
+- 通过 Service Proxy 转发 `POST` 时，通常需要 `create services/proxy`；
+- 通过 Service Proxy 转发 `PATCH` 时，必须额外具备 `patch services/proxy`，否则会报错：
+  - `cannot patch resource "services/proxy" in API group "" in the namespace "default"`
+
+示例：
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -170,7 +179,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["services", "services/proxy"]
-    verbs: ["get", "list", "create"]
+    verbs: ["get", "list", "create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -192,8 +201,15 @@ roleRef:
 kubectl --context megadev-hash auth can-i get services -n default
 kubectl --context megadev-hash auth can-i get services/proxy -n default
 kubectl --context megadev-hash auth can-i create services/proxy -n default
+kubectl --context megadev-hash auth can-i patch services/proxy -n default
 kubectl --context megadev-hash -n default get svc dashboard-db-gateway-agent kylin-admin-kylin-admin-impl
 ```
+
+补充说明：
+
+- `query/users/:uid/trader` 这类“编辑交易员昵称”接口在当前实现里会通过 `requestServiceProxy()` 以 `PATCH` 请求转发到 `default/dashboard-db-gateway-agent:8080`；
+- 如果 Dashboard 后端使用的 IAM 用户只具备 `get/create services/proxy`，则查询类接口可能正常，但编辑类接口会因缺少 `patch services/proxy` 而返回 403，最终在业务侧表现为 500。
+
 
 ##### 4) Kubernetes RBAC：允许 Dashboard Backend 读取 Ingress
 
