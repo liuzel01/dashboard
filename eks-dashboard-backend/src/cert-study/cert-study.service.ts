@@ -242,8 +242,7 @@ export class CertStudyService {
          tags.tags_csv
        FROM cert_questions q
        INNER JOIN cert_exams e ON e.id = q.exam_id
-       LEFT JOIN cert_question_reviews r
-         ON r.question_id = q.id AND r.user_id = ?
+       ${this.buildLatestUserReviewJoinSql('r')}
        LEFT JOIN (
          SELECT question_id, GROUP_CONCAT(tag ORDER BY tag SEPARATOR '||') AS tags_csv
          FROM cert_question_tags
@@ -258,8 +257,7 @@ export class CertStudyService {
     const countRows = await this.db.query<{ total: number }[]>(
       `SELECT COUNT(1) AS total
        FROM cert_questions q
-       LEFT JOIN cert_question_reviews r
-         ON r.question_id = q.id AND r.user_id = ?
+       ${this.buildLatestUserReviewJoinSql('r')}
        WHERE ${whereSql}`,
       [actor.userId, ...wherePack.params],
     );
@@ -267,8 +265,7 @@ export class CertStudyService {
     const summaryRows = await this.db.query<{ status: string; total: number }[]>(
       `SELECT COALESCE(r.status, 'new') AS status, COUNT(1) AS total
        FROM cert_questions q
-       LEFT JOIN cert_question_reviews r
-         ON r.question_id = q.id AND r.user_id = ?
+       ${this.buildLatestUserReviewJoinSql('r')}
        WHERE ${summaryWherePack.where.join(' AND ')}
        GROUP BY COALESCE(r.status, 'new')`,
       [actor.userId, ...summaryWherePack.params],
@@ -344,8 +341,7 @@ export class CertStudyService {
          tags.tags_csv
        FROM cert_questions q
        INNER JOIN cert_exams e ON e.id = q.exam_id
-       LEFT JOIN cert_question_reviews r
-         ON r.question_id = q.id AND r.user_id = ?
+       ${this.buildLatestUserReviewJoinSql('r')}
        LEFT JOIN (
          SELECT question_id, GROUP_CONCAT(tag ORDER BY tag SEPARATOR '||') AS tags_csv
          FROM cert_question_tags
@@ -530,6 +526,7 @@ export class CertStudyService {
                 review_count, wrong_count, correct_streak, last_result, last_reviewed_at, next_review_at
          FROM cert_question_reviews
          WHERE question_id = ? AND user_id = ?
+         ORDER BY id DESC
          LIMIT 1`,
         [questionId, actor.userId],
       );
@@ -890,6 +887,19 @@ export class CertStudyService {
       .filter(Boolean);
   }
 
+  private buildLatestUserReviewJoinSql(reviewAlias: string) {
+    return `LEFT JOIN (
+         SELECT rr.*
+         FROM cert_question_reviews rr
+         INNER JOIN (
+           SELECT question_id, MAX(id) AS latest_id
+           FROM cert_question_reviews
+           WHERE user_id = ?
+           GROUP BY question_id
+         ) latest ON latest.latest_id = rr.id
+       ) ${reviewAlias} ON ${reviewAlias}.question_id = q.id`;
+  }
+
   private buildQuestionWhere(input: {
     examId: number;
     keyword: string;
@@ -1041,7 +1051,7 @@ export class CertStudyService {
 
   private async ensureReviewRow(conn: mysql.PoolConnection, userId: number, questionId: number) {
     const [rows] = await conn.execute<any[]>(
-      'SELECT id FROM cert_question_reviews WHERE question_id = ? AND user_id = ? LIMIT 1',
+      'SELECT id FROM cert_question_reviews WHERE question_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1',
       [questionId, userId],
     );
     if (Array.isArray(rows) && rows.length > 0) return;
