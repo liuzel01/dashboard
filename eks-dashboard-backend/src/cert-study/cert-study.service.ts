@@ -143,7 +143,7 @@ export class CertStudyService {
   async listExams(actor: ActorContext) {
     this.ensurePermissions(actor, ['menu:cert-study']);
     await this.ensureSchema();
-    await this.ensureExamByCode('SAP-C02');
+    await Promise.all(['SAP-C02', 'DOP-C02'].map((code) => this.ensureExamByCode(code)));
     const rows = await this.db.query<any[]>(
       'SELECT id, code, name, provider, created_at, updated_at FROM cert_exams ORDER BY id ASC',
     );
@@ -767,6 +767,21 @@ export class CertStudyService {
       .toUpperCase();
   }
 
+  private getExamMetadata(examCode: string) {
+    const normalizedCode = this.normalizeExamCode(examCode);
+    const catalog: Record<string, { name: string; provider: string }> = {
+      'SAP-C02': {
+        name: 'AWS Certified Solutions Architect - Professional',
+        provider: 'aws',
+      },
+      'DOP-C02': {
+        name: 'AWS Certified DevOps Engineer - Professional',
+        provider: 'aws',
+      },
+    };
+    return catalog[normalizedCode] || { name: normalizedCode, provider: 'aws' };
+  }
+
   private makeCacheKey(scope: string, userId: number, payload: Record<string, unknown>) {
     return `${scope}:${userId}:${JSON.stringify(payload)}`;
   }
@@ -831,11 +846,12 @@ export class CertStudyService {
 
   private async ensureExamByCode(code: string) {
     const normalizedCode = this.normalizeExamCode(code);
+    const metadata = this.getExamMetadata(normalizedCode);
     await this.db.query(
       `INSERT INTO cert_exams (code, name, provider, created_at, updated_at)
        VALUES (?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
        ON DUPLICATE KEY UPDATE name = VALUES(name), provider = VALUES(provider), updated_at = UTC_TIMESTAMP()`,
-      [normalizedCode, 'AWS Certified Solutions Architect - Professional', 'aws'],
+      [normalizedCode, metadata.name, metadata.provider],
     );
     const rows = await this.db.query<any[]>(
       'SELECT id, code, name, provider FROM cert_exams WHERE code = ? LIMIT 1',
