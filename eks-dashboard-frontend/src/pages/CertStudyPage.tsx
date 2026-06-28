@@ -66,7 +66,7 @@ const defaultVisibleColumns: CertStudyColumnKey[] = [
 ];
 
 
-const CERT_STUDY_VISIBLE_COLUMNS_STORAGE_KEY = 'cert-study.visibleColumns.v1';
+const getVisibleColumnsStorageKey = (examCode: string) => `cert-study.visibleColumns.${examCode.toLowerCase()}.v1`;
 const validColumnKeys = new Set<CertStudyColumnKey>([
   ...columnOptions.map((item) => item.value),
   'actions',
@@ -81,10 +81,10 @@ const normalizeVisibleColumns = (values: unknown): CertStudyColumnKey[] => {
   return unique.length > 1 ? unique : defaultVisibleColumns;
 };
 
-const loadVisibleColumns = (): CertStudyColumnKey[] => {
+const loadVisibleColumns = (examCode: string): CertStudyColumnKey[] => {
   if (typeof window === 'undefined') return defaultVisibleColumns;
   try {
-    const raw = window.localStorage.getItem(CERT_STUDY_VISIBLE_COLUMNS_STORAGE_KEY);
+    const raw = window.localStorage.getItem(getVisibleColumnsStorageKey(examCode));
     if (!raw) return defaultVisibleColumns;
     return normalizeVisibleColumns(JSON.parse(raw));
   } catch {
@@ -236,7 +236,12 @@ const parseOptionsFromText = (text: string) => {
   return map;
 };
 
-const CertStudyPage: React.FC = () => {
+type CertStudyPageProps = {
+  examCode: string;
+  examTitle: string;
+};
+
+const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<CertStudyQuestionListItem[]>([]);
@@ -267,7 +272,7 @@ const CertStudyPage: React.FC = () => {
   const [savingEditedNote, setSavingEditedNote] = useState(false);
   const [noteComposerOpen, setNoteComposerOpen] = useState(false);
   const [detailNavLoading, setDetailNavLoading] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(loadVisibleColumns);
+  const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(() => loadVisibleColumns(examCode));
 
   const [reviewForm] = Form.useForm();
   const [noteForm] = Form.useForm();
@@ -277,10 +282,14 @@ const CertStudyPage: React.FC = () => {
 
   useEffect(() => {
     window.localStorage.setItem(
-      CERT_STUDY_VISIBLE_COLUMNS_STORAGE_KEY,
+      getVisibleColumnsStorageKey(examCode),
       JSON.stringify(visibleColumns),
     );
-  }, [visibleColumns]);
+  }, [examCode, visibleColumns]);
+
+  useEffect(() => {
+    setVisibleColumns(loadVisibleColumns(examCode));
+  }, [examCode]);
 
   const buildQuestionListParams = useCallback(
     (targetPage: number, targetPageSize = pageSize) => {
@@ -293,7 +302,7 @@ const CertStudyPage: React.FC = () => {
             ? 'desc'
             : undefined;
       return {
-        examCode: 'SAP-C02',
+        examCode,
         keyword: keyword.trim() || undefined,
         status,
         important: important ? 1 as const : undefined,
@@ -306,7 +315,7 @@ const CertStudyPage: React.FC = () => {
         pageSize: targetPageSize,
       };
     },
-    [important, keyword, pageSize, reviewSort, reviewedOnly, source, status, tag],
+    [examCode, important, keyword, pageSize, reviewSort, reviewedOnly, source, status, tag],
   );
 
   const loadQuestions = useCallback(async () => {
@@ -602,7 +611,7 @@ const CertStudyPage: React.FC = () => {
     setImporting(true);
     try {
       const result = await importCertStudyManual({
-        examCode: 'SAP-C02',
+        examCode,
         source: values.source?.trim() || 'manual',
         sourceUrl: values.sourceUrl?.trim() || undefined,
         sourceQuestionNo: values.sourceQuestionNo?.trim() || undefined,
@@ -1136,7 +1145,7 @@ const CertStudyPage: React.FC = () => {
       </Drawer>
 
       <Modal
-        title="导入 SAP-C02 题目"
+        title={`导入 ${examTitle} 题目`}
         open={importOpen}
         onCancel={() => setImportOpen(false)}
         footer={null}
@@ -1211,7 +1220,7 @@ const CertStudyPage: React.FC = () => {
             >
               <TextArea
                 rows={16}
-                placeholder={`[\n  {\n    "examCode": "SAP-C02",\n    "source": "manual",\n    "stem": "Question text...",\n    "options": { "A": "Option A", "B": "Option B" }\n  }\n]`}
+                placeholder={`[\n  {\n    "examCode": "${examCode}",\n    "source": "manual",\n    "stem": "Question text...",\n    "options": { "A": "Option A", "B": "Option B" }\n  }\n]`}
               />
             </Form.Item>
             <Button type="primary" loading={importing} onClick={() => void handleSubmitJsonImport()}>

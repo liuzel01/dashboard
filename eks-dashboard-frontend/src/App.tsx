@@ -161,6 +161,7 @@ const AppLayout: React.FC = () => {
     icon: <BookOutlined />,
     children: [
       { key: '/cert-study/sap-c02', label: <Link to="/cert-study/sap-c02">SAP-C02</Link> },
+      { key: '/cert-study/dop-c02', label: <Link to="/cert-study/dop-c02">DOP-C02</Link> },
     ],
   };
 
@@ -337,7 +338,14 @@ const AppLayout: React.FC = () => {
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
               <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
-              <Route path="/cert-study/sap-c02" element={<ProtectedRoute required={[certStudyPermission]}><CertStudyPage /></ProtectedRoute>} />
+              <Route
+                path="/cert-study/sap-c02"
+                element={<ProtectedRoute required={[certStudyPermission]}><CertStudyPage examCode="SAP-C02" examTitle="SAP-C02" /></ProtectedRoute>}
+              />
+              <Route
+                path="/cert-study/dop-c02"
+                element={<ProtectedRoute required={[certStudyPermission]}><CertStudyPage examCode="DOP-C02" examTitle="DOP-C02" /></ProtectedRoute>}
+              />
               <Route path="/signal-monitor/realtime" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorRealtimePage /></ProtectedRoute>} />
               <Route path="/signal-monitor/history" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorHistoryPage /></ProtectedRoute>} />
               <Route path="/signal-monitor/stats" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorStatsPage /></ProtectedRoute>} />
