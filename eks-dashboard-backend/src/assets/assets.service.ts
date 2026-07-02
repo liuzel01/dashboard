@@ -14,6 +14,7 @@ import {
   CreateCredentialRefDto,
   ListAssetsDto,
   ListChangeLogsDto,
+  SyncAccountDomainsDto,
   SyncWangsuDomainsDto,
   SyncAliyunDcdnDomainsDto,
   UpdateAssetAccountDto,
@@ -62,6 +63,9 @@ type WangsuDomainPreviewItem = {
 
 type AliyunDcdnDomainPreviewItem = {
   provider: 'aliyun_dcdn';
+  accountId?: number;
+  accountName?: string;
+  accountIdentifier?: string;
   domain: string;
   domainId?: string;
   cname?: string;
@@ -409,6 +413,112 @@ export class AssetsService {
     });
   }
 
+  async previewAccountAliyunDcdnDomains(actor: ActorContext, accountId: number) {
+    this.ensureAssetPermission(actor);
+    const account = await this.getSyncableAccount(accountId, 'aliyun');
+    const credentials = await this.resolveAccountSiteConfCredentials(account);
+    const client = await this.createAliyunDcdnClient(credentials);
+    const timeoutMs = await this.getAliyunTimeoutMs();
+    const pageSize = 100;
+    let pageNumber = 1;
+    const items: AliyunDcdnDomainPreviewItem[] = [];
+    let totalCount = 0;
+
+    do {
+      const resp = await client.request('DescribeDcdnUserDomains', { PageNumber: pageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+      totalCount = Number(resp?.TotalCount || 0);
+      const pageData = resp?.Domains?.PageData || [];
+      const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
+      items.push(...rows
+        .map((row: Record<string, unknown>) => this.parseAliyunDcdnDomain(row, {
+          accountId: Number(account.id),
+          accountName: String(account.account_name || ''),
+          accountIdentifier: String(account.account_identifier || ''),
+        }))
+        .filter((item: AliyunDcdnDomainPreviewItem | null): item is AliyunDcdnDomainPreviewItem => Boolean(item)));
+      pageNumber += 1;
+    } while (items.length < totalCount && pageNumber <= 1000);
+
+    return {
+      provider: 'aliyun_dcdn',
+      account: {
+        id: Number(account.id),
+        account_name: String(account.account_name || ''),
+        account_identifier: String(account.account_identifier || ''),
+        provider: String(account.provider || ''),
+      },
+      endpoint: credentials.endpoint,
+      fetchedAt: new Date().toISOString(),
+      total: items.length,
+      totalCount,
+      items,
+    };
+  }
+
+  async syncAccountAliyunDcdnDomains(actor: ActorContext, accountId: number, dto: SyncAccountDomainsDto = {}) {
+    this.ensureAssetPermission(actor);
+    const preview = await this.previewAccountAliyunDcdnDomains(actor, accountId);
+    const dryRun = dto.dryRun !== false;
+    const planned = preview.items.map((item) => this.buildAliyunDcdnDomainSyncPayload(item, {
+      accountId: preview.account.id,
+      accountIdentifier: preview.account.account_identifier,
+    }));
+
+    return this.db.withTransaction(async (conn) => {
+      const summary = { total: planned.length, created: 0, updated: 0, unchanged: 0, conflicts: 0, dryRun };
+      const items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }> = [];
+
+      for (const payload of planned) {
+        const domain = String(payload.domain);
+        const before = await this.findDomainByDomain(conn, domain);
+        if (!before) {
+          summary.created += 1;
+          items.push({ domain, action: 'create' });
+          if (!dryRun) {
+            const columns = Object.keys(payload);
+            const result = await conn.execute<mysql.ResultSetHeader>(
+              `INSERT INTO asset_domains (${columns.join(', ')}, created_by, updated_by, created_at, updated_at) VALUES (${columns.map(() => '?').join(', ')}, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+              [...columns.map((column) => payload[column]), actor.username, actor.username],
+            );
+            const id = result[0].insertId;
+            const after = await this.getRowById(conn, domainConfig, id, true);
+            await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: id, action: 'sync_account_aliyun_dcdn_create', beforeData: null, afterData: after, remark: `sync from aliyun dcdn account ${preview.account.account_identifier}` });
+            items[items.length - 1] = { domain, action: 'create', id };
+          }
+          continue;
+        }
+
+        const beforeProvider = before.cdn_provider === undefined || before.cdn_provider === null ? '' : String(before.cdn_provider);
+        if (beforeProvider && beforeProvider !== 'aliyun_dcdn') {
+          summary.conflicts += 1;
+          items.push({ domain, action: 'provider_conflict', id: Number(before.id), conflictProvider: beforeProvider });
+          continue;
+        }
+
+        const patch = this.diffDomainPayload(before, payload, ['environment', 'tenant', 'business', 'owner', 'usage_desc']);
+        if (Object.keys(patch).length === 0) {
+          summary.unchanged += 1;
+          items.push({ domain, action: 'unchanged', id: Number(before.id) });
+          continue;
+        }
+
+        summary.updated += 1;
+        items.push({ domain, action: 'update', id: Number(before.id) });
+        if (!dryRun) {
+          const keys = Object.keys(patch);
+          await conn.execute(
+            `UPDATE asset_domains SET ${keys.map((key) => `${key} = ?`).join(', ')}, updated_by = ?, updated_at = UTC_TIMESTAMP(), deleted_at = NULL WHERE id = ?`,
+            [...keys.map((key) => patch[key]), actor.username, Number(before.id)],
+          );
+          const after = await this.getRowById(conn, domainConfig, Number(before.id), true);
+          await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: Number(before.id), action: 'sync_account_aliyun_dcdn_update', beforeData: before, afterData: after, remark: `sync from aliyun dcdn account ${preview.account.account_identifier}` });
+        }
+      }
+
+      return { provider: 'aliyun_dcdn', account: preview.account, fetchedAt: preview.fetchedAt, summary, items };
+    });
+  }
+
   async getOverview(actor: ActorContext) {
     this.ensureAssetPermission(actor);
     const [accountStats, resourceStats, domainStats, credentialStats, ownerStats, recentChanges] =
@@ -610,9 +720,9 @@ export class AssetsService {
     return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
   }
 
-  private async createAliyunDcdnClient() {
-    const accessKeyId = (await this.siteConf.getString('cdn.aliyun.access_key_id', '')).trim();
-    const accessKeySecret = (await this.siteConf.getString('cdn.aliyun.access_key_secret', '')).trim();
+  private async createAliyunDcdnClient(credentials?: { accessKeyId: string; accessKeySecret: string; endpoint: string }) {
+    const accessKeyId = credentials?.accessKeyId || (await this.siteConf.getString('cdn.aliyun.access_key_id', '')).trim();
+    const accessKeySecret = credentials?.accessKeySecret || (await this.siteConf.getString('cdn.aliyun.access_key_secret', '')).trim();
     if (!accessKeyId || !accessKeySecret) {
       throw new BadRequestException('Aliyun credentials are incomplete. Configure cdn.aliyun.access_key_id and cdn.aliyun.access_key_secret.');
     }
@@ -625,11 +735,14 @@ export class AssetsService {
     });
   }
 
-  private parseAliyunDcdnDomain(row: Record<string, unknown>): AliyunDcdnDomainPreviewItem | null {
+  private parseAliyunDcdnDomain(row: Record<string, unknown>, account?: { accountId: number; accountName: string; accountIdentifier: string }): AliyunDcdnDomainPreviewItem | null {
     const domain = String(row.DomainName || '').trim();
     if (!domain) return null;
     return {
       provider: 'aliyun_dcdn',
+      accountId: account?.accountId,
+      accountName: account?.accountName,
+      accountIdentifier: account?.accountIdentifier,
       domain,
       domainId: row.DomainId === undefined || row.DomainId === null ? undefined : String(row.DomainId),
       cname: row.Cname === undefined || row.Cname === null ? undefined : String(row.Cname),
@@ -651,7 +764,7 @@ export class AssetsService {
     return status || 'unknown';
   }
 
-  private buildAliyunDcdnDomainSyncPayload(item: AliyunDcdnDomainPreviewItem) {
+  private buildAliyunDcdnDomainSyncPayload(item: AliyunDcdnDomainPreviewItem, account?: { accountId?: number; accountIdentifier?: string }) {
     const normalizedStatus = String(item.status || '').toLowerCase();
     const status = this.mapAliyunDcdnStatus(normalizedStatus);
     return this.normalizePayload({
@@ -659,10 +772,13 @@ export class AssetsService {
       root_domain: this.guessRootDomain(item.domain),
       cdn_provider: 'aliyun_dcdn',
       provider: 'aliyun',
+      account_id: account?.accountId ?? item.accountId ?? undefined,
       status,
       usage_desc: 'Aliyun DCDN',
       remark: JSON.stringify({
         source: 'aliyun_dcdn_api',
+        sourceAccountId: account?.accountId ?? item.accountId ?? null,
+        sourceAccountIdentifier: account?.accountIdentifier ?? item.accountIdentifier ?? null,
         domainId: item.domainId || null,
         cname: item.cname || null,
         status: item.status || null,
@@ -699,9 +815,10 @@ export class AssetsService {
     });
   }
 
-  private diffDomainPayload(before: DbRow, payload: Record<string, unknown>) {
+  private diffDomainPayload(before: DbRow, payload: Record<string, unknown>, skipFields: string[] = []) {
     const patch: Record<string, unknown> = {};
     Object.entries(payload).forEach(([key, value]) => {
+      if (skipFields.includes(key)) return;
       const normalizedBefore = before[key] === undefined || before[key] === null ? null : String(before[key]);
       const normalizedValue = value === undefined || value === null ? null : String(value);
       if (normalizedBefore !== normalizedValue) patch[key] = value;
@@ -713,6 +830,34 @@ export class AssetsService {
     const result = await conn.execute(`SELECT * FROM asset_domains WHERE domain = ? LIMIT 1`, [domain]);
     const rows = result[0] as DbRow[];
     return rows[0] || null;
+  }
+
+  private async getSyncableAccount(id: number, provider?: string) {
+    const rows = await this.db.query<DbRow[]>(`SELECT * FROM asset_accounts WHERE id = ? AND deleted_at IS NULL LIMIT 1`, [id]);
+    const account = rows[0] || null;
+    if (!account) throw new NotFoundException('账号不存在');
+    if (String(account.status || 'active') !== 'active') throw new BadRequestException('账号未启用，不能执行同步');
+    if (provider && String(account.provider || '').trim() !== provider) throw new BadRequestException(`账号 provider 不是 ${provider}`);
+    if (!account.credential_ref_id) throw new BadRequestException('账号未绑定凭证索引');
+    return account;
+  }
+
+  private async resolveAccountSiteConfCredentials(account: DbRow) {
+    const credentialRefId = Number(account.credential_ref_id || 0);
+    const rows = await this.db.query<DbRow[]>(`SELECT * FROM credential_refs WHERE id = ? AND deleted_at IS NULL LIMIT 1`, [credentialRefId]);
+    const ref = rows[0] || null;
+    if (!ref) throw new BadRequestException('账号绑定的凭证索引不存在');
+    const storageType = String(ref.storage_type || '').trim();
+    if (storageType !== 'siteconf') throw new BadRequestException(`当前仅支持 siteconf 凭证，实际为 ${storageType || 'unknown'}`);
+    const storagePath = String(ref.storage_path || '').trim();
+    if (!storagePath) throw new BadRequestException('凭证索引未配置 storage_path');
+    const accessKeyId = (await this.siteConf.getString(`${storagePath}.access_key_id`, '')).trim();
+    const accessKeySecret = (await this.siteConf.getString(`${storagePath}.access_key_secret`, '')).trim();
+    const endpoint = (await this.siteConf.getString(`${storagePath}.endpoint`, await this.getAliyunDcdnEndpoint())).trim() || await this.getAliyunDcdnEndpoint();
+    const enabled = await this.siteConf.getBoolean(`${storagePath}.enabled`, true);
+    if (!enabled) throw new BadRequestException('该账号绑定的 siteconf 凭证已禁用');
+    if (!accessKeyId || !accessKeySecret) throw new BadRequestException(`siteconf 凭证不完整，请检查 ${storagePath}.access_key_id / access_key_secret`);
+    return { accessKeyId, accessKeySecret, endpoint, storagePath, refId: credentialRefId };
   }
 
   private guessRootDomain(domain: string) {

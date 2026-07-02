@@ -99,6 +99,13 @@ export class SyncAliyunDcdnDomainsDto {
   dryRun?: boolean;
 }
 
+export class SyncAccountDomainsDto {
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  dryRun?: boolean;
+}
+
 export class SyncWangsuDomainsDto {
   @IsOptional()
   @Transform(toOptionalBoolean)

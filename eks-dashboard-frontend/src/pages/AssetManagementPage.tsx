@@ -17,6 +17,7 @@ import {
   Tag,
   Typography,
   Alert,
+  Modal,
 } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
@@ -36,8 +37,10 @@ import {
   getCredentialRefs,
   previewWangsuCdnDomains,
   previewAliyunDcdnDomains,
+  previewAccountAliyunDcdnDomains,
   syncWangsuCdnDomains,
   syncAliyunDcdnDomains,
+  syncAccountAliyunDcdnDomains,
   restoreAssetAccount,
   restoreAssetDomain,
   restoreAssetResource,
@@ -61,6 +64,8 @@ import type {
   AliyunDcdnDomainPreviewItem,
   AliyunDcdnDomainPreviewResponse,
   AliyunDcdnDomainSyncResponse,
+  AccountAliyunDcdnDomainPreviewResponse,
+  AccountAliyunDcdnDomainSyncResponse,
 } from '../services/api';
 
 const { Text, Paragraph } = Typography;
@@ -86,6 +91,7 @@ type FieldConfig<T extends AssetEntity> = {
   options?: Array<{ label: string; value: string }>;
   placeholder?: string;
   help?: string;
+  render?: (value: unknown, record: T) => React.ReactNode;
 };
 
 type EntityTabProps<T extends AssetEntity> = {
@@ -161,6 +167,7 @@ const credentialTypeOptions = [
 ];
 
 const storageTypeOptions = [
+  { value: 'siteconf', label: 'siteconf' },
   { value: '1password', label: '1Password' },
   { value: 'bitwarden', label: 'Bitwarden' },
   { value: 'lark_doc', label: 'Lark 文档' },
@@ -197,6 +204,29 @@ const renderValue = (value: unknown) => {
 const statusTag = (status?: string | null) => {
   const color = status === 'active' ? 'green' : status === 'disabled' || status === 'deprecated' ? 'red' : 'default';
   return <Tag color={color}>{status || 'unknown'}</Tag>;
+};
+
+const tryParseJsonObject = (value?: string | null): Record<string, any> | null => {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, any> : null;
+  } catch {
+    return null;
+  }
+};
+
+const getDomainSourceMeta = (domain: AssetDomain) => {
+  const remark = tryParseJsonObject(domain.remark);
+  return {
+    source: typeof remark?.source === 'string' ? remark.source : null,
+    sourceProvider: typeof remark?.source === 'string' ? String(remark.source).replace(/_api$/, '') : null,
+    sourceAccountId: typeof remark?.sourceAccountId === 'number' ? remark.sourceAccountId : domain.account_id,
+    sourceAccountIdentifier: typeof remark?.sourceAccountIdentifier === 'string' ? remark.sourceAccountIdentifier : null,
+    domainId: typeof remark?.domainId === 'string' ? remark.domainId : null,
+    cname: typeof remark?.cname === 'string' ? remark.cname : null,
+    raw: remark,
+  };
 };
 
 function EntityTab<T extends AssetEntity>({
@@ -278,7 +308,7 @@ function EntityTab<T extends AssetEntity>({
       dataIndex: field.name,
       key: field.name,
       ellipsis: true,
-      render: (value: unknown) => (field.name === 'status' ? statusTag(String(value || 'unknown')) : renderValue(value)),
+      render: (value: unknown, record: T) => field.render ? field.render(value, record) : (field.name === 'status' ? statusTag(String(value || 'unknown')) : renderValue(value)),
     })),
     {
       title: '更新时间',
@@ -410,6 +440,209 @@ function EntityTab<T extends AssetEntity>({
     </Space>
   );
 }
+
+const AccountManagementTab: React.FC = () => {
+  const { message } = AntApp.useApp();
+  const [form] = Form.useForm();
+  const [items, setItems] = useState<AssetAccount[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<AssetAccount | null>(null);
+  const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20 });
+  const [total, setTotal] = useState(0);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [credentialRefs, setCredentialRefs] = useState<CredentialRef[]>([]);
+  const [credentialRefsLoadError, setCredentialRefsLoadError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<AccountAliyunDcdnDomainPreviewResponse | null>(null);
+  const [syncResult, setSyncResult] = useState<AccountAliyunDcdnDomainSyncResponse | null>(null);
+
+  const credentialRefMap = useMemo(() => new Map(credentialRefs.map((item) => [item.id, item])), [credentialRefs]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getAssetAccounts(filters);
+      setItems(data.items);
+      setTotal(data.pagination.total);
+
+      try {
+        const refs = await getCredentialRefs({ page: 1, pageSize: 500 });
+        setCredentialRefs(refs.items);
+        setCredentialRefsLoadError(null);
+      } catch (e: any) {
+        setCredentialRefs([]);
+        setCredentialRefsLoadError(getErrorMessage(e, '凭证索引加载失败'));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const openCreate = () => {
+    setEditing(null);
+    form.resetFields();
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (record: AssetAccount) => {
+    setEditing(record);
+    form.setFieldsValue(record);
+    setDrawerOpen(true);
+  };
+
+  const submit = async () => {
+    const values = await form.validateFields();
+    if (editing) {
+      await updateAssetAccount(editing.id, values);
+      message.success('已更新');
+    } else {
+      await createAssetAccount(values);
+      message.success('已创建');
+    }
+    setDrawerOpen(false);
+    await load();
+  };
+
+  const handlePreview = async (record: AssetAccount) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setSyncResult(null);
+    try {
+      setPreviewData(await previewAccountAliyunDcdnDomains(record.id));
+    } catch (e: any) {
+      setPreviewData(null);
+      setPreviewError(getErrorMessage(e, '账号域名预览失败'));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleSync = async (record: AssetAccount, dryRun: boolean) => {
+    setPreviewOpen(true);
+    if (!previewData || previewData.account.id !== record.id) {
+      await handlePreview(record);
+    }
+    if (dryRun) setPreviewLoading(true);
+    else setSyncLoading(true);
+    setPreviewError(null);
+    try {
+      const result = await syncAccountAliyunDcdnDomains(record.id, { dryRun });
+      setSyncResult(result);
+      message.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${result.summary.total} 条，新增 ${result.summary.created}，更新 ${result.summary.updated}，不变 ${result.summary.unchanged}，冲突 ${result.summary.conflicts}`);
+      if (!previewData || previewData.account.id !== record.id) {
+        setPreviewData(await previewAccountAliyunDcdnDomains(record.id));
+      }
+    } catch (e: any) {
+      setPreviewError(getErrorMessage(e, dryRun ? '账号域名 Dry Run 失败' : '账号域名同步失败'));
+    } finally {
+      if (dryRun) setPreviewLoading(false);
+      else setSyncLoading(false);
+    }
+  };
+
+  const columns: ColumnsType<AssetAccount> = [
+    { title: '账号名称', dataIndex: 'account_name', key: 'account_name', width: 220, ellipsis: true, fixed: 'left' },
+    { title: '账号类型', dataIndex: 'account_type', key: 'account_type', width: 140 },
+    { title: '服务商', dataIndex: 'provider', key: 'provider', width: 100 },
+    { title: '账号标识', dataIndex: 'account_identifier', key: 'account_identifier', width: 180, ellipsis: true, render: renderValue },
+    { title: '凭证索引', dataIndex: 'credential_ref_id', key: 'credential_ref_id', width: 220, render: (value: number | null) => {
+      if (!value) return '-';
+      const ref = credentialRefMap.get(value);
+      if (!ref) return String(value);
+      return (
+        <Space direction="vertical" size={0}>
+          <Text>{ref.ref_name}</Text>
+          <Text type="secondary">ID: {ref.id} / {ref.storage_type}</Text>
+        </Space>
+      );
+    } },
+    { title: 'siteconf 路径', dataIndex: 'credential_ref_id', key: 'credential_storage_path', width: 240, ellipsis: true, render: (value: number | null) => {
+      const ref = value ? credentialRefMap.get(value) : null;
+      return ref?.storage_type === 'siteconf' ? (ref.storage_path || '-') : '-';
+    } },
+    { title: '负责人', dataIndex: 'owner', key: 'owner', width: 120, render: renderValue },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (value) => statusTag(String(value || 'unknown')) },
+    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 170, render: (value: string | null) => formatDateTime(value) },
+    {
+      title: '操作', key: 'actions', fixed: 'right', width: 350,
+      render: (_, record) => {
+        const isAliyun = String(record.provider || '') === 'aliyun';
+        const hasCredential = Boolean(record.credential_ref_id);
+        const syncDisabled = !isAliyun || !hasCredential || record.deleted_at != null;
+        return (
+          <Space size={8} wrap>
+            <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
+            <Button size="small" disabled={syncDisabled} onClick={() => handlePreview(record)}>预览域名</Button>
+            <Button size="small" disabled={syncDisabled || syncLoading} onClick={() => handleSync(record, true)}>Dry Run</Button>
+            <Popconfirm title={`确认同步账号 ${record.account_name} 的阿里云 DCDN 域名？`} onConfirm={() => handleSync(record, false)} disabled={syncDisabled}>
+              <Button size="small" type="primary" disabled={syncDisabled} loading={syncLoading}>同步域名</Button>
+            </Popconfirm>
+            {record.deleted_at ? (
+              <Button size="small" onClick={async () => { await restoreAssetAccount(record.id); message.success('已恢复'); await load(); }}>恢复</Button>
+            ) : (
+              <Popconfirm title="确认删除这条资产？" onConfirm={async () => { await deleteAssetAccount(record.id); message.success('已删除'); await load(); }}>
+                <Button size="small" danger>删除</Button>
+              </Popconfirm>
+            )}
+          </Space>
+        );
+      },
+    },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert type="info" showIcon message="账号管理是账号维度域名同步主入口" description="一期支持按阿里云账号读取 siteconf 凭证并预览/同步 DCDN 域名。需先绑定 credential_ref_id，且对应 credential_ref.storage_type=siteconf。" />
+      {credentialRefsLoadError && <Alert type="warning" showIcon message="凭证索引附加信息加载失败" description="账号主列表仍可正常显示与编辑；仅凭证名称 / siteconf 路径等增强展示暂不可用。" />}
+      <Space wrap>
+        <Input.Search allowClear placeholder="搜索账号" style={{ width: 260 }} onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))} />
+        <Input allowClear placeholder="服务商" style={{ width: 160 }} onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))} />
+        <Input allowClear placeholder="负责人" style={{ width: 160 }} onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))} />
+        <Select allowClear placeholder="状态" style={{ width: 150 }} options={accountStatusOptions} onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))} />
+        <Checkbox checked={Boolean(filters.includeDeleted)} onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}>包含已删除</Checkbox>
+        <Button type="primary" onClick={openCreate}>新增</Button>
+      </Space>
+
+      <Table rowKey="id" loading={loading} dataSource={items} columns={columns} pagination={{ current: filters.page || 1, pageSize: filters.pageSize || 20, total, showSizeChanger: true, onChange: (page, pageSize) => setFilters((prev) => ({ ...prev, page, pageSize })) }} scroll={{ x: 1500 }} />
+
+      <Drawer title={editing ? '编辑账号' : '新增账号'} open={drawerOpen} width={620} onClose={() => setDrawerOpen(false)} extra={<Button type="primary" onClick={submit}>保存</Button>}>
+        {editing && (() => { const ref = editing.credential_ref_id ? credentialRefMap.get(editing.credential_ref_id) : null; return ref ? <Alert type="info" showIcon style={{ marginBottom: 16 }} message={`当前绑定凭证：${ref.ref_name}`} description={`storage_type=${ref.storage_type}；storage_path=${ref.storage_path || '-'}；related_account_id=${renderValue(ref.related_account_id)}`} /> : null; })()}
+        <Form form={form} layout="vertical">
+          {accountFields.map((field) => (
+            <Form.Item key={field.name} name={[field.name]} label={field.label} rules={field.required ? [{ required: true, message: `请输入${field.label}` }] : undefined} valuePropName={field.boolean ? 'checked' : 'value'} help={field.help}>
+              {field.boolean ? <Checkbox /> : field.number ? <InputNumber min={1} style={{ width: '100%' }} /> : field.options ? <Select allowClear options={field.options} /> : field.textarea ? <TextArea rows={3} /> : <Input placeholder={field.placeholder} />}
+            </Form.Item>
+          ))}
+        </Form>
+      </Drawer>
+
+      <Modal title={previewData ? `账号域名预览 - ${previewData.account.account_name}` : '账号域名预览'} open={previewOpen} width={1100} onCancel={() => setPreviewOpen(false)} footer={null}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；共 ${previewData.total} 条`} />}
+          {previewError && <Alert type="error" showIcon message="账号域名操作失败" description={previewError} />}
+          {syncResult && <Alert type={syncResult.summary.dryRun ? 'warning' : 'success'} showIcon message={syncResult.summary.dryRun ? 'Dry Run 结果' : '同步完成'} description={`共 ${syncResult.summary.total} 条，新增 ${syncResult.summary.created}，更新 ${syncResult.summary.updated}，不变 ${syncResult.summary.unchanged}，冲突 ${syncResult.summary.conflicts}`} />}
+          <Table<AliyunDcdnDomainPreviewItem> rowKey={(record) => record.domainId || record.domain} loading={previewLoading} dataSource={previewData?.items || []} pagination={{ pageSize: 10, showSizeChanger: true }} scroll={{ x: 1000 }} columns={[
+            { title: '域名', dataIndex: 'domain', width: 220 },
+            { title: 'DomainId', dataIndex: 'domainId', width: 120, render: renderValue },
+            { title: 'CNAME', dataIndex: 'cname', width: 220, ellipsis: true, render: renderValue },
+            { title: '状态', dataIndex: 'status', width: 110, render: renderValue },
+            { title: 'SSL', dataIndex: 'sslProtocol', width: 90, render: renderValue },
+            { title: '创建时间', dataIndex: 'gmtCreated', width: 170, render: renderValue },
+            { title: '更新时间', dataIndex: 'gmtModified', width: 170, render: renderValue },
+          ]} />
+        </Space>
+      </Modal>
+    </Space>
+  );
+};
 
 const overviewStats = [
   { key: 'accounts', label: '账号总数' },
@@ -815,6 +1048,76 @@ const ChangeLogsTab: React.FC = () => {
   );
 };
 
+const DomainManagementTab: React.FC = () => {
+  const [accounts, setAccounts] = useState<AssetAccount[]>([]);
+  const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await getAssetAccounts({ page: 1, pageSize: 500 });
+      setAccounts(res.items);
+    })();
+  }, []);
+
+  const renderAccount = (value: unknown, record: AssetDomain) => {
+    const meta = getDomainSourceMeta(record);
+    const accountId = meta.sourceAccountId ?? (typeof value === 'number' ? value : null);
+    if (!accountId) return '-';
+    const account = accountMap.get(accountId);
+    if (!account) return String(accountId);
+    return (
+      <Space direction="vertical" size={0}>
+        <Text>{account.account_name}</Text>
+        <Text type="secondary">ID: {account.id}{account.account_identifier ? ` / ${account.account_identifier}` : ''}</Text>
+      </Space>
+    );
+  };
+
+  const domainFieldsWithSource: FieldConfig<AssetDomain>[] = [
+    domainFields[0],
+    domainFields[1],
+    domainFields[2],
+    { name: 'account_id', label: '来源账号', table: true, render: renderAccount },
+    { name: 'resource_id', label: '关联资源ID', number: true },
+    domainFields[5],
+    domainFields[6],
+    domainFields[7],
+    domainFields[8],
+    { name: 'remark', label: '同步来源', table: true, render: (_: unknown, record: AssetDomain) => {
+      const meta = getDomainSourceMeta(record);
+      return (
+        <Space direction="vertical" size={0}>
+          <Text>{meta.sourceProvider || record.cdn_provider || '-'}</Text>
+          <Text type="secondary">{meta.source || '-'}</Text>
+        </Space>
+      );
+    } },
+    domainFields[9],
+    domainFields[10],
+    domainFields[11],
+    domainFields[12],
+    domainFields[13],
+    domainFields[14],
+    { name: 'remark', label: '备注/同步信息', table: false, textarea: true },
+  ];
+
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 2 已补充来源账号与同步来源展示。同步来源优先从 remark 中的结构化 JSON 解析；若无则回退到 account_id / cdn_provider。" />
+      <EntityTab<AssetDomain>
+        title="域名"
+        fields={domainFieldsWithSource}
+        list={getAssetDomains}
+        create={createAssetDomain}
+        update={updateAssetDomain}
+        remove={deleteAssetDomain}
+        restore={restoreAssetDomain}
+        primaryField="domain"
+      />
+    </Space>
+  );
+};
+
 const accountFields: FieldConfig<AssetAccount>[] = [
   { name: 'account_name', label: '账号名称', required: true },
   { name: 'account_type', label: '账号类型', options: accountTypeOptions },
@@ -889,18 +1192,7 @@ const AssetManagementPage: React.FC<AssetManagementPageProps> = ({ activeTab = '
     {
       key: 'accounts',
       label: '账号管理',
-      children: (
-        <EntityTab<AssetAccount>
-          title="账号"
-          fields={accountFields}
-          list={getAssetAccounts}
-          create={createAssetAccount}
-          update={updateAssetAccount}
-          remove={deleteAssetAccount}
-          restore={restoreAssetAccount}
-          primaryField="account_name"
-        />
-      ),
+      children: <AccountManagementTab />,
     },
     {
       key: 'resources',
@@ -921,18 +1213,7 @@ const AssetManagementPage: React.FC<AssetManagementPageProps> = ({ activeTab = '
     {
       key: 'domains',
       label: '域名管理',
-      children: (
-        <EntityTab<AssetDomain>
-          title="域名"
-          fields={domainFields}
-          list={getAssetDomains}
-          create={createAssetDomain}
-          update={updateAssetDomain}
-          remove={deleteAssetDomain}
-          restore={restoreAssetDomain}
-          primaryField="domain"
-        />
-      ),
+      children: <DomainManagementTab />,
     },
     {
       key: 'credential-refs',
