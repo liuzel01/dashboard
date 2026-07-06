@@ -44,6 +44,12 @@ export class ListAssetsDto {
   owner?: string;
 
   @IsOptional()
+  @Transform(toOptionalInt)
+  @IsInt()
+  @Min(1)
+  accountId?: number;
+
+  @IsOptional()
   @Transform(toOptionalBoolean)
   @IsBoolean()
   includeDeleted?: boolean;

@@ -933,6 +933,7 @@ export type AssetListParams = {
   environment?: string;
   tenant?: string;
   owner?: string;
+  accountId?: number;
   includeDeleted?: boolean;
   page?: number;
   pageSize?: number;

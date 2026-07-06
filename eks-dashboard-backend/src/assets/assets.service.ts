@@ -43,6 +43,7 @@ type AssetConfig = {
   tenantField?: string;
   ownerField?: string;
   statusField?: string;
+  accountField?: string;
 };
 
 type DbRow = Record<string, any>;
@@ -136,6 +137,7 @@ const resourceConfig: AssetConfig = {
   tenantField: 'tenant',
   ownerField: 'owner',
   statusField: 'status',
+  accountField: 'account_id',
 };
 
 const domainConfig: AssetConfig = {
@@ -167,6 +169,7 @@ const domainConfig: AssetConfig = {
   tenantField: 'tenant',
   ownerField: 'owner',
   statusField: 'status',
+  accountField: 'account_id',
 };
 
 const credentialRefConfig: AssetConfig = {
@@ -187,6 +190,7 @@ const credentialRefConfig: AssetConfig = {
   keywordFields: ['ref_name', 'ref_type', 'storage_type', 'storage_path', 'visibility_level', 'owner', 'remark'],
   typeField: 'ref_type',
   ownerField: 'owner',
+  accountField: 'related_account_id',
 };
 
 @Injectable()
@@ -987,6 +991,7 @@ export class AssetsService {
     this.addExactFilter(where, params, config.environmentField, query.environment);
     this.addExactFilter(where, params, config.tenantField, query.tenant);
     this.addExactFilter(where, params, config.ownerField, query.owner);
+    this.addExactFilter(where, params, config.accountField, query.accountId);
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const totalRows = await this.db.query<Array<{ total: number }>>(
@@ -1170,9 +1175,15 @@ export class AssetsService {
     return data;
   }
 
-  private addExactFilter(where: string[], params: any[], column: string | undefined, value: string | undefined) {
-    const normalized = value?.trim();
-    if (!column || !normalized) return;
+  private addExactFilter(where: string[], params: any[], column: string | undefined, value: string | number | undefined) {
+    if (!column || value === undefined || value === null) return;
+    if (typeof value === 'number') {
+      where.push(`${column} = ?`);
+      params.push(value);
+      return;
+    }
+    const normalized = value.trim();
+    if (!normalized) return;
     where.push(`${column} = ?`);
     params.push(normalized);
   }

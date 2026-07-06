@@ -197,7 +197,6 @@ const formatDateTime = (value?: string | null) => {
 const renderValue = (value: unknown) => {
   if (value === undefined || value === null || value === '') return '-';
   if (typeof value === 'boolean') return value ? '是' : '否';
-  if (value === 1 || value === 0) return value === 1 ? '是' : '否';
   return String(value);
 };
 
@@ -243,6 +242,7 @@ function EntityTab<T extends AssetEntity>({
   const [form] = Form.useForm();
   const [items, setItems] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<T | null>(null);
   const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20 });
@@ -276,16 +276,21 @@ function EntityTab<T extends AssetEntity>({
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
-    if (editing) {
-      await update(editing.id, values as Partial<T>);
-      message.success('已更新');
-    } else {
-      await create(values as Partial<T>);
-      message.success('已创建');
+    setSubmitting(true);
+    try {
+      const values = await form.validateFields();
+      if (editing) {
+        await update(editing.id, values as Partial<T>);
+        message.success('已更新');
+      } else {
+        await create(values as Partial<T>);
+        message.success('已创建');
+      }
+      setDrawerOpen(false);
+      await load();
+    } finally {
+      setSubmitting(false);
     }
-    setDrawerOpen(false);
-    await load();
   };
 
   const handleRemove = async (record: T) => {
@@ -303,6 +308,14 @@ function EntityTab<T extends AssetEntity>({
   const tableFields = fields.filter((field) => field.table !== false);
 
   const columns: ColumnsType<T> = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 90,
+      fixed: 'left',
+      render: (value: unknown) => renderValue(value),
+    },
     ...tableFields.map((field) => ({
       title: field.label,
       dataIndex: field.name,
@@ -402,9 +415,14 @@ function EntityTab<T extends AssetEntity>({
         open={drawerOpen}
         width={620}
         onClose={() => setDrawerOpen(false)}
-        extra={<Button type="primary" onClick={submit}>保存</Button>}
+        extra={<Button type="primary" onClick={submit} loading={submitting}>保存</Button>}
       >
         <Form form={form} layout="vertical">
+          {editing && (
+            <Form.Item label="ID">
+              <Input value={String(editing.id)} readOnly disabled />
+            </Form.Item>
+          )}
           {fields.map((field) => (
             <Form.Item
               key={field.name}
@@ -446,6 +464,7 @@ const AccountManagementTab: React.FC = () => {
   const [form] = Form.useForm();
   const [items, setItems] = useState<AssetAccount[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AssetAccount | null>(null);
   const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20 });
@@ -455,6 +474,9 @@ const AccountManagementTab: React.FC = () => {
   const [credentialRefsLoadError, setCredentialRefsLoadError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [accountDomainsLoading, setAccountDomainsLoading] = useState(false);
+  const [accountDomainsError, setAccountDomainsError] = useState<string | null>(null);
+  const [accountDomains, setAccountDomains] = useState<AssetDomain[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<AccountAliyunDcdnDomainPreviewResponse | null>(null);
   const [syncResult, setSyncResult] = useState<AccountAliyunDcdnDomainSyncResponse | null>(null);
@@ -469,7 +491,7 @@ const AccountManagementTab: React.FC = () => {
       setTotal(data.pagination.total);
 
       try {
-        const refs = await getCredentialRefs({ page: 1, pageSize: 500 });
+        const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
         setCredentialRefs(refs.items);
         setCredentialRefsLoadError(null);
       } catch (e: any) {
@@ -485,29 +507,71 @@ const AccountManagementTab: React.FC = () => {
     void load();
   }, [load]);
 
-  const openCreate = () => {
+  const loadAccountDomains = useCallback(async (accountId: number) => {
+    setAccountDomainsLoading(true);
+    setAccountDomainsError(null);
+    try {
+      const res = await getAssetDomains({ page: 1, pageSize: 100, accountId });
+      setAccountDomains(res.items);
+    } catch (e: any) {
+      setAccountDomains([]);
+      setAccountDomainsError(getErrorMessage(e, '账号关联域名加载失败'));
+    } finally {
+      setAccountDomainsLoading(false);
+    }
+  }, []);
+
+  const refreshAccountContext = useCallback(async (accountId: number) => {
+    await Promise.all([load(), loadAccountDomains(accountId)]);
+  }, [load, loadAccountDomains]);
+
+  const openCreate = async () => {
     setEditing(null);
+    setAccountDomains([]);
+    setAccountDomainsError(null);
     form.resetFields();
+    try {
+      const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
+      setCredentialRefs(refs.items);
+      setCredentialRefsLoadError(null);
+    } catch (e: any) {
+      setCredentialRefs([]);
+      setCredentialRefsLoadError(getErrorMessage(e, '凭证索引加载失败'));
+    }
     setDrawerOpen(true);
   };
 
-  const openEdit = (record: AssetAccount) => {
+  const openEdit = async (record: AssetAccount) => {
     setEditing(record);
     form.setFieldsValue(record);
+    try {
+      const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
+      setCredentialRefs(refs.items);
+      setCredentialRefsLoadError(null);
+    } catch (e: any) {
+      setCredentialRefs([]);
+      setCredentialRefsLoadError(getErrorMessage(e, '凭证索引加载失败'));
+    }
     setDrawerOpen(true);
+    void loadAccountDomains(record.id);
   };
 
   const submit = async () => {
-    const values = await form.validateFields();
-    if (editing) {
-      await updateAssetAccount(editing.id, values);
-      message.success('已更新');
-    } else {
-      await createAssetAccount(values);
-      message.success('已创建');
+    setSubmitting(true);
+    try {
+      const values = await form.validateFields();
+      if (editing) {
+        await updateAssetAccount(editing.id, values);
+        message.success('已更新');
+      } else {
+        await createAssetAccount(values);
+        message.success('已创建');
+      }
+      setDrawerOpen(false);
+      await load();
+    } finally {
+      setSubmitting(false);
     }
-    setDrawerOpen(false);
-    await load();
   };
 
   const handlePreview = async (record: AssetAccount) => {
@@ -537,9 +601,11 @@ const AccountManagementTab: React.FC = () => {
       const result = await syncAccountAliyunDcdnDomains(record.id, { dryRun });
       setSyncResult(result);
       message.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${result.summary.total} 条，新增 ${result.summary.created}，更新 ${result.summary.updated}，不变 ${result.summary.unchanged}，冲突 ${result.summary.conflicts}`);
-      if (!previewData || previewData.account.id !== record.id) {
-        setPreviewData(await previewAccountAliyunDcdnDomains(record.id));
-      }
+      const [nextPreview] = await Promise.all([
+        previewAccountAliyunDcdnDomains(record.id),
+        refreshAccountContext(record.id),
+      ]);
+      setPreviewData(nextPreview);
     } catch (e: any) {
       setPreviewError(getErrorMessage(e, dryRun ? '账号域名 Dry Run 失败' : '账号域名同步失败'));
     } finally {
@@ -548,7 +614,10 @@ const AccountManagementTab: React.FC = () => {
     }
   };
 
+  const selectedCredentialRef = editing?.credential_ref_id ? credentialRefMap.get(editing.credential_ref_id) : null;
+
   const columns: ColumnsType<AssetAccount> = [
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 90, fixed: 'left', render: renderValue },
     { title: '账号名称', dataIndex: 'account_name', key: 'account_name', width: 220, ellipsis: true, fixed: 'left' },
     { title: '账号类型', dataIndex: 'account_type', key: 'account_type', width: 140 },
     { title: '服务商', dataIndex: 'provider', key: 'provider', width: 100 },
@@ -579,7 +648,7 @@ const AccountManagementTab: React.FC = () => {
         const syncDisabled = !isAliyun || !hasCredential || record.deleted_at != null;
         return (
           <Space size={8} wrap>
-            <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
+            <Button size="small" onClick={() => void openEdit(record)}>编辑</Button>
             <Button size="small" disabled={syncDisabled} onClick={() => handlePreview(record)}>预览域名</Button>
             <Button size="small" disabled={syncDisabled || syncLoading} onClick={() => handleSync(record, true)}>Dry Run</Button>
             <Popconfirm title={`确认同步账号 ${record.account_name} 的阿里云 DCDN 域名？`} onConfirm={() => handleSync(record, false)} disabled={syncDisabled}>
@@ -608,20 +677,76 @@ const AccountManagementTab: React.FC = () => {
         <Input allowClear placeholder="负责人" style={{ width: 160 }} onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))} />
         <Select allowClear placeholder="状态" style={{ width: 150 }} options={accountStatusOptions} onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))} />
         <Checkbox checked={Boolean(filters.includeDeleted)} onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}>包含已删除</Checkbox>
-        <Button type="primary" onClick={openCreate}>新增</Button>
+        <Button type="primary" onClick={() => void openCreate()}>新增</Button>
       </Space>
 
       <Table rowKey="id" loading={loading} dataSource={items} columns={columns} pagination={{ current: filters.page || 1, pageSize: filters.pageSize || 20, total, showSizeChanger: true, onChange: (page, pageSize) => setFilters((prev) => ({ ...prev, page, pageSize })) }} scroll={{ x: 1500 }} />
 
-      <Drawer title={editing ? '编辑账号' : '新增账号'} open={drawerOpen} width={620} onClose={() => setDrawerOpen(false)} extra={<Button type="primary" onClick={submit}>保存</Button>}>
-        {editing && (() => { const ref = editing.credential_ref_id ? credentialRefMap.get(editing.credential_ref_id) : null; return ref ? <Alert type="info" showIcon style={{ marginBottom: 16 }} message={`当前绑定凭证：${ref.ref_name}`} description={`storage_type=${ref.storage_type}；storage_path=${ref.storage_path || '-'}；related_account_id=${renderValue(ref.related_account_id)}`} /> : null; })()}
-        <Form form={form} layout="vertical">
-          {accountFields.map((field) => (
-            <Form.Item key={field.name} name={[field.name]} label={field.label} rules={field.required ? [{ required: true, message: `请输入${field.label}` }] : undefined} valuePropName={field.boolean ? 'checked' : 'value'} help={field.help}>
-              {field.boolean ? <Checkbox /> : field.number ? <InputNumber min={1} style={{ width: '100%' }} /> : field.options ? <Select allowClear options={field.options} /> : field.textarea ? <TextArea rows={3} /> : <Input placeholder={field.placeholder} />}
-            </Form.Item>
-          ))}
-        </Form>
+      <Drawer title={editing ? '编辑账号' : '新增账号'} open={drawerOpen} width={960} onClose={() => setDrawerOpen(false)} extra={<Button type="primary" onClick={submit} loading={submitting}>保存</Button>}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          {editing && (
+            selectedCredentialRef ? (
+              <Descriptions size="small" bordered column={2} title="绑定凭证详情">
+                <Descriptions.Item label="凭证名称">{selectedCredentialRef.ref_name}</Descriptions.Item>
+                <Descriptions.Item label="凭证类型">{renderValue(selectedCredentialRef.ref_type)}</Descriptions.Item>
+                <Descriptions.Item label="存储类型">{renderValue(selectedCredentialRef.storage_type)}</Descriptions.Item>
+                <Descriptions.Item label="可见级别">{renderValue(selectedCredentialRef.visibility_level)}</Descriptions.Item>
+                <Descriptions.Item label="storage_path" span={2}>{renderValue(selectedCredentialRef.storage_path)}</Descriptions.Item>
+                <Descriptions.Item label="related_account_id">{renderValue(selectedCredentialRef.related_account_id)}</Descriptions.Item>
+                <Descriptions.Item label="负责人">{renderValue(selectedCredentialRef.owner)}</Descriptions.Item>
+              </Descriptions>
+            ) : (
+              <Alert
+                type="warning"
+                showIcon
+                message="当前账号未匹配到可展示的凭证详情"
+                description={editing.credential_ref_id ? `credential_ref_id=${editing.credential_ref_id}` : '该账号尚未绑定 credential_ref_id'}
+              />
+            )
+          )}
+
+          <Form form={form} layout="vertical">
+            {editing && (
+              <Form.Item label="ID">
+                <Input value={String(editing.id)} readOnly disabled />
+              </Form.Item>
+            )}
+            {accountFields.map((field) => (
+              <Form.Item key={field.name} name={[field.name]} label={field.label} rules={field.required ? [{ required: true, message: `请输入${field.label}` }] : undefined} valuePropName={field.boolean ? 'checked' : 'value'} help={field.help}>
+                {field.boolean ? <Checkbox /> : field.number ? <InputNumber min={1} style={{ width: '100%' }} /> : field.options ? <Select allowClear options={field.options} /> : field.textarea ? <TextArea rows={3} /> : <Input placeholder={field.placeholder} />}
+              </Form.Item>
+            ))}
+          </Form>
+
+          {editing && (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+                <Space direction="vertical" size={0}>
+                  <Text strong>该账号关联域名</Text>
+                  <Text type="secondary">{accountDomainsLoading ? '正在刷新该账号的域名落库结果…' : `当前共 ${accountDomains.length} 条`}</Text>
+                </Space>
+                <Button size="small" onClick={() => void refreshAccountContext(editing.id)} loading={accountDomainsLoading || loading}>刷新域名列表</Button>
+              </Space>
+              {accountDomainsError && <Alert type="warning" showIcon message="账号域名列表加载失败" description={accountDomainsError} />}
+              <Table<AssetDomain>
+                rowKey="id"
+                size="small"
+                loading={accountDomainsLoading}
+                dataSource={accountDomains}
+                pagination={{ pageSize: 5, hideOnSinglePage: true }}
+                scroll={{ x: 900 }}
+                columns={[
+                  { title: '域名', dataIndex: 'domain', width: 220 },
+                  { title: 'CDN服务商', dataIndex: 'cdn_provider', width: 120, render: renderValue },
+                  { title: '环境', dataIndex: 'environment', width: 120, render: renderValue },
+                  { title: '租户', dataIndex: 'tenant', width: 120, render: renderValue },
+                  { title: '状态', dataIndex: 'status', width: 100, render: (value) => statusTag(String(value || 'unknown')) },
+                  { title: '更新时间', dataIndex: 'updated_at', width: 170, render: (value: string | null) => formatDateTime(value) },
+                ]}
+              />
+            </Space>
+          )}
+        </Space>
       </Drawer>
 
       <Modal title={previewData ? `账号域名预览 - ${previewData.account.account_name}` : '账号域名预览'} open={previewOpen} width={1100} onCancel={() => setPreviewOpen(false)} footer={null}>
@@ -1128,7 +1253,7 @@ const accountFields: FieldConfig<AssetAccount>[] = [
   { name: 'department', label: '部门', table: false },
   { name: 'usage_scope', label: '使用范围', textarea: true, table: false },
   { name: 'environment_scope', label: '环境范围' },
-  { name: 'credential_ref_id', label: '凭证索引ID', number: true, table: false },
+  { name: 'credential_ref_id', label: '凭证索引ID', number: true, table: false, help: '这里填 credential_refs.id（即凭证索引这条记录自己的 ID），不是账号 ID。' },
   { name: 'mfa_enabled', label: 'MFA', boolean: true },
   { name: 'status', label: '状态', options: accountStatusOptions },
   { name: 'remark', label: '备注', textarea: true, table: false },
@@ -1174,7 +1299,7 @@ const credentialFields: FieldConfig<CredentialRef>[] = [
   { name: 'ref_type', label: '凭证类型', options: credentialTypeOptions },
   { name: 'storage_type', label: '存储类型', options: storageTypeOptions },
   { name: 'storage_path', label: '存储路径/条目名' },
-  { name: 'related_account_id', label: '关联账号ID', number: true },
+  { name: 'related_account_id', label: '关联账号ID', number: true, help: '这里填 asset_accounts.id（即账号这条记录自己的 ID），不是凭证索引 ID。' },
   { name: 'visibility_level', label: '可见级别' },
   { name: 'owner', label: '负责人' },
   { name: 'remark', label: '备注', textarea: true, table: false },
