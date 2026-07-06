@@ -873,10 +873,10 @@ export class AssetsService {
     const message = String(body?.Message || body?.message || error?.message || '').trim();
     const recommend = String(body?.Recommend || body?.recommend || '').trim();
     const summary = [code, message, recommend].filter(Boolean).join(': ');
-    if (['NoPermission', 'NoPermission.SoldOut', 'ServiceNotOpen', 'ServiceUnavailable', 'InvalidAccountStatus.NotOpenDcdn'].includes(code)) {
+    if (['NoPermission', 'NoPermission.SoldOut', 'ServiceNotOpen', 'ServiceUnavailable', 'InvalidAccountStatus.NotOpenDcdn', 'DcdnServiceNotFound'].includes(code)) {
       return new UnprocessableEntityException('当前账号未开通阿里云 DCDN 服务，请改用 ESA 或检查账号服务开通状态');
     }
-    if (/not\s*open\s*dcdn|未开通.*DCDN|service.*not.*open|dcdn.*not.*opened|product.*not.*opened/i.test(summary)) {
+    if (/DcdnServiceNotFound|not\s*open\s*dcdn|未开通.*DCDN|service.*not.*open|dcdn.*not.*opened|product.*not.*opened|service\s+is\s+not\s+activated/i.test(summary)) {
       return new UnprocessableEntityException('当前账号未开通阿里云 DCDN 服务，请改用 ESA 或检查账号服务开通状态');
     }
     if (/InvalidAccessKeyId|SignatureDoesNotMatch|IncompleteSignature|Forbidden\.AccessKeyDisabled/i.test(summary)) {
