@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS `asset_accounts` (
   `account_type` varchar(64) NOT NULL DEFAULT 'other',
   `provider` varchar(64) DEFAULT NULL,
   `domain_service_type` varchar(32) NOT NULL DEFAULT 'unknown',
+  `domain_service_types` json DEFAULT NULL,
   `login_url` varchar(512) DEFAULT NULL,
   `account_identifier` varchar(255) DEFAULT NULL,
   `owner` varchar(128) DEFAULT NULL,

@@ -3,6 +3,7 @@ import {
   App as AntApp,
   Button,
   Checkbox,
+  Dropdown,
   Descriptions,
   Drawer,
   Form,
@@ -88,6 +89,7 @@ type FieldConfig<T extends AssetEntity> = {
   textarea?: boolean;
   number?: boolean;
   boolean?: boolean;
+  multiple?: boolean;
   options?: Array<{ label: string; value: string }>;
   placeholder?: string;
   help?: string;
@@ -216,6 +218,20 @@ const domainServiceTypeTag = (value?: string | null) => {
   const color = normalized === 'dcdn' ? 'blue' : normalized === 'esa' ? 'purple' : 'default';
   const label = domainServiceTypeOptions.find((item) => item.value === normalized)?.label || normalized;
   return <Tag color={color}>{label}</Tag>;
+};
+
+const normalizeAccountServiceTypes = (account?: Partial<AssetAccount> | null) => {
+  const raw = account?.domain_service_types;
+  const list = Array.isArray(raw) ? raw : [];
+  const normalized = list.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
+  if (normalized.length > 0) return Array.from(new Set(normalized));
+  const fallback = String(account?.domain_service_type || 'unknown').trim().toLowerCase();
+  return fallback ? [fallback] : ['unknown'];
+};
+
+const renderAccountServiceTypes = (account?: Partial<AssetAccount> | null) => {
+  const items = normalizeAccountServiceTypes(account);
+  return <Space size={4} wrap>{items.map((item) => <span key={item}>{domainServiceTypeTag(item)}</span>)}</Space>;
 };
 
 const tryParseJsonObject = (value?: string | null): Record<string, any> | null => {
@@ -543,6 +559,7 @@ const AccountManagementTab: React.FC = () => {
     setAccountDomains([]);
     setAccountDomainsError(null);
     form.resetFields();
+    form.setFieldsValue({ domain_service_types: ['unknown'] });
     try {
       const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
       setCredentialRefs(refs.items);
@@ -556,7 +573,7 @@ const AccountManagementTab: React.FC = () => {
 
   const openEdit = async (record: AssetAccount) => {
     setEditing(record);
-    form.setFieldsValue(record);
+    form.setFieldsValue({ ...record, domain_service_types: normalizeAccountServiceTypes(record) });
     try {
       const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
       setCredentialRefs(refs.items);
@@ -587,13 +604,13 @@ const AccountManagementTab: React.FC = () => {
     }
   };
 
-  const handlePreview = async (record: AssetAccount) => {
+  const handlePreview = async (record: AssetAccount, service: 'dcdn' | 'esa' = 'dcdn') => {
     setPreviewOpen(true);
     setPreviewLoading(true);
     setPreviewError(null);
     setSyncResult(null);
     try {
-      setPreviewData(await previewAccountAliyunDcdnDomains(record.id));
+      setPreviewData(await previewAccountAliyunDcdnDomains(record.id, service));
     } catch (e: any) {
       setPreviewData(null);
       setPreviewError(getErrorMessage(e, '账号域名预览失败'));
@@ -602,20 +619,20 @@ const AccountManagementTab: React.FC = () => {
     }
   };
 
-  const handleSync = async (record: AssetAccount, dryRun: boolean) => {
+  const handleSync = async (record: AssetAccount, dryRun: boolean, service: 'dcdn' | 'esa' = 'dcdn') => {
     setPreviewOpen(true);
-    if (!previewData || previewData.account.id !== record.id) {
-      await handlePreview(record);
+    if (!previewData || previewData.account.id !== record.id || (previewData as any).service !== service) {
+      await handlePreview(record, service);
     }
     if (dryRun) setPreviewLoading(true);
     else setSyncLoading(true);
     setPreviewError(null);
     try {
-      const result = await syncAccountAliyunDcdnDomains(record.id, { dryRun });
+      const result = await syncAccountAliyunDcdnDomains(record.id, { dryRun, service });
       setSyncResult(result);
       message.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${result.summary.total} 条，新增 ${result.summary.created}，更新 ${result.summary.updated}，不变 ${result.summary.unchanged}，冲突 ${result.summary.conflicts}`);
       const [nextPreview] = await Promise.all([
-        previewAccountAliyunDcdnDomains(record.id),
+        previewAccountAliyunDcdnDomains(record.id, service),
         refreshAccountContext(record.id),
       ]);
       setPreviewData(nextPreview);
@@ -634,7 +651,7 @@ const AccountManagementTab: React.FC = () => {
     { title: '账号名称', dataIndex: 'account_name', key: 'account_name', width: 220, ellipsis: true, fixed: 'left' },
     { title: '账号类型', dataIndex: 'account_type', key: 'account_type', width: 140 },
     { title: '服务商', dataIndex: 'provider', key: 'provider', width: 100 },
-    { title: '域名服务类型', dataIndex: 'domain_service_type', key: 'domain_service_type', width: 130, render: (value) => domainServiceTypeTag(String(value || 'unknown')) },
+    { title: '域名服务能力', dataIndex: 'domain_service_types', key: 'domain_service_types', width: 180, render: (_value, record) => renderAccountServiceTypes(record) },
     { title: '账号标识', dataIndex: 'account_identifier', key: 'account_identifier', width: 180, ellipsis: true, render: renderValue },
     { title: '凭证索引', dataIndex: 'credential_ref_id', key: 'credential_ref_id', width: 220, render: (value: number | null) => {
       if (!value) return '-';
@@ -659,22 +676,38 @@ const AccountManagementTab: React.FC = () => {
       render: (_, record) => {
         const isAliyun = String(record.provider || '') === 'aliyun';
         const hasCredential = Boolean(record.credential_ref_id);
-        const serviceType = String(record.domain_service_type || 'unknown').trim().toLowerCase();
+        const serviceTypes = normalizeAccountServiceTypes(record);
         const syncDisabled = !isAliyun || !hasCredential || record.deleted_at != null;
-        const isDcdn = serviceType === 'dcdn';
-        const isEsa = serviceType === 'esa';
-        const previewLabel = isDcdn ? '预览DCDN域名' : isEsa ? '预览ESA域名' : '预览域名';
-        const syncLabel = isDcdn ? '同步DCDN域名' : isEsa ? '同步ESA域名' : '同步域名';
-        const dryRunLabel = isDcdn ? 'DCDN Dry Run' : isEsa ? 'ESA Dry Run' : 'Dry Run';
-        const unsupportedReason = !isAliyun ? '当前仅支持阿里云账号' : !hasCredential ? '请先绑定凭证索引' : serviceType === 'unknown' ? '请先配置域名服务类型' : isEsa ? 'ESA 同步能力暂未正式开放' : null;
+        const unsupportedReason = !isAliyun ? '当前仅支持阿里云账号' : !hasCredential ? '请先绑定凭证索引' : serviceTypes.includes('unknown') && serviceTypes.length === 1 ? '请先配置域名服务能力' : null;
+        const previewItems = serviceTypes.filter((item) => item !== 'unknown').map((service) => ({
+          key: `preview-${service}`,
+          label: service === 'dcdn' ? '预览DCDN域名' : '预览ESA域名',
+          onClick: () => handlePreview(record, service as 'dcdn' | 'esa'),
+        }));
+        const dryRunItems = serviceTypes.filter((item) => item !== 'unknown').map((service) => ({
+          key: `dryrun-${service}`,
+          label: service === 'dcdn' ? 'DCDN Dry Run' : 'ESA Dry Run',
+          onClick: () => handleSync(record, true, service as 'dcdn' | 'esa'),
+        }));
+        const syncItems = serviceTypes.filter((item) => item !== 'unknown').map((service) => ({
+          key: `sync-${service}`,
+          label: service === 'dcdn' ? '同步DCDN域名' : '同步ESA域名',
+          disabled: service !== 'dcdn',
+          onClick: () => handleSync(record, false, service as 'dcdn' | 'esa'),
+        }));
         return (
           <Space size={8} wrap>
             <Button size="small" onClick={() => void openEdit(record)}>编辑</Button>
-            <Button size="small" disabled={syncDisabled || Boolean(unsupportedReason)} onClick={() => handlePreview(record)}>{previewLabel}</Button>
-            <Button size="small" disabled={syncDisabled || syncLoading || Boolean(unsupportedReason)} onClick={() => handleSync(record, true)}>{dryRunLabel}</Button>
-            <Popconfirm title={`确认同步账号 ${record.account_name} 的阿里云 DCDN 域名？`} onConfirm={() => handleSync(record, false)} disabled={syncDisabled || !isDcdn}>
-              <Button size="small" type="primary" disabled={syncDisabled || !isDcdn} loading={syncLoading}>{syncLabel}</Button>
-            </Popconfirm>
+            <Dropdown menu={{ items: previewItems }} disabled={syncDisabled || Boolean(unsupportedReason) || previewItems.length === 0}>
+              <Button size="small">预览域名</Button>
+            </Dropdown>
+            <Dropdown menu={{ items: dryRunItems }} disabled={syncDisabled || syncLoading || Boolean(unsupportedReason) || dryRunItems.length === 0}>
+              <Button size="small">Dry Run</Button>
+            </Dropdown>
+            <Dropdown menu={{ items: syncItems }} disabled={syncDisabled || syncLoading || Boolean(unsupportedReason) || syncItems.length === 0}>
+              <Button size="small" type="primary" loading={syncLoading}>同步域名</Button>
+            </Dropdown>
+            {serviceTypes.includes('esa') && <Tag color="purple">ESA 同步能力暂未正式开放</Tag>}
             {unsupportedReason && !record.deleted_at && <Tag color="warning">{unsupportedReason}</Tag>}
             {record.deleted_at ? (
               <Button size="small" onClick={async () => { await restoreAssetAccount(record.id); message.success('已恢复'); await load(); }}>恢复</Button>
@@ -711,7 +744,7 @@ const AccountManagementTab: React.FC = () => {
               <Descriptions size="small" bordered column={2} title="绑定凭证详情">
                 <Descriptions.Item label="凭证名称">{selectedCredentialRef.ref_name}</Descriptions.Item>
                 <Descriptions.Item label="凭证类型">{renderValue(selectedCredentialRef.ref_type)}</Descriptions.Item>
-                <Descriptions.Item label="域名服务类型">{domainServiceTypeTag(editing.domain_service_type)}</Descriptions.Item>
+                <Descriptions.Item label="域名服务能力">{renderAccountServiceTypes(editing)}</Descriptions.Item>
                 <Descriptions.Item label="存储类型">{renderValue(selectedCredentialRef.storage_type)}</Descriptions.Item>
                 <Descriptions.Item label="可见级别">{renderValue(selectedCredentialRef.visibility_level)}</Descriptions.Item>
                 <Descriptions.Item label="storage_path" span={2}>{renderValue(selectedCredentialRef.storage_path)}</Descriptions.Item>
@@ -736,7 +769,7 @@ const AccountManagementTab: React.FC = () => {
             )}
             {accountFields.map((field) => (
               <Form.Item key={field.name} name={[field.name]} label={field.label} rules={field.required ? [{ required: true, message: `请输入${field.label}` }] : undefined} valuePropName={field.boolean ? 'checked' : 'value'} help={field.help}>
-                {field.boolean ? <Checkbox /> : field.number ? <InputNumber min={1} style={{ width: '100%' }} /> : field.options ? <Select allowClear options={field.options} /> : field.textarea ? <TextArea rows={3} /> : <Input placeholder={field.placeholder} />}
+                {field.boolean ? <Checkbox /> : field.number ? <InputNumber min={1} style={{ width: '100%' }} /> : field.options ? <Select allowClear mode={field.multiple ? 'multiple' : undefined} options={field.options} /> : field.textarea ? <TextArea rows={3} /> : <Input placeholder={field.placeholder} />}
               </Form.Item>
             ))}
           </Form>
@@ -774,7 +807,7 @@ const AccountManagementTab: React.FC = () => {
 
       <Modal title={previewData ? `账号域名预览 - ${previewData.account.account_name}` : '账号域名预览'} open={previewOpen} width={1100} onCancel={() => setPreviewOpen(false)} footer={null}>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；共 ${previewData.total} 条`} />}
+          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`服务：${(previewData as any).service || 'dcdn'}；Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；共 ${previewData.total} 条`} />}
           {previewError && <Alert type="error" showIcon message="账号域名操作失败" description={previewError} />}
           {syncResult && <Alert type={syncResult.summary.dryRun ? 'warning' : 'success'} showIcon message={syncResult.summary.dryRun ? 'Dry Run 结果' : '同步完成'} description={`共 ${syncResult.summary.total} 条，新增 ${syncResult.summary.created}，更新 ${syncResult.summary.updated}，不变 ${syncResult.summary.unchanged}，冲突 ${syncResult.summary.conflicts}`} />}
           <Table<AliyunDcdnDomainPreviewItem> rowKey={(record) => record.domainId || record.domain} loading={previewLoading} dataSource={previewData?.items || []} pagination={{ pageSize: 10, showSizeChanger: true }} scroll={{ x: 1000 }} columns={[
@@ -1270,7 +1303,7 @@ const accountFields: FieldConfig<AssetAccount>[] = [
   { name: 'account_name', label: '账号名称', required: true },
   { name: 'account_type', label: '账号类型', options: accountTypeOptions },
   { name: 'provider', label: '服务商', placeholder: '如 wangsu / knownsec / aliyun', help: '手动输入服务商 code，建议使用稳定英文标识；例如网宿 wangsu、知道创宇 knownsec。' },
-  { name: 'domain_service_type', label: '域名服务类型', options: domainServiceTypeOptions, help: '用于区分该账号应走 DCDN 还是 ESA，同步按钮会按此分流；未确认时请选择 unknown。' },
+  { name: 'domain_service_types', label: '域名服务能力', options: domainServiceTypeOptions, multiple: true, help: '用于标记该账号支持哪些域名服务；若同时支持 DCDN / ESA，请多选。单次预览/同步时再显式选择目标服务。' },
   { name: 'account_identifier', label: '账号标识' },
   { name: 'login_url', label: '登录地址', table: false },
   { name: 'owner', label: '负责人' },

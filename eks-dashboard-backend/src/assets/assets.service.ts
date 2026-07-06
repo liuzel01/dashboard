@@ -90,6 +90,7 @@ const accountConfig: AssetConfig = {
     'account_type',
     'provider',
     'domain_service_type',
+    'domain_service_types',
     'login_url',
     'account_identifier',
     'owner',
@@ -418,10 +419,10 @@ export class AssetsService {
     });
   }
 
-  async previewAccountAliyunDcdnDomains(actor: ActorContext, accountId: number) {
+  async previewAccountAliyunDcdnDomains(actor: ActorContext, accountId: number, service = 'dcdn') {
     this.ensureAssetPermission(actor);
     const account = await this.getSyncableAccount(accountId, 'aliyun');
-    this.ensureAliyunDcdnAccount(account);
+    this.ensureAliyunDcdnAccount(account, service);
     const credentials = await this.resolveAccountSiteConfCredentials(account);
     const client = await this.createAliyunDcdnClient(credentials);
     const timeoutMs = await this.getAliyunTimeoutMs();
@@ -457,6 +458,7 @@ export class AssetsService {
         account_identifier: String(account.account_identifier || ''),
         provider: String(account.provider || ''),
       },
+      service,
       endpoint: credentials.endpoint,
       fetchedAt: new Date().toISOString(),
       total: items.length,
@@ -467,7 +469,8 @@ export class AssetsService {
 
   async syncAccountAliyunDcdnDomains(actor: ActorContext, accountId: number, dto: SyncAccountDomainsDto = {}) {
     this.ensureAssetPermission(actor);
-    const preview = await this.previewAccountAliyunDcdnDomains(actor, accountId);
+    const service = String(dto.service || 'dcdn').trim().toLowerCase() || 'dcdn';
+    const preview = await this.previewAccountAliyunDcdnDomains(actor, accountId, service);
     const dryRun = dto.dryRun !== false;
     const planned = preview.items.map((item) => this.buildAliyunDcdnDomainSyncPayload(item, {
       accountId: preview.account.id,
@@ -525,7 +528,7 @@ export class AssetsService {
         }
       }
 
-      return { provider: 'aliyun_dcdn', account: preview.account, fetchedAt: preview.fetchedAt, summary, items };
+      return { provider: 'aliyun_dcdn', service, account: preview.account, fetchedAt: preview.fetchedAt, summary, items };
     });
   }
 
@@ -853,18 +856,44 @@ export class AssetsService {
     return account;
   }
 
-  private getAccountDomainServiceType(account: DbRow) {
-    return String(account.domain_service_type || 'unknown').trim().toLowerCase() || 'unknown';
+  private getAccountDomainServiceTypes(account: DbRow) {
+    const rawList = account.domain_service_types;
+    const parsed = Array.isArray(rawList)
+      ? rawList
+      : typeof rawList === 'string' && rawList.trim()
+      ? (() => {
+          try {
+            const value = JSON.parse(rawList);
+            return Array.isArray(value) ? value : [rawList];
+          } catch {
+            return rawList.split(',');
+          }
+        })()
+      : [];
+    const normalized = parsed
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.indexOf(value) === index);
+    if (normalized.length > 0) return normalized;
+    const fallback = String(account.domain_service_type || 'unknown').trim().toLowerCase();
+    return fallback ? [fallback] : ['unknown'];
   }
 
-  private ensureAliyunDcdnAccount(account: DbRow) {
-    const serviceType = this.getAccountDomainServiceType(account);
-    if (serviceType === 'esa') {
-      throw new UnprocessableEntityException('当前账号配置为阿里云 ESA，请改用 ESA 同步流程；DCDN 同步不适用该账号');
+  private ensureAccountSupportsService(account: DbRow, service: string) {
+    const supported = this.getAccountDomainServiceTypes(account);
+    if (!supported.includes(service)) {
+      if (supported.includes('unknown')) {
+        throw new BadRequestException(`当前账号未配置域名服务能力，请先配置 domain_service_types 并包含 ${service}`);
+      }
+      throw new UnprocessableEntityException(`当前账号未配置 ${service.toUpperCase()} 服务能力；当前能力：${supported.join(', ')}`);
     }
-    if (serviceType !== 'dcdn') {
-      throw new BadRequestException('当前账号未配置域名服务类型，请先将 domain_service_type 配置为 dcdn 或 esa');
+  }
+
+  private ensureAliyunDcdnAccount(account: DbRow, service = 'dcdn') {
+    if (service === 'esa') {
+      throw new UnprocessableEntityException('ESA 同步能力暂未正式开放，请稍后使用显式 ESA 流程');
     }
+    this.ensureAccountSupportsService(account, 'dcdn');
   }
 
   private mapAliyunDcdnError(error: any) {
@@ -1205,7 +1234,10 @@ export class AssetsService {
   private normalizePayload(payload: Record<string, unknown>) {
     const data: Record<string, unknown> = {};
     Object.entries(payload).forEach(([key, value]) => {
-      if (typeof value === 'string') {
+      if (Array.isArray(value)) {
+        const normalized = value.map((item) => String(item || '').trim()).filter(Boolean);
+        data[key] = normalized.length ? JSON.stringify(normalized) : null;
+      } else if (typeof value === 'string') {
         const trimmed = value.trim();
         data[key] = trimmed === '' ? null : trimmed;
       } else if (typeof value === 'boolean') {

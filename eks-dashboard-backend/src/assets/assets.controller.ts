@@ -120,9 +120,10 @@ export class AssetsController {
   async previewAccountAliyunDcdnDomains(
     @Headers('authorization') authorization: string | undefined,
     @Param('id', ParseIntPipe) id: number,
+    @Query('service') service?: string,
   ) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
-    return this.service.previewAccountAliyunDcdnDomains(actor, id);
+    return this.service.previewAccountAliyunDcdnDomains(actor, id, service);
   }
 
   @Post('accounts/:id/aliyun-dcdn/domains/sync')

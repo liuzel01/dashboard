@@ -945,6 +945,7 @@ export type AssetAccount = {
   account_type: string;
   provider: string | null;
   domain_service_type: string | null;
+  domain_service_types?: string[] | null;
   login_url: string | null;
   account_identifier: string | null;
   owner: string | null;
@@ -962,6 +963,7 @@ export type AssetAccount = {
 
 export type AccountAliyunDcdnDomainPreviewResponse = {
   provider: 'aliyun_dcdn';
+  service?: 'dcdn' | 'esa' | string;
   account: { id: number; account_name: string; account_identifier: string; provider: string };
   endpoint: string;
   fetchedAt: string;
@@ -972,6 +974,7 @@ export type AccountAliyunDcdnDomainPreviewResponse = {
 
 export type AccountAliyunDcdnDomainSyncResponse = {
   provider: 'aliyun_dcdn';
+  service?: 'dcdn' | 'esa' | string;
   account: { id: number; account_name: string; account_identifier: string; provider: string };
   fetchedAt: string;
   summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; dryRun: boolean };
@@ -1252,12 +1255,12 @@ export const syncAliyunDcdnDomains = async (data: { dryRun?: boolean } = {}) => 
   return response.data as AliyunDcdnDomainSyncResponse;
 };
 
-export const previewAccountAliyunDcdnDomains = async (accountId: number) => {
-  const response = await api.get(`/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`);
+export const previewAccountAliyunDcdnDomains = async (accountId: number, service: 'dcdn' | 'esa' = 'dcdn') => {
+  const response = await api.get(`/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`, { params: { service } });
   return response.data as AccountAliyunDcdnDomainPreviewResponse;
 };
 
-export const syncAccountAliyunDcdnDomains = async (accountId: number, data: { dryRun?: boolean } = {}) => {
+export const syncAccountAliyunDcdnDomains = async (accountId: number, data: { dryRun?: boolean; service?: 'dcdn' | 'esa' } = {}) => {
   const response = await api.post(`/assets/accounts/${accountId}/aliyun-dcdn/domains/sync`, data);
   return response.data as AccountAliyunDcdnDomainSyncResponse;
 };
