@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
 import axios from 'axios';
 import { createHash, createHmac } from 'crypto';
 const { RPCClient } = require('@alicloud/pop-core');
@@ -89,6 +89,7 @@ const accountConfig: AssetConfig = {
     'account_name',
     'account_type',
     'provider',
+    'domain_service_type',
     'login_url',
     'account_identifier',
     'owner',
@@ -420,6 +421,7 @@ export class AssetsService {
   async previewAccountAliyunDcdnDomains(actor: ActorContext, accountId: number) {
     this.ensureAssetPermission(actor);
     const account = await this.getSyncableAccount(accountId, 'aliyun');
+    this.ensureAliyunDcdnAccount(account);
     const credentials = await this.resolveAccountSiteConfCredentials(account);
     const client = await this.createAliyunDcdnClient(credentials);
     const timeoutMs = await this.getAliyunTimeoutMs();
@@ -428,20 +430,24 @@ export class AssetsService {
     const items: AliyunDcdnDomainPreviewItem[] = [];
     let totalCount = 0;
 
-    do {
-      const resp = await client.request('DescribeDcdnUserDomains', { PageNumber: pageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
-      totalCount = Number(resp?.TotalCount || 0);
-      const pageData = resp?.Domains?.PageData || [];
-      const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
-      items.push(...rows
-        .map((row: Record<string, unknown>) => this.parseAliyunDcdnDomain(row, {
-          accountId: Number(account.id),
-          accountName: String(account.account_name || ''),
-          accountIdentifier: String(account.account_identifier || ''),
-        }))
-        .filter((item: AliyunDcdnDomainPreviewItem | null): item is AliyunDcdnDomainPreviewItem => Boolean(item)));
-      pageNumber += 1;
-    } while (items.length < totalCount && pageNumber <= 1000);
+    try {
+      do {
+        const resp = await client.request('DescribeDcdnUserDomains', { PageNumber: pageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+        totalCount = Number(resp?.TotalCount || 0);
+        const pageData = resp?.Domains?.PageData || [];
+        const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
+        items.push(...rows
+          .map((row: Record<string, unknown>) => this.parseAliyunDcdnDomain(row, {
+            accountId: Number(account.id),
+            accountName: String(account.account_name || ''),
+            accountIdentifier: String(account.account_identifier || ''),
+          }))
+          .filter((item: AliyunDcdnDomainPreviewItem | null): item is AliyunDcdnDomainPreviewItem => Boolean(item)));
+        pageNumber += 1;
+      } while (items.length < totalCount && pageNumber <= 1000);
+    } catch (error: any) {
+      throw this.mapAliyunDcdnError(error) || error;
+    }
 
     return {
       provider: 'aliyun_dcdn',
@@ -844,6 +850,33 @@ export class AssetsService {
     if (provider && String(account.provider || '').trim() !== provider) throw new BadRequestException(`账号 provider 不是 ${provider}`);
     if (!account.credential_ref_id) throw new BadRequestException('账号未绑定凭证索引');
     return account;
+  }
+
+  private getAccountDomainServiceType(account: DbRow) {
+    return String(account.domain_service_type || 'unknown').trim().toLowerCase() || 'unknown';
+  }
+
+  private ensureAliyunDcdnAccount(account: DbRow) {
+    const serviceType = this.getAccountDomainServiceType(account);
+    if (serviceType === 'esa') {
+      throw new UnprocessableEntityException('当前账号配置为阿里云 ESA，请改用 ESA 同步流程；DCDN 同步不适用该账号');
+    }
+    if (serviceType !== 'dcdn') {
+      throw new BadRequestException('当前账号未配置域名服务类型，请先将 domain_service_type 配置为 dcdn 或 esa');
+    }
+  }
+
+  private mapAliyunDcdnError(error: any) {
+    const code = String(error?.data?.Code || error?.code || error?.name || '').trim();
+    const message = String(error?.data?.Message || error?.message || '').trim();
+    const summary = [code, message].filter(Boolean).join(': ');
+    if (['NoPermission', 'NoPermission.SoldOut', 'ServiceNotOpen', 'ServiceUnavailable', 'InvalidAccountStatus.NotOpenDcdn'].includes(code)) {
+      return new UnprocessableEntityException('当前账号未开通阿里云 DCDN 服务，请改用 ESA 或检查账号服务开通状态');
+    }
+    if (/not\s*open\s*dcdn|未开通.*DCDN|service.*not.*open/i.test(summary)) {
+      return new UnprocessableEntityException('当前账号未开通阿里云 DCDN 服务，请改用 ESA 或检查账号服务开通状态');
+    }
+    return null;
   }
 
   private async resolveAccountSiteConfCredentials(account: DbRow) {

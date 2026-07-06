@@ -134,6 +134,10 @@ export class CreateAssetAccountDto {
 
   @IsOptional()
   @IsString()
+  domain_service_type?: string;
+
+  @IsOptional()
+  @IsString()
   login_url?: string;
 
   @IsOptional()

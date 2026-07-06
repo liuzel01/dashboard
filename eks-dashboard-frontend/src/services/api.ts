@@ -944,6 +944,7 @@ export type AssetAccount = {
   account_name: string;
   account_type: string;
   provider: string | null;
+  domain_service_type: string | null;
   login_url: string | null;
   account_identifier: string | null;
   owner: string | null;
