@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
 import axios from 'axios';
 import { createHash, createHmac } from 'crypto';
 const { RPCClient } = require('@alicloud/pop-core');
@@ -733,13 +733,14 @@ export class AssetsService {
   private async createAliyunDcdnClient(credentials?: { accessKeyId: string; accessKeySecret: string; endpoint: string }) {
     const accessKeyId = credentials?.accessKeyId || (await this.siteConf.getString('cdn.aliyun.access_key_id', '')).trim();
     const accessKeySecret = credentials?.accessKeySecret || (await this.siteConf.getString('cdn.aliyun.access_key_secret', '')).trim();
+    const endpoint = credentials?.endpoint?.trim() || await this.getAliyunDcdnEndpoint();
     if (!accessKeyId || !accessKeySecret) {
       throw new BadRequestException('Aliyun credentials are incomplete. Configure cdn.aliyun.access_key_id and cdn.aliyun.access_key_secret.');
     }
     return new RPCClient({
       accessKeyId,
       accessKeySecret,
-      endpoint: await this.getAliyunDcdnEndpoint(),
+      endpoint,
       apiVersion: '2018-01-15',
       opts: { timeout: await this.getAliyunTimeoutMs() },
     });
@@ -867,14 +868,22 @@ export class AssetsService {
   }
 
   private mapAliyunDcdnError(error: any) {
-    const code = String(error?.data?.Code || error?.code || error?.name || '').trim();
-    const message = String(error?.data?.Message || error?.message || '').trim();
-    const summary = [code, message].filter(Boolean).join(': ');
+    const body = error?.data || error?.body || error?.result || error?.response?.data || null;
+    const code = String(body?.Code || body?.code || error?.code || error?.name || '').trim();
+    const message = String(body?.Message || body?.message || error?.message || '').trim();
+    const recommend = String(body?.Recommend || body?.recommend || '').trim();
+    const summary = [code, message, recommend].filter(Boolean).join(': ');
     if (['NoPermission', 'NoPermission.SoldOut', 'ServiceNotOpen', 'ServiceUnavailable', 'InvalidAccountStatus.NotOpenDcdn'].includes(code)) {
       return new UnprocessableEntityException('当前账号未开通阿里云 DCDN 服务，请改用 ESA 或检查账号服务开通状态');
     }
-    if (/not\s*open\s*dcdn|未开通.*DCDN|service.*not.*open/i.test(summary)) {
+    if (/not\s*open\s*dcdn|未开通.*DCDN|service.*not.*open|dcdn.*not.*opened|product.*not.*opened/i.test(summary)) {
       return new UnprocessableEntityException('当前账号未开通阿里云 DCDN 服务，请改用 ESA 或检查账号服务开通状态');
+    }
+    if (/InvalidAccessKeyId|SignatureDoesNotMatch|IncompleteSignature|Forbidden\.AccessKeyDisabled/i.test(summary)) {
+      return new BadRequestException('阿里云账号凭证无效，请检查 siteconf 中配置的 access_key_id / access_key_secret');
+    }
+    if (/DomainRecordNotBelongToUser|Forbidden|NoPermission/i.test(summary)) {
+      return new BadRequestException(message || '当前阿里云账号无权访问 DCDN 域名数据，请检查账号权限');
     }
     return null;
   }
