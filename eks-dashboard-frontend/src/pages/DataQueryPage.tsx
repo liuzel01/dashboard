@@ -32,6 +32,7 @@ import {
   getOtcMerchantInfo,
   updateTraderNickName,
   updateOtcMerchantName,
+  disableOtcUserTrade,
   getAuthRecord,
   updateAuthRecord,
 } from '../services/api';
@@ -373,6 +374,30 @@ const DataQueryPage: React.FC = () => {
     }
   };
 
+  const showDisableOtcTradeConfirm = () => {
+    if (!userInfo?.tenant_user_id) {
+      message.error('无法禁用 OTC 交易：缺少用户 UID。');
+      return;
+    }
+    modal.confirm({
+      title: '确认禁用 OTC 交易？',
+      content: `是否确定要将用户 ${userInfo.tenant_user_id} 的 OTC 交易状态设为禁用？`,
+      okText: '确认禁用',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await disableOtcUserTrade(String(userInfo.tenant_user_id));
+          message.success('OTC 交易已成功禁用！');
+        } catch (err) {
+          const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+          const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
+          message.error(`禁用 OTC 交易失败: ${errorMessage}`);
+        }
+      },
+    });
+  };
+
   const showDeactivateConfirm = () => {
     modal.confirm({
       title: '确认注销账号？',
@@ -478,6 +503,9 @@ const DataQueryPage: React.FC = () => {
       <Menu>
         <Menu.Item key="edit" onClick={showEditModal}>
           编辑信息
+        </Menu.Item>
+        <Menu.Item key="disable-otc" danger onClick={showDisableOtcTradeConfirm}>
+          禁用 OTC 交易
         </Menu.Item>
         <Menu.Item key="deactivate" danger onClick={showDeactivateConfirm}>
           注销账号

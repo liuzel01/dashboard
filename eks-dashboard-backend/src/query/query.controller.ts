@@ -182,6 +182,15 @@ export class QueryController {
     );
   }
 
+  @Post('users/:uid/otc-user/disable')
+  async disableOtcUserTrade(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    return this.queryService.disableOtcUserTrade(environmentId, uid);
+  }
+
   @Get('users/:uid/auth-record')
   async getAuthRecord(
     @Headers('x-target-environment') environmentId: string,

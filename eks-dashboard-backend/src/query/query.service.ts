@@ -504,7 +504,7 @@ export class QueryService {
     name: string,
     tenantId: number,
   ) {
-    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+    if (!(await this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId))) {
       throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
     }
 
@@ -531,6 +531,33 @@ export class QueryService {
       throw new InternalServerErrorException(
         'Failed to update OTC merchant name',
       );
+    }
+  }
+
+  async disableOtcUserTrade(environmentId: string, uid: string) {
+    if (!(await this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId))) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
+    try {
+      const data = await this.queryGatewayClient.disableOtcUserTrade(environmentId, uid);
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || `OTC user with tenant_user_id ${uid} not found.`);
+      }
+      if (data?.status === 'noop') {
+        return { message: data?.message || 'OTC trading is already disabled.' };
+      }
+      return { message: data?.message || 'OTC trading disabled successfully.' };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `Error disabling OTC trade via agent for uid ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException('Failed to disable OTC trade via agent');
     }
   }
 

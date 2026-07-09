@@ -161,6 +161,11 @@ export const updateOtcMerchantName = async (uid: string, name: string, tenantId:
   return response.data;
 };
 
+export const disableOtcUserTrade = async (uid: string) => {
+  const response = await api.post(`/query/users/${uid}/otc-user/disable`);
+  return response.data;
+};
+
 export const getAuthRecord = async (uid: string, tenantId: number, userId?: number) => {
   const response = await api.get(`/query/users/${uid}/auth-record`, { params: { tenantId, userId } });
   return response.data;
