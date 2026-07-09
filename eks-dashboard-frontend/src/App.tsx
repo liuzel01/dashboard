@@ -12,6 +12,7 @@ import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import S3UploadPage from './pages/S3UploadPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import AuditLogPage from './pages/AuditLogPage';
+import SslCertificateExportPage from './pages/SslCertificateExportPage';
 import LineOnboardingPage from './pages/LineOnboardingPage';
 import LineListPage from './pages/LineListPage';
 import ForbiddenPage from './pages/ForbiddenPage';
@@ -103,6 +104,7 @@ const AppLayout: React.FC = () => {
     lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
+    sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请与导出', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
   };
@@ -207,7 +209,7 @@ const AppLayout: React.FC = () => {
     '/ops-tools',
     '运维工具',
     <RobotOutlined />,
-    [menuItems.dataQuery, menuItems.aiOps],
+    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates],
   );
 
   const systemManagementChildren: NonNullable<MenuProps['items']> = [
@@ -270,7 +272,7 @@ const AppLayout: React.FC = () => {
     ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
     ...(['/lines', '/line-onboarding'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
     ...(location.pathname.startsWith('/site-monitors') ? ['/monitoring'] : []),
-    ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
+    ...(['/data-query', '/ai-ops', '/ssl-certificates'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
     ...(['/environments', '/site-conf', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
@@ -337,6 +339,7 @@ const AppLayout: React.FC = () => {
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
+              <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
               <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
               <Route
                 path="/cert-study/sap-c02"

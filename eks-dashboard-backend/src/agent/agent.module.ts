@@ -12,7 +12,7 @@ import { AgentTenantDomainService } from './agent-tenant-domain.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['.env', '.env.local', '.env.development', '.env-example'],
     }),
   ],
   controllers: [AgentController],

@@ -1275,3 +1275,25 @@ export const login = async (data: { username: string; password: string; otpCode?
   const response = await api.post('/auth/login', data);
   return response.data;
 };
+
+export const getSslCertificates = async (params: { keyword?: string; page?: number; pageSize?: number } = {}) => {
+  const response = await api.get('/ssl-certificates', { params });
+  return response.data;
+};
+
+export const getSslCertificateDetail = async (id: number) => {
+  const response = await api.get(`/ssl-certificates/${id}`);
+  return response.data;
+};
+
+export const exportSslCertificateEncryptedPackage = async (id: number, data: { otpCode: string; passphrase: string }) => {
+  const response = await api.post(`/ssl-certificates/${id}/export-encrypted`, data);
+  return response.data;
+};
+
+export const createSslCertificateDecryptedDownload = async (id: number, data: { otpCode: string; passphrase: string }) => {
+  const response = await api.post(`/ssl-certificates/${id}/decrypt-download`, data);
+  return response.data;
+};
+
+export const getSslCertificateDownloadUrl = (token: string) => `/api/ssl-certificates/download/${token}`;

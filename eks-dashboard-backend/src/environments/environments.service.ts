@@ -27,6 +27,14 @@ export class EnvironmentsService implements OnModuleInit {
 
   constructor(private readonly envDb: EnvironmentsDbService) {}
 
+  private parseEnvironmentConfig(raw: string) {
+    const withoutComments = raw
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const withoutTrailingCommas = withoutComments.replace(/,\s*([}\]])/g, '$1');
+    return JSON.parse(withoutTrailingCommas) as Environment[];
+  }
+
   async onModuleInit() {
     const dbEnvs = await this.envDb.getEnvironmentConfigs();
     if (dbEnvs.length > 0) {
@@ -37,19 +45,32 @@ export class EnvironmentsService implements OnModuleInit {
 
     try {
       // 从项目的根目录加载配置文件，这比依赖 `__dirname` 更加健壮。
-      // 这假定 `environments.json` 文件与 `package.json` 在同一目录。
-      const filePath = path.resolve(process.cwd(), 'environments.json');
-      this.logger.log(`Attempting to load environments from: ${filePath}`);
+      const candidatePaths = [
+        path.resolve(process.cwd(), 'environments.json'),
+        path.resolve(process.cwd(), 'environments.json-example'),
+      ];
 
-      const fileContent = fs.readFileSync(filePath, 'utf-8');
-      this.environments = JSON.parse(fileContent);
+      let loadedFrom: string | null = null;
+      for (const filePath of candidatePaths) {
+        if (!fs.existsSync(filePath)) continue;
+        this.logger.log(`Attempting to load environments from: ${filePath}`);
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        this.environments = this.parseEnvironmentConfig(fileContent);
+        loadedFrom = filePath;
+        break;
+      }
+
+      if (!loadedFrom) {
+        throw new Error(`Missing environments config files: ${candidatePaths.join(', ')}`);
+      }
+
       this.logger.log(
-        `Successfully loaded ${this.environments.length} environments from file.`,
+        `Successfully loaded ${this.environments.length} environments from file: ${loadedFrom}`,
       );
     } catch (error) {
       this.logger.error(
-        'Failed to load environments from DB and could not load environments.json. Please ensure DB is available or the file exists at the project root.',
-        error.stack,
+        'Failed to load environments from DB and could not load environments.json / environments.json-example. Please ensure DB is available or one of these files exists at the project root.',
+        error instanceof Error ? error.stack : String(error),
       );
       throw new Error('Could not load environments configuration.');
     }

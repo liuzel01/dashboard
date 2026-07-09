@@ -22,6 +22,7 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
   { method: 'POST', path: '/s3/upload', action: 's3.upload', actionName: '上传 S3 对象', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/s3/object-exists', action: 's3.objectExists', actionName: '检查 S3 对象是否存在', menuKey: 'menu:s3-upload', targetType: 's3_object', getResourceId: ({ body }) => [body?.bucket, body?.key].filter(Boolean).join('/') || null },
   { method: 'POST', path: '/users', action: 'users.create', actionName: '创建用户', menuKey: 'menu:access-control', targetType: 'user', getResourceId: ({ body }) => body?.username || null },
+  { method: 'GET', path: '/ssl-certificates', action: 'sslCertificates.list', actionName: '查询 SSL 证书列表', menuKey: 'menu:ssl-certificates', targetType: 'ssl_certificate' },
 ];
 
 export const AUDIT_PATTERN_RULES: AuditPatternRuleConfig[] = [
@@ -31,6 +32,10 @@ export const AUDIT_PATTERN_RULES: AuditPatternRuleConfig[] = [
   { method: 'PATCH', path: '/roles/:id', regex: /^\/roles\/([^/]+)$/, action: 'roles.update', actionName: '修改角色', menuKey: 'menu:access-control', targetType: 'role', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'DELETE', path: '/roles/:id', regex: /^\/roles\/([^/]+)$/, action: 'roles.delete', actionName: '删除角色', menuKey: 'menu:access-control', targetType: 'role', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'PUT', path: '/roles/:id/permissions', regex: /^\/roles\/([^/]+)\/permissions$/, action: 'roles.updatePermissions', actionName: '修改角色权限', menuKey: 'menu:access-control', targetType: 'role', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'GET', path: '/ssl-certificates/:id', regex: /^\/ssl-certificates\/([^/]+)$/, action: 'sslCertificates.viewDetail', actionName: '查看证书详情', menuKey: 'menu:ssl-certificates', targetType: 'ssl_certificate', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'POST', path: '/ssl-certificates/:id/export-encrypted', regex: /^\/ssl-certificates\/([^/]+)\/export-encrypted$/, action: 'sslCertificates.exportEncrypted', actionName: '导出加密包', menuKey: 'menu:ssl-certificates', targetType: 'ssl_certificate', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'POST', path: '/ssl-certificates/:id/decrypt-download', regex: /^\/ssl-certificates\/([^/]+)\/decrypt-download$/, action: 'sslCertificates.decryptDownload', actionName: '解密下载', menuKey: 'menu:ssl-certificates', targetType: 'ssl_certificate', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'GET', path: '/ssl-certificates/download/:token', regex: /^\/ssl-certificates\/download\/([^/]+)$/, action: 'sslCertificates.downloadFile', actionName: '下载证书明文文件', menuKey: 'menu:ssl-certificates', targetType: 'ssl_certificate_download', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'PUT', path: '/environments/config/:id', regex: /^\/environments\/config\/([^/]+)$/, action: 'environments.updateConfig', actionName: '修改环境配置', menuKey: 'menu:environments', targetType: 'environment', getResourceId: ({ params }) => String(params?.[0] || '') || null },
 ];
 
