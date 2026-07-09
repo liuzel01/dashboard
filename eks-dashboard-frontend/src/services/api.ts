@@ -933,6 +933,7 @@ export type AssetListParams = {
   environment?: string;
   tenant?: string;
   owner?: string;
+  accountId?: number;
   includeDeleted?: boolean;
   page?: number;
   pageSize?: number;
@@ -943,6 +944,8 @@ export type AssetAccount = {
   account_name: string;
   account_type: string;
   provider: string | null;
+  domain_service_type: string | null;
+  domain_service_types?: string[] | null;
   login_url: string | null;
   account_identifier: string | null;
   owner: string | null;
@@ -956,6 +959,26 @@ export type AssetAccount = {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type AccountAliyunDcdnDomainPreviewResponse = {
+  provider: 'aliyun_dcdn';
+  service?: 'dcdn' | 'esa' | string;
+  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  endpoint: string;
+  fetchedAt: string;
+  total: number;
+  totalCount: number;
+  items: AliyunDcdnDomainPreviewItem[];
+};
+
+export type AccountAliyunDcdnDomainSyncResponse = {
+  provider: 'aliyun_dcdn';
+  service?: 'dcdn' | 'esa' | string;
+  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  fetchedAt: string;
+  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; dryRun: boolean };
+  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }>;
 };
 
 export type AssetResource = {
@@ -1230,6 +1253,16 @@ export const previewAliyunDcdnDomains = async () => {
 export const syncAliyunDcdnDomains = async (data: { dryRun?: boolean } = {}) => {
   const response = await api.post('/assets/cdn/aliyun/dcdn/domains/sync', data);
   return response.data as AliyunDcdnDomainSyncResponse;
+};
+
+export const previewAccountAliyunDcdnDomains = async (accountId: number, service: 'dcdn' | 'esa' = 'dcdn') => {
+  const response = await api.get(`/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`, { params: { service } });
+  return response.data as AccountAliyunDcdnDomainPreviewResponse;
+};
+
+export const syncAccountAliyunDcdnDomains = async (accountId: number, data: { dryRun?: boolean; service?: 'dcdn' | 'esa' } = {}) => {
+  const response = await api.post(`/assets/accounts/${accountId}/aliyun-dcdn/domains/sync`, data);
+  return response.data as AccountAliyunDcdnDomainSyncResponse;
 };
 
 // Auth / Me

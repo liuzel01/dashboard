@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
 
 const toOptionalInt = ({ value }: { value: unknown }) => {
   if (value === undefined || value === null || value === '') return undefined;
@@ -11,6 +11,15 @@ const toOptionalBoolean = ({ value }: { value: unknown }) => {
   if (value === undefined || value === null || value === '') return undefined;
   if (value === true || value === 'true' || value === '1' || value === 1) return true;
   if (value === false || value === 'false' || value === '0' || value === 0) return false;
+  return value;
+};
+
+const toOptionalStringArray = ({ value }: { value: unknown }) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    return value.split(',').map((item) => item.trim()).filter(Boolean);
+  }
   return value;
 };
 
@@ -42,6 +51,12 @@ export class ListAssetsDto {
   @IsOptional()
   @IsString()
   owner?: string;
+
+  @IsOptional()
+  @Transform(toOptionalInt)
+  @IsInt()
+  @Min(1)
+  accountId?: number;
 
   @IsOptional()
   @Transform(toOptionalBoolean)
@@ -99,6 +114,17 @@ export class SyncAliyunDcdnDomainsDto {
   dryRun?: boolean;
 }
 
+export class SyncAccountDomainsDto {
+  @IsOptional()
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  dryRun?: boolean;
+
+  @IsOptional()
+  @IsString()
+  service?: string;
+}
+
 export class SyncWangsuDomainsDto {
   @IsOptional()
   @Transform(toOptionalBoolean)
@@ -118,6 +144,16 @@ export class CreateAssetAccountDto {
   @IsOptional()
   @IsString()
   provider?: string;
+
+  @IsOptional()
+  @IsString()
+  domain_service_type?: string;
+
+  @IsOptional()
+  @Transform(toOptionalStringArray)
+  @IsArray()
+  @IsString({ each: true })
+  domain_service_types?: string[];
 
   @IsOptional()
   @IsString()
