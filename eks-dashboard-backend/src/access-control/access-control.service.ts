@@ -78,37 +78,6 @@ export class AccessControlService {
     return fallback?.[0] || null;
   }
 
-  private async ensureDefaultAdminPermissionBindings(permissionKeys: string[]) {
-    if (!permissionKeys.length) return;
-    const roles = await this.db.query<{ id: number; name: string }[]>(
-      "SELECT id, name FROM roles WHERE LOWER(name) = 'admin' OR name = '管理员'",
-    );
-    if (!Array.isArray(roles) || roles.length === 0) return;
-
-    const permissions = await this.db.query<{ id: number; key: string }[]>(
-      `SELECT id, \`key\` FROM permissions WHERE \`key\` IN (${permissionKeys.map(() => '?').join(',')})`,
-      permissionKeys,
-    );
-    if (!Array.isArray(permissions) || permissions.length === 0) return;
-
-    for (const role of roles) {
-      const existing = await this.db.query<{ permission_id: number }[]>(
-        'SELECT permission_id FROM role_permissions WHERE role_id = ?',
-        [role.id],
-      );
-      const existingIds = new Set((existing || []).map((row) => Number(row.permission_id)));
-      const missingPermissionIds = permissions.map((row) => Number(row.id)).filter((id) => !existingIds.has(id));
-      if (missingPermissionIds.length === 0) continue;
-
-      const valuesSql = missingPermissionIds.map(() => '(?, ?)').join(',');
-      const params: any[] = [];
-      missingPermissionIds.forEach((permissionId) => {
-        params.push(role.id, permissionId);
-      });
-      await this.db.query(`INSERT INTO role_permissions (role_id, permission_id) VALUES ${valuesSql}`, params);
-    }
-  }
-
   private async ensureDefaultPermissions() {
     const existing = await this.db.query<{ key: string }[]>('SELECT `key` FROM permissions');
     const existingKeys = new Set(existing.map((row) => row.key));
@@ -127,7 +96,6 @@ export class AccessControlService {
       );
     }
 
-    await this.ensureDefaultAdminPermissionBindings(['menu:ssl-certificates']);
   }
 
   async listPermissions() {
