@@ -1,10 +1,19 @@
-import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, Query, Res, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Res, ValidationPipe } from '@nestjs/common';
 import type { Response } from 'express';
 import { Type } from 'class-transformer';
 import { IsOptional, IsString, MaxLength, MinLength, IsInt, Min } from 'class-validator';
 import { SslCertificatesService } from './ssl-certificates.service';
 
 class ListSslCertificatesDto {
+  @IsString()
+  @MaxLength(128)
+  environmentId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  region?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(200)
@@ -23,7 +32,35 @@ class ListSslCertificatesDto {
   pageSize?: number;
 }
 
+class GetSslCertificateDetailDto {
+  @IsString()
+  @MaxLength(128)
+  environmentId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  region?: string;
+
+  @IsString()
+  @MaxLength(2048)
+  certificateArn!: string;
+}
+
 class SensitiveCertificateActionDto {
+  @IsString()
+  @MaxLength(128)
+  environmentId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  region?: string;
+
+  @IsString()
+  @MaxLength(2048)
+  certificateArn!: string;
+
   @IsString()
   @MinLength(6)
   @MaxLength(12)
@@ -63,48 +100,37 @@ export class SslCertificatesController {
     return this.service.listCertificates(actor, query);
   }
 
-  @Get(':id')
+  @Get('detail')
   async detail(
     @Headers('authorization') authorization: string | undefined,
     @Headers() headers: Record<string, any>,
-    @Param('id', ParseIntPipe) id: number,
+    @Query(validation) query: GetSslCertificateDetailDto,
   ) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
-    return this.service.getCertificateDetail(actor, id, this.getReqMeta(headers));
+    return this.service.getCertificateDetail(actor, query, this.getReqMeta(headers));
   }
 
-  @Post(':id/export-encrypted')
+  @Post('export-encrypted')
   async exportEncrypted(
     @Headers('authorization') authorization: string | undefined,
     @Headers() headers: Record<string, any>,
-    @Param('id', ParseIntPipe) id: number,
     @Body(validation) body: SensitiveCertificateActionDto,
   ) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
-    return this.service.exportEncryptedPackage(actor, id, body, this.getReqMeta(headers));
+    return this.service.exportEncryptedPackage(actor, body, this.getReqMeta(headers));
   }
 
-  @Post(':id/decrypt-download')
+  @Post('decrypt-download')
   async decryptDownload(
     @Headers('authorization') authorization: string | undefined,
     @Headers() headers: Record<string, any>,
-    @Param('id', ParseIntPipe) id: number,
     @Body(validation) body: SensitiveCertificateActionDto,
-  ) {
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
-    return this.service.createDecryptedDownload(actor, id, body, this.getReqMeta(headers));
-  }
-
-  @Get('download/:token')
-  async download(
-    @Headers('authorization') authorization: string | undefined,
-    @Param('token') token: string,
     @Res() res: Response,
   ) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
-    const session = this.service.consumeDownloadToken(actor, token);
-    res.setHeader('Content-Type', session.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${session.filename}"`);
-    return res.send(session.payload);
+    const file = await this.service.createDecryptedDownload(actor, body, this.getReqMeta(headers));
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    return res.send(file.payload);
   }
 }

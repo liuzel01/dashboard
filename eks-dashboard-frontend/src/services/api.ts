@@ -1276,24 +1276,17 @@ export const login = async (data: { username: string; password: string; otpCode?
   return response.data;
 };
 
-export const getSslCertificates = async (params: { keyword?: string; page?: number; pageSize?: number } = {}) => {
+export const getSslCertificates = async (params: { environmentId: string; region?: string; keyword?: string; page?: number; pageSize?: number }) => {
   const response = await api.get('/ssl-certificates', { params });
   return response.data;
 };
 
-export const getSslCertificateDetail = async (id: number) => {
-  const response = await api.get(`/ssl-certificates/${id}`);
+export const getSslCertificateDetail = async (params: { environmentId: string; region?: string; certificateArn: string }) => {
+  const response = await api.get('/ssl-certificates/detail', { params });
   return response.data;
 };
 
-export const exportSslCertificateEncryptedPackage = async (id: number, data: { otpCode: string; passphrase: string }) => {
-  const response = await api.post(`/ssl-certificates/${id}/export-encrypted`, data);
-  return response.data;
+export const createSslCertificateDecryptedDownload = async (data: { environmentId: string; region?: string; certificateArn: string; otpCode: string; passphrase: string }) => {
+  const response = await api.post('/ssl-certificates/decrypt-download', data, { responseType: 'blob' });
+  return response;
 };
-
-export const createSslCertificateDecryptedDownload = async (id: number, data: { otpCode: string; passphrase: string }) => {
-  const response = await api.post(`/ssl-certificates/${id}/decrypt-download`, data);
-  return response.data;
-};
-
-export const getSslCertificateDownloadUrl = (token: string) => `/api/ssl-certificates/download/${token}`;

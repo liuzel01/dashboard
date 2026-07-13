@@ -3,11 +3,12 @@ import { AccessControlModule } from '../access-control/access-control.module';
 import { AuthModule } from '../auth/auth.module';
 import { AuditModule } from '../audit/audit.module';
 import { SiteConfModule } from '../site-conf/site-conf.module';
+import { EnvironmentsModule } from '../environments/environments.module';
 import { SslCertificatesController } from './ssl-certificates.controller';
 import { SslCertificatesService } from './ssl-certificates.service';
 
 @Module({
-  imports: [AccessControlModule, AuthModule, AuditModule, SiteConfModule],
+  imports: [AccessControlModule, AuthModule, AuditModule, SiteConfModule, EnvironmentsModule],
   controllers: [SslCertificatesController],
   providers: [SslCertificatesService],
 })
