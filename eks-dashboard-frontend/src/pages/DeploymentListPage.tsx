@@ -88,7 +88,6 @@ const DeploymentListPage: React.FC = () => {
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
   const [loading, setLoading] = useState(false);
   const [restarting, setRestarting] = useState<string | null>(null);
-  const [rolloutTracking, setRolloutTracking] = useState<string | null>(null);
 
   // 日志查看器弹窗的状态
   const [logViewerVisible, setLogViewerVisible] = useState(false);
@@ -151,6 +150,48 @@ const DeploymentListPage: React.FC = () => {
     setLogViewerVisible(true);
   };
 
+  const trackRestartProgress = useCallback(
+    async (deploymentName: string) => {
+      let finalDeployment: Deployment | undefined;
+      let finalPhase: RolloutPhase = 'unknown';
+      const maxAttempts = 40;
+      const intervalMs = 3000;
+
+      for (let i = 0; i < maxAttempts; i += 1) {
+        const latest = await getDeployments({ name: deploymentName });
+        const target = Array.isArray(latest)
+          ? latest.find((item) => item.name === deploymentName)
+          : undefined;
+        if (target) {
+          finalDeployment = target;
+          setAllDeployments((prev) =>
+            prev.map((item) =>
+              item.name === deploymentName ? target : item,
+            ),
+          );
+          finalPhase = getRolloutPhase(target);
+          if (finalPhase === 'completed' || finalPhase === 'failed') {
+            break;
+          }
+        }
+        await sleep(intervalMs);
+      }
+
+      if (finalPhase === 'completed') {
+        message.success(`应用 "${deploymentName}" 已完成重启。`);
+      } else if (finalPhase === 'failed') {
+        message.error(
+          `应用 "${deploymentName}" 重启失败：${finalDeployment?.progressingReason || 'Kubernetes 回滚/发布状态异常'}`,
+        );
+      } else {
+        message.warning(
+          `应用 "${deploymentName}" 重启状态仍在进行中，请稍后查看“状态”列确认。`,
+        );
+      }
+    },
+    [message],
+  );
+
   // “重启”按钮点击处理
   const handleRestart = (deploymentName: string | undefined) => {
     if (!deploymentName) {
@@ -169,48 +210,11 @@ const DeploymentListPage: React.FC = () => {
         setRestarting(deploymentName);
         try {
           await restartDeployment(deploymentName);
-          setRolloutTracking(deploymentName);
           message.loading({
-            content: `应用 "${deploymentName}" 已发送重启指令，正在跟踪重启进度...`,
+            content: `应用 "${deploymentName}" 已发送重启指令，正在后台跟踪重启进度...`,
             duration: 2,
           });
-
-          let finalDeployment: Deployment | undefined;
-          let finalPhase: RolloutPhase = 'unknown';
-          const maxAttempts = 40;
-          const intervalMs = 3000;
-
-          for (let i = 0; i < maxAttempts; i += 1) {
-            const latest = await getDeployments({ name: deploymentName });
-            const target = Array.isArray(latest)
-              ? latest.find((item) => item.name === deploymentName)
-              : undefined;
-            if (target) {
-              finalDeployment = target;
-              setAllDeployments((prev) =>
-                prev.map((item) =>
-                  item.name === deploymentName ? target : item,
-                ),
-              );
-              finalPhase = getRolloutPhase(target);
-              if (finalPhase === 'completed' || finalPhase === 'failed') {
-                break;
-              }
-            }
-            await sleep(intervalMs);
-          }
-
-          if (finalPhase === 'completed') {
-            message.success(`应用 "${deploymentName}" 已完成重启。`);
-          } else if (finalPhase === 'failed') {
-            message.error(
-              `应用 "${deploymentName}" 重启失败：${finalDeployment?.progressingReason || 'Kubernetes 回滚/发布状态异常'}`,
-            );
-          } else {
-            message.warning(
-              `应用 "${deploymentName}" 重启状态仍在进行中，请稍后查看“状态”列确认。`,
-            );
-          }
+          void trackRestartProgress(deploymentName);
         } catch (error: any) {
           console.error('[Restart] Caught an error:', error);
           const errorMessage = error.response?.data?.message || error.message;
@@ -218,8 +222,7 @@ const DeploymentListPage: React.FC = () => {
         } finally {
           console.log(`[Restart] Resetting loading state for ${deploymentName}`);
           setRestarting(null);
-          setRolloutTracking(null);
-          fetchDeployments(filter);
+          void fetchDeployments(filter);
         }
       },
       onCancel: () => {
@@ -294,7 +297,7 @@ const DeploymentListPage: React.FC = () => {
           <Button
             icon={<ReloadOutlined />}
             onClick={() => handleRestart(record.name)}
-            loading={restarting === record.name || rolloutTracking === record.name}
+            loading={restarting === record.name}
           >
             重启
           </Button>
