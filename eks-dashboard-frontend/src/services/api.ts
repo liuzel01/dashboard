@@ -1285,3 +1285,23 @@ export const login = async (data: { username: string; password: string; otpCode?
   const response = await api.post('/auth/login', data);
   return response.data;
 };
+
+export const getSslCertificates = async (params: { environmentId: string; region?: string; keyword?: string; page?: number; pageSize?: number }) => {
+  const response = await api.get('/ssl-certificates', { params });
+  return response.data;
+};
+
+export const requestSslCertificate = async (data: { environmentId: string; region?: string; domain: string; sans?: string }) => {
+  const response = await api.post('/ssl-certificates/request-certificate', data);
+  return response.data;
+};
+
+export const getSslCertificateDetail = async (params: { environmentId: string; region?: string; certificateArn: string }) => {
+  const response = await api.get('/ssl-certificates/detail', { params });
+  return response.data;
+};
+
+export const createSslCertificateDecryptedDownload = async (data: { environmentId: string; region?: string; certificateArn: string; otpCode: string; passphrase: string }) => {
+  const response = await api.post('/ssl-certificates/decrypt-download', data, { responseType: 'blob' });
+  return response;
+};

@@ -22,12 +22,13 @@ import { AuditModule } from './audit/audit.module';
 import { CertStudyModule } from './cert-study/cert-study.module';
 import { AssetsModule } from './assets/assets.module';
 import { SiteConfModule } from './site-conf/site-conf.module';
+import { SslCertificatesModule } from './ssl-certificates/ssl-certificates.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true, // 使 ConfigModule 在全局可用
-      envFilePath: '.env', // 指定 .env 文件的路径
+      envFilePath: ['.env', '.env.local', '.env.development', '.env-example'], // dev fallback
     }),
     JumpServerModule,
     KubernetesModule,
@@ -49,6 +50,7 @@ import { SiteConfModule } from './site-conf/site-conf.module';
     CertStudyModule,
     AssetsModule,
     SiteConfModule,
+    SslCertificatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
