@@ -33,6 +33,7 @@ import {
   updateTraderNickName,
   updateOtcMerchantName,
   disableOtcUserTrade,
+  enableOtcUserTrade,
   getAuthRecord,
   updateAuthRecord,
 } from '../services/api';
@@ -398,6 +399,30 @@ const DataQueryPage: React.FC = () => {
     });
   };
 
+  const showEnableOtcTradeConfirm = () => {
+    if (!userInfo?.tenant_user_id) {
+      message.error('无法解除禁用 OTC 交易：缺少用户 UID。');
+      return;
+    }
+    modal.confirm({
+      title: '确认解除禁用 OTC 交易？',
+      content: `是否确定要将用户 ${userInfo.tenant_user_id} 的 OTC 交易状态恢复为启用？`,
+      okText: '确认解除禁用',
+      okType: 'primary',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await enableOtcUserTrade(String(userInfo.tenant_user_id));
+          message.success('OTC 交易已成功恢复启用！');
+        } catch (err) {
+          const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+          const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
+          message.error(`解除禁用 OTC 交易失败: ${errorMessage}`);
+        }
+      },
+    });
+  };
+
   const showDeactivateConfirm = () => {
     modal.confirm({
       title: '确认注销账号？',
@@ -506,6 +531,9 @@ const DataQueryPage: React.FC = () => {
         </Menu.Item>
         <Menu.Item key="disable-otc" danger onClick={showDisableOtcTradeConfirm}>
           禁用 OTC 交易
+        </Menu.Item>
+        <Menu.Item key="enable-otc" onClick={showEnableOtcTradeConfirm}>
+          解除禁用 OTC 交易
         </Menu.Item>
         <Menu.Item key="deactivate" danger onClick={showDeactivateConfirm}>
           注销账号

@@ -166,6 +166,11 @@ export const disableOtcUserTrade = async (uid: string) => {
   return response.data;
 };
 
+export const enableOtcUserTrade = async (uid: string) => {
+  const response = await api.post(`/query/users/${uid}/otc-user/enable`);
+  return response.data;
+};
+
 export const getAuthRecord = async (uid: string, tenantId: number, userId?: number) => {
   const response = await api.get(`/query/users/${uid}/auth-record`, { params: { tenantId, userId } });
   return response.data;

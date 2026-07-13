@@ -191,6 +191,17 @@ export class AgentController {
     return this.queryService.disableOtcUserTradeByUserUid(envId, uid);
   }
 
+  @Post('v1/query/users/:uid/otc-user/enable')
+  async enableOtcUserTrade(
+    @Param('uid') uid: string,
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.enableOtcUserTradeByUserUid(envId, uid);
+  }
+
   @Get('v1/query/redis-key')
   async getRedisKey(
     @Query('key') key: string | undefined,

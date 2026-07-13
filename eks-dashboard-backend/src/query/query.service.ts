@@ -561,6 +561,33 @@ export class QueryService {
     }
   }
 
+  async enableOtcUserTrade(environmentId: string, uid: string) {
+    if (!(await this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId))) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
+    try {
+      const data = await this.queryGatewayClient.enableOtcUserTrade(environmentId, uid);
+      if (!data) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || `OTC user with tenant_user_id ${uid} not found.`);
+      }
+      if (data?.status === 'noop') {
+        return { message: data?.message || 'OTC trading is already enabled.' };
+      }
+      return { message: data?.message || 'OTC trading enabled successfully.' };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `Error enabling OTC trade via agent for uid ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException('Failed to enable OTC trade via agent');
+    }
+  }
+
   async getAuthRecordByUserUid(
     environmentId: string,
     uid: string,
