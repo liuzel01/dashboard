@@ -304,6 +304,52 @@ export class AgentQueryService implements OnModuleDestroy {
     return { status: 'not_found', error: 'No OTC merchant record updated.' };
   }
 
+  async disableOtcUserTradeByUserUid(environmentId: string, uid: string) {
+    const pool = await this.getMysqlPool(environmentId);
+    const selectSql =
+      'SELECT `status` FROM `otc`.`otc_user` WHERE `tenant_user_id` = ? LIMIT 1';
+    const [rows] = (await pool.execute(selectSql, [uid])) as any;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { status: 'not_found', error: `OTC user with tenant_user_id ${uid} not found.` };
+    }
+
+    const currentStatus = Number(rows[0]?.status);
+    if (currentStatus === 0) {
+      return { status: 'noop', message: 'OTC trading is already disabled.' };
+    }
+
+    const updateSql =
+      'UPDATE `otc`.`otc_user` SET `status` = 0 WHERE `tenant_user_id` = ?';
+    const [result] = (await pool.execute(updateSql, [uid])) as any;
+    if (result && result.affectedRows > 0) {
+      return { message: 'OTC trading disabled successfully.' };
+    }
+    return { status: 'not_found', error: 'No OTC user record updated.' };
+  }
+
+  async enableOtcUserTradeByUserUid(environmentId: string, uid: string) {
+    const pool = await this.getMysqlPool(environmentId);
+    const selectSql =
+      'SELECT `status` FROM `otc`.`otc_user` WHERE `tenant_user_id` = ? LIMIT 1';
+    const [rows] = (await pool.execute(selectSql, [uid])) as any;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { status: 'not_found', error: `OTC user with tenant_user_id ${uid} not found.` };
+    }
+
+    const currentStatus = Number(rows[0]?.status);
+    if (currentStatus === 1) {
+      return { status: 'noop', message: 'OTC trading is already enabled.' };
+    }
+
+    const updateSql =
+      'UPDATE `otc`.`otc_user` SET `status` = 1 WHERE `tenant_user_id` = ?';
+    const [result] = (await pool.execute(updateSql, [uid])) as any;
+    if (result && result.affectedRows > 0) {
+      return { message: 'OTC trading enabled successfully.' };
+    }
+    return { status: 'not_found', error: 'No OTC user record updated.' };
+  }
+
   async getRedisKey(environmentId: string, key: string) {
     const client = await this.getRedisClient(environmentId);
     const metaPipeline = client.pipeline();
@@ -598,4 +644,3 @@ export class AgentQueryService implements OnModuleDestroy {
     });
   }
 }
-
