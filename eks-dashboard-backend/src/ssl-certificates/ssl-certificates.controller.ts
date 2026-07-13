@@ -1,7 +1,27 @@
-import { Body, Controller, Get, Headers, Param, Post, Query, Res, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, Query, Res, ValidationPipe } from '@nestjs/common';
 import type { Response } from 'express';
 import { Type } from 'class-transformer';
 import { IsOptional, IsString, MaxLength, MinLength, IsInt, Min } from 'class-validator';
+
+class RequestSslCertificateDto {
+  @IsString()
+  @MaxLength(128)
+  environmentId!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  region?: string;
+
+  @IsString()
+  @MaxLength(253)
+  domain!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  sans?: string;
+}
 import { SslCertificatesService } from './ssl-certificates.service';
 
 class ListSslCertificatesDto {
@@ -108,6 +128,16 @@ export class SslCertificatesController {
   ) {
     const actor = await this.service.resolveActorFromAuthorization(authorization);
     return this.service.getCertificateDetail(actor, query, this.getReqMeta(headers));
+  }
+
+  @Post('request-certificate')
+  async requestCertificate(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers() headers: Record<string, any>,
+    @Body(validation) body: RequestSslCertificateDto,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.requestCertificate(actor, body, this.getReqMeta(headers));
   }
 
   @Post('export-encrypted')

@@ -14,6 +14,7 @@ import {
   DescribeCertificateCommand,
   ExportCertificateCommand,
   ListCertificatesCommand,
+  RequestCertificateCommand,
 } from '@aws-sdk/client-acm';
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import JSZip from 'jszip';
@@ -230,6 +231,11 @@ export class SslCertificatesService {
     );
   }
 
+  private buildIdempotencyToken(input: { environmentId: string; region: string; domain: string; sans: string[] }) {
+    const raw = `${input.environmentId}|${input.region}|${input.domain}|${input.sans.join(',')}`;
+    return Buffer.from(raw).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) || 'sslrequesttoken';
+  }
+
   private isExportable(detail: any) {
     const type = String(detail?.Type || '').toUpperCase();
     const option = String(detail?.Options?.Export || detail?.Options?.ExportOption || detail?.ExportOption || '').toUpperCase();
@@ -348,6 +354,15 @@ export class SslCertificatesService {
     if (!certificateArn) throw new BadRequestException('certificateArn 不能为空');
     const detail = await this.describeCertificate(client, certificateArn);
     const item = this.buildListItem(detail, { environmentId, region });
+    const validationOptions = Array.isArray(detail?.DomainValidationOptions)
+      ? detail.DomainValidationOptions.map((entry: any) => ({
+          domainName: String(entry?.DomainName || ''),
+          validationStatus: String(entry?.ValidationStatus || ''),
+          recordName: String(entry?.ResourceRecord?.Name || ''),
+          recordType: String(entry?.ResourceRecord?.Type || ''),
+          recordValue: String(entry?.ResourceRecord?.Value || ''),
+        }))
+      : [];
 
     await this.auditService.record({
       actorUserId: actor.userId,
@@ -368,7 +383,14 @@ export class SslCertificatesService {
       userAgent: req.userAgent || null,
     });
 
-    return item;
+    return {
+      ...item,
+      validationMethod: String(detail?.Type || ''),
+      keyAlgorithm: String(detail?.KeyAlgorithm || ''),
+      exportOption: String(detail?.Options?.Export || ''),
+      transparencyLogging: String(detail?.Options?.CertificateTransparencyLoggingPreference || ''),
+      validationOptions,
+    };
   }
 
   private buildArchiveFilename(domain: string) {
@@ -425,6 +447,92 @@ export class SslCertificatesService {
       [parts.certificate, parts.certificateChain].filter(Boolean).map((item) => String(item).trim()).join('\n') + '\n',
     );
     return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  }
+
+  async requestCertificate(
+    actor: ActorContext,
+    body: { environmentId: string; region?: string; domain: string; sans?: string },
+    req: { ip?: string | null; userAgent?: string | null },
+  ) {
+    this.ensurePermission(actor);
+    const { client, environmentId, region, credentialSource, callerIdentity } = await this.createAcmClient(body);
+    const domain = this.normalizeCertificatePattern(body.domain);
+    if (!domain) {
+      throw new BadRequestException('domain 不能为空');
+    }
+    const sans = this.splitCertificateDomains(body.sans).filter((item) => item && item !== domain);
+    const idempotencyToken = this.buildIdempotencyToken({ environmentId, region, domain, sans });
+
+    this.logger.log(`[ssl-certificates] request-certificate env=${environmentId} region=${region} source=${credentialSource} account=${callerIdentity?.account || '-'} arn=${callerIdentity?.arn || '-'} domain=${domain} sans=${sans.join(',') || '-'} actor=${actor.username}`);
+
+    let resp: any;
+    try {
+      resp = await client.send(
+        new RequestCertificateCommand({
+          DomainName: domain,
+          SubjectAlternativeNames: sans.length ? sans : undefined,
+          ValidationMethod: 'DNS',
+          IdempotencyToken: idempotencyToken,
+          KeyAlgorithm: 'RSA_2048',
+          Options: {
+            CertificateTransparencyLoggingPreference: 'ENABLED',
+            Export: 'ENABLED',
+          },
+        }),
+      );
+    } catch (error) {
+      this.mapAwsError(error, 'acm:RequestCertificate');
+    }
+
+    const certificateArn = String(resp?.CertificateArn || '').trim();
+    if (!certificateArn) {
+      throw new BadRequestException('AWS 未返回 certificateArn');
+    }
+
+    const detail = await this.describeCertificate(client, certificateArn);
+    const validationOptions = Array.isArray(detail?.DomainValidationOptions)
+      ? detail.DomainValidationOptions.map((item: any) => ({
+          domainName: String(item?.DomainName || ''),
+          validationStatus: String(item?.ValidationStatus || ''),
+          recordName: String(item?.ResourceRecord?.Name || ''),
+          recordType: String(item?.ResourceRecord?.Type || ''),
+          recordValue: String(item?.ResourceRecord?.Value || ''),
+        }))
+      : [];
+
+    await this.auditService.record({
+      actorUserId: actor.userId,
+      actorUsername: actor.username,
+      actorDisplayName: actor.displayName || actor.username,
+      method: 'POST',
+      path: `/ssl-certificates/request-certificate`,
+      menuKey: MENU_PERMISSION,
+      action: 'sslCertificates.requestCertificate',
+      actionName: '申请 SSL 证书',
+      targetType: 'ssl_certificate_request',
+      targetId: certificateArn,
+      requestSummary: { environmentId, region, domain, sans },
+      responseSummary: { certificateArn, validationOptionCount: validationOptions.length },
+      status: 'success',
+      statusCode: 200,
+      ip: req.ip || null,
+      userAgent: req.userAgent || null,
+    });
+
+    return {
+      certificateArn,
+      domain,
+      sans,
+      status: String(detail?.Status || 'PENDING_VALIDATION'),
+      certificateType: 'AMAZON_ISSUED_PUBLIC',
+      validationMethod: 'DNS',
+      keyAlgorithm: String(detail?.KeyAlgorithm || 'RSA_2048'),
+      exportOption: String(detail?.Options?.Export || 'ENABLED'),
+      transparencyLogging: String(detail?.Options?.CertificateTransparencyLoggingPreference || 'ENABLED'),
+      tags: [],
+      validationOptions,
+      source: { provider: 'aws-acm', environmentId, region },
+    };
   }
 
   async exportEncryptedPackage(

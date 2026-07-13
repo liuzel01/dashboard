@@ -1,14 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { CopyOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
   createSslCertificateDecryptedDownload,
   getEnvironmentConfigs,
   getSslCertificateDetail,
   getSslCertificates,
+  requestSslCertificate,
 } from '../services/api';
 
 const { Text } = Typography;
+
+type ValidationRecord = {
+  domainName: string;
+  validationStatus: string;
+  recordName: string;
+  recordType: string;
+  recordValue: string;
+};
 
 type SslCertificateItem = {
   certificateArn: string;
@@ -25,6 +35,11 @@ type SslCertificateItem = {
   lastExportedBy: string | null;
   sourceEnvironmentId?: string;
   sourceRegion?: string;
+  validationMethod?: string;
+  keyAlgorithm?: string;
+  exportOption?: string;
+  transparencyLogging?: string;
+  validationOptions?: ValidationRecord[];
 };
 
 type EnvOption = {
@@ -41,8 +56,70 @@ const formatTime = (value?: string | null) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
 };
 
+const DOMAIN_PATTERN = /^(\*\.)?(((?!-)[A-Za-z0-9-]{1,63}\.)+([A-Za-z0-9-]{2,63}))$/;
+
+const normalizeDomainInput = (value?: string) => String(value || '').trim().toLowerCase();
+
+const splitSanInput = (value?: string) =>
+  Array.from(
+    new Set(
+      String(value || '')
+        .split(/[;,\n]/)
+        .map((item) => normalizeDomainInput(item))
+        .filter(Boolean),
+    ),
+  );
+
+const buildDnsRecordText = (records: ValidationRecord[] = []) =>
+  records
+    .map((row) => [`域名: ${row.domainName || '-'}`, `记录类型: ${row.recordType || '-'}`, `记录名: ${row.recordName || '-'}`, `记录值: ${row.recordValue || '-'}`].join('\n'))
+    .join('\n\n');
+
+const buildDnsRecordLineText = (record: ValidationRecord) => [`域名: ${record.domainName || '-'}`, `记录类型: ${record.recordType || '-'}`, `记录名: ${record.recordName || '-'}`, `记录值: ${record.recordValue || '-'}`].join('\n');
+
 const SslCertificateExportPage: React.FC = () => {
   const { message } = App.useApp();
+
+  const copyDnsRecords = async (records: ValidationRecord[] = []) => {
+    const text = buildDnsRecordText(records);
+    if (!text) {
+      message.warning('当前没有可复制的 DNS 记录');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success('DNS 记录已复制');
+    } catch {
+      message.error('复制失败，请手动复制');
+    }
+  };
+
+  const copyDnsRecord = async (record: ValidationRecord) => {
+    const text = buildDnsRecordLineText(record);
+    if (!text) {
+      message.warning('当前没有可复制的 DNS 记录');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success('该条 DNS 记录已复制');
+    } catch {
+      message.error('复制失败，请手动复制');
+    }
+  };
+
+  const copyText = async (text: string, successMessage: string) => {
+    if (!String(text || '').trim()) {
+      message.warning('当前没有可复制的内容');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(String(text));
+      message.success(successMessage);
+    } catch {
+      message.error('复制失败，请手动复制');
+    }
+  };
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<SslCertificateItem[]>([]);
   const [keyword, setKeyword] = useState('');
@@ -52,6 +129,8 @@ const SslCertificateExportPage: React.FC = () => {
   const [actionMode, setActionMode] = useState<'decrypt' | null>(null);
   const [actionOpen, setActionOpen] = useState(false);
   const [form] = Form.useForm();
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestForm] = Form.useForm();
   const [envOptions, setEnvOptions] = useState<EnvOption[]>([]);
   const [environmentId, setEnvironmentId] = useState<string>('');
   const [region, setRegion] = useState<string>('');
@@ -103,18 +182,24 @@ const SslCertificateExportPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const onOpenDetail = async (row: SslCertificateItem) => {
+  const fetchCertificateDetail = async (certificateArn: string) => {
     if (!queriedEnvironmentId) {
-      message.warning('请先点击“查询”加载证书列表');
-      return;
+      message.warning('请先点击"查询"加载证书列表');
+      return null;
     }
+    const resp = await getSslCertificateDetail({
+      environmentId: queriedEnvironmentId,
+      region: queriedRegion || undefined,
+      certificateArn,
+    });
+    return resp;
+  };
+
+  const onOpenDetail = async (row: SslCertificateItem) => {
     setLoading(true);
     try {
-      const resp = await getSslCertificateDetail({
-        environmentId: queriedEnvironmentId,
-        region: queriedRegion || undefined,
-        certificateArn: row.certificateArn,
-      });
+      const resp = await fetchCertificateDetail(row.certificateArn);
+      if (!resp) return;
       setDetail(resp);
       setDetailOpen(true);
     } catch (error) {
@@ -125,9 +210,27 @@ const SslCertificateExportPage: React.FC = () => {
     }
   };
 
+  const refreshDetail = async () => {
+    if (!detail?.certificateArn) return;
+    setLoading(true);
+    try {
+      const resp = await fetchCertificateDetail(detail.certificateArn);
+      if (!resp) return;
+      setDetail(resp);
+      setItems((prev) => prev.map((item) => item.certificateArn === resp.certificateArn ? { ...item, ...resp } : item));
+      message.success('证书详情已刷新');
+    } catch (error) {
+      const err = error as { response?: { data?: { message?: string } }; message?: string };
+      message.error(err?.response?.data?.message || err?.message || '详情刷新失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
   const onOpenAction = (row: SslCertificateItem, mode: 'decrypt') => {
     if (!queriedEnvironmentId) {
-      message.warning('请先点击“查询”加载证书列表');
+      message.warning('请先点击"查询"加载证书列表');
       return;
     }
     setActionTarget(row);
@@ -160,7 +263,7 @@ const SslCertificateExportPage: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      message.success('已直接下载证书文件包（zip）');
+      message.success('已直接下载证书文件包(zip)');
       setActionOpen(false);
       await load(keyword, queriedEnvironmentId, queriedRegion);
     } catch (error) {
@@ -203,10 +306,10 @@ const SslCertificateExportPage: React.FC = () => {
         type="warning"
         showIcon
         message="该页面涉及证书私钥高敏操作"
-        description="解密下载会直接把证书文件包下载到本地，内含证书正文、证书链、解密后的私钥等文件。需要输入 Google 验证码 + passphrase。"
+        description="解密下载会直接把证书文件包下载到本地,内含证书正文、证书链、解密后的私钥等文件。需要输入 Google 验证码 + passphrase。"
       />
 
-      <Card title="SSL证书申请与导出（AWS ACM）">
+      <Card title="SSL证书申请与导出(AWS ACM)">
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder="选择 AWS 环境 / 账号"
@@ -220,7 +323,7 @@ const SslCertificateExportPage: React.FC = () => {
             options={envOptions.map((env) => ({ label: `${env.name} (${env.id})`, value: env.id }))}
           />
           <Input
-            placeholder="Region，例如 ap-east-1 / us-east-1"
+            placeholder="Region,例如 ap-east-1 / us-east-1"
             style={{ width: 220 }}
             value={region}
             onChange={(e) => setRegion(e.target.value)}
@@ -232,20 +335,12 @@ const SslCertificateExportPage: React.FC = () => {
             style={{ width: 320 }}
             allowClear
           />
+          <Button onClick={() => setRequestOpen(true)} disabled={!environmentId}>申请证书</Button>
           <Button type="primary" onClick={() => load(keyword, environmentId, region)} loading={loading} disabled={!environmentId}>查询</Button>
           <Button onClick={() => { setKeyword(''); }} disabled={loading}>清空搜索词</Button>
         </Space>
 
 
-        {queriedEnvironmentId && (
-          <Alert
-            type="success"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={`当前列表最近一次查询来源：${queriedEnv ? `${queriedEnv.name} (${queriedEnv.id})` : queriedEnvironmentId}`}
-            description={`最近一次查询 Region：${queriedRegion || queriedEnv?.aws_region || '-'}。详细的实际 AWS 身份 / 凭证来源已输出到 backend 日志，请查看 eks-dashboard-backend/logs/pm2-out.log。`}
-          />
-        )}
 
         <Table
           rowKey="certificateArn"
@@ -257,20 +352,236 @@ const SslCertificateExportPage: React.FC = () => {
         />
       </Card>
 
-      <Modal title="证书详情" open={detailOpen} onCancel={() => setDetailOpen(false)} footer={null} width={900}>
+      <Modal
+        title="证书详情"
+        open={detailOpen}
+        onCancel={() => setDetailOpen(false)}
+        footer={detail ? [
+          <Button key="refresh" icon={<ReloadOutlined />} onClick={refreshDetail} loading={loading}>刷新状态</Button>,
+          <Button key="close" onClick={() => setDetailOpen(false)}>关闭</Button>,
+        ] : null}
+        width={980}
+      >
         {detail && (
-          <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label="AWS 环境">{detail.sourceEnvironmentId || queriedEnvironmentId || environmentId}</Descriptions.Item>
-            <Descriptions.Item label="Region">{detail.sourceRegion || queriedRegion || region || '-'}</Descriptions.Item>
-            <Descriptions.Item label="域名">{detail.domain}</Descriptions.Item>
-            <Descriptions.Item label="SAN">{detail.sans?.join(', ') || '-'}</Descriptions.Item>
-            <Descriptions.Item label="状态">{detail.status || '-'}</Descriptions.Item>
-            <Descriptions.Item label="证书类型">{detail.certType || '-'}</Descriptions.Item>
-            <Descriptions.Item label="是否可导出">{detail.canExport ? '是' : '否'}</Descriptions.Item>
-            <Descriptions.Item label="到期时间">{formatTime(detail.endDate)}</Descriptions.Item>
-            <Descriptions.Item label="ARN">{detail.arn}</Descriptions.Item>
-          </Descriptions>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="AWS 环境">{detail.sourceEnvironmentId || queriedEnvironmentId || environmentId}</Descriptions.Item>
+              <Descriptions.Item label="Region">{detail.sourceRegion || queriedRegion || region || '-'}</Descriptions.Item>
+              <Descriptions.Item label="域名">{detail.domain}</Descriptions.Item>
+              <Descriptions.Item label="SAN">{detail.sans?.join(', ') || '-'}</Descriptions.Item>
+              <Descriptions.Item label="状态">{detail.status || '-'}</Descriptions.Item>
+              <Descriptions.Item label="证书类型">{detail.certType || '-'}</Descriptions.Item>
+              <Descriptions.Item label="是否可导出">{detail.canExport ? '是' : '否'}</Descriptions.Item>
+              <Descriptions.Item label="验证方法">{detail.validationMethod || '-'}</Descriptions.Item>
+              <Descriptions.Item label="密钥算法">{detail.keyAlgorithm || '-'}</Descriptions.Item>
+              <Descriptions.Item label="到期时间">{formatTime(detail.endDate)}</Descriptions.Item>
+              <Descriptions.Item label="ARN">{detail.arn}</Descriptions.Item>
+            </Descriptions>
+            <div>
+              <Space style={{ marginBottom: 8 }}>
+                <Text strong>DNS 验证记录</Text>
+                <Text type="secondary">共 {Array.isArray(detail.validationOptions) ? detail.validationOptions.length : 0} 条</Text>
+              </Space>
+              <Table<ValidationRecord>
+                size="small"
+                pagination={false}
+                rowKey={(row, index) => `${row.domainName}-${row.recordName}-${row.recordValue}-${index}`}
+                dataSource={Array.isArray(detail.validationOptions) ? detail.validationOptions : []}
+                columns={[
+                  { title: '域名', dataIndex: 'domainName', width: 180 },
+                  { title: '状态', dataIndex: 'validationStatus', width: 140 },
+                  { title: '记录类型', dataIndex: 'recordType', width: 120 },
+                  {
+                    title: '记录名',
+                    dataIndex: 'recordName',
+                    render: (value) => (
+                      <Space size={6}>
+                        <Text code>{value || '-'}</Text>
+                        <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyText(String(value || ''), '记录名已复制')} />
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: '记录值',
+                    dataIndex: 'recordValue',
+                    render: (value) => (
+                      <Space size={6}>
+                        <Text code>{value || '-'}</Text>
+                        <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyText(String(value || ''), '记录值已复制')} />
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: '操作',
+                    width: 110,
+                    fixed: 'right',
+                    render: (_, row) => <Button size="small" onClick={() => copyDnsRecord(row)}>复制</Button>,
+                  },
+                ]}
+                locale={{ emptyText: '当前没有 DNS 验证记录' }}
+                scroll={{ x: 1040 }}
+              />
+            </div>
+          </Space>
         )}
+      </Modal>
+
+      <Modal
+        title="申请 SSL 证书"
+        open={requestOpen}
+        onCancel={() => setRequestOpen(false)}
+        onOk={async () => {
+          if (!environmentId) {
+            message.warning('请先选择 AWS 环境');
+            return;
+          }
+          const values = await requestForm.validateFields();
+          setLoading(true);
+          try {
+            const resp = await requestSslCertificate({
+              environmentId,
+              region: region || undefined,
+              domain: values.domain,
+              sans: values.sans,
+            });
+            setRequestOpen(false);
+            requestForm.resetFields();
+            Modal.info({
+              title: '证书申请已提交',
+              width: 960,
+              content: (
+                <div>
+                  <Alert type="success" showIcon message="AWS ACM 已受理申请。请把下方 DNS 验证记录加到你的域名 DNS 配置中。" style={{ marginBottom: 12 }} />
+                  <Descriptions bordered size="small" column={1}>
+                    <Descriptions.Item label="CertificateArn">{resp?.certificateArn || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="证书类型">公有证书（AWS ACM）</Descriptions.Item>
+                    <Descriptions.Item label="主域名">{resp?.domain || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="SAN 列表">{Array.isArray(resp?.sans) && resp.sans.length ? resp.sans.join(', ') : '-'}</Descriptions.Item>
+                    <Descriptions.Item label="验证方法">{resp?.validationMethod || 'DNS'}</Descriptions.Item>
+                    <Descriptions.Item label="允许导出">{resp?.exportOption === 'ENABLED' ? '是' : resp?.exportOption || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="密钥算法">{resp?.keyAlgorithm || 'RSA_2048'}</Descriptions.Item>
+                    <Descriptions.Item label="标签">默认无</Descriptions.Item>
+                    <Descriptions.Item label="状态">{resp?.status || '-'}</Descriptions.Item>
+                  </Descriptions>
+                  <div style={{ marginTop: 12 }}>
+                    <Space style={{ marginBottom: 8 }}>
+                      <Text strong>需要配置的 DNS 验证记录</Text>
+                      <Text type="secondary">共 {Array.isArray(resp?.validationOptions) ? resp.validationOptions.length : 0} 条</Text>
+                      <Button size="small" onClick={() => copyDnsRecords(Array.isArray(resp?.validationOptions) ? resp.validationOptions : [])}>复制全部</Button>
+                    </Space>
+                    <Table<ValidationRecord>
+                      style={{ marginTop: 8 }}
+                      size="small"
+                      pagination={false}
+                      rowKey={(row, index) => `${row.domainName}-${row.recordName}-${row.recordValue}-${index}`}
+                      dataSource={Array.isArray(resp?.validationOptions) ? resp.validationOptions : []}
+                      columns={[
+                        { title: '域名', dataIndex: 'domainName', width: 180 },
+                        { title: '状态', dataIndex: 'validationStatus', width: 140 },
+                        { title: '记录类型', dataIndex: 'recordType', width: 120 },
+                        {
+                          title: '记录名',
+                          dataIndex: 'recordName',
+                          render: (value) => (
+                            <Space size={6}>
+                              <Text code>{value || '-'}</Text>
+                              <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyText(String(value || ''), '记录名已复制')} />
+                            </Space>
+                          ),
+                        },
+                        {
+                          title: '记录值',
+                          dataIndex: 'recordValue',
+                          render: (value) => (
+                            <Space size={6}>
+                              <Text code>{value || '-'}</Text>
+                              <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyText(String(value || ''), '记录值已复制')} />
+                            </Space>
+                          ),
+                        },
+                        {
+                          title: '操作',
+                          width: 110,
+                          fixed: 'right',
+                          render: (_, row) => <Button size="small" onClick={() => copyDnsRecord(row)}>复制</Button>,
+                        },
+                      ]}
+                      locale={{ emptyText: '当前没有 DNS 验证记录' }}
+                      scroll={{ x: 1040 }}
+                    />
+                  </div>
+                </div>
+              ),
+            });
+            await load(keyword, environmentId, region);
+          } catch (error) {
+            const err = error as { errorFields?: Array<{ errors?: string[] }>; response?: { data?: { message?: string } }; message?: string };
+            if (Array.isArray(err?.errorFields) && err.errorFields.length > 0) {
+              return;
+            }
+            message.error(err?.response?.data?.message || err?.message || '证书申请失败');
+          } finally {
+            setLoading(false);
+          }
+        }}
+        okText="确认申请"
+        confirmLoading={loading}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="当前版本不会自动写 Route53 记录"
+            description="申请成功后，会直接展示证书信息和需要配置的 DNS 验证记录，方便你去域名 DNS 平台手动添加。"
+          />
+          <Descriptions bordered size="small" column={1}>
+            <Descriptions.Item label="AWS 环境">{envOptions.find((item) => item.id === environmentId)?.name || environmentId || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Region">{region || '-'}</Descriptions.Item>
+            <Descriptions.Item label="证书类型">公有证书（AWS ACM）</Descriptions.Item>
+            <Descriptions.Item label="验证方法">DNS 验证</Descriptions.Item>
+            <Descriptions.Item label="密钥算法">RSA 2048</Descriptions.Item>
+            <Descriptions.Item label="允许导出">启用导出</Descriptions.Item>
+            <Descriptions.Item label="标签">默认无</Descriptions.Item>
+          </Descriptions>
+          <Form form={requestForm} layout="vertical">
+            <Form.Item
+              label="主域名"
+              name="domain"
+              rules={[
+                { required: true, message: '请输入主域名' },
+                {
+                  validator: async (_, value) => {
+                    const domain = normalizeDomainInput(value);
+                    if (!domain) return;
+                    if (!DOMAIN_PATTERN.test(domain)) {
+                      throw new Error('主域名格式不合法，例如 abc.com 或 *.abc.com');
+                    }
+                  },
+                },
+              ]}
+            > 
+              <Input placeholder="例如 abc.com" />
+            </Form.Item>
+            <Form.Item
+              label="SAN 列表（可选）"
+              name="sans"
+              extra="SAN = 这张证书额外还要覆盖的域名，不是必填。比如主域名填 abc.com，这里填 *.abc.com。多个域名可用逗号、分号或换行分隔。"
+              rules={[
+                {
+                  validator: async (_, value) => {
+                    const items = splitSanInput(value);
+                    const invalid = items.find((item) => !DOMAIN_PATTERN.test(item));
+                    if (invalid) {
+                      throw new Error(`SAN 域名格式不合法: ${invalid}`);
+                    }
+                  },
+                },
+              ]}
+            >
+              <Input.TextArea rows={4} placeholder="例如 *.abc.com" />
+            </Form.Item>
+          </Form>
+        </Space>
       </Modal>
 
       <Modal
@@ -286,7 +597,7 @@ const SslCertificateExportPage: React.FC = () => {
             type="error"
             showIcon
             message="高风险操作"
-            description="该操作会直接下载包含明文私钥的证书文件包到本地，请仅在确有导入第三方平台需求时使用。"
+            description="该操作会直接下载包含明文私钥的证书文件包到本地,请仅在确有导入第三方平台需求时使用。"
           />
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="AWS 环境">{queriedEnv ? `${queriedEnv.name} (${queriedEnv.id})` : queriedEnvironmentId || '-'}</Descriptions.Item>
@@ -298,7 +609,7 @@ const SslCertificateExportPage: React.FC = () => {
               <Input placeholder="6 位验证码" maxLength={12} autoComplete="one-time-code" />
             </Form.Item>
             <Form.Item label="Passphrase" name="passphrase" rules={[{ required: true, min: 8, message: '请输入至少 8 位 passphrase' }]}>
-              <Input.Password placeholder="当次输入，不持久化" autoComplete="new-password" />
+              <Input.Password placeholder="当次输入,不持久化" autoComplete="new-password" />
             </Form.Item>
           </Form>
         </Space>

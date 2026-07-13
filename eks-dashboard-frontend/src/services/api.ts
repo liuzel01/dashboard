@@ -1281,6 +1281,11 @@ export const getSslCertificates = async (params: { environmentId: string; region
   return response.data;
 };
 
+export const requestSslCertificate = async (data: { environmentId: string; region?: string; domain: string; sans?: string }) => {
+  const response = await api.post('/ssl-certificates/request-certificate', data);
+  return response.data;
+};
+
 export const getSslCertificateDetail = async (params: { environmentId: string; region?: string; certificateArn: string }) => {
   const response = await api.get('/ssl-certificates/detail', { params });
   return response.data;
