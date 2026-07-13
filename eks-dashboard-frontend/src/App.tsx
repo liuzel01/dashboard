@@ -25,6 +25,7 @@ import SignalMonitorDailyPage from './pages/SignalMonitorDailyPage';
 import CertStudyPage from './pages/CertStudyPage';
 import AssetManagementPage from './pages/AssetManagementPage';
 import SiteConfPage from './pages/SiteConfPage';
+import SslCertificateExportPage from './pages/SslCertificateExportPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -103,6 +104,7 @@ const AppLayout: React.FC = () => {
     lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
+    sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
   };
@@ -207,7 +209,7 @@ const AppLayout: React.FC = () => {
     '/ops-tools',
     '运维工具',
     <RobotOutlined />,
-    [menuItems.dataQuery, menuItems.aiOps],
+    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates],
   );
 
   const systemManagementChildren: NonNullable<MenuProps['items']> = [
@@ -337,6 +339,7 @@ const AppLayout: React.FC = () => {
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
+              <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
               <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
               <Route
                 path="/cert-study/sap-c02"
