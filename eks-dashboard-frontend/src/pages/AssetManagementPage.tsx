@@ -335,6 +335,7 @@ function EntityTab<T extends AssetEntity>({
   };
 
   const tableFields = fields.filter((field) => field.table !== false);
+  const firstTableFieldName = tableFields[0]?.name;
 
   const columns: ColumnsType<T> = [
     {
@@ -349,6 +350,8 @@ function EntityTab<T extends AssetEntity>({
       title: field.label,
       dataIndex: field.name,
       key: field.name,
+      width: field.name === firstTableFieldName ? 220 : field.name === 'status' ? 110 : 180,
+      fixed: field.name === firstTableFieldName ? ('left' as const) : undefined,
       ellipsis: true,
       render: (value: unknown, record: T) => field.render ? field.render(value, record) : (field.name === 'status' ? statusTag(String(value || 'unknown')) : renderValue(value)),
     })),
@@ -436,7 +439,7 @@ function EntityTab<T extends AssetEntity>({
         dataSource={items}
         columns={columns}
         pagination={pagination}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1500 }}
       />
 
       <Drawer
