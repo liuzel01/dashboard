@@ -93,6 +93,11 @@ export const deactivateUser = async (uid: string, tenantId: number) => {
   return response.data;
 };
 
+export const clearUserInviteBy = async (uid: string, tenantId: number) => {
+  const response = await api.post(`/query/users/${uid}/invite-by/clear`, { tenantId });
+  return response.data;
+};
+
 /**
  * 删除一个指定的 Redis 键
  * @param key - 要删除的键名

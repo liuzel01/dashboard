@@ -401,6 +401,43 @@ export class QueryService {
     }
   }
 
+  async clearUserInviteBy(environmentId: string, uid: string, tenantId: number) {
+    if (!(await this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId))) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
+    try {
+      const result = await this.queryGatewayClient.clearUserInviteBy(
+        environmentId,
+        uid,
+        tenantId,
+      );
+      if (!result) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      if (result?.status === 'not_found') {
+        throw new NotFoundException(
+          result?.error || `User with UID ${uid} not found.`,
+        );
+      }
+      if (result?.status === 'noop') {
+        return {
+          message: result?.message || 'invite_by is already cleared.',
+        };
+      }
+      return { message: result?.message || 'User invite_by cleared successfully.' };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(
+        `Error clearing user invite_by via agent ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException('Failed to clear user invite_by via agent');
+    }
+  }
+
   async deleteRedisKey(environmentId: string, key: string) {
     if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
       throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');

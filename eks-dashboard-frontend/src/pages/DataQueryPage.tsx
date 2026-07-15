@@ -25,6 +25,7 @@ import {
   createRedisKey,
   updateUser,
   deactivateUser,
+  clearUserInviteBy,
   deleteRedisKey,
   getTenantsForEnvironment,
   getRedisKey,
@@ -375,6 +376,33 @@ const DataQueryPage: React.FC = () => {
     }
   };
 
+  const showClearInviteByConfirm = () => {
+    const tenantId = userInfo?.tenant_id;
+    if (!userInfo?.tenant_user_id || tenantId == null) {
+      message.error('无法解除邀请人：缺少用户信息或租户ID。');
+      return;
+    }
+
+    modal.confirm({
+      title: '确认解除邀请人？',
+      content: `是否确定要清空用户 ${userInfo.tenant_user_id} 的 invite_by 字段？`,
+      okText: '确认清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await clearUserInviteBy(String(userInfo.tenant_user_id), tenantId);
+          message.success('用户邀请人已清空！');
+          await onSearch(lastSearchTerm);
+        } catch (err) {
+          const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+          const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
+          message.error(`解除邀请人失败: ${errorMessage}`);
+        }
+      },
+    });
+  };
+
   const showDisableOtcTradeConfirm = () => {
     if (!userInfo?.tenant_user_id) {
       message.error('无法禁用 OTC 交易：缺少用户 UID。');
@@ -524,10 +552,23 @@ const DataQueryPage: React.FC = () => {
       return <Alert message="请输入UID、手机号或邮箱等标识符进行统一查询。" type="info" showIcon />;
     }
 
+    const inviteByValue =
+      userInfo?.invite_by == null || userInfo?.invite_by === ''
+        ? null
+        : String(userInfo.invite_by);
+
     const userActionsMenu = (
       <Menu>
         <Menu.Item key="edit" onClick={showEditModal}>
           编辑信息
+        </Menu.Item>
+        <Menu.Item
+          key="clear-invite-by"
+          danger
+          disabled={!inviteByValue}
+          onClick={showClearInviteByConfirm}
+        >
+          解除邀请人
         </Menu.Item>
         <Menu.Item key="disable-otc" danger onClick={showDisableOtcTradeConfirm}>
           禁用 OTC 交易
@@ -557,6 +598,7 @@ const DataQueryPage: React.FC = () => {
               <Descriptions bordered column={1}>
                 <Descriptions.Item label="UID">{userInfo.tenant_user_id || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Tenant ID">{userInfo.tenant_id || 'N/A'}</Descriptions.Item>
+                <Descriptions.Item label="邀请人ID">{inviteByValue || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Email">{userInfo.email || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Telephone">{userInfo.tel || 'N/A'}</Descriptions.Item>
                 <Descriptions.Item label="Telephone Country Code">{userInfo.tel_country_code || 'N/A'}</Descriptions.Item>

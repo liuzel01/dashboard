@@ -12,6 +12,26 @@ export PM2_HOME
 if [[ -n "${NVM_BIN:-}" ]]; then
   export PATH="$NVM_BIN:$PATH"
 fi
+
+# Non-interactive shells may not load nvm, so pm2 can disappear from PATH.
+# Recover by sourcing nvm and, if needed, falling back to any installed nvm pm2 binary.
+if ! command -v pm2 >/dev/null 2>&1; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    # shellcheck disable=SC1090
+    source "$NVM_DIR/nvm.sh"
+  fi
+fi
+if ! command -v pm2 >/dev/null 2>&1; then
+  pm2_bin=$(find "$HOME/.nvm/versions/node" -path '*/bin/pm2' -print 2>/dev/null | sort -V | tail -n 1 || true)
+  if [[ -n "$pm2_bin" ]]; then
+    export PATH="$(dirname "$pm2_bin"):$PATH"
+  fi
+fi
+if ! command -v pm2 >/dev/null 2>&1; then
+  echo "[dev] pm2 not found. Install it with: npm i -g pm2" >&2
+  exit 127
+fi
 PM2_NAMESPACE="dev"
 APPS=(eks-dashboard-backend eks-dashboard-frontend)
 

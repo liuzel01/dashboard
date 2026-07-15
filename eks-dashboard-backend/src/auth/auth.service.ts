@@ -268,6 +268,24 @@ export class AuthService {
     return verifySync({ strategy: 'totp', secret, token });
   }
 
+  private buildFallbackUser(user: {
+    id: number;
+    username: string;
+    display_name?: string | null;
+    status?: string | null;
+    last_login_at?: string | null;
+  }) {
+    return {
+      id: user.id,
+      username: user.username,
+      display_name: user.display_name || user.username,
+      status: user.status || 'active',
+      last_login_at: user.last_login_at || null,
+      roles: [],
+      permissions: [],
+    };
+  }
+
   async login(usernameRaw: string, password: string, otpCode?: string) {
     const username = usernameRaw.trim();
     if (!username) throw new BadRequestException('用户名不能为空');
@@ -316,7 +334,15 @@ export class AuthService {
       displayName: user.username,
       authSource: 'local',
     });
-    const me = await this.accessControl.getMe({ userId: user.id });
+    let me;
+    try {
+      me = await this.accessControl.getMe({ userId: user.id });
+    } catch (err) {
+      me = this.buildFallbackUser(user);
+      console.warn(
+        `[Auth] getMe failed after local login for username=${user.username}: ${String(err)}`,
+      );
+    }
 
     return { token, user: me };
   }
@@ -367,7 +393,15 @@ export class AuthService {
       email: payload.email,
       authSource: 'keycloak',
     });
-    const me = await this.accessControl.getMe({ userId: user.id });
+    let me;
+    try {
+      me = await this.accessControl.getMe({ userId: user.id });
+    } catch (err) {
+      me = this.buildFallbackUser(user);
+      console.warn(
+        `[Auth] getMe failed after keycloak login for username=${user.username}: ${String(err)}`,
+      );
+    }
     return { token, user: me };
   }
 
