@@ -204,13 +204,14 @@ export const getPlatforms = async () => {
 };
 
 /**
- * 获取当前环境的所有租户
+ * 获取指定环境的所有租户；未传时使用当前环境。
  */
-export const getTenantsForEnvironment = async () => {
-  if (!_environmentId) {
+export const getTenantsForEnvironment = async (environmentId?: string) => {
+  const resolvedEnvironmentId = environmentId || _environmentId;
+  if (!resolvedEnvironmentId) {
     throw new Error('Environment ID has not been set.');
   }
-  const response = await api.get(`/environments/${_environmentId}/tenants`);
+  const response = await api.get(`/environments/${resolvedEnvironmentId}/tenants`);
   return response.data;
 };
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App as AntApp,
   Button,
@@ -102,6 +102,8 @@ type TenantOption = {
   id: number;
   name: string;
 };
+
+type TenantMapByEnvironment = Record<string, TenantOption[]>;
 
 type EntityTabProps<T extends AssetEntity> = {
   title: string;
@@ -1263,10 +1265,21 @@ const ChangeLogsTab: React.FC = () => {
 const DomainManagementTab: React.FC = () => {
   const { currentEnvironment } = useContext(EnvironmentContext);
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
-  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [tenantsByEnvironment, setTenantsByEnvironment] = useState<TenantMapByEnvironment>({});
   const [tenantLoading, setTenantLoading] = useState(false);
+  const tenantLoadingEnvironmentsRef = useRef<Set<string>>(new Set());
   const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
-  const tenantMap = useMemo(() => new Map(tenants.map((item) => [String(item.id), item.name])), [tenants]);
+  const currentTenants = useMemo(() => {
+    const envId = currentEnvironment?.id;
+    return envId ? (tenantsByEnvironment[envId] || []) : [];
+  }, [currentEnvironment?.id, tenantsByEnvironment]);
+  const tenantNameMapByEnvironment = useMemo(() => {
+    const result = new Map<string, Map<string, string>>();
+    Object.entries(tenantsByEnvironment).forEach(([envId, list]) => {
+      result.set(envId, new Map(list.map((item) => [String(item.id), item.name])));
+    });
+    return result;
+  }, [tenantsByEnvironment]);
 
   useEffect(() => {
     void (async () => {
@@ -1275,35 +1288,50 @@ const DomainManagementTab: React.FC = () => {
     })();
   }, []);
 
+  const normalizeTenantOptions = useCallback((data: unknown) => (
+    Array.isArray(data)
+      ? data
+          .map((item) => ({ id: Number((item as TenantOption).id), name: String((item as TenantOption).name || '') }))
+          .filter((item) => Number.isInteger(item.id) && item.id > 0)
+      : []
+  ), []);
+
+  const ensureTenantsLoaded = useCallback(async (environmentIds: string[]) => {
+    const envIds = Array.from(new Set(environmentIds.map((item) => String(item || '').trim()).filter(Boolean)));
+    const missingEnvIds = envIds.filter((envId) => !tenantsByEnvironment[envId] && !tenantLoadingEnvironmentsRef.current.has(envId));
+    if (missingEnvIds.length === 0) return;
+
+    missingEnvIds.forEach((envId) => tenantLoadingEnvironmentsRef.current.add(envId));
+    setTenantLoading(true);
+    try {
+      const results = await Promise.all(missingEnvIds.map(async (envId) => {
+        try {
+          const data = await getTenantsForEnvironment(envId);
+          return [envId, normalizeTenantOptions(data)] as const;
+        } catch {
+          return [envId, [] as TenantOption[]] as const;
+        }
+      }));
+      setTenantsByEnvironment((prev) => {
+        const next = { ...prev };
+        results.forEach(([envId, list]) => {
+          next[envId] = list;
+        });
+        return next;
+      });
+    } finally {
+      missingEnvIds.forEach((envId) => tenantLoadingEnvironmentsRef.current.delete(envId));
+      if (tenantLoadingEnvironmentsRef.current.size === 0) {
+        setTenantLoading(false);
+      }
+    }
+  }, [normalizeTenantOptions, tenantsByEnvironment]);
+
   useEffect(() => {
     const envId = currentEnvironment?.id;
-    if (!envId) {
-      setTenants([]);
-      return;
-    }
-    let cancelled = false;
-    const loadTenants = async () => {
-      setTenantLoading(true);
-      try {
-        const data = (await getTenantsForEnvironment()) as TenantOption[];
-        if (cancelled) return;
-        const normalized = Array.isArray(data)
-          ? data
-              .map((item) => ({ id: Number(item.id), name: String(item.name || '') }))
-              .filter((item) => Number.isInteger(item.id) && item.id > 0)
-          : [];
-        setTenants(normalized);
-      } catch {
-        if (!cancelled) setTenants([]);
-      } finally {
-        if (!cancelled) setTenantLoading(false);
-      }
-    };
-    void loadTenants();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentEnvironment?.id]);
+    if (!envId) return;
+    void ensureTenantsLoaded([envId]);
+  }, [currentEnvironment?.id, ensureTenantsLoaded]);
 
   const renderAccount = (value: unknown, record: AssetDomain) => {
     const meta = getDomainSourceMeta(record);
@@ -1322,7 +1350,8 @@ const DomainManagementTab: React.FC = () => {
   const renderTenant = (value: unknown, record: AssetDomain) => {
     const tenantId = String(value || '').trim();
     if (!tenantId) return '-';
-    const name = record.environment === currentEnvironment?.id ? tenantMap.get(tenantId) : undefined;
+    const envId = String(record.environment || '').trim();
+    const name = envId ? tenantNameMapByEnvironment.get(envId)?.get(tenantId) : undefined;
     return name ? `${tenantId} - ${name}` : tenantId;
   };
 
@@ -1367,7 +1396,7 @@ const DomainManagementTab: React.FC = () => {
     if (field.name === 'tenant') {
       return {
         ...field,
-        options: tenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) })),
+        options: currentTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) })),
         placeholder: currentEnvironment?.id ? '请选择租户' : '请先选择左上角环境',
         help: '存当前 environment 下的 tenant.id。',
       } as FieldConfig<AssetDomain>;
@@ -1375,7 +1404,11 @@ const DomainManagementTab: React.FC = () => {
     return field;
   });
 
-  const listDomainsPhase1 = (params: AssetListParams) => getAssetDomains(params);
+  const listDomainsPhase1 = useCallback(async (params: AssetListParams) => {
+    const response = await getAssetDomains(params);
+    void ensureTenantsLoaded(response.items.map((item) => String(item.environment || '')).filter(Boolean));
+    return response;
+  }, [ensureTenantsLoaded]);
 
   const createDomainPhase1 = (data: Partial<AssetDomain>) => createAssetDomain({
     ...data,
