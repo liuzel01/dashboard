@@ -304,6 +304,33 @@ export class AgentQueryService implements OnModuleDestroy {
     return { status: 'not_found', error: 'No OTC merchant record updated.' };
   }
 
+  async clearUserInviteBy(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const selectSql =
+      'SELECT `invite_by` FROM `spot`.`tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [rows] = (await pool.execute(selectSql, [uid, tenantId])) as any;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const currentInviteBy = rows[0]?.invite_by;
+    if (currentInviteBy === null || currentInviteBy === undefined || currentInviteBy === '') {
+      return { status: 'noop', message: 'invite_by is already cleared.' };
+    }
+
+    const updateSql =
+      'UPDATE `spot`.`tbl_user` SET `invite_by` = NULL WHERE `tenant_user_id` = ? AND `tenant_id` = ?';
+    const [result] = (await pool.execute(updateSql, [uid, tenantId])) as any;
+    if (result && result.affectedRows > 0) {
+      return { message: 'User invite_by cleared successfully.' };
+    }
+    return { status: 'not_found', error: 'No user record updated.' };
+  }
+
   async disableOtcUserTradeByUserUid(environmentId: string, uid: string) {
     const pool = await this.getMysqlPool(environmentId);
     const selectSql =

@@ -89,7 +89,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     localStorage.setItem('authToken', token);
     setAuthToken(token);
-    await fetchMe();
+    if (resp?.user) {
+      setMe(resp.user);
+      setLoading(false);
+    } else {
+      await fetchMe();
+    }
     return resp;
   };
 
