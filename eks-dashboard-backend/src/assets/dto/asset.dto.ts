@@ -53,6 +53,14 @@ export class ListAssetsDto {
   owner?: string;
 
   @IsOptional()
+  @IsString()
+  business?: string;
+
+  @IsOptional()
+  @IsString()
+  tag?: string;
+
+  @IsOptional()
   @Transform(toOptionalInt)
   @IsInt()
   @Min(1)
@@ -319,6 +327,12 @@ export class CreateAssetDomainDto {
   @IsOptional()
   @IsString()
   business?: string;
+
+  @IsOptional()
+  @Transform(toOptionalStringArray)
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
 
   @IsOptional()
   @IsString()

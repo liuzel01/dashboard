@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App as AntApp,
   Button,
@@ -20,6 +20,7 @@ import {
   Alert,
   Modal,
 } from 'antd';
+import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
   createAssetAccount,
@@ -36,6 +37,7 @@ import {
   getAssetOverview,
   getAssetResources,
   getCredentialRefs,
+  getTenantsForEnvironment,
   previewWangsuCdnDomains,
   previewAliyunDcdnDomains,
   previewAccountAliyunDcdnDomains,
@@ -51,6 +53,7 @@ import {
   updateAssetResource,
   updateCredentialRef,
 } from '../services/api';
+import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import type {
   AssetAccount,
   AssetChangeLog,
@@ -90,11 +93,30 @@ type FieldConfig<T extends AssetEntity> = {
   number?: boolean;
   boolean?: boolean;
   multiple?: boolean;
+  searchable?: boolean;
   options?: Array<{ label: string; value: string }>;
   placeholder?: string;
   help?: string;
   render?: (value: unknown, record: T) => React.ReactNode;
 };
+
+interface EntityTabFormHooks<T extends AssetEntity> {
+  onOpenCreate?: (form: FormInstance<Partial<T>>) => void;
+  onOpenEdit?: (record: T, form: FormInstance<Partial<T>>) => void;
+  onValuesChange?: (changedValues: Partial<T>, allValues: Partial<T>, form: FormInstance<Partial<T>>) => void;
+  renderFilters?: (context: {
+    filters: AssetListParams;
+    setFilters: React.Dispatch<React.SetStateAction<AssetListParams>>;
+    openCreate: () => void;
+  }) => React.ReactNode;
+}
+
+type TenantOption = {
+  id: number;
+  name: string;
+};
+
+type TenantMapByEnvironment = Record<string, TenantOption[]>;
 
 type EntityTabProps<T extends AssetEntity> = {
   title: string;
@@ -105,7 +127,7 @@ type EntityTabProps<T extends AssetEntity> = {
   remove: (id: number) => Promise<unknown>;
   restore: (id: number) => Promise<unknown>;
   primaryField: keyof T & string;
-};
+} & EntityTabFormHooks<T>;
 
 const accountTypeOptions = [
   { value: 'cloud_provider', label: '云平台账号' },
@@ -234,6 +256,33 @@ const renderAccountServiceTypes = (account?: Partial<AssetAccount> | null) => {
   return <Space size={4} wrap>{items.map((item) => <span key={item}>{domainServiceTypeTag(item)}</span>)}</Space>;
 };
 
+const normalizeStringArray = (value: unknown) => {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item || '').trim()).filter(Boolean);
+    } catch {
+      return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [] as string[];
+};
+
+const renderTags = (value: unknown) => {
+  const tags = normalizeStringArray(value);
+  if (tags.length === 0) return '-';
+  return <Space size={[4, 4]} wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space>;
+};
+
+const selectFilterOption = (input: string, option?: { label?: string; value?: string | number | null }) => {
+  const keyword = String(input || '').trim().toLowerCase();
+  if (!keyword) return true;
+  const label = String(option?.label || '').toLowerCase();
+  const value = String(option?.value || '').toLowerCase();
+  return label.includes(keyword) || value.includes(keyword);
+};
+
 const tryParseJsonObject = (value?: string | null): Record<string, any> | null => {
   if (!value) return null;
   try {
@@ -266,6 +315,10 @@ function EntityTab<T extends AssetEntity>({
   remove,
   restore,
   primaryField,
+  onOpenCreate,
+  onOpenEdit,
+  onValuesChange,
+  renderFilters,
 }: EntityTabProps<T>) {
   const { message } = AntApp.useApp();
   const [form] = Form.useForm();
@@ -295,12 +348,14 @@ function EntityTab<T extends AssetEntity>({
   const openCreate = () => {
     setEditing(null);
     form.resetFields();
+    onOpenCreate?.(form as FormInstance<Partial<T>>);
     setDrawerOpen(true);
   };
 
   const openEdit = (record: T) => {
     setEditing(record);
     form.setFieldsValue(record);
+    onOpenEdit?.(record, form as FormInstance<Partial<T>>);
     setDrawerOpen(true);
   };
 
@@ -317,6 +372,8 @@ function EntityTab<T extends AssetEntity>({
       }
       setDrawerOpen(false);
       await load();
+    } catch (e: any) {
+      message.error(getErrorMessage(e, `保存${title}失败`));
     } finally {
       setSubmitting(false);
     }
@@ -335,6 +392,7 @@ function EntityTab<T extends AssetEntity>({
   };
 
   const tableFields = fields.filter((field) => field.table !== false);
+  const firstTableFieldName = tableFields[0]?.name;
 
   const columns: ColumnsType<T> = [
     {
@@ -349,6 +407,8 @@ function EntityTab<T extends AssetEntity>({
       title: field.label,
       dataIndex: field.name,
       key: field.name,
+      width: field.name === firstTableFieldName ? 220 : field.name === 'status' ? 110 : 180,
+      fixed: field.name === firstTableFieldName ? ('left' as const) : undefined,
       ellipsis: true,
       render: (value: unknown, record: T) => field.render ? field.render(value, record) : (field.name === 'status' ? statusTag(String(value || 'unknown')) : renderValue(value)),
     })),
@@ -396,38 +456,42 @@ function EntityTab<T extends AssetEntity>({
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space wrap>
-        <Input.Search
-          allowClear
-          placeholder={`搜索${title}`}
-          style={{ width: 260 }}
-          onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))}
-        />
-        <Input
-          allowClear
-          placeholder="服务商"
-          style={{ width: 160 }}
-          onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))}
-        />
-        <Input
-          allowClear
-          placeholder="负责人"
-          style={{ width: 160 }}
-          onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))}
-        />
-        <Select
-          allowClear
-          placeholder="状态"
-          style={{ width: 150 }}
-          options={[...accountStatusOptions, ...domainStatusOptions].filter((item, index, arr) => arr.findIndex((x) => x.value === item.value) === index)}
-          onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))}
-        />
-        <Checkbox
-          checked={Boolean(filters.includeDeleted)}
-          onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}
-        >
-          包含已删除
-        </Checkbox>
-        <Button type="primary" onClick={openCreate}>新增</Button>
+        {renderFilters ? renderFilters({ filters, setFilters, openCreate }) : (
+          <>
+            <Input.Search
+              allowClear
+              placeholder={`搜索${title}`}
+              style={{ width: 260 }}
+              onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))}
+            />
+            <Input
+              allowClear
+              placeholder="服务商"
+              style={{ width: 160 }}
+              onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))}
+            />
+            <Input
+              allowClear
+              placeholder="负责人"
+              style={{ width: 160 }}
+              onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))}
+            />
+            <Select
+              allowClear
+              placeholder="状态"
+              style={{ width: 150 }}
+              options={[...accountStatusOptions, ...domainStatusOptions].filter((item, index, arr) => arr.findIndex((x) => x.value === item.value) === index)}
+              onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))}
+            />
+            <Checkbox
+              checked={Boolean(filters.includeDeleted)}
+              onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}
+            >
+              包含已删除
+            </Checkbox>
+            <Button type="primary" onClick={openCreate}>新增</Button>
+          </>
+        )}
       </Space>
 
       <Table
@@ -436,7 +500,7 @@ function EntityTab<T extends AssetEntity>({
         dataSource={items}
         columns={columns}
         pagination={pagination}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1500 }}
       />
 
       <Drawer
@@ -446,7 +510,11 @@ function EntityTab<T extends AssetEntity>({
         onClose={() => setDrawerOpen(false)}
         extra={<Button type="primary" onClick={submit} loading={submitting}>保存</Button>}
       >
-        <Form form={form} layout="vertical">
+        <Form
+          form={form}
+          layout="vertical"
+          onValuesChange={(changedValues, allValues) => onValuesChange?.(changedValues as Partial<T>, allValues as Partial<T>, form as FormInstance<Partial<T>>)}
+        >
           {editing && (
             <Form.Item label="ID">
               <Input value={String(editing.id)} readOnly disabled />
@@ -466,7 +534,14 @@ function EntityTab<T extends AssetEntity>({
               ) : field.number ? (
                 <InputNumber min={1} style={{ width: '100%' }} />
               ) : field.options ? (
-                <Select allowClear options={field.options} />
+                <Select
+                  allowClear
+                  showSearch={field.searchable}
+                  optionFilterProp="label"
+                  filterOption={field.searchable ? selectFilterOption : undefined}
+                  mode={field.multiple ? 'multiple' : undefined}
+                  options={field.options}
+                />
               ) : field.textarea ? (
                 <TextArea rows={3} />
               ) : (
@@ -1230,15 +1305,85 @@ const ChangeLogsTab: React.FC = () => {
 };
 
 const DomainManagementTab: React.FC = () => {
+  const { environments, currentEnvironment } = useContext(EnvironmentContext);
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
+  const [tenantsByEnvironment, setTenantsByEnvironment] = useState<TenantMapByEnvironment>({});
+  const [tenantLoading, setTenantLoading] = useState(false);
+  const tenantLoadingEnvironmentsRef = useRef<Set<string>>(new Set());
   const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
+  const [selectedFormEnvironment, setSelectedFormEnvironment] = useState<string>('');
+  const [domainFilterEnvironment, setDomainFilterEnvironment] = useState<string>('');
+  const currentTenants = useMemo(() => {
+    const envId = selectedFormEnvironment || currentEnvironment?.id;
+    return envId ? (tenantsByEnvironment[envId] || []) : [];
+  }, [selectedFormEnvironment, currentEnvironment?.id, tenantsByEnvironment]);
+  const currentFilterTenants = useMemo(() => {
+    return domainFilterEnvironment ? (tenantsByEnvironment[domainFilterEnvironment] || []) : [];
+  }, [domainFilterEnvironment, tenantsByEnvironment]);
+  const tenantNameMapByEnvironment = useMemo(() => {
+    const result = new Map<string, Map<string, string>>();
+    Object.entries(tenantsByEnvironment).forEach(([envId, list]) => {
+      result.set(envId, new Map(list.map((item) => [String(item.id), item.name])));
+    });
+    return result;
+  }, [tenantsByEnvironment]);
 
   useEffect(() => {
     void (async () => {
-      const res = await getAssetAccounts({ page: 1, pageSize: 500 });
+      const res = await getAssetAccounts({ page: 1, pageSize: 200 });
       setAccounts(res.items);
     })();
   }, []);
+
+  const normalizeTenantOptions = useCallback((data: unknown) => (
+    Array.isArray(data)
+      ? data
+          .map((item) => ({ id: Number((item as TenantOption).id), name: String((item as TenantOption).name || '') }))
+          .filter((item) => Number.isInteger(item.id) && item.id > 0)
+      : []
+  ), []);
+
+  const ensureTenantsLoaded = useCallback(async (environmentIds: string[]) => {
+    const envIds = Array.from(new Set(environmentIds.map((item) => String(item || '').trim()).filter(Boolean)));
+    const missingEnvIds = envIds.filter((envId) => !tenantsByEnvironment[envId] && !tenantLoadingEnvironmentsRef.current.has(envId));
+    if (missingEnvIds.length === 0) return;
+
+    missingEnvIds.forEach((envId) => tenantLoadingEnvironmentsRef.current.add(envId));
+    setTenantLoading(true);
+    try {
+      const results = await Promise.all(missingEnvIds.map(async (envId) => {
+        try {
+          const data = await getTenantsForEnvironment(envId);
+          return [envId, normalizeTenantOptions(data)] as const;
+        } catch {
+          return [envId, [] as TenantOption[]] as const;
+        }
+      }));
+      setTenantsByEnvironment((prev) => {
+        const next = { ...prev };
+        results.forEach(([envId, list]) => {
+          next[envId] = list;
+        });
+        return next;
+      });
+    } finally {
+      missingEnvIds.forEach((envId) => tenantLoadingEnvironmentsRef.current.delete(envId));
+      if (tenantLoadingEnvironmentsRef.current.size === 0) {
+        setTenantLoading(false);
+      }
+    }
+  }, [normalizeTenantOptions, tenantsByEnvironment]);
+
+  useEffect(() => {
+    const envId = currentEnvironment?.id;
+    if (!envId) return;
+    void ensureTenantsLoaded([envId]);
+  }, [currentEnvironment?.id, ensureTenantsLoaded]);
+
+  useEffect(() => {
+    const envId = domainFilterEnvironment || currentEnvironment?.id || '';
+    setDomainFilterEnvironment(envId);
+  }, [currentEnvironment?.id]);
 
   const renderAccount = (value: unknown, record: AssetDomain) => {
     const meta = getDomainSourceMeta(record);
@@ -1252,6 +1397,14 @@ const DomainManagementTab: React.FC = () => {
         <Text type="secondary">ID: {account.id}{account.account_identifier ? ` / ${account.account_identifier}` : ''}</Text>
       </Space>
     );
+  };
+
+  const renderTenant = (value: unknown, record: AssetDomain) => {
+    const tenantId = String(value || '').trim();
+    if (!tenantId) return '-';
+    const envId = String(record.environment || '').trim();
+    const name = envId ? tenantNameMapByEnvironment.get(envId)?.get(tenantId) : undefined;
+    return name ? `${tenantId} - ${name}` : tenantId;
   };
 
   const domainFieldsWithSource: FieldConfig<AssetDomain>[] = [
@@ -1273,28 +1426,183 @@ const DomainManagementTab: React.FC = () => {
         </Space>
       );
     } },
-    domainFields[9],
-    domainFields[10],
-    domainFields[11],
-    domainFields[12],
-    domainFields[13],
-    domainFields[14],
+    { name: 'environment', label: '环境', render: renderValue },
+    { name: 'tenant', label: '租户', render: renderTenant },
+    { name: 'business', label: '业务' },
+    { name: 'tags', label: '标签', table: true, render: renderTags },
+    { name: 'owner', label: '负责人' },
+    { name: 'status', label: '状态', options: domainStatusOptions },
     { name: 'remark', label: '备注/同步信息', table: false, textarea: true },
   ];
 
+  const domainFormFields = domainFieldsWithSource.filter((field) => field.label !== '同步来源');
+
+  const domainFieldsPhase1 = domainFormFields.map((field) => {
+    if (field.name === 'environment') {
+      return {
+        ...field,
+        searchable: true,
+        options: environments.map((item) => ({ label: `${item.name} (${item.id})`, value: item.id })),
+        placeholder: '请选择环境',
+        help: '存 dashboard environment_id；tenant 需与 environment 成对使用。',
+      } as FieldConfig<AssetDomain>;
+    }
+    if (field.name === 'tenant') {
+      return {
+        ...field,
+        searchable: true,
+        options: currentTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) })),
+        placeholder: selectedFormEnvironment ? '请选择租户' : '请先选择环境',
+        help: '存所选 environment 下的 tenant.id。',
+      } as FieldConfig<AssetDomain>;
+    }
+    return field;
+  });
+
+  const listDomainsPhase1 = useCallback(async (params: AssetListParams) => {
+    const response = await getAssetDomains(params);
+    void ensureTenantsLoaded(response.items.map((item) => String(item.environment || '')).filter(Boolean));
+    return response;
+  }, [ensureTenantsLoaded]);
+
+  const handleDomainOpenCreate = useCallback((form: FormInstance<Partial<AssetDomain>>) => {
+    const envId = currentEnvironment?.id || '';
+    setSelectedFormEnvironment(envId);
+    if (envId) {
+      form.setFieldsValue({ environment: envId, tenant: undefined });
+      void ensureTenantsLoaded([envId]);
+    }
+  }, [currentEnvironment?.id, ensureTenantsLoaded]);
+
+  const handleDomainOpenEdit = useCallback((record: AssetDomain) => {
+    const envId = String(record.environment || '').trim();
+    setSelectedFormEnvironment(envId);
+    if (envId) {
+      void ensureTenantsLoaded([envId]);
+    }
+  }, [ensureTenantsLoaded]);
+
+  const handleDomainValuesChange = useCallback((changedValues: Partial<AssetDomain>, allValues: Partial<AssetDomain>, form: FormInstance<Partial<AssetDomain>>) => {
+    if (!Object.prototype.hasOwnProperty.call(changedValues, 'environment')) return;
+    const nextEnvironment = String(allValues.environment || '').trim();
+    const previousEnvironment = selectedFormEnvironment;
+    setSelectedFormEnvironment(nextEnvironment);
+    if (nextEnvironment) {
+      void ensureTenantsLoaded([nextEnvironment]);
+    }
+    if (previousEnvironment !== nextEnvironment && allValues.tenant) {
+      form.setFieldsValue({ tenant: undefined });
+    }
+  }, [ensureTenantsLoaded, selectedFormEnvironment]);
+
+  const createDomainPhase1 = (data: Partial<AssetDomain>) => createAssetDomain({
+    ...data,
+    environment: data.environment || currentEnvironment?.id || undefined,
+  });
+
+  const updateDomainPhase1 = (id: number, data: Partial<AssetDomain>) => updateAssetDomain(id, data);
+
+  const renderDomainFilters = useCallback(({ filters, setFilters, openCreate }: { filters: AssetListParams; setFilters: React.Dispatch<React.SetStateAction<AssetListParams>>; openCreate: () => void; }) => (
+    <>
+      <Input.Search
+        allowClear
+        placeholder="搜索域名 / 根域名"
+        style={{ width: 260 }}
+        onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="服务商"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))}
+      />
+      <Select
+        allowClear
+        placeholder="环境"
+        style={{ width: 180 }}
+        showSearch
+        optionFilterProp="label"
+        filterOption={selectFilterOption}
+        value={filters.environment}
+        options={environments.map((item) => ({ label: `${item.name} (${item.id})`, value: item.id }))}
+        onChange={(value) => {
+          const nextEnvironment = String(value || '');
+          setDomainFilterEnvironment(nextEnvironment);
+          if (nextEnvironment) {
+            void ensureTenantsLoaded([nextEnvironment]);
+          }
+          setFilters((prev) => ({ ...prev, environment: value || undefined, tenant: undefined, page: 1 }));
+        }}
+      />
+      <Select
+        allowClear
+        placeholder={filters.environment ? '租户' : '先选环境'}
+        style={{ width: 180 }}
+        showSearch
+        optionFilterProp="label"
+        filterOption={selectFilterOption}
+        value={filters.tenant}
+        options={currentFilterTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) }))}
+        onChange={(value) => setFilters((prev) => ({ ...prev, tenant: value || undefined, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="业务"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, business: event.target.value || undefined, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="标签"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, tag: event.target.value || undefined, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="负责人"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))}
+      />
+      <Select
+        allowClear
+        placeholder="状态"
+        style={{ width: 130 }}
+        showSearch
+        optionFilterProp="label"
+        filterOption={selectFilterOption}
+        value={filters.status}
+        options={domainStatusOptions}
+        onChange={(status) => setFilters((prev) => ({ ...prev, status: status || undefined, page: 1 }))}
+      />
+      <Checkbox
+        checked={Boolean(filters.includeDeleted)}
+        onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}
+      >
+        包含已删除
+      </Checkbox>
+      <Button type="primary" onClick={openCreate}>新增</Button>
+    </>
+  ), [currentFilterTenants, ensureTenantsLoaded, environments]);
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 2 已补充来源账号与同步来源展示。同步来源优先从 remark 中的结构化 JSON 解析；若无则回退到 account_id / cdn_provider。" />
+      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不应覆盖人工分类字段。" />
+      {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时会默认带入该环境；但编辑框内可单独切换 environment/tenant，已不再依赖左上角环境。列表也不会因左上角环境自动过滤历史域名。" />}
       <EntityTab<AssetDomain>
         title="域名"
-        fields={domainFieldsWithSource}
-        list={getAssetDomains}
-        create={createAssetDomain}
-        update={updateAssetDomain}
+        fields={domainFieldsPhase1}
+        list={listDomainsPhase1}
+        create={createDomainPhase1}
+        update={updateDomainPhase1}
         remove={deleteAssetDomain}
         restore={restoreAssetDomain}
         primaryField="domain"
+        onOpenCreate={handleDomainOpenCreate}
+        onOpenEdit={handleDomainOpenEdit}
+        onValuesChange={handleDomainValuesChange}
+        renderFilters={renderDomainFilters}
       />
+      {tenantLoading && <Text type="secondary">租户列表加载中…</Text>}
     </Space>
   );
 };
@@ -1345,6 +1653,7 @@ const domainFields: FieldConfig<AssetDomain>[] = [
   { name: 'environment', label: '环境' },
   { name: 'tenant', label: '租户' },
   { name: 'business', label: '业务' },
+  { name: 'tags', label: '标签', multiple: true, table: false, help: '补充标签，支持多选/多值提交；如 prod、shared-cert、待迁移。' },
   { name: 'usage_desc', label: '用途说明', textarea: true, table: false },
   { name: 'owner', label: '负责人' },
   { name: 'status', label: '状态', options: domainStatusOptions },
