@@ -1117,14 +1117,14 @@ export class AssetsService {
 
   private async updateRow(actor: ActorContext, config: AssetConfig, id: number, dto: Record<string, unknown>) {
     this.ensureAssetPermission(actor);
-    const patch = this.buildUpdatePayload(config, dto, actor);
-    const keys = Object.keys(patch);
 
     return this.db.withTransaction(async (conn) => {
       const before = await this.getRowById(conn, config, id, true);
       if (!before) {
         throw new NotFoundException('资产不存在');
       }
+      const patch = this.buildUpdatePayload(config, dto, actor, before);
+      const keys = Object.keys(patch);
       if (keys.length > 0) {
         const setSql = keys.map((key) => `${key} = ?`).join(', ');
         await conn.execute(
@@ -1225,10 +1225,10 @@ export class AssetsService {
     return this.normalizePayload(payload);
   }
 
-  private buildUpdatePayload(config: AssetConfig, dto: Record<string, unknown>, actor: ActorContext) {
+  private buildUpdatePayload(config: AssetConfig, dto: Record<string, unknown>, actor: ActorContext, before?: DbRow) {
     const picked = this.pickFields(config.fields, dto);
     if (config.assetType === 'domain') {
-      this.ensureEnvironmentTenantPair(picked);
+      this.ensureEnvironmentTenantPair(before ? { ...before, ...picked } : picked);
     }
     return this.normalizePayload({
       ...picked,

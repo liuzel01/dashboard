@@ -343,6 +343,8 @@ function EntityTab<T extends AssetEntity>({
       }
       setDrawerOpen(false);
       await load();
+    } catch (e: any) {
+      message.error(getErrorMessage(e, `保存${title}失败`));
     } finally {
       setSubmitting(false);
     }
@@ -1352,7 +1354,9 @@ const DomainManagementTab: React.FC = () => {
     { name: 'remark', label: '备注/同步信息', table: false, textarea: true },
   ];
 
-  const domainFieldsPhase1 = domainFieldsWithSource.map((field) => {
+  const domainFormFields = domainFieldsWithSource.filter((field) => field.label !== '同步来源');
+
+  const domainFieldsPhase1 = domainFormFields.map((field) => {
     if (field.name === 'environment') {
       return {
         ...field,
@@ -1382,7 +1386,7 @@ const DomainManagementTab: React.FC = () => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源字段仍保留，且同步不应覆盖人工分类字段。" />
+      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不应覆盖人工分类字段。" />
       {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时若未手动填写 environment，将默认写入当前环境；tenant 下拉也基于当前环境加载。列表不会因左上角环境自动过滤历史域名。" />}
       <EntityTab<AssetDomain>
         title="域名"
