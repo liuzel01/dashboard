@@ -943,6 +943,7 @@ export type AssetListParams = {
   environment?: string;
   tenant?: string;
   owner?: string;
+  tag?: string;
   accountId?: number;
   includeDeleted?: boolean;
   page?: number;
@@ -1025,6 +1026,7 @@ export type AssetDomain = {
   environment: string | null;
   tenant: string | null;
   business: string | null;
+  tags?: string[] | string | null;
   usage_desc: string | null;
   owner: string | null;
   status: string;

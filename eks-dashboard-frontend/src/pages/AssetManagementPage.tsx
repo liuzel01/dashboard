@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   App as AntApp,
   Button,
@@ -36,6 +36,7 @@ import {
   getAssetOverview,
   getAssetResources,
   getCredentialRefs,
+  getTenantsForEnvironment,
   previewWangsuCdnDomains,
   previewAliyunDcdnDomains,
   previewAccountAliyunDcdnDomains,
@@ -51,6 +52,7 @@ import {
   updateAssetResource,
   updateCredentialRef,
 } from '../services/api';
+import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import type {
   AssetAccount,
   AssetChangeLog,
@@ -94,6 +96,11 @@ type FieldConfig<T extends AssetEntity> = {
   placeholder?: string;
   help?: string;
   render?: (value: unknown, record: T) => React.ReactNode;
+};
+
+type TenantOption = {
+  id: number;
+  name: string;
 };
 
 type EntityTabProps<T extends AssetEntity> = {
@@ -232,6 +239,25 @@ const normalizeAccountServiceTypes = (account?: Partial<AssetAccount> | null) =>
 const renderAccountServiceTypes = (account?: Partial<AssetAccount> | null) => {
   const items = normalizeAccountServiceTypes(account);
   return <Space size={4} wrap>{items.map((item) => <span key={item}>{domainServiceTypeTag(item)}</span>)}</Space>;
+};
+
+const normalizeStringArray = (value: unknown) => {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item || '').trim()).filter(Boolean);
+    } catch {
+      return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+  }
+  return [] as string[];
+};
+
+const renderTags = (value: unknown) => {
+  const tags = normalizeStringArray(value);
+  if (tags.length === 0) return '-';
+  return <Space size={[4, 4]} wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space>;
 };
 
 const tryParseJsonObject = (value?: string | null): Record<string, any> | null => {
@@ -469,7 +495,7 @@ function EntityTab<T extends AssetEntity>({
               ) : field.number ? (
                 <InputNumber min={1} style={{ width: '100%' }} />
               ) : field.options ? (
-                <Select allowClear options={field.options} />
+                <Select allowClear mode={field.multiple ? 'multiple' : undefined} options={field.options} />
               ) : field.textarea ? (
                 <TextArea rows={3} />
               ) : (
@@ -1233,15 +1259,49 @@ const ChangeLogsTab: React.FC = () => {
 };
 
 const DomainManagementTab: React.FC = () => {
+  const { currentEnvironment } = useContext(EnvironmentContext);
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [tenantLoading, setTenantLoading] = useState(false);
   const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
+  const tenantMap = useMemo(() => new Map(tenants.map((item) => [String(item.id), item.name])), [tenants]);
 
   useEffect(() => {
     void (async () => {
-      const res = await getAssetAccounts({ page: 1, pageSize: 500 });
+      const res = await getAssetAccounts({ page: 1, pageSize: 200 });
       setAccounts(res.items);
     })();
   }, []);
+
+  useEffect(() => {
+    const envId = currentEnvironment?.id;
+    if (!envId) {
+      setTenants([]);
+      return;
+    }
+    let cancelled = false;
+    const loadTenants = async () => {
+      setTenantLoading(true);
+      try {
+        const data = (await getTenantsForEnvironment()) as TenantOption[];
+        if (cancelled) return;
+        const normalized = Array.isArray(data)
+          ? data
+              .map((item) => ({ id: Number(item.id), name: String(item.name || '') }))
+              .filter((item) => Number.isInteger(item.id) && item.id > 0)
+          : [];
+        setTenants(normalized);
+      } catch {
+        if (!cancelled) setTenants([]);
+      } finally {
+        if (!cancelled) setTenantLoading(false);
+      }
+    };
+    void loadTenants();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEnvironment?.id]);
 
   const renderAccount = (value: unknown, record: AssetDomain) => {
     const meta = getDomainSourceMeta(record);
@@ -1255,6 +1315,13 @@ const DomainManagementTab: React.FC = () => {
         <Text type="secondary">ID: {account.id}{account.account_identifier ? ` / ${account.account_identifier}` : ''}</Text>
       </Space>
     );
+  };
+
+  const renderTenant = (value: unknown, record: AssetDomain) => {
+    const tenantId = String(value || '').trim();
+    if (!tenantId) return '-';
+    const name = record.environment === currentEnvironment?.id ? tenantMap.get(tenantId) : undefined;
+    return name ? `${tenantId} - ${name}` : tenantId;
   };
 
   const domainFieldsWithSource: FieldConfig<AssetDomain>[] = [
@@ -1276,28 +1343,58 @@ const DomainManagementTab: React.FC = () => {
         </Space>
       );
     } },
-    domainFields[9],
-    domainFields[10],
-    domainFields[11],
-    domainFields[12],
-    domainFields[13],
-    domainFields[14],
+    { name: 'environment', label: '环境', render: renderValue },
+    { name: 'tenant', label: '租户', render: renderTenant },
+    { name: 'business', label: '业务' },
+    { name: 'tags', label: '标签', table: true, render: renderTags },
+    { name: 'owner', label: '负责人' },
+    { name: 'status', label: '状态', options: domainStatusOptions },
     { name: 'remark', label: '备注/同步信息', table: false, textarea: true },
   ];
 
+  const domainFieldsPhase1 = domainFieldsWithSource.map((field) => {
+    if (field.name === 'environment') {
+      return {
+        ...field,
+        placeholder: currentEnvironment?.id ? `默认 ${currentEnvironment.id}` : '请选择左上角环境',
+        help: '存 dashboard environment_id；tenant 需与 environment 成对使用。',
+      } as FieldConfig<AssetDomain>;
+    }
+    if (field.name === 'tenant') {
+      return {
+        ...field,
+        options: tenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) })),
+        placeholder: currentEnvironment?.id ? '请选择租户' : '请先选择左上角环境',
+        help: '存当前 environment 下的 tenant.id。',
+      } as FieldConfig<AssetDomain>;
+    }
+    return field;
+  });
+
+  const listDomainsPhase1 = (params: AssetListParams) => getAssetDomains(params);
+
+  const createDomainPhase1 = (data: Partial<AssetDomain>) => createAssetDomain({
+    ...data,
+    environment: data.environment || currentEnvironment?.id || undefined,
+  });
+
+  const updateDomainPhase1 = (id: number, data: Partial<AssetDomain>) => updateAssetDomain(id, data);
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 2 已补充来源账号与同步来源展示。同步来源优先从 remark 中的结构化 JSON 解析；若无则回退到 account_id / cdn_provider。" />
+      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源字段仍保留，且同步不应覆盖人工分类字段。" />
+      {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时若未手动填写 environment，将默认写入当前环境；tenant 下拉也基于当前环境加载。列表不会因左上角环境自动过滤历史域名。" />}
       <EntityTab<AssetDomain>
         title="域名"
-        fields={domainFieldsWithSource}
-        list={getAssetDomains}
-        create={createAssetDomain}
-        update={updateAssetDomain}
+        fields={domainFieldsPhase1}
+        list={listDomainsPhase1}
+        create={createDomainPhase1}
+        update={updateDomainPhase1}
         remove={deleteAssetDomain}
         restore={restoreAssetDomain}
         primaryField="domain"
       />
+      {tenantLoading && <Text type="secondary">租户列表加载中…</Text>}
     </Space>
   );
 };
@@ -1348,6 +1445,7 @@ const domainFields: FieldConfig<AssetDomain>[] = [
   { name: 'environment', label: '环境' },
   { name: 'tenant', label: '租户' },
   { name: 'business', label: '业务' },
+  { name: 'tags', label: '标签', multiple: true, table: false, help: '补充标签，支持多选/多值提交；如 prod、shared-cert、待迁移。' },
   { name: 'usage_desc', label: '用途说明', textarea: true, table: false },
   { name: 'owner', label: '负责人' },
   { name: 'status', label: '状态', options: domainStatusOptions },

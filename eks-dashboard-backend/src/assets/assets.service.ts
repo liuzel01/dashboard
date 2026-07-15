@@ -158,6 +158,7 @@ const domainConfig: AssetConfig = {
     'environment',
     'tenant',
     'business',
+    'tags',
     'usage_desc',
     'owner',
     'status',
@@ -165,7 +166,7 @@ const domainConfig: AssetConfig = {
   ],
   requiredField: 'domain',
   defaultValues: { icp_status: 'unknown', status: 'unknown' },
-  keywordFields: ['domain', 'root_domain', 'provider', 'icp_entity', 'dns_provider', 'cdn_provider', 'environment', 'tenant', 'business', 'owner', 'remark'],
+  keywordFields: ['domain', 'root_domain', 'provider', 'icp_entity', 'dns_provider', 'cdn_provider', 'environment', 'tenant', 'business', 'tags', 'owner', 'remark'],
   providerField: 'provider',
   environmentField: 'environment',
   tenantField: 'tenant',
@@ -1048,6 +1049,10 @@ export class AssetsService {
     const where: string[] = [];
     const params: any[] = [];
 
+    if (config.assetType === 'domain' && query.tenant?.trim() && !query.environment?.trim()) {
+      throw new BadRequestException('筛选 tenant 时必须同时指定 environment');
+    }
+
     if (!query.includeDeleted) {
       where.push('deleted_at IS NULL');
     }
@@ -1061,6 +1066,10 @@ export class AssetsService {
     this.addExactFilter(where, params, config.typeField, query.type);
     this.addExactFilter(where, params, config.environmentField, query.environment);
     this.addExactFilter(where, params, config.tenantField, query.tenant);
+    if (config.assetType === 'domain' && query.tag?.trim()) {
+      where.push(`tags LIKE ?`);
+      params.push(`%\"${query.tag.trim()}\"%`);
+    }
     this.addExactFilter(where, params, config.ownerField, query.owner);
     this.addExactFilter(where, params, config.accountField, query.accountId);
 
@@ -1210,12 +1219,19 @@ export class AssetsService {
     if (payload[config.requiredField] === undefined || payload[config.requiredField] === null || payload[config.requiredField] === '') {
       throw new BadRequestException('缺少必要资产字段');
     }
+    if (config.assetType === 'domain') {
+      this.ensureEnvironmentTenantPair(payload);
+    }
     return this.normalizePayload(payload);
   }
 
   private buildUpdatePayload(config: AssetConfig, dto: Record<string, unknown>, actor: ActorContext) {
+    const picked = this.pickFields(config.fields, dto);
+    if (config.assetType === 'domain') {
+      this.ensureEnvironmentTenantPair(picked);
+    }
     return this.normalizePayload({
-      ...this.pickFields(config.fields, dto),
+      ...picked,
       updated_by: actor.username,
       updated_at: new Date(),
     });
@@ -1247,6 +1263,17 @@ export class AssetsService {
       }
     });
     return data;
+  }
+
+  private ensureEnvironmentTenantPair(payload: Record<string, unknown>) {
+    const hasEnvironment = Object.prototype.hasOwnProperty.call(payload, 'environment');
+    const hasTenant = Object.prototype.hasOwnProperty.call(payload, 'tenant');
+    if (!hasEnvironment && !hasTenant) return;
+    const environment = payload.environment === undefined || payload.environment === null ? '' : String(payload.environment).trim();
+    const tenant = payload.tenant === undefined || payload.tenant === null ? '' : String(payload.tenant).trim();
+    if ((environment && !tenant) || (!environment && tenant)) {
+      throw new BadRequestException('environment 与 tenant 必须成对填写');
+    }
   }
 
   private addExactFilter(where: string[], params: any[], column: string | undefined, value: string | number | undefined) {
