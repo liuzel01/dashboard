@@ -20,6 +20,7 @@ import {
   Alert,
   Modal,
 } from 'antd';
+import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
   createAssetAccount,
@@ -98,6 +99,12 @@ type FieldConfig<T extends AssetEntity> = {
   render?: (value: unknown, record: T) => React.ReactNode;
 };
 
+interface EntityTabFormHooks<T extends AssetEntity> {
+  onOpenCreate?: (form: FormInstance<Partial<T>>) => void;
+  onOpenEdit?: (record: T, form: FormInstance<Partial<T>>) => void;
+  onValuesChange?: (changedValues: Partial<T>, allValues: Partial<T>, form: FormInstance<Partial<T>>) => void;
+}
+
 type TenantOption = {
   id: number;
   name: string;
@@ -114,7 +121,7 @@ type EntityTabProps<T extends AssetEntity> = {
   remove: (id: number) => Promise<unknown>;
   restore: (id: number) => Promise<unknown>;
   primaryField: keyof T & string;
-};
+} & EntityTabFormHooks<T>;
 
 const accountTypeOptions = [
   { value: 'cloud_provider', label: '云平台账号' },
@@ -294,6 +301,9 @@ function EntityTab<T extends AssetEntity>({
   remove,
   restore,
   primaryField,
+  onOpenCreate,
+  onOpenEdit,
+  onValuesChange,
 }: EntityTabProps<T>) {
   const { message } = AntApp.useApp();
   const [form] = Form.useForm();
@@ -323,12 +333,14 @@ function EntityTab<T extends AssetEntity>({
   const openCreate = () => {
     setEditing(null);
     form.resetFields();
+    onOpenCreate?.(form as FormInstance<Partial<T>>);
     setDrawerOpen(true);
   };
 
   const openEdit = (record: T) => {
     setEditing(record);
     form.setFieldsValue(record);
+    onOpenEdit?.(record, form as FormInstance<Partial<T>>);
     setDrawerOpen(true);
   };
 
@@ -479,7 +491,11 @@ function EntityTab<T extends AssetEntity>({
         onClose={() => setDrawerOpen(false)}
         extra={<Button type="primary" onClick={submit} loading={submitting}>保存</Button>}
       >
-        <Form form={form} layout="vertical">
+        <Form
+          form={form}
+          layout="vertical"
+          onValuesChange={(changedValues, allValues) => onValuesChange?.(changedValues as Partial<T>, allValues as Partial<T>, form as FormInstance<Partial<T>>)}
+        >
           {editing && (
             <Form.Item label="ID">
               <Input value={String(editing.id)} readOnly disabled />
@@ -1263,16 +1279,17 @@ const ChangeLogsTab: React.FC = () => {
 };
 
 const DomainManagementTab: React.FC = () => {
-  const { currentEnvironment } = useContext(EnvironmentContext);
+  const { environments, currentEnvironment } = useContext(EnvironmentContext);
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
   const [tenantsByEnvironment, setTenantsByEnvironment] = useState<TenantMapByEnvironment>({});
   const [tenantLoading, setTenantLoading] = useState(false);
   const tenantLoadingEnvironmentsRef = useRef<Set<string>>(new Set());
   const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
+  const [selectedFormEnvironment, setSelectedFormEnvironment] = useState<string>('');
   const currentTenants = useMemo(() => {
-    const envId = currentEnvironment?.id;
+    const envId = selectedFormEnvironment || currentEnvironment?.id;
     return envId ? (tenantsByEnvironment[envId] || []) : [];
-  }, [currentEnvironment?.id, tenantsByEnvironment]);
+  }, [selectedFormEnvironment, currentEnvironment?.id, tenantsByEnvironment]);
   const tenantNameMapByEnvironment = useMemo(() => {
     const result = new Map<string, Map<string, string>>();
     Object.entries(tenantsByEnvironment).forEach(([envId, list]) => {
@@ -1389,7 +1406,8 @@ const DomainManagementTab: React.FC = () => {
     if (field.name === 'environment') {
       return {
         ...field,
-        placeholder: currentEnvironment?.id ? `默认 ${currentEnvironment.id}` : '请选择左上角环境',
+        options: environments.map((item) => ({ label: `${item.name} (${item.id})`, value: item.id })),
+        placeholder: '请选择环境',
         help: '存 dashboard environment_id；tenant 需与 environment 成对使用。',
       } as FieldConfig<AssetDomain>;
     }
@@ -1397,8 +1415,8 @@ const DomainManagementTab: React.FC = () => {
       return {
         ...field,
         options: currentTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) })),
-        placeholder: currentEnvironment?.id ? '请选择租户' : '请先选择左上角环境',
-        help: '存当前 environment 下的 tenant.id。',
+        placeholder: selectedFormEnvironment ? '请选择租户' : '请先选择环境',
+        help: '存所选 environment 下的 tenant.id。',
       } as FieldConfig<AssetDomain>;
     }
     return field;
@@ -1410,6 +1428,36 @@ const DomainManagementTab: React.FC = () => {
     return response;
   }, [ensureTenantsLoaded]);
 
+  const handleDomainOpenCreate = useCallback((form: FormInstance<Partial<AssetDomain>>) => {
+    const envId = currentEnvironment?.id || '';
+    setSelectedFormEnvironment(envId);
+    if (envId) {
+      form.setFieldsValue({ environment: envId, tenant: undefined });
+      void ensureTenantsLoaded([envId]);
+    }
+  }, [currentEnvironment?.id, ensureTenantsLoaded]);
+
+  const handleDomainOpenEdit = useCallback((record: AssetDomain) => {
+    const envId = String(record.environment || '').trim();
+    setSelectedFormEnvironment(envId);
+    if (envId) {
+      void ensureTenantsLoaded([envId]);
+    }
+  }, [ensureTenantsLoaded]);
+
+  const handleDomainValuesChange = useCallback((changedValues: Partial<AssetDomain>, allValues: Partial<AssetDomain>, form: FormInstance<Partial<AssetDomain>>) => {
+    if (!Object.prototype.hasOwnProperty.call(changedValues, 'environment')) return;
+    const nextEnvironment = String(allValues.environment || '').trim();
+    const previousEnvironment = selectedFormEnvironment;
+    setSelectedFormEnvironment(nextEnvironment);
+    if (nextEnvironment) {
+      void ensureTenantsLoaded([nextEnvironment]);
+    }
+    if (previousEnvironment !== nextEnvironment && allValues.tenant) {
+      form.setFieldsValue({ tenant: undefined });
+    }
+  }, [ensureTenantsLoaded, selectedFormEnvironment]);
+
   const createDomainPhase1 = (data: Partial<AssetDomain>) => createAssetDomain({
     ...data,
     environment: data.environment || currentEnvironment?.id || undefined,
@@ -1420,7 +1468,7 @@ const DomainManagementTab: React.FC = () => {
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不应覆盖人工分类字段。" />
-      {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时若未手动填写 environment，将默认写入当前环境；tenant 下拉也基于当前环境加载。列表不会因左上角环境自动过滤历史域名。" />}
+      {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时会默认带入该环境；但编辑框内可单独切换 environment/tenant，已不再依赖左上角环境。列表也不会因左上角环境自动过滤历史域名。" />}
       <EntityTab<AssetDomain>
         title="域名"
         fields={domainFieldsPhase1}
@@ -1430,6 +1478,9 @@ const DomainManagementTab: React.FC = () => {
         remove={deleteAssetDomain}
         restore={restoreAssetDomain}
         primaryField="domain"
+        onOpenCreate={handleDomainOpenCreate}
+        onOpenEdit={handleDomainOpenEdit}
+        onValuesChange={handleDomainValuesChange}
       />
       {tenantLoading && <Text type="secondary">租户列表加载中…</Text>}
     </Space>
