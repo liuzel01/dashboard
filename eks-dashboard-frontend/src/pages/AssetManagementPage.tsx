@@ -93,6 +93,7 @@ type FieldConfig<T extends AssetEntity> = {
   number?: boolean;
   boolean?: boolean;
   multiple?: boolean;
+  searchable?: boolean;
   options?: Array<{ label: string; value: string }>;
   placeholder?: string;
   help?: string;
@@ -272,6 +273,14 @@ const renderTags = (value: unknown) => {
   const tags = normalizeStringArray(value);
   if (tags.length === 0) return '-';
   return <Space size={[4, 4]} wrap>{tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</Space>;
+};
+
+const selectFilterOption = (input: string, option?: { label?: string; value?: string | number | null }) => {
+  const keyword = String(input || '').trim().toLowerCase();
+  if (!keyword) return true;
+  const label = String(option?.label || '').toLowerCase();
+  const value = String(option?.value || '').toLowerCase();
+  return label.includes(keyword) || value.includes(keyword);
 };
 
 const tryParseJsonObject = (value?: string | null): Record<string, any> | null => {
@@ -525,7 +534,14 @@ function EntityTab<T extends AssetEntity>({
               ) : field.number ? (
                 <InputNumber min={1} style={{ width: '100%' }} />
               ) : field.options ? (
-                <Select allowClear mode={field.multiple ? 'multiple' : undefined} options={field.options} />
+                <Select
+                  allowClear
+                  showSearch={field.searchable}
+                  optionFilterProp="label"
+                  filterOption={field.searchable ? selectFilterOption : undefined}
+                  mode={field.multiple ? 'multiple' : undefined}
+                  options={field.options}
+                />
               ) : field.textarea ? (
                 <TextArea rows={3} />
               ) : (
@@ -1425,6 +1441,7 @@ const DomainManagementTab: React.FC = () => {
     if (field.name === 'environment') {
       return {
         ...field,
+        searchable: true,
         options: environments.map((item) => ({ label: `${item.name} (${item.id})`, value: item.id })),
         placeholder: '请选择环境',
         help: '存 dashboard environment_id；tenant 需与 environment 成对使用。',
@@ -1433,6 +1450,7 @@ const DomainManagementTab: React.FC = () => {
     if (field.name === 'tenant') {
       return {
         ...field,
+        searchable: true,
         options: currentTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) })),
         placeholder: selectedFormEnvironment ? '请选择租户' : '请先选择环境',
         help: '存所选 environment 下的 tenant.id。',
@@ -1502,6 +1520,9 @@ const DomainManagementTab: React.FC = () => {
         allowClear
         placeholder="环境"
         style={{ width: 180 }}
+        showSearch
+        optionFilterProp="label"
+        filterOption={selectFilterOption}
         value={filters.environment}
         options={environments.map((item) => ({ label: `${item.name} (${item.id})`, value: item.id }))}
         onChange={(value) => {
@@ -1517,6 +1538,9 @@ const DomainManagementTab: React.FC = () => {
         allowClear
         placeholder={filters.environment ? '租户' : '先选环境'}
         style={{ width: 180 }}
+        showSearch
+        optionFilterProp="label"
+        filterOption={selectFilterOption}
         value={filters.tenant}
         options={currentFilterTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) }))}
         onChange={(value) => setFilters((prev) => ({ ...prev, tenant: value || undefined, page: 1 }))}
@@ -1543,6 +1567,9 @@ const DomainManagementTab: React.FC = () => {
         allowClear
         placeholder="状态"
         style={{ width: 130 }}
+        showSearch
+        optionFilterProp="label"
+        filterOption={selectFilterOption}
         value={filters.status}
         options={domainStatusOptions}
         onChange={(status) => setFilters((prev) => ({ ...prev, status: status || undefined, page: 1 }))}
