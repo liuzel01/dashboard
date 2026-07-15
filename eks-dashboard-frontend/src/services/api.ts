@@ -943,6 +943,7 @@ export type AssetListParams = {
   type?: string;
   environment?: string;
   tenant?: string;
+  business?: string;
   owner?: string;
   tag?: string;
   accountId?: number;

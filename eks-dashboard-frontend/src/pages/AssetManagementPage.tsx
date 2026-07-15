@@ -103,6 +103,11 @@ interface EntityTabFormHooks<T extends AssetEntity> {
   onOpenCreate?: (form: FormInstance<Partial<T>>) => void;
   onOpenEdit?: (record: T, form: FormInstance<Partial<T>>) => void;
   onValuesChange?: (changedValues: Partial<T>, allValues: Partial<T>, form: FormInstance<Partial<T>>) => void;
+  renderFilters?: (context: {
+    filters: AssetListParams;
+    setFilters: React.Dispatch<React.SetStateAction<AssetListParams>>;
+    openCreate: () => void;
+  }) => React.ReactNode;
 }
 
 type TenantOption = {
@@ -304,6 +309,7 @@ function EntityTab<T extends AssetEntity>({
   onOpenCreate,
   onOpenEdit,
   onValuesChange,
+  renderFilters,
 }: EntityTabProps<T>) {
   const { message } = AntApp.useApp();
   const [form] = Form.useForm();
@@ -441,38 +447,42 @@ function EntityTab<T extends AssetEntity>({
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Space wrap>
-        <Input.Search
-          allowClear
-          placeholder={`搜索${title}`}
-          style={{ width: 260 }}
-          onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))}
-        />
-        <Input
-          allowClear
-          placeholder="服务商"
-          style={{ width: 160 }}
-          onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))}
-        />
-        <Input
-          allowClear
-          placeholder="负责人"
-          style={{ width: 160 }}
-          onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))}
-        />
-        <Select
-          allowClear
-          placeholder="状态"
-          style={{ width: 150 }}
-          options={[...accountStatusOptions, ...domainStatusOptions].filter((item, index, arr) => arr.findIndex((x) => x.value === item.value) === index)}
-          onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))}
-        />
-        <Checkbox
-          checked={Boolean(filters.includeDeleted)}
-          onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}
-        >
-          包含已删除
-        </Checkbox>
-        <Button type="primary" onClick={openCreate}>新增</Button>
+        {renderFilters ? renderFilters({ filters, setFilters, openCreate }) : (
+          <>
+            <Input.Search
+              allowClear
+              placeholder={`搜索${title}`}
+              style={{ width: 260 }}
+              onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))}
+            />
+            <Input
+              allowClear
+              placeholder="服务商"
+              style={{ width: 160 }}
+              onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))}
+            />
+            <Input
+              allowClear
+              placeholder="负责人"
+              style={{ width: 160 }}
+              onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))}
+            />
+            <Select
+              allowClear
+              placeholder="状态"
+              style={{ width: 150 }}
+              options={[...accountStatusOptions, ...domainStatusOptions].filter((item, index, arr) => arr.findIndex((x) => x.value === item.value) === index)}
+              onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))}
+            />
+            <Checkbox
+              checked={Boolean(filters.includeDeleted)}
+              onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}
+            >
+              包含已删除
+            </Checkbox>
+            <Button type="primary" onClick={openCreate}>新增</Button>
+          </>
+        )}
       </Space>
 
       <Table
@@ -1286,10 +1296,14 @@ const DomainManagementTab: React.FC = () => {
   const tenantLoadingEnvironmentsRef = useRef<Set<string>>(new Set());
   const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
   const [selectedFormEnvironment, setSelectedFormEnvironment] = useState<string>('');
+  const [domainFilterEnvironment, setDomainFilterEnvironment] = useState<string>('');
   const currentTenants = useMemo(() => {
     const envId = selectedFormEnvironment || currentEnvironment?.id;
     return envId ? (tenantsByEnvironment[envId] || []) : [];
   }, [selectedFormEnvironment, currentEnvironment?.id, tenantsByEnvironment]);
+  const currentFilterTenants = useMemo(() => {
+    return domainFilterEnvironment ? (tenantsByEnvironment[domainFilterEnvironment] || []) : [];
+  }, [domainFilterEnvironment, tenantsByEnvironment]);
   const tenantNameMapByEnvironment = useMemo(() => {
     const result = new Map<string, Map<string, string>>();
     Object.entries(tenantsByEnvironment).forEach(([envId, list]) => {
@@ -1349,6 +1363,11 @@ const DomainManagementTab: React.FC = () => {
     if (!envId) return;
     void ensureTenantsLoaded([envId]);
   }, [currentEnvironment?.id, ensureTenantsLoaded]);
+
+  useEffect(() => {
+    const envId = domainFilterEnvironment || currentEnvironment?.id || '';
+    setDomainFilterEnvironment(envId);
+  }, [currentEnvironment?.id]);
 
   const renderAccount = (value: unknown, record: AssetDomain) => {
     const meta = getDomainSourceMeta(record);
@@ -1465,6 +1484,79 @@ const DomainManagementTab: React.FC = () => {
 
   const updateDomainPhase1 = (id: number, data: Partial<AssetDomain>) => updateAssetDomain(id, data);
 
+  const renderDomainFilters = useCallback(({ filters, setFilters, openCreate }: { filters: AssetListParams; setFilters: React.Dispatch<React.SetStateAction<AssetListParams>>; openCreate: () => void; }) => (
+    <>
+      <Input.Search
+        allowClear
+        placeholder="搜索域名 / 根域名"
+        style={{ width: 260 }}
+        onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="服务商"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))}
+      />
+      <Select
+        allowClear
+        placeholder="环境"
+        style={{ width: 180 }}
+        value={filters.environment}
+        options={environments.map((item) => ({ label: `${item.name} (${item.id})`, value: item.id }))}
+        onChange={(value) => {
+          const nextEnvironment = String(value || '');
+          setDomainFilterEnvironment(nextEnvironment);
+          if (nextEnvironment) {
+            void ensureTenantsLoaded([nextEnvironment]);
+          }
+          setFilters((prev) => ({ ...prev, environment: value || undefined, tenant: undefined, page: 1 }));
+        }}
+      />
+      <Select
+        allowClear
+        placeholder={filters.environment ? '租户' : '先选环境'}
+        style={{ width: 180 }}
+        value={filters.tenant}
+        options={currentFilterTenants.map((item) => ({ label: `${item.id} - ${item.name}`, value: String(item.id) }))}
+        onChange={(value) => setFilters((prev) => ({ ...prev, tenant: value || undefined, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="业务"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, business: event.target.value || undefined, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="标签"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, tag: event.target.value || undefined, page: 1 }))}
+      />
+      <Input
+        allowClear
+        placeholder="负责人"
+        style={{ width: 140 }}
+        onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))}
+      />
+      <Select
+        allowClear
+        placeholder="状态"
+        style={{ width: 130 }}
+        value={filters.status}
+        options={domainStatusOptions}
+        onChange={(status) => setFilters((prev) => ({ ...prev, status: status || undefined, page: 1 }))}
+      />
+      <Checkbox
+        checked={Boolean(filters.includeDeleted)}
+        onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}
+      >
+        包含已删除
+      </Checkbox>
+      <Button type="primary" onClick={openCreate}>新增</Button>
+    </>
+  ), [currentFilterTenants, ensureTenantsLoaded, environments]);
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不应覆盖人工分类字段。" />
@@ -1481,6 +1573,7 @@ const DomainManagementTab: React.FC = () => {
         onOpenCreate={handleDomainOpenCreate}
         onOpenEdit={handleDomainOpenEdit}
         onValuesChange={handleDomainValuesChange}
+        renderFilters={renderDomainFilters}
       />
       {tenantLoading && <Text type="secondary">租户列表加载中…</Text>}
     </Space>

@@ -54,6 +54,10 @@ export class ListAssetsDto {
 
   @IsOptional()
   @IsString()
+  business?: string;
+
+  @IsOptional()
+  @IsString()
   tag?: string;
 
   @IsOptional()

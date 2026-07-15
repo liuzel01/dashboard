@@ -41,6 +41,7 @@ type AssetConfig = {
   providerField?: string;
   environmentField?: string;
   tenantField?: string;
+  businessField?: string;
   ownerField?: string;
   statusField?: string;
   accountField?: string;
@@ -170,6 +171,7 @@ const domainConfig: AssetConfig = {
   providerField: 'provider',
   environmentField: 'environment',
   tenantField: 'tenant',
+  businessField: 'business',
   ownerField: 'owner',
   statusField: 'status',
   accountField: 'account_id',
@@ -1066,6 +1068,7 @@ export class AssetsService {
     this.addExactFilter(where, params, config.typeField, query.type);
     this.addExactFilter(where, params, config.environmentField, query.environment);
     this.addExactFilter(where, params, config.tenantField, query.tenant);
+    this.addExactFilter(where, params, config.businessField, query.business);
     if (config.assetType === 'domain' && query.tag?.trim()) {
       where.push(`tags LIKE ?`);
       params.push(`%\"${query.tag.trim()}\"%`);
