@@ -385,10 +385,13 @@ export class QueryService {
       if (result?.status === 'noop') {
         return {
           message:
-            result?.message || 'User already deactivated or has no email/phone to mark.',
+            result?.message || 'User account is already deactivated.',
         };
       }
-      return { message: result?.message || 'User deactivated successfully.' };
+      return {
+        message:
+          result?.message || 'User account deactivated successfully. Email and phone fields were cleared.',
+      };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;

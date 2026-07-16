@@ -454,7 +454,7 @@ const DataQueryPage: React.FC = () => {
   const showDeactivateConfirm = () => {
     modal.confirm({
       title: '确认注销账号？',
-      content: `你确定要注销用户 ${userInfo?.tenant_user_id} 吗？此操作会将用户的邮箱和电话标记为已删除，但不会物理删除记录。`,
+      content: `你确定要注销用户 ${userInfo?.tenant_user_id} 吗？此操作会清空该用户在主表和敏感信息表中的邮箱、手机号及手机号区号，但不会物理删除记录。`,
       okText: '确认注销',
       okType: 'danger',
       cancelText: '取消',

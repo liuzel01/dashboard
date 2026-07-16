@@ -540,7 +540,7 @@ export class AgentQueryService implements OnModuleDestroy {
   async deactivateUser(environmentId: string, uid: string, tenantId: number) {
     const pool = await this.getMysqlPool(environmentId);
     const userSql =
-      'SELECT email, tel FROM `tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+      'SELECT `tenant_user_id`, `email`, `tel`, `tel_country_code` FROM `tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
     const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
 
     if (!Array.isArray(userRows) || userRows.length === 0) {
@@ -548,27 +548,33 @@ export class AgentQueryService implements OnModuleDestroy {
     }
 
     const user = userRows[0] || {};
-    const updates: { [key: string]: any } = {};
-    if (typeof user.email === 'string' && !user.email.endsWith('-del')) {
-      updates.email = `${user.email}-del`;
-    }
-    if (typeof user.tel === 'string' && !user.tel.endsWith('-del')) {
-      updates.tel = `${user.tel}-del`;
-    }
+    const alreadyCleared =
+      user.email == null &&
+      user.tel == null &&
+      user.tel_country_code == null;
 
-    if (Object.keys(updates).length === 0) {
+    if (alreadyCleared) {
       return {
         status: 'noop',
-        message: 'User already deactivated or has no email/phone to mark.',
+        message: 'User account is already deactivated.',
       };
     }
 
-    const fields = Object.keys(updates)
-      .map((key) => `\`${key}\` = ?`)
-      .join(', ');
-    const values = Object.values(updates);
-    const sql = `UPDATE \`tbl_user\` SET ${fields} WHERE \`tenant_user_id\` = ? AND \`tenant_id\` = ? LIMIT 1`;
-    const [result] = (await pool.execute(sql, [...values, uid, tenantId])) as any;
+    const sql = `
+      UPDATE \`spot\`.\`tbl_user\` u
+      LEFT JOIN \`spot\`.\`user_sensitive_info\` s
+        ON u.\`tenant_user_id\` = s.\`tenant_user_id\`
+      SET
+        u.\`email\` = NULL,
+        s.\`email\` = NULL,
+        u.\`tel_country_code\` = NULL,
+        u.\`tel\` = NULL,
+        s.\`tel_country_code\` = NULL,
+        s.\`tel\` = NULL
+      WHERE u.\`tenant_user_id\` = ?
+        AND u.\`tenant_id\` = ?
+    `;
+    const [result] = (await pool.execute(sql, [uid, tenantId])) as any;
 
     if (!result || result.affectedRows === 0) {
       return {
@@ -577,7 +583,10 @@ export class AgentQueryService implements OnModuleDestroy {
       };
     }
 
-    return { status: 'success', message: 'User deactivated successfully.' };
+    return {
+      status: 'success',
+      message: 'User account deactivated successfully. Email and phone fields were cleared.',
+    };
   }
 
   async updateTraderNickName(
