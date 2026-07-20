@@ -136,6 +136,25 @@ export class AssetsController {
     return this.service.syncAccountAliyunDcdnDomains(actor, id, body);
   }
 
+  @Get('accounts/:id/wangsu/domains/preview')
+  async previewAccountWangsuDomains(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.previewAccountWangsuDomains(actor, id);
+  }
+
+  @Post('accounts/:id/wangsu/domains/sync')
+  async syncAccountWangsuDomains(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id', ParseIntPipe) id: number,
+    @Body(validation) body: SyncAccountDomainsDto,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.syncAccountWangsuDomains(actor, id, body);
+  }
+
   @Get('resources')
   async listResources(
     @Headers('authorization') authorization: string | undefined,

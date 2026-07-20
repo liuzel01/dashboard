@@ -535,6 +535,109 @@ export class AssetsService {
     });
   }
 
+  async previewAccountWangsuDomains(actor: ActorContext, accountId: number) {
+    this.ensureAssetPermission(actor);
+    const account = await this.getSyncableAccount(accountId, 'wangsu');
+    this.ensureWangsuAccount(account);
+    const credentials = await this.resolveAccountSiteConfCredentials(account, {
+      defaultEndpoint: 'https://open.chinanetcenter.com',
+      allowLegacyBasicAuth: true,
+    });
+    const url = `${credentials.endpoint.replace(/\/+$/, '')}/api/domain`;
+    const headers = credentials.accessKeyId && credentials.accessKeySecret
+      ? this.buildWangsuAkskHeaders({ endpoint: credentials.endpoint, method: 'GET', path: '/api/domain', accessKeyId: credentials.accessKeyId, accessKeySecret: credentials.accessKeySecret })
+      : this.buildWangsuBasicHeaders({ username: credentials.username || '', apiKey: credentials.apiKey || '' });
+    const response = await axios.get(url, {
+      timeout: await this.getWangsuTimeoutMs(),
+      headers,
+      responseType: 'text',
+      validateStatus: (status) => status >= 200 && status < 500,
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new BadRequestException(`Wangsu API request failed: HTTP ${response.status} ${this.summarizeWangsuError(response.data)}`);
+    }
+    const body = String(response.data || '');
+    const items = this.parseWangsuDomainResponse(body);
+    return {
+      provider: 'wangsu',
+      service: 'cdn',
+      account: {
+        id: Number(account.id),
+        account_name: String(account.account_name || ''),
+        account_identifier: String(account.account_identifier || ''),
+        provider: String(account.provider || ''),
+      },
+      endpoint: credentials.endpoint,
+      fetchedAt: new Date().toISOString(),
+      total: items.length,
+      items,
+    };
+  }
+
+  async syncAccountWangsuDomains(actor: ActorContext, accountId: number, dto: SyncAccountDomainsDto = {}) {
+    this.ensureAssetPermission(actor);
+    const preview = await this.previewAccountWangsuDomains(actor, accountId);
+    const dryRun = dto.dryRun !== false;
+    const planned = preview.items.map((item) => this.buildWangsuDomainSyncPayload(item, {
+      accountId: preview.account.id,
+      accountIdentifier: preview.account.account_identifier,
+    }));
+
+    return this.db.withTransaction(async (conn) => {
+      const summary = { total: planned.length, created: 0, updated: 0, unchanged: 0, conflicts: 0, dryRun };
+      const items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }> = [];
+
+      for (const payload of planned) {
+        const domain = String(payload.domain);
+        const before = await this.findDomainByDomain(conn, domain);
+        if (!before) {
+          summary.created += 1;
+          items.push({ domain, action: 'create' });
+          if (!dryRun) {
+            const columns = Object.keys(payload);
+            const result = await conn.execute<mysql.ResultSetHeader>(
+              `INSERT INTO asset_domains (${columns.join(', ')}, created_by, updated_by, created_at, updated_at) VALUES (${columns.map(() => '?').join(', ')}, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+              [...columns.map((column) => payload[column]), actor.username, actor.username],
+            );
+            const id = result[0].insertId;
+            const after = await this.getRowById(conn, domainConfig, id, true);
+            await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: id, action: 'sync_account_wangsu_create', beforeData: null, afterData: after, remark: `sync from wangsu account ${preview.account.account_identifier}` });
+            items[items.length - 1] = { domain, action: 'create', id };
+          }
+          continue;
+        }
+
+        const beforeProvider = before.cdn_provider === undefined || before.cdn_provider === null ? '' : String(before.cdn_provider);
+        if (beforeProvider && beforeProvider !== 'wangsu') {
+          summary.conflicts += 1;
+          items.push({ domain, action: 'provider_conflict', id: Number(before.id), conflictProvider: beforeProvider });
+          continue;
+        }
+
+        const patch = this.diffDomainPayload(before, payload, ['environment', 'tenant', 'business', 'owner', 'usage_desc']);
+        if (Object.keys(patch).length === 0) {
+          summary.unchanged += 1;
+          items.push({ domain, action: 'unchanged', id: Number(before.id) });
+          continue;
+        }
+
+        summary.updated += 1;
+        items.push({ domain, action: 'update', id: Number(before.id) });
+        if (!dryRun) {
+          const keys = Object.keys(patch);
+          await conn.execute(
+            `UPDATE asset_domains SET ${keys.map((key) => `${key} = ?`).join(', ')}, updated_by = ?, updated_at = UTC_TIMESTAMP(), deleted_at = NULL WHERE id = ?`,
+            [...keys.map((key) => patch[key]), actor.username, Number(before.id)],
+          );
+          const after = await this.getRowById(conn, domainConfig, Number(before.id), true);
+          await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: Number(before.id), action: 'sync_account_wangsu_update', beforeData: before, afterData: after, remark: `sync from wangsu account ${preview.account.account_identifier}` });
+        }
+      }
+
+      return { provider: 'wangsu', service: 'cdn', account: preview.account, fetchedAt: preview.fetchedAt, summary, items };
+    });
+  }
+
   async getOverview(actor: ActorContext) {
     this.ensureAssetPermission(actor);
     const [accountStats, resourceStats, domainStats, credentialStats, ownerStats, recentChanges] =
@@ -736,6 +839,11 @@ export class AssetsService {
     return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
   }
 
+  private async getWangsuTimeoutMs() {
+    const timeoutMs = await this.siteConf.getNumber('cdn.wangsu.timeout_ms', 15000);
+    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
+  }
+
   private async createAliyunDcdnClient(credentials?: { accessKeyId: string; accessKeySecret: string; endpoint: string }) {
     const accessKeyId = credentials?.accessKeyId || (await this.siteConf.getString('cdn.aliyun.access_key_id', '')).trim();
     const accessKeySecret = credentials?.accessKeySecret || (await this.siteConf.getString('cdn.aliyun.access_key_secret', '')).trim();
@@ -810,17 +918,20 @@ export class AssetsService {
     });
   }
 
-  private buildWangsuDomainSyncPayload(item: WangsuDomainPreviewItem) {
-    const status = item.enabled === 'true' || item.cdnServiceStatus === 'true' || item.status === 'Deployed' ? 'active' : (item.status || 'unknown').toLowerCase();
+  private buildWangsuDomainSyncPayload(item: WangsuDomainPreviewItem, account?: { accountId?: number; accountIdentifier?: string }) {
+    const status = this.mapWangsuDomainStatus(item);
     return this.normalizePayload({
       domain: item.domain,
       root_domain: this.guessRootDomain(item.domain),
       cdn_provider: 'wangsu',
       provider: 'wangsu',
+      account_id: account?.accountId,
       status,
       usage_desc: item.serviceType ? `Wangsu CDN ${item.serviceType}` : 'Wangsu CDN',
       remark: JSON.stringify({
         source: 'wangsu_cdn_api',
+        sourceAccountId: account?.accountId ?? null,
+        sourceAccountIdentifier: account?.accountIdentifier ?? null,
         domainId: item.domainId || null,
         cname: item.cname || null,
         serviceType: item.serviceType || null,
@@ -840,6 +951,9 @@ export class AssetsService {
       const normalizedValue = value === undefined || value === null ? null : String(value);
       if (normalizedBefore !== normalizedValue) patch[key] = value;
     });
+    if (before.deleted_at !== undefined && before.deleted_at !== null) {
+      patch.deleted_at = null;
+    }
     return patch;
   }
 
@@ -899,6 +1013,15 @@ export class AssetsService {
     this.ensureAccountSupportsService(account, 'dcdn');
   }
 
+  private ensureWangsuAccount(account: DbRow) {
+    const supported = this.getAccountDomainServiceTypes(account);
+    if (supported.includes('cdn') || supported.includes('dcdn')) return;
+    if (supported.includes('unknown')) {
+      throw new BadRequestException('当前网宿账号未配置域名服务能力，请先配置 domain_service_types 并包含 cdn（历史数据若为 dcdn 也兼容）');
+    }
+    throw new UnprocessableEntityException(`当前网宿账号未配置 CDN 服务能力；当前能力：${supported.join(', ')}`);
+  }
+
   private mapAliyunDcdnError(error: any) {
     const body = error?.data || error?.body || error?.result || error?.response?.data || null;
     const code = String(body?.Code || body?.code || error?.code || error?.name || '').trim();
@@ -920,7 +1043,7 @@ export class AssetsService {
     return null;
   }
 
-  private async resolveAccountSiteConfCredentials(account: DbRow) {
+  private async resolveAccountSiteConfCredentials(account: DbRow, options?: { defaultEndpoint?: string; allowLegacyBasicAuth?: boolean }) {
     const credentialRefId = Number(account.credential_ref_id || 0);
     const rows = await this.db.query<DbRow[]>(`SELECT * FROM credential_refs WHERE id = ? AND deleted_at IS NULL LIMIT 1`, [credentialRefId]);
     const ref = rows[0] || null;
@@ -931,11 +1054,19 @@ export class AssetsService {
     if (!storagePath) throw new BadRequestException('凭证索引未配置 storage_path');
     const accessKeyId = (await this.siteConf.getString(`${storagePath}.access_key_id`, '')).trim();
     const accessKeySecret = (await this.siteConf.getString(`${storagePath}.access_key_secret`, '')).trim();
-    const endpoint = (await this.siteConf.getString(`${storagePath}.endpoint`, await this.getAliyunDcdnEndpoint())).trim() || await this.getAliyunDcdnEndpoint();
+    const username = (await this.siteConf.getString(`${storagePath}.username`, '')).trim();
+    const apiKey = (await this.siteConf.getString(`${storagePath}.api_key`, '')).trim();
+    const defaultEndpoint = options?.defaultEndpoint || await this.getAliyunDcdnEndpoint();
+    const endpoint = (await this.siteConf.getString(`${storagePath}.endpoint`, defaultEndpoint)).trim() || defaultEndpoint;
     const enabled = await this.siteConf.getBoolean(`${storagePath}.enabled`, true);
     if (!enabled) throw new BadRequestException('该账号绑定的 siteconf 凭证已禁用');
-    if (!accessKeyId || !accessKeySecret) throw new BadRequestException(`siteconf 凭证不完整，请检查 ${storagePath}.access_key_id / access_key_secret`);
-    return { accessKeyId, accessKeySecret, endpoint, storagePath, refId: credentialRefId };
+    if ((!accessKeyId || !accessKeySecret) && !(options?.allowLegacyBasicAuth && username && apiKey)) {
+      if (options?.allowLegacyBasicAuth) {
+        throw new BadRequestException(`siteconf 凭证不完整，请检查 ${storagePath}.access_key_id / access_key_secret，或补齐 ${storagePath}.username / api_key`);
+      }
+      throw new BadRequestException(`siteconf 凭证不完整，请检查 ${storagePath}.access_key_id / access_key_secret`);
+    }
+    return { accessKeyId, accessKeySecret, username, apiKey, endpoint, storagePath, refId: credentialRefId };
   }
 
   private guessRootDomain(domain: string) {
@@ -973,6 +1104,30 @@ export class AssetsService {
       provider: 'wangsu' as const,
       raw: row,
     };
+  }
+
+  private mapWangsuDomainStatus(item: WangsuDomainPreviewItem) {
+    const enabled = String(item.enabled || '').trim().toLowerCase();
+    const cdnServiceStatus = String(item.cdnServiceStatus || '').trim().toLowerCase();
+    const rawStatus = String(item.status || '').trim().toLowerCase();
+    const combined = [enabled, cdnServiceStatus, rawStatus].filter(Boolean).join(' | ');
+
+    if ([enabled, cdnServiceStatus, rawStatus].some((value) => /^(false|0|disabled|disable|off|stopped|stop|suspend|suspended|forbidden)$/i.test(value))) {
+      return 'disabled';
+    }
+    if (/禁用|已禁用|停用|关闭|暂停/.test(combined)) {
+      return 'disabled';
+    }
+    if ([enabled, cdnServiceStatus, rawStatus].some((value) => /^(true|1|enabled|enable|on|deployed|serving|running|online|active)$/i.test(value))) {
+      return 'active';
+    }
+    if (/启用|已启用|部署中|运行中|生效中|在线/.test(combined)) {
+      return 'active';
+    }
+    if (/audit|review|pending|processing|deploying|configuring/.test(combined) || /审核|待处理|处理中|部署中|配置中/.test(combined)) {
+      return 'pending';
+    }
+    return rawStatus || cdnServiceStatus || enabled || 'unknown';
   }
 
   private parseWangsuDomainXml(xml: string): WangsuDomainPreviewItem[] {
