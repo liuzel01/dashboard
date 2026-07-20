@@ -398,6 +398,7 @@ function EntityTab<T extends AssetEntity>({
 
   const tableFields = fields.filter((field) => field.table !== false);
   const firstTableFieldName = tableFields[0]?.name;
+  const showDeletedStateColumn = Boolean(filters.includeDeleted);
 
   const columns: ColumnsType<T> = [
     {
@@ -424,12 +425,12 @@ function EntityTab<T extends AssetEntity>({
       width: 170,
       render: (value: string | null) => formatDateTime(value),
     },
-    {
-      title: '状态',
+    ...(showDeletedStateColumn ? [{
+      title: '记录状态',
       key: 'deleted_state',
-      width: 90,
-      render: (_, record) => (record.deleted_at ? <Tag color="red">已删除</Tag> : <Tag color="green">有效</Tag>),
-    },
+      width: 100,
+      render: (_: unknown, record: T) => (record.deleted_at ? <Tag color="red">已删除</Tag> : <Tag color="green">有效</Tag>),
+    }] : []),
     {
       title: '操作',
       key: 'actions',
