@@ -9,6 +9,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Popover,
   Select,
   Checkbox,
   Collapse,
@@ -19,6 +20,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { SettingOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   createCertStudyNote,
@@ -885,16 +887,39 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
             options={reviewSortOptions}
             style={{ width: 180 }}
           />
-          <Space direction="vertical" size={2}>
-            <Text type="secondary">列显示</Text>
-            <Checkbox.Group
-              options={columnOptions}
-              value={visibleColumns.filter((item) => item !== 'actions')}
-              onChange={(values) => {
-                setVisibleColumns(normalizeVisibleColumns(values));
-              }}
-            />
-          </Space>
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            title="列设置"
+            content={
+              <Space direction="vertical" size={8} style={{ minWidth: 260 }}>
+                <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
+                  <Text type="secondary">选择要显示的列</Text>
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => setVisibleColumns(defaultVisibleColumns)}
+                  >
+                    恢复默认
+                  </Button>
+                </Space>
+                <Checkbox.Group
+                  options={columnOptions}
+                  value={visibleColumns.filter((item) => item !== 'actions')}
+                  onChange={(values) => {
+                    setVisibleColumns(normalizeVisibleColumns(values));
+                  }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gap: 8,
+                  }}
+                />
+              </Space>
+            }
+          >
+            <Button icon={<SettingOutlined />}>列设置</Button>
+          </Popover>
           <Button
             onClick={() => {
               void loadQuestions();
