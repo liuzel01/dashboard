@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   App,
   Button,
@@ -69,6 +69,30 @@ const defaultVisibleColumns: CertStudyColumnKey[] = [
 
 
 const getVisibleColumnsStorageKey = (examCode: string) => `cert-study.visibleColumns.${examCode.toLowerCase()}.v1`;
+const getDetailDrawerWidthStorageKey = (examCode: string) => `cert-study.detailDrawerWidth.${examCode.toLowerCase()}.v1`;
+
+const getDetailDrawerMaxWidth = () => Math.max(320, window.innerWidth - 32);
+
+const clampDetailDrawerWidth = (width: number) => {
+  const maxWidth = getDetailDrawerMaxWidth();
+  const minWidth = Math.min(720, maxWidth);
+  return Math.round(Math.min(maxWidth, Math.max(minWidth, width)));
+};
+
+const getDefaultDetailDrawerWidth = () => clampDetailDrawerWidth(window.innerWidth * 0.62);
+
+const loadDetailDrawerWidth = (examCode: string) => {
+  if (typeof window === 'undefined') return 820;
+  try {
+    const value = Number(window.localStorage.getItem(getDetailDrawerWidthStorageKey(examCode)));
+    return Number.isFinite(value) && value > 0
+      ? clampDetailDrawerWidth(value)
+      : getDefaultDetailDrawerWidth();
+  } catch {
+    return getDefaultDetailDrawerWidth();
+  }
+};
+
 const validColumnKeys = new Set<CertStudyColumnKey>([
   ...columnOptions.map((item) => item.value),
   'actions',
@@ -275,6 +299,8 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
   const [noteComposerOpen, setNoteComposerOpen] = useState(false);
   const [detailNavLoading, setDetailNavLoading] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(() => loadVisibleColumns(examCode));
+  const [detailDrawerWidth, setDetailDrawerWidth] = useState(() => loadDetailDrawerWidth(examCode));
+  const detailDrawerWidthRef = useRef(detailDrawerWidth);
 
   const [reviewForm] = Form.useForm();
   const [noteForm] = Form.useForm();
@@ -292,6 +318,63 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
   useEffect(() => {
     setVisibleColumns(loadVisibleColumns(examCode));
   }, [examCode]);
+
+  useEffect(() => {
+    setDetailDrawerWidth(loadDetailDrawerWidth(examCode));
+  }, [examCode]);
+
+  useEffect(() => {
+    detailDrawerWidthRef.current = detailDrawerWidth;
+    window.localStorage.setItem(
+      getDetailDrawerWidthStorageKey(examCode),
+      String(detailDrawerWidth),
+    );
+  }, [detailDrawerWidth, examCode]);
+
+  useEffect(() => {
+    const handleResize = () => setDetailDrawerWidth((current) => clampDetailDrawerWidth(current));
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleDetailDrawerResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const drawerWrapper = event.currentTarget.closest('.ant-drawer-content-wrapper') as HTMLElement | null;
+    if (!drawerWrapper) return;
+
+    const startX = event.clientX;
+    const startWidth = detailDrawerWidthRef.current;
+    let nextWidth = startWidth;
+    let animationFrame: number | null = null;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+
+    const applyWidth = () => {
+      drawerWrapper.style.width = `${nextWidth}px`;
+      animationFrame = null;
+    };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      nextWidth = clampDetailDrawerWidth(startWidth + startX - moveEvent.clientX);
+      if (animationFrame === null) {
+        animationFrame = window.requestAnimationFrame(applyWidth);
+      }
+    };
+    const handlePointerEnd = () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+        applyWidth();
+      }
+      document.body.style.userSelect = previousUserSelect;
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerup', handlePointerEnd);
+      document.removeEventListener('pointercancel', handlePointerEnd);
+      setDetailDrawerWidth(nextWidth);
+    };
+
+    document.addEventListener('pointermove', handlePointerMove);
+    document.addEventListener('pointerup', handlePointerEnd, { once: true });
+    document.addEventListener('pointercancel', handlePointerEnd, { once: true });
+  };
 
   const buildQuestionListParams = useCallback(
     (targetPage: number, targetPageSize = pageSize) => {
@@ -995,7 +1078,8 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
           </Space>
         }
         open={detailOpen}
-        width={820}
+        width={detailDrawerWidth}
+        styles={{ body: { position: 'relative' } }}
         onClose={() => {
           setDetailOpen(false);
           setDetail(null);
@@ -1005,6 +1089,22 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         }}
         destroyOnClose
       >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整详情面板宽度"
+          onPointerDown={handleDetailDrawerResizeStart}
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: -6,
+            width: 12,
+            cursor: 'col-resize',
+            touchAction: 'none',
+            zIndex: 1,
+          }}
+        />
         {detailLoading || !detail ? (
           <Text type="secondary">加载中...</Text>
         ) : (
