@@ -337,12 +337,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleDetailDrawerResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const drawerWrapper = event.currentTarget.closest('.ant-drawer-content-wrapper') as HTMLElement | null;
-    if (!drawerWrapper) return;
-
-    const startX = event.clientX;
+  const startDetailDrawerResize = (startX: number, drawerWrapper: HTMLElement) => {
     const startWidth = detailDrawerWidthRef.current;
     let nextWidth = startWidth;
     let animationFrame: number | null = null;
@@ -359,6 +354,11 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         animationFrame = window.requestAnimationFrame(applyWidth);
       }
     };
+    const consumeResizeClick = (clickEvent: MouseEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      document.removeEventListener('click', consumeResizeClick, true);
+    };
     const handlePointerEnd = () => {
       if (animationFrame !== null) {
         window.cancelAnimationFrame(animationFrame);
@@ -368,6 +368,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerEnd);
       document.removeEventListener('pointercancel', handlePointerEnd);
+      document.addEventListener('click', consumeResizeClick, true);
       setDetailDrawerWidth(nextWidth);
     };
 
@@ -375,6 +376,38 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
     document.addEventListener('pointerup', handlePointerEnd, { once: true });
     document.addEventListener('pointercancel', handlePointerEnd, { once: true });
   };
+
+  useEffect(() => {
+    if (!detailOpen) return;
+
+    const previousCursor = document.body.style.cursor;
+    const getDrawerWrapper = () => document.querySelector<HTMLElement>('.cert-study-detail-drawer-wrapper');
+    const isNearDrawerLeftEdge = (clientX: number) => {
+      const drawerWrapper = getDrawerWrapper();
+      if (!drawerWrapper) return false;
+      return Math.abs(clientX - drawerWrapper.getBoundingClientRect().left) <= 16;
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      document.body.style.cursor = isNearDrawerLeftEdge(event.clientX) ? 'col-resize' : previousCursor;
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const drawerWrapper = getDrawerWrapper();
+      if (!drawerWrapper || !isNearDrawerLeftEdge(event.clientX)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      document.body.style.cursor = 'col-resize';
+      startDetailDrawerResize(event.clientX, drawerWrapper);
+    };
+
+    document.addEventListener('pointermove', handlePointerMove, true);
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.removeEventListener('pointermove', handlePointerMove, true);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [detailOpen]);
 
   const buildQuestionListParams = useCallback(
     (targetPage: number, targetPageSize = pageSize) => {
@@ -1079,7 +1112,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         }
         open={detailOpen}
         width={detailDrawerWidth}
-        styles={{ body: { position: 'relative' } }}
+        classNames={{ wrapper: 'cert-study-detail-drawer-wrapper' }}
         onClose={() => {
           setDetailOpen(false);
           setDetail(null);
@@ -1089,22 +1122,6 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         }}
         destroyOnClose
       >
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="调整详情面板宽度"
-          onPointerDown={handleDetailDrawerResizeStart}
-          style={{
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            left: -6,
-            width: 12,
-            cursor: 'col-resize',
-            touchAction: 'none',
-            zIndex: 1,
-          }}
-        />
         {detailLoading || !detail ? (
           <Text type="secondary">加载中...</Text>
         ) : (
