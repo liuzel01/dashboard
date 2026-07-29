@@ -157,6 +157,21 @@ export class AgentController {
     return this.queryService.clearUserInviteBy(envId, uid, body.tenantId);
   }
 
+  @Post('v1/query/users/:uid/partner-password/reset')
+  async resetPartnerPassword(
+    @Param('uid') uid: string,
+    @Body() body: { tenantId?: number },
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    if (body.tenantId === undefined) {
+      throw new BadRequestException('tenantId is required in body');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.resetPartnerPassword(envId, uid, body.tenantId);
+  }
+
   @Get('v1/query/otc-merchant/:uid')
   async getOtcMerchantInfo(
     @Param('uid') uid: string,

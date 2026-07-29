@@ -565,6 +565,60 @@ export class QueryGatewayClientService {
     return response.data;
   }
 
+  async resetPartnerPassword(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    context?: QueryRequestContext,
+  ): Promise<any | null> {
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
+
+    const requestId = context?.requestId || randomUUID();
+    const token = await this.getAgentToken();
+    const transport = await this.getGatewayTransport();
+
+    if (transport === 'k8s-proxy') {
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
+      const timeoutMs = await this.getGatewayTimeoutMs();
+      const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+        namespace,
+        serviceName,
+        port: Number.isFinite(servicePort) && servicePort > 0 ? servicePort : 8080,
+        method: 'POST',
+        path: `/v1/query/users/${encodeURIComponent(uid)}/partner-password/reset`,
+        body: { tenantId },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      });
+      return response.body;
+    }
+
+    const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(environmentId);
+    if (!baseUrl) return null;
+    const url = `${baseUrl.replace(/\/+$/, '')}/v1/query/users/${encodeURIComponent(uid)}/partner-password/reset`;
+    const response = await axios.post(
+      url,
+      { tenantId },
+      {
+        timeout: await this.getGatewayTimeoutMs(),
+        headers: {
+          'X-Environment-Id': environmentId,
+          'X-Request-Id': requestId,
+          ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+          ...(context?.username ? { 'X-Username': context.username } : {}),
+          ...(token ? { 'X-Agent-Token': token } : {}),
+        },
+      },
+    );
+    return response.data;
+  }
+
   async getRedisKey(
     environmentId: string,
     key: string,

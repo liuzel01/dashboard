@@ -25,6 +25,7 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
 ];
 
 export const AUDIT_PATTERN_RULES: AuditPatternRuleConfig[] = [
+  { method: 'POST', path: '/query/users/:uid/partner-password/reset', regex: /^\/query\/users\/([^/]+)\/partner-password\/reset$/, action: 'query.resetPartnerPassword', actionName: '重置合伙人密码', menuKey: 'menu:data-query', targetType: 'partner_user', getResourceId: ({ params, body }) => [body?.tenantId ? `tenant:${body.tenantId}` : null, params?.[0] ? `uid:${params[0]}` : null].filter(Boolean).join(':') || null },
   { method: 'PATCH', path: '/users/:id', regex: /^\/users\/([^/]+)$/, action: 'users.update', actionName: '修改用户', menuKey: 'menu:access-control', targetType: 'user', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/users/:id/reset-password', regex: /^\/users\/([^/]+)\/reset-password$/, action: 'users.resetPassword', actionName: '重置用户密码', menuKey: 'menu:access-control', targetType: 'user', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/roles', regex: /^\/roles$/, action: 'roles.create', actionName: '创建角色', menuKey: 'menu:access-control', targetType: 'role', getResourceId: ({ body }) => body?.name || null },

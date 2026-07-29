@@ -331,6 +331,53 @@ export class AgentQueryService implements OnModuleDestroy {
     return { status: 'not_found', error: 'No user record updated.' };
   }
 
+  async resetPartnerPassword(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT `id` FROM `spot`.`tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+    const userId = userRows?.[0]?.id;
+    if (!userId) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const activePartnerSql =
+      'SELECT `id` FROM `spot`.`tbl_channel` WHERE `channel_user_id` = ? AND `tenant_id` = ? AND (`is_del` = 0 OR `is_del` IS NULL)';
+    const [partnerRows] = (await pool.execute(activePartnerSql, [userId, tenantId])) as any;
+    if (!Array.isArray(partnerRows) || partnerRows.length === 0) {
+      return {
+        status: 'not_found',
+        error: `No active partner record found for UID ${uid}.`,
+      };
+    }
+
+    const resetPasswordHash = 'e19d5cd5af0378da05f63f891c7467af';
+    const updateSql =
+      'UPDATE `spot`.`tbl_channel` SET `password` = ? WHERE `channel_user_id` = ? AND `tenant_id` = ? AND (`is_del` = 0 OR `is_del` IS NULL)';
+    const [result] = (await pool.execute(updateSql, [
+      resetPasswordHash,
+      userId,
+      tenantId,
+    ])) as any;
+
+    if (!result || result.affectedRows === 0) {
+      return {
+        status: 'not_found',
+        error: `No active partner record updated for UID ${uid}.`,
+      };
+    }
+
+    return {
+      status: 'success',
+      message: 'Partner password reset successfully.',
+      affectedRows: result.affectedRows,
+    };
+  }
+
   async disableOtcUserTradeByUserUid(environmentId: string, uid: string) {
     const pool = await this.getMysqlPool(environmentId);
     const selectSql =

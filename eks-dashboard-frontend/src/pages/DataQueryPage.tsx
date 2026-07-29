@@ -26,6 +26,7 @@ import {
   updateUser,
   deactivateUser,
   clearUserInviteBy,
+  resetPartnerPassword,
   deleteRedisKey,
   getTenantsForEnvironment,
   getRedisKey,
@@ -403,6 +404,32 @@ const DataQueryPage: React.FC = () => {
     });
   };
 
+  const showResetPartnerPasswordConfirm = () => {
+    const tenantId = userInfo?.tenant_id;
+    if (!userInfo?.tenant_user_id || tenantId == null) {
+      message.error('无法重置合伙人密码：缺少用户信息或租户ID。');
+      return;
+    }
+
+    modal.confirm({
+      title: '确认重置合伙人密码？',
+      content: `将用户 ${userInfo.tenant_user_id} 对应的有效合伙人密码重置为 abcd1234。此操作会立即生效，确认继续？`,
+      okText: '确认重置',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const result = await resetPartnerPassword(String(userInfo.tenant_user_id), tenantId);
+          message.success(result?.message || '合伙人密码已重置为 abcd1234！');
+        } catch (err) {
+          const errObj = err as { response?: { data?: { message?: string } }; message?: string };
+          const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
+          message.error(`重置合伙人密码失败: ${errorMessage}`);
+        }
+      },
+    });
+  };
+
   const showDisableOtcTradeConfirm = () => {
     if (!userInfo?.tenant_user_id) {
       message.error('无法禁用 OTC 交易：缺少用户 UID。');
@@ -569,6 +596,9 @@ const DataQueryPage: React.FC = () => {
           onClick={showClearInviteByConfirm}
         >
           解除邀请人
+        </Menu.Item>
+        <Menu.Item key="reset-partner-password" danger onClick={showResetPartnerPasswordConfirm}>
+          重置合伙人密码
         </Menu.Item>
         <Menu.Item key="disable-otc" danger onClick={showDisableOtcTradeConfirm}>
           禁用 OTC 交易

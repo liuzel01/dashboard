@@ -96,6 +96,22 @@ export class QueryController {
     return this.queryService.clearUserInviteBy(environmentId, uid, body.tenantId);
   }
 
+  @Post('users/:uid/partner-password/reset')
+  async resetPartnerPassword(
+    @Headers('x-target-environment') environmentId: string,
+    @Param('uid') uid: string,
+    @Body() body: { tenantId: number },
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    if (body.tenantId === undefined) {
+      throw new HttpException(
+        'tenantId is required in the request body for resetting partner password.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.queryService.resetPartnerPassword(environmentId, uid, body.tenantId);
+  }
+
   @Post('redis-key')
   async createRedisKey(
     @Headers('x-target-environment') environmentId: string,

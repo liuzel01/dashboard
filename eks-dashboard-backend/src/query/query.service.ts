@@ -441,6 +441,41 @@ export class QueryService {
     }
   }
 
+  async resetPartnerPassword(environmentId: string, uid: string, tenantId: number) {
+    if (!(await this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId))) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+
+    try {
+      const result = await this.queryGatewayClient.resetPartnerPassword(
+        environmentId,
+        uid,
+        tenantId,
+      );
+      if (!result) {
+        throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      }
+      if (result?.status === 'not_found') {
+        throw new NotFoundException(
+          result?.error || `No active partner record found for UID ${uid}.`,
+        );
+      }
+      return {
+        message: result?.message || 'Partner password reset successfully.',
+        affectedRows: result?.affectedRows,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error(
+        `Error resetting partner password via agent ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException('Failed to reset partner password via agent');
+    }
+  }
+
   async deleteRedisKey(environmentId: string, key: string) {
     if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
       throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
