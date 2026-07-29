@@ -10,6 +10,7 @@ import {
   Input,
   InputNumber,
   Popconfirm,
+  Popover,
   Select,
   Space,
   Statistic,
@@ -22,6 +23,7 @@ import {
 } from 'antd';
 import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import { SettingOutlined } from '@ant-design/icons';
 import {
   createAssetAccount,
   createAssetDomain,
@@ -131,6 +133,10 @@ type EntityTabProps<T extends AssetEntity> = {
   remove: (id: number) => Promise<unknown>;
   restore: (id: number) => Promise<unknown>;
   primaryField: keyof T & string;
+  columnSettings?: {
+    storageKey: string;
+    defaultVisibleColumnKeys?: string[];
+  };
 } & EntityTabFormHooks<T>;
 
 const accountTypeOptions = [
@@ -320,6 +326,7 @@ function EntityTab<T extends AssetEntity>({
   remove,
   restore,
   primaryField,
+  columnSettings,
   onOpenCreate,
   onOpenEdit,
   onValuesChange,
@@ -334,6 +341,41 @@ function EntityTab<T extends AssetEntity>({
   const [editing, setEditing] = useState<T | null>(null);
   const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20 });
   const [total, setTotal] = useState(0);
+  const tableFields = fields.filter((field) => field.table !== false);
+  const columnOptions = [
+    ...tableFields.map((field) => ({ label: field.label, value: field.name })),
+    { label: '更新时间', value: 'updated_at' },
+    { label: '记录状态', value: 'deleted_state' },
+  ];
+  const validColumnKeys = new Set(columnOptions.map((item) => item.value));
+  const defaultVisibleColumnKeys = columnSettings?.defaultVisibleColumnKeys
+    ? columnSettings.defaultVisibleColumnKeys.filter((key) => validColumnKeys.has(key))
+    : columnOptions.map((item) => item.value);
+  const normalizeVisibleColumnKeys = (values: unknown) => {
+    if (!Array.isArray(values)) return defaultVisibleColumnKeys;
+    const next = Array.from(new Set(values.filter((value): value is string =>
+      typeof value === 'string' && validColumnKeys.has(value),
+    )));
+    return next.length > 0 ? next : defaultVisibleColumnKeys;
+  };
+  const loadVisibleColumnKeys = () => {
+    if (!columnSettings || typeof window === 'undefined') return defaultVisibleColumnKeys;
+    try {
+      return normalizeVisibleColumnKeys(JSON.parse(window.localStorage.getItem(columnSettings.storageKey) || 'null'));
+    } catch {
+      return defaultVisibleColumnKeys;
+    }
+  };
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumnKeys);
+
+  useEffect(() => {
+    setVisibleColumnKeys(loadVisibleColumnKeys());
+  }, [columnSettings?.storageKey]);
+
+  useEffect(() => {
+    if (!columnSettings || typeof window === 'undefined') return;
+    window.localStorage.setItem(columnSettings.storageKey, JSON.stringify(visibleColumnKeys));
+  }, [columnSettings?.storageKey, visibleColumnKeys]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -396,7 +438,6 @@ function EntityTab<T extends AssetEntity>({
     await load();
   };
 
-  const tableFields = fields.filter((field) => field.table !== false);
   const firstTableFieldName = tableFields[0]?.name;
   const showDeletedStateColumn = Boolean(filters.includeDeleted);
 
@@ -451,6 +492,13 @@ function EntityTab<T extends AssetEntity>({
     },
   ];
 
+  const visibleColumns = columnSettings
+    ? columns.filter((column) => {
+        const key = typeof column.key === 'string' ? column.key : '';
+        return key === 'id' || key === 'actions' || visibleColumnKeys.includes(key);
+      })
+    : columns;
+
   const pagination: TablePaginationConfig = {
     current: filters.page || 1,
     pageSize: filters.pageSize || 20,
@@ -498,13 +546,42 @@ function EntityTab<T extends AssetEntity>({
             <Button type="primary" onClick={openCreate}>新增</Button>
           </>
         )}
+        {columnSettings && (
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            title="列设置"
+            content={
+              <Space direction="vertical" size={8} style={{ minWidth: 260 }}>
+                <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
+                  <Text type="secondary">选择要显示的列</Text>
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => setVisibleColumnKeys(defaultVisibleColumnKeys)}
+                  >
+                    恢复默认
+                  </Button>
+                </Space>
+                <Checkbox.Group
+                  options={columnOptions}
+                  value={visibleColumnKeys}
+                  onChange={(values) => setVisibleColumnKeys(normalizeVisibleColumnKeys(values))}
+                  style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
+                />
+              </Space>
+            }
+          >
+            <Button icon={<SettingOutlined />}>列设置</Button>
+          </Popover>
+        )}
       </Space>
 
       <Table
         rowKey="id"
         loading={loading}
         dataSource={items}
-        columns={columns}
+        columns={visibleColumns}
         pagination={pagination}
         scroll={{ x: 1500 }}
       />
@@ -1638,6 +1715,10 @@ const DomainManagementTab: React.FC = () => {
         onOpenEdit={handleDomainOpenEdit}
         onValuesChange={handleDomainValuesChange}
         renderFilters={renderDomainFilters}
+        columnSettings={{
+          storageKey: 'asset-management.domain.visible-columns.v1',
+          defaultVisibleColumnKeys: ['domain', 'root_domain', 'provider', 'account_id', 'environment', 'tenant', 'business', 'tags', 'owner', 'status', 'updated_at'],
+        }}
       />
       {tenantLoading && <Text type="secondary">租户列表加载中…</Text>}
     </Space>
