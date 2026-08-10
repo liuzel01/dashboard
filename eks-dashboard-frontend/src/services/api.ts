@@ -992,6 +992,7 @@ export type AccountAliyunEsaDomainPreviewResponse = {
   fetchedAt: string;
   total: number;
   totalCount: number;
+  siteTotalCount: number;
   items: AliyunEsaDomainPreviewItem[];
 };
 
@@ -1138,9 +1139,14 @@ export type WangsuCdnDomainSyncResponse = {
 export type AliyunEsaDomainPreviewItem = {
   provider: 'aliyun_esa';
   domain: string;
+  recordId?: string;
   siteId?: string;
+  siteName?: string;
   instanceId?: string;
   cname?: string;
+  origin?: string;
+  recordType?: string;
+  proxied?: boolean;
   status?: string;
   accessType?: string;
   planName?: string;

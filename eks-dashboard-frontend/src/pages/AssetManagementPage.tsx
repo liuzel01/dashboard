@@ -1008,12 +1008,12 @@ const AccountManagementTab: React.FC = () => {
 
       <Modal title={previewData ? `账号域名预览 - ${previewData.account.account_name}` : '账号域名预览'} open={previewOpen} width={1100} onCancel={() => setPreviewOpen(false)} footer={null} destroyOnHidden>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`服务：${(previewData as any).service || 'dcdn'}；Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；共 ${previewData.total} 条`} />}
+          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`服务：${(previewData as any).service || 'dcdn'}；Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；${previewData.provider === 'aliyun_esa' ? `共 ${(previewData as AccountAliyunEsaDomainPreviewResponse).siteTotalCount} 个站点、${previewData.total} 条 DNS 记录` : `共 ${previewData.total} 条`}`} />}
           {syncLoading && <Alert type="info" showIcon message="正在同步域名…" description="已收到操作请求，正在拉取并写入域名数据，请稍候。同步完成后会自动刷新预览结果。" />}
           {!syncLoading && previewLoading && <Alert type="info" showIcon message="正在执行 Dry Run…" description="正在预检本次同步将产生的变更，请稍候。完成后会展示本次预检结果。" />}
           {previewError && <Alert type="error" showIcon message="账号域名操作失败" description={previewError} />}
           {syncResult && <Alert type={syncResult.summary.dryRun ? 'warning' : 'success'} showIcon message={syncResult.summary.dryRun ? 'Dry Run 结果' : '同步完成'} description={`共 ${syncResult.summary.total} 条，新增 ${syncResult.summary.created}，更新 ${syncResult.summary.updated}，不变 ${syncResult.summary.unchanged}，冲突 ${syncResult.summary.conflicts}`} />}
-          <Table<WangsuCdnDomainPreviewItem | AliyunDcdnDomainPreviewItem | AliyunEsaDomainPreviewItem> rowKey={(record) => ('domainId' in record ? record.domainId : 'siteId' in record ? record.siteId : undefined) || record.domain} loading={previewLoading} dataSource={previewData?.items || []} pagination={{ current: previewPage, pageSize: previewPageSize, total: previewData?.items?.length || 0, showSizeChanger: true, onChange: (page, pageSize) => { setPreviewPage(page); setPreviewPageSize(pageSize); } }} scroll={{ x: 1000 }} columns={previewData?.provider === 'wangsu' ? [
+          <Table<WangsuCdnDomainPreviewItem | AliyunDcdnDomainPreviewItem | AliyunEsaDomainPreviewItem> rowKey={(record) => ('domainId' in record ? record.domainId : 'recordId' in record ? record.recordId : undefined) || record.domain} loading={previewLoading} dataSource={previewData?.items || []} pagination={{ current: previewPage, pageSize: previewPageSize, total: previewData?.items?.length || 0, showSizeChanger: true, onChange: (page, pageSize) => { setPreviewPage(page); setPreviewPageSize(pageSize); } }} scroll={{ x: 1000 }} columns={previewData?.provider === 'wangsu' ? [
             { title: '域名', dataIndex: 'domain', width: 220 },
             { title: 'DomainId', dataIndex: 'domainId', width: 120, render: renderValue },
             { title: 'CNAME', dataIndex: 'cname', width: 220, ellipsis: true, render: renderValue },
@@ -1022,14 +1022,14 @@ const AccountManagementTab: React.FC = () => {
             { title: '已启用', dataIndex: 'enabled', width: 90, render: renderValue },
             { title: '最近更新时间', dataIndex: 'lastModified', width: 170, render: renderValue },
           ] : previewData?.provider === 'aliyun_esa' ? [
-            { title: '站点域名', dataIndex: 'domain', width: 220 },
-            { title: 'Site ID', dataIndex: 'siteId', width: 160, render: renderValue },
-            { title: 'Instance ID', dataIndex: 'instanceId', width: 180, render: renderValue },
-            { title: 'CNAME', dataIndex: 'cname', width: 220, ellipsis: true, render: renderValue },
-            { title: '状态', dataIndex: 'status', width: 110, render: renderValue },
-            { title: '接入方式', dataIndex: 'accessType', width: 100, render: renderValue },
-            { title: '套餐', dataIndex: 'planName', width: 140, render: renderValue },
-            { title: '创建时间', dataIndex: 'gmtCreated', width: 170, render: renderValue },
+            { title: '域名', dataIndex: 'domain', width: 280 },
+            { title: '所属站点', dataIndex: 'siteName', width: 180, render: renderValue },
+            { title: '记录类型', dataIndex: 'recordType', width: 100, render: renderValue },
+            { title: '源站', dataIndex: 'origin', width: 260, ellipsis: true, render: renderValue },
+            { title: 'ESA CNAME', dataIndex: 'cname', width: 280, ellipsis: true, render: renderValue },
+            { title: '代理', dataIndex: 'proxied', width: 80, render: (value: boolean | undefined) => value === undefined ? '-' : value ? '是' : '否' },
+            { title: '站点状态', dataIndex: 'status', width: 110, render: renderValue },
+            { title: 'Record ID', dataIndex: 'recordId', width: 160, render: renderValue },
             { title: '更新时间', dataIndex: 'gmtModified', width: 170, render: renderValue },
           ] : [
             { title: '域名', dataIndex: 'domain', width: 220 },

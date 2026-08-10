@@ -69,9 +69,14 @@ type AliyunEsaDomainPreviewItem = {
   accountName?: string;
   accountIdentifier?: string;
   domain: string;
+  recordId?: string;
   siteId?: string;
+  siteName?: string;
   instanceId?: string;
   cname?: string;
+  origin?: string;
+  recordType?: string;
+  proxied?: boolean;
   status?: string;
   accessType?: string;
   planName?: string;
@@ -499,25 +504,42 @@ export class AssetsService {
     const client = await this.createAliyunEsaClient(credentials);
     const timeoutMs = await this.getAliyunEsaTimeoutMs();
     const pageSize = 100;
-    let pageNumber = 1;
+    let sitePageNumber = 1;
+    const sites: Record<string, unknown>[] = [];
     const items: AliyunEsaDomainPreviewItem[] = [];
-    let totalCount = 0;
+    let siteTotalCount = 0;
 
     try {
       do {
-        const resp = await client.request('ListSites', { PageNumber: pageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
-        totalCount = Number(resp?.TotalCount || 0);
+        const resp = await client.request('ListSites', { PageNumber: sitePageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+        siteTotalCount = Number(resp?.TotalCount || 0);
         const pageData = resp?.Sites || [];
-        const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
-        items.push(...rows
-          .map((row: Record<string, unknown>) => this.parseAliyunEsaSite(row, {
-            accountId: Number(account.id),
-            accountName: String(account.account_name || ''),
-            accountIdentifier: String(account.account_identifier || ''),
-          }))
-          .filter((item: AliyunEsaDomainPreviewItem | null): item is AliyunEsaDomainPreviewItem => Boolean(item)));
-        pageNumber += 1;
-      } while (items.length < totalCount && pageNumber <= 1000);
+        sites.push(...(Array.isArray(pageData) ? pageData : [pageData].filter(Boolean)));
+        sitePageNumber += 1;
+      } while (sites.length < siteTotalCount && sitePageNumber <= 1000);
+
+      for (const site of sites) {
+        const siteId = String(site.SiteId || '').trim();
+        if (!siteId) continue;
+        let recordPageNumber = 1;
+        let recordTotalCount = 0;
+        let fetchedRecordCount = 0;
+        do {
+          const resp = await client.request('ListRecords', { SiteId: siteId, PageNumber: recordPageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+          recordTotalCount = Number(resp?.TotalCount || 0);
+          const pageData = resp?.Records || [];
+          const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
+          fetchedRecordCount += rows.length;
+          items.push(...rows
+            .map((row: Record<string, unknown>) => this.parseAliyunEsaRecord(row, site, {
+              accountId: Number(account.id),
+              accountName: String(account.account_name || ''),
+              accountIdentifier: String(account.account_identifier || ''),
+            }))
+            .filter((item: AliyunEsaDomainPreviewItem | null): item is AliyunEsaDomainPreviewItem => Boolean(item)));
+          recordPageNumber += 1;
+        } while (fetchedRecordCount < recordTotalCount && recordPageNumber <= 1000);
+      }
     } catch (error: any) {
       throw this.mapAliyunEsaError(error) || error;
     }
@@ -534,7 +556,8 @@ export class AssetsService {
       endpoint: credentials.endpoint,
       fetchedAt: new Date().toISOString(),
       total: items.length,
-      totalCount,
+      totalCount: items.length,
+      siteTotalCount,
       items,
     };
   }
@@ -948,26 +971,32 @@ export class AssetsService {
     });
   }
 
-  private parseAliyunEsaSite(row: Record<string, unknown>, account?: { accountId: number; accountName: string; accountIdentifier: string }): AliyunEsaDomainPreviewItem | null {
-    const domain = String(row.SiteName || '').trim();
+  private parseAliyunEsaRecord(record: Record<string, unknown>, site: Record<string, unknown>, account?: { accountId: number; accountName: string; accountIdentifier: string }): AliyunEsaDomainPreviewItem | null {
+    const domain = String(record.RecordName || '').trim();
     if (!domain) return null;
+    const data = record.Data && typeof record.Data === 'object' ? record.Data as Record<string, unknown> : {};
     return {
       provider: 'aliyun_esa',
       accountId: account?.accountId,
       accountName: account?.accountName,
       accountIdentifier: account?.accountIdentifier,
       domain,
-      siteId: row.SiteId === undefined || row.SiteId === null ? undefined : String(row.SiteId),
-      instanceId: row.InstanceId === undefined || row.InstanceId === null ? undefined : String(row.InstanceId),
-      cname: row.CnameZone === undefined || row.CnameZone === null ? undefined : String(row.CnameZone),
-      status: row.Status === undefined || row.Status === null ? undefined : String(row.Status),
-      accessType: row.AccessType === undefined || row.AccessType === null ? undefined : String(row.AccessType),
-      planName: row.PlanName === undefined || row.PlanName === null ? undefined : String(row.PlanName),
-      coverage: row.Coverage === undefined || row.Coverage === null ? undefined : String(row.Coverage),
-      gmtCreated: row.CreateTime === undefined || row.CreateTime === null ? undefined : String(row.CreateTime),
-      gmtModified: row.UpdateTime === undefined || row.UpdateTime === null ? undefined : String(row.UpdateTime),
-      resourceGroupId: row.ResourceGroupId === undefined || row.ResourceGroupId === null ? undefined : String(row.ResourceGroupId),
-      raw: row,
+      recordId: record.RecordId === undefined || record.RecordId === null ? undefined : String(record.RecordId),
+      siteId: site.SiteId === undefined || site.SiteId === null ? undefined : String(site.SiteId),
+      siteName: site.SiteName === undefined || site.SiteName === null ? undefined : String(site.SiteName),
+      instanceId: site.InstanceId === undefined || site.InstanceId === null ? undefined : String(site.InstanceId),
+      cname: record.RecordCname === undefined || record.RecordCname === null ? undefined : String(record.RecordCname),
+      origin: data.Value === undefined || data.Value === null ? undefined : String(data.Value),
+      recordType: record.RecordType === undefined || record.RecordType === null ? undefined : String(record.RecordType),
+      proxied: typeof record.Proxied === 'boolean' ? record.Proxied : undefined,
+      status: site.Status === undefined || site.Status === null ? undefined : String(site.Status),
+      accessType: site.AccessType === undefined || site.AccessType === null ? undefined : String(site.AccessType),
+      planName: site.PlanName === undefined || site.PlanName === null ? undefined : String(site.PlanName),
+      coverage: site.Coverage === undefined || site.Coverage === null ? undefined : String(site.Coverage),
+      gmtCreated: record.CreateTime === undefined || record.CreateTime === null ? undefined : String(record.CreateTime),
+      gmtModified: record.UpdateTime === undefined || record.UpdateTime === null ? undefined : String(record.UpdateTime),
+      resourceGroupId: site.ResourceGroupId === undefined || site.ResourceGroupId === null ? undefined : String(site.ResourceGroupId),
+      raw: { site, record },
     };
   }
 
