@@ -17,6 +17,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   Alert,
   Modal,
@@ -847,7 +848,11 @@ const AccountManagementTab: React.FC = () => {
         const isWangsu = provider === 'wangsu';
         const hasCredential = Boolean(record.credential_ref_id);
         const serviceTypes = normalizeAccountServiceTypes(record);
-        const syncDisabled = (!isAliyun && !isWangsu) || !hasCredential || record.deleted_at != null;
+        const accountStatus = String(record.status || 'unknown').trim().toLowerCase();
+        const accountInactive = accountStatus !== 'active';
+        const accountStatusLabel = accountStatusOptions.find((option) => option.value === accountStatus)?.label || accountStatus || '未确认';
+        const accountInactiveReason = `账号当前状态为“${accountStatusLabel}”，请启用后再执行域名操作`;
+        const syncDisabled = accountInactive || (!isAliyun && !isWangsu) || !hasCredential || record.deleted_at != null;
         const unsupportedReason = (!isAliyun && !isWangsu)
           ? '当前仅支持阿里云 / 网宿账号'
           : !hasCredential
@@ -874,18 +879,30 @@ const AccountManagementTab: React.FC = () => {
           disabled: isAliyun ? service !== 'dcdn' : false,
           onClick: () => handleSync(record, isWangsu ? 'wangsu' : 'aliyun', false, (isWangsu ? 'cdn' : service) as 'dcdn' | 'esa' | 'cdn'),
         }));
+        const previewDisabled = syncDisabled || Boolean(unsupportedReason) || previewItems.length === 0;
+        const dryRunDisabled = syncDisabled || syncLoading || Boolean(unsupportedReason) || dryRunItems.length === 0;
+        const syncActionDisabled = syncDisabled || syncLoading || Boolean(unsupportedReason) || syncItems.length === 0;
+        const renderAccountAction = (disabled: boolean, action: React.ReactNode) => (
+          accountInactive && disabled ? <Tooltip title={accountInactiveReason}><span>{action}</span></Tooltip> : action
+        );
         return (
           <Space size={8} wrap>
             <Button size="small" onClick={() => void openEdit(record)}>编辑</Button>
-            <Dropdown menu={{ items: previewItems }} disabled={syncDisabled || Boolean(unsupportedReason) || previewItems.length === 0}>
-              <Button size="small">预览域名</Button>
-            </Dropdown>
-            <Dropdown menu={{ items: dryRunItems }} disabled={syncDisabled || syncLoading || Boolean(unsupportedReason) || dryRunItems.length === 0}>
-              <Button size="small">Dry Run</Button>
-            </Dropdown>
-            <Dropdown menu={{ items: syncItems }} disabled={syncDisabled || syncLoading || Boolean(unsupportedReason) || syncItems.length === 0}>
-              <Button size="small" type="primary" loading={syncLoading}>同步域名</Button>
-            </Dropdown>
+            {renderAccountAction(previewDisabled,
+              <Dropdown menu={{ items: previewItems }} disabled={previewDisabled}>
+                <Button size="small" disabled={previewDisabled}>预览域名</Button>
+              </Dropdown>,
+            )}
+            {renderAccountAction(dryRunDisabled,
+              <Dropdown menu={{ items: dryRunItems }} disabled={dryRunDisabled}>
+                <Button size="small" disabled={dryRunDisabled}>Dry Run</Button>
+              </Dropdown>,
+            )}
+            {renderAccountAction(syncActionDisabled,
+              <Dropdown menu={{ items: syncItems }} disabled={syncActionDisabled}>
+                <Button size="small" type="primary" loading={syncLoading} disabled={syncActionDisabled}>同步域名</Button>
+              </Dropdown>,
+            )}
             {isAliyun && serviceTypes.includes('esa') && <Tag color="purple">ESA 同步能力暂未正式开放</Tag>}
             {unsupportedReason && !record.deleted_at && <Tag color="warning">{unsupportedReason}</Tag>}
             {record.deleted_at ? (
