@@ -57,6 +57,7 @@ const SiteConfPage: React.FC = () => {
   const [category, setCategory] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<SiteConfItem | null>(null);
   const [form] = Form.useForm();
   const valueType = Form.useWatch('valueType', form) as ValueType | undefined;
@@ -117,6 +118,7 @@ const SiteConfPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if (saving) return;
     const values = await form.validateFields();
     const validationError = validateValueByType(values.confValue, values.valueType);
     if (validationError) {
@@ -127,7 +129,7 @@ const SiteConfPage: React.FC = () => {
       try { JSON.parse(values.validationJson); } catch { message.error('validationJson 必须是合法 JSON'); return; }
     }
     try {
-      setLoading(true);
+      setSaving(true);
       await saveDashboardSiteConf({
         confKey: values.confKey,
         confValue: values.confValue,
@@ -139,14 +141,14 @@ const SiteConfPage: React.FC = () => {
         defaultValue: values.defaultValue || undefined,
         validationJson: values.validationJson || undefined,
       });
-      message.success('siteconf 配置已保存');
       setModalOpen(false);
-      await fetchCategories();
-      await fetchList(page, size, keyword, category);
+      message.success('siteconf 配置已保存，正在刷新列表');
+      void fetchCategories();
+      void fetchList(page, size, keyword, category);
     } catch (e: any) {
       message.error(e?.message || '保存 siteconf 配置失败');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
@@ -293,7 +295,19 @@ const SiteConfPage: React.FC = () => {
         />
       </Spin>
 
-      <Modal title={editing ? '编辑 siteconf 配置' : '新增 siteconf 配置'} open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleSubmit} okText="保存" width={860} destroyOnClose>
+      <Modal
+        title={editing ? '编辑 siteconf 配置' : '新增 siteconf 配置'}
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        onOk={handleSubmit}
+        okText="保存"
+        confirmLoading={saving}
+        cancelButtonProps={{ disabled: saving }}
+        maskClosable={!saving}
+        keyboard={!saving}
+        width={860}
+        destroyOnClose
+      >
         <Form form={form} layout="vertical">
           <Form.Item label="Key" name="confKey" rules={[{ required: true, message: '请输入 key' }]}>
             <Input disabled={!!editing} placeholder="例如：sso.keycloak.issuer" />
