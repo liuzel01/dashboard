@@ -349,6 +349,7 @@ function EntityTab<T extends AssetEntity>({
   const [editing, setEditing] = useState<T | null>(null);
   const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20, ...initialFilters });
   const [total, setTotal] = useState(0);
+  const loadRequestRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
   const tableFields = fields.filter((field) => field.table !== false);
   const columnOptions = [
     ...tableFields.map((field) => ({ label: field.label, value: field.name })),
@@ -386,13 +387,28 @@ function EntityTab<T extends AssetEntity>({
   }, [columnSettings?.storageKey, visibleColumnKeys]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const requestKey = JSON.stringify(filters);
+    if (loadRequestRef.current?.key === requestKey) {
+      return loadRequestRef.current.promise;
+    }
+
+    const request = (async () => {
+      setLoading(true);
+      try {
+        const data = await list(filters);
+        setItems(data.items);
+        setTotal(data.pagination.total);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    loadRequestRef.current = { key: requestKey, promise: request };
     try {
-      const data = await list(filters);
-      setItems(data.items);
-      setTotal(data.pagination.total);
+      await request;
     } finally {
-      setLoading(false);
+      if (loadRequestRef.current?.promise === request) {
+        loadRequestRef.current = null;
+      }
     }
   }, [filters, list]);
 
@@ -1476,7 +1492,9 @@ const DomainManagementTab: React.FC = () => {
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
   const [tenantsByEnvironment, setTenantsByEnvironment] = useState<TenantMapByEnvironment>({});
   const [tenantLoading, setTenantLoading] = useState(false);
+  const tenantsByEnvironmentRef = useRef<TenantMapByEnvironment>({});
   const tenantLoadingEnvironmentsRef = useRef<Set<string>>(new Set());
+  const accountsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const accountMap = useMemo(() => new Map(accounts.map((item) => [item.id, item])), [accounts]);
   const [selectedFormEnvironment, setSelectedFormEnvironment] = useState<string>('');
   const [domainFilterEnvironment, setDomainFilterEnvironment] = useState<string>('');
@@ -1496,10 +1514,11 @@ const DomainManagementTab: React.FC = () => {
   }, [tenantsByEnvironment]);
 
   useEffect(() => {
-    void (async () => {
-      const res = await getAssetAccounts({ page: 1, pageSize: 200 });
-      setAccounts(res.items);
-    })();
+    if (accountsLoadPromiseRef.current) return;
+    const request = getAssetAccounts({ page: 1, pageSize: 200 })
+      .then((res) => setAccounts(res.items))
+      .finally(() => { accountsLoadPromiseRef.current = null; });
+    accountsLoadPromiseRef.current = request;
   }, []);
 
   const normalizeTenantOptions = useCallback((data: unknown) => (
@@ -1512,7 +1531,7 @@ const DomainManagementTab: React.FC = () => {
 
   const ensureTenantsLoaded = useCallback(async (environmentIds: string[]) => {
     const envIds = Array.from(new Set(environmentIds.map((item) => String(item || '').trim()).filter(Boolean)));
-    const missingEnvIds = envIds.filter((envId) => !tenantsByEnvironment[envId] && !tenantLoadingEnvironmentsRef.current.has(envId));
+    const missingEnvIds = envIds.filter((envId) => !tenantsByEnvironmentRef.current[envId] && !tenantLoadingEnvironmentsRef.current.has(envId));
     if (missingEnvIds.length === 0) return;
 
     missingEnvIds.forEach((envId) => tenantLoadingEnvironmentsRef.current.add(envId));
@@ -1531,6 +1550,7 @@ const DomainManagementTab: React.FC = () => {
         results.forEach(([envId, list]) => {
           next[envId] = list;
         });
+        tenantsByEnvironmentRef.current = next;
         return next;
       });
     } finally {
@@ -1539,7 +1559,7 @@ const DomainManagementTab: React.FC = () => {
         setTenantLoading(false);
       }
     }
-  }, [normalizeTenantOptions, tenantsByEnvironment]);
+  }, [normalizeTenantOptions]);
 
   useEffect(() => {
     const envId = currentEnvironment?.id;
