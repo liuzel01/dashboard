@@ -562,6 +562,76 @@ export class AssetsService {
     };
   }
 
+  async syncAccountAliyunEsaDomains(actor: ActorContext, accountId: number, dto: SyncAccountDomainsDto = {}) {
+    this.ensureAssetPermission(actor);
+    const preview = await this.previewAccountAliyunEsaDomains(actor, accountId);
+    const dryRun = dto.dryRun !== false;
+    const planned = preview.items.map((item) => this.buildAliyunEsaDomainSyncPayload(item, {
+      accountId: preview.account.id,
+      accountIdentifier: preview.account.account_identifier,
+    }));
+
+    return this.db.withTransaction(async (conn) => {
+      const summary = { total: planned.length, created: 0, updated: 0, unchanged: 0, conflicts: 0, accountConflicts: 0, dryRun };
+      const items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict' | 'account_conflict'; id?: number; conflictProvider?: string | null; conflictAccountId?: number | null }> = [];
+
+      for (const payload of planned) {
+        const domain = String(payload.domain);
+        const before = await this.findDomainByDomain(conn, domain);
+        if (!before) {
+          summary.created += 1;
+          items.push({ domain, action: 'create' });
+          if (!dryRun) {
+            const columns = Object.keys(payload);
+            const result = await conn.execute<mysql.ResultSetHeader>(
+              `INSERT INTO asset_domains (${columns.join(', ')}, created_by, updated_by, created_at, updated_at) VALUES (${columns.map(() => '?').join(', ')}, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+              [...columns.map((column) => payload[column]), actor.username, actor.username],
+            );
+            const id = result[0].insertId;
+            const after = await this.getRowById(conn, domainConfig, id, true);
+            await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: id, action: 'sync_account_aliyun_esa_create', beforeData: null, afterData: after, remark: `sync from aliyun esa account ${preview.account.account_identifier}` });
+            items[items.length - 1] = { domain, action: 'create', id };
+          }
+          continue;
+        }
+
+        const beforeProvider = before.cdn_provider === undefined || before.cdn_provider === null ? '' : String(before.cdn_provider);
+        if (beforeProvider !== 'aliyun_esa') {
+          summary.conflicts += 1;
+          items.push({ domain, action: 'provider_conflict', id: Number(before.id), conflictProvider: beforeProvider || null });
+          continue;
+        }
+        const beforeAccountId = before.account_id === undefined || before.account_id === null ? null : Number(before.account_id);
+        if (beforeAccountId !== preview.account.id) {
+          summary.accountConflicts += 1;
+          items.push({ domain, action: 'account_conflict', id: Number(before.id), conflictAccountId: beforeAccountId });
+          continue;
+        }
+
+        const patch = this.diffDomainPayload(before, payload, ['environment', 'tenant', 'business', 'owner', 'usage_desc']);
+        if (Object.keys(patch).length === 0) {
+          summary.unchanged += 1;
+          items.push({ domain, action: 'unchanged', id: Number(before.id) });
+          continue;
+        }
+
+        summary.updated += 1;
+        items.push({ domain, action: 'update', id: Number(before.id) });
+        if (!dryRun) {
+          const keys = Object.keys(patch);
+          await conn.execute(
+            `UPDATE asset_domains SET ${keys.map((key) => `${key} = ?`).join(', ')}, updated_by = ?, updated_at = UTC_TIMESTAMP(), deleted_at = NULL WHERE id = ?`,
+            [...keys.map((key) => patch[key]), actor.username, Number(before.id)],
+          );
+          const after = await this.getRowById(conn, domainConfig, Number(before.id), true);
+          await this.insertChangeLog(conn, { actor, assetType: 'domain', assetId: Number(before.id), action: 'sync_account_aliyun_esa_update', beforeData: before, afterData: after, remark: `sync from aliyun esa account ${preview.account.account_identifier}` });
+        }
+      }
+
+      return { provider: 'aliyun_esa' as const, service: 'esa', account: preview.account, fetchedAt: preview.fetchedAt, summary, items };
+    });
+  }
+
   async syncAccountAliyunDcdnDomains(actor: ActorContext, accountId: number, dto: SyncAccountDomainsDto = {}) {
     this.ensureAssetPermission(actor);
     const service = String(dto.service || 'dcdn').trim().toLowerCase() || 'dcdn';
@@ -1027,6 +1097,45 @@ export class AssetsService {
     if (['configuring', 'checking', 'configure_failed', 'check_failed'].includes(status)) return 'migrating';
     if (['offline', 'stopped', 'stopping', 'deleting', 'deleted'].includes(status)) return 'unused';
     return status || 'unknown';
+  }
+
+  private mapAliyunEsaStatus(status: string) {
+    if (status === 'active') return 'active';
+    if (['offline', 'disabled', 'stopped', 'deleted'].includes(status)) return 'unused';
+    return status || 'unknown';
+  }
+
+  private buildAliyunEsaDomainSyncPayload(item: AliyunEsaDomainPreviewItem, account?: { accountId?: number; accountIdentifier?: string }) {
+    return this.normalizePayload({
+      domain: item.domain,
+      root_domain: this.guessRootDomain(item.domain),
+      cdn_provider: 'aliyun_esa',
+      provider: 'aliyun',
+      account_id: account?.accountId ?? item.accountId ?? undefined,
+      status: this.mapAliyunEsaStatus(String(item.status || '').toLowerCase()),
+      usage_desc: 'Aliyun ESA DNS Record',
+      remark: JSON.stringify({
+        source: 'aliyun_esa_api',
+        sourceAccountId: account?.accountId ?? item.accountId ?? null,
+        sourceAccountIdentifier: account?.accountIdentifier ?? item.accountIdentifier ?? null,
+        siteId: item.siteId || null,
+        siteName: item.siteName || null,
+        instanceId: item.instanceId || null,
+        recordId: item.recordId || null,
+        recordType: item.recordType || null,
+        proxied: item.proxied ?? null,
+        origin: item.origin || null,
+        cname: item.cname || null,
+        siteStatus: item.status || null,
+        accessType: item.accessType || null,
+        planName: item.planName || null,
+        coverage: item.coverage || null,
+        gmtCreated: item.gmtCreated || null,
+        gmtModified: item.gmtModified || null,
+        resourceGroupId: item.resourceGroupId || null,
+        raw: item.raw || null,
+      }, null, 2),
+    });
   }
 
   private buildAliyunDcdnDomainSyncPayload(item: AliyunDcdnDomainPreviewItem, account?: { accountId?: number; accountIdentifier?: string }) {

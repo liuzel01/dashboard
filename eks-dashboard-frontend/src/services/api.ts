@@ -1007,6 +1007,15 @@ export type AccountAliyunDcdnDomainPreviewResponse = {
   items: AliyunDcdnDomainPreviewItem[];
 };
 
+export type AccountAliyunEsaDomainSyncResponse = {
+  provider: 'aliyun_esa';
+  service: 'esa';
+  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  fetchedAt: string;
+  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; accountConflicts: number; dryRun: boolean };
+  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict' | 'account_conflict'; id?: number; conflictProvider?: string | null; conflictAccountId?: number | null }>;
+};
+
 export type AccountAliyunDcdnDomainSyncResponse = {
   provider: 'aliyun_dcdn';
   service?: 'dcdn' | 'esa' | string;
@@ -1344,6 +1353,11 @@ export const previewAccountAliyunEsaDomains = async (accountId: number) => {
 export const syncAccountAliyunDcdnDomains = async (accountId: number, data: { dryRun?: boolean; service?: 'dcdn' | 'esa' } = {}) => {
   const response = await api.post(`/assets/accounts/${accountId}/aliyun-dcdn/domains/sync`, data);
   return response.data as AccountAliyunDcdnDomainSyncResponse;
+};
+
+export const syncAccountAliyunEsaDomains = async (accountId: number, data: { dryRun?: boolean } = {}) => {
+  const response = await api.post(`/assets/accounts/${accountId}/aliyun-esa/domains/sync`, data);
+  return response.data as AccountAliyunEsaDomainSyncResponse;
 };
 
 export const previewAccountWangsuDomains = async (accountId: number) => {

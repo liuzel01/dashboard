@@ -125,6 +125,16 @@ export class AssetsController {
     return this.service.previewAccountAliyunEsaDomains(actor, id);
   }
 
+  @Post('accounts/:id/aliyun-esa/domains/sync')
+  async syncAccountAliyunEsaDomains(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id', ParseIntPipe) id: number,
+    @Body(validation) body: SyncAccountDomainsDto,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.syncAccountAliyunEsaDomains(actor, id, body);
+  }
+
   @Get('accounts/:id/aliyun-dcdn/domains/preview')
   async previewAccountAliyunDcdnDomains(
     @Headers('authorization') authorization: string | undefined,
