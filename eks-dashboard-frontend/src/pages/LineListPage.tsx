@@ -450,6 +450,11 @@ const LineListPage: React.FC = () => {
                 title: '剩余天数',
                 dataIndex: 'sslDaysLeft',
                 width: 100,
+                sorter: (left, right) => {
+                  const leftDays = typeof left.sslDaysLeft === 'number' ? left.sslDaysLeft : Number.POSITIVE_INFINITY;
+                  const rightDays = typeof right.sslDaysLeft === 'number' ? right.sslDaysLeft : Number.POSITIVE_INFINITY;
+                  return leftDays - rightDays;
+                },
                 render: (value: number | null | undefined) => toDisplayDaysLeft(value),
               },
               {
