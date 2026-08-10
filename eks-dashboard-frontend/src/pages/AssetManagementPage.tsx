@@ -558,8 +558,9 @@ function EntityTab<T extends AssetEntity>({
               allowClear
               placeholder="状态"
               style={{ width: 150 }}
+              value={filters.status}
               options={[...accountStatusOptions, ...domainStatusOptions].filter((item, index, arr) => arr.findIndex((x) => x.value === item.value) === index)}
-              onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))}
+              onChange={(status) => setFilters((prev) => ({ ...prev, status: status || undefined, page: 1 }))}
             />
             <Checkbox
               checked={Boolean(filters.includeDeleted)}
