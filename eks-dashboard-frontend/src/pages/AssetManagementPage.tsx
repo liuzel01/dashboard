@@ -829,7 +829,9 @@ const AccountManagementTab: React.FC = () => {
       content: '将仅把 ESA DNS 记录写入 Dashboard 的资产域名表；不会修改阿里云 ESA 的 DNS、代理、源站或站点配置。不同 Provider 或其他账号归属的已有域名将跳过覆盖。',
       okText: '确认同步',
       cancelText: '取消',
-      onOk: () => handleSync(record, 'aliyun', false, 'esa'),
+      onOk: async () => {
+        await handleSync(record, 'aliyun', false, 'esa');
+      },
     });
   };
 
@@ -924,7 +926,6 @@ const AccountManagementTab: React.FC = () => {
                 <Button size="small" type="primary" loading={syncLoading} disabled={syncActionDisabled}>同步域名</Button>
               </Dropdown>,
             )}
-            {isAliyun && serviceTypes.includes('esa') && <Tag color="purple">ESA 同步能力暂未正式开放</Tag>}
             {unsupportedReason && !record.deleted_at && <Tag color="warning">{unsupportedReason}</Tag>}
             {record.deleted_at ? (
               <Button size="small" onClick={async () => { await restoreAssetAccount(record.id); message.success('已恢复'); await load(); }}>恢复</Button>
@@ -941,7 +942,7 @@ const AccountManagementTab: React.FC = () => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="账号管理是账号维度域名同步主入口" description="当前支持按账号读取 siteconf 凭证并预览/同步阿里云 DCDN 或网宿 CDN 域名。需先绑定 credential_ref_id，且对应 credential_ref.storage_type=siteconf。网宿账号兼容历史 domain_service_types=dcdn 标记。" />
+      <Alert type="info" showIcon message="账号管理是账号维度域名同步主入口" description="当前支持按账号读取 siteconf 凭证并预览/同步阿里云 DCDN、ESA DNS 记录或网宿 CDN 域名。需先绑定 credential_ref_id，且对应 credential_ref.storage_type=siteconf。ESA 同步仅写入 Dashboard 资产库，不会修改云侧 DNS 或站点配置。" />
       {credentialRefsLoadError && <Alert type="warning" showIcon message="凭证索引附加信息加载失败" description="账号主列表仍可正常显示与编辑；仅凭证名称 / siteconf 路径等增强展示暂不可用。" />}
       <Space wrap>
         <Input.Search allowClear placeholder="搜索账号" style={{ width: 260 }} onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))} />

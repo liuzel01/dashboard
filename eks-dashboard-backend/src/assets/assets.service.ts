@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, GatewayTimeoutException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException, UnprocessableEntityException } from '@nestjs/common';
 import axios from 'axios';
 import { createHash, createHmac } from 'crypto';
 const { RPCClient } = require('@alicloud/pop-core');
@@ -224,6 +224,8 @@ const credentialRefConfig: AssetConfig = {
 
 @Injectable()
 export class AssetsService {
+  private readonly logger = new Logger(AssetsService.name);
+
   constructor(
     private readonly db: PlatformDatabaseService,
     private readonly authService: AuthService,
@@ -511,7 +513,7 @@ export class AssetsService {
 
     try {
       do {
-        const resp = await client.request('ListSites', { PageNumber: sitePageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+        const resp = await this.requestAliyunEsa(client, 'ListSites', { PageNumber: sitePageNumber, PageSize: pageSize }, timeoutMs);
         siteTotalCount = Number(resp?.TotalCount || 0);
         const pageData = resp?.Sites || [];
         sites.push(...(Array.isArray(pageData) ? pageData : [pageData].filter(Boolean)));
@@ -525,7 +527,7 @@ export class AssetsService {
         let recordTotalCount = 0;
         let fetchedRecordCount = 0;
         do {
-          const resp = await client.request('ListRecords', { SiteId: siteId, PageNumber: recordPageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+          const resp = await this.requestAliyunEsa(client, 'ListRecords', { SiteId: siteId, PageNumber: recordPageNumber, PageSize: pageSize }, timeoutMs);
           recordTotalCount = Number(resp?.TotalCount || 0);
           const pageData = resp?.Records || [];
           const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
@@ -541,7 +543,8 @@ export class AssetsService {
         } while (fetchedRecordCount < recordTotalCount && recordPageNumber <= 1000);
       }
     } catch (error: any) {
-      throw this.mapAliyunEsaError(error) || error;
+      this.logger.warn(`ESA preview failed for account ${accountId}: ${this.summarizeAliyunEsaError(error)}`);
+      throw this.mapAliyunEsaError(error) || new ServiceUnavailableException('阿里云 ESA 查询暂时失败，请稍后重试');
     }
 
     return {
@@ -1031,6 +1034,25 @@ export class AssetsService {
     });
   }
 
+  private async requestAliyunEsa(client: any, action: 'ListSites' | 'ListRecords', params: Record<string, unknown>, timeout: number) {
+    const maxAttempts = 3;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await client.request(action, params, { method: 'GET', timeout });
+      } catch (error) {
+        lastError = error;
+        const summary = this.summarizeAliyunEsaError(error);
+        const retryable = /timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|NetworkingError|ServiceUnavailable|Throttl|InternalError/i.test(summary);
+        if (!retryable || attempt === maxAttempts) throw error;
+        const delayMs = 250 * (2 ** (attempt - 1));
+        this.logger.warn(`ESA ${action} attempt ${attempt}/${maxAttempts} failed; retrying in ${delayMs}ms: ${summary}`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    throw lastError;
+  }
+
   private async createAliyunEsaClient(credentials: { accessKeyId: string; accessKeySecret: string; endpoint: string }) {
     return new RPCClient({
       accessKeyId: credentials.accessKeyId,
@@ -1271,18 +1293,25 @@ export class AssetsService {
     throw new UnprocessableEntityException(`当前网宿账号未配置 CDN 服务能力；当前能力：${supported.join(', ')}`);
   }
 
-  private mapAliyunEsaError(error: any) {
+  private summarizeAliyunEsaError(error: any) {
     const body = error?.data || error?.body || error?.result || error?.response?.data || null;
     const code = String(body?.Code || body?.code || error?.code || error?.name || '').trim();
     const message = String(body?.Message || body?.message || error?.message || '').trim();
-    const summary = [code, message].filter(Boolean).join(': ');
+    return [code, message].filter(Boolean).join(': ') || 'unknown ESA API error';
+  }
+
+  private mapAliyunEsaError(error: any) {
+    const summary = this.summarizeAliyunEsaError(error);
     if (/InvalidAccessKeyId|SignatureDoesNotMatch|IncompleteSignature|Forbidden\.AccessKeyDisabled/i.test(summary)) {
       return new BadRequestException('阿里云账号凭证无效，请检查 siteconf 中配置的 access_key_id / access_key_secret');
     }
     if (/NoPermission|Forbidden|AccessDenied/i.test(summary)) {
-      return new BadRequestException(message || '当前阿里云账号无权访问 ESA 站点数据，请检查 ESA 只读权限');
+      return new BadRequestException('当前阿里云账号无权访问 ESA 站点数据，请检查 ESA 只读权限');
     }
-    return null;
+    if (/timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up|NetworkingError|ServiceUnavailable|Throttl/i.test(summary)) {
+      return new GatewayTimeoutException('阿里云 ESA 查询超时或网络暂不可用，请稍后重试');
+    }
+    return new ServiceUnavailableException('阿里云 ESA 查询失败，请稍后重试');
   }
 
   private mapAliyunDcdnError(error: any) {
