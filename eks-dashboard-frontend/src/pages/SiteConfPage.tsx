@@ -58,6 +58,7 @@ const SiteConfPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<SiteConfItem | null>(null);
   const [form] = Form.useForm();
   const valueType = Form.useWatch('valueType', form) as ValueType | undefined;
@@ -153,18 +154,24 @@ const SiteConfPage: React.FC = () => {
   };
 
   const handleDelete = async (record: SiteConfItem) => {
-    Modal.confirm({
-      title: '删除配置？',
-      content: `确认删除 ${record.confKey}？删除后程序会回退到 legacy env 或默认值。`,
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        await deleteDashboardSiteConf(record.confKey);
+    if (deletingKey) return;
+    const confirmed = window.confirm(`确认删除 ${record.confKey}？删除后程序会回退到 legacy env 或默认值。`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingKey(record.confKey);
+      const result = await deleteDashboardSiteConf(record.confKey);
+      if (!result?.deleted) {
+        message.warning(`未找到 ${record.confKey}，列表将刷新以确认当前状态`);
+      } else {
         message.success('配置已删除');
-        await fetchList(page, size, keyword, category);
-      },
-    });
+      }
+      await Promise.all([fetchCategories(), fetchList(page, size, keyword, category)]);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || e?.message || '删除 siteconf 配置失败');
+    } finally {
+      setDeletingKey(null);
+    }
   };
 
   const renderResizableTitle = (key: SiteConfColumnKey, title: string) => (
@@ -248,7 +255,7 @@ const SiteConfPage: React.FC = () => {
         render: (_: any, record: SiteConfItem) => (
           <Space size={4}>
             <Button aria-label="编辑" title="编辑" type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
-            <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(record)} />
+            <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} loading={deletingKey === record.confKey} disabled={Boolean(deletingKey)} onClick={() => void handleDelete(record)} />
           </Space>
         ),
       },

@@ -130,10 +130,17 @@ export class SiteConfService implements OnModuleInit {
   }
 
   async remove(confKey: string) {
+    const normalizedKey = decodeURIComponent(confKey).trim();
+    if (!normalizedKey) throw new BadRequestException('confKey is required');
+
     await this.ensureTableAndDefaults();
-    await this.db.query('DELETE FROM dashboard_site_conf WHERE conf_key = ?', [confKey]);
-    this.cache.delete(confKey);
-    return { ok: true };
+    const result = await this.db.query<any>(
+      'DELETE FROM dashboard_site_conf WHERE conf_key = ?',
+      [normalizedKey],
+    );
+    const affectedRows = Number(result?.affectedRows || 0);
+    this.cache.delete(normalizedKey);
+    return { ok: true, deleted: affectedRows, confKey: normalizedKey };
   }
 
   async getString(key: string, defaultValue = ''): Promise<string> {
@@ -208,26 +215,48 @@ export class SiteConfService implements OnModuleInit {
       UNIQUE KEY uniq_dashboard_site_conf_key (conf_key),
       KEY idx_dashboard_site_conf_category (category)
     )`);
+    await this.db.query(`CREATE TABLE IF NOT EXISTS dashboard_site_conf_meta (
+      meta_key VARCHAR(128) NOT NULL,
+      meta_value VARCHAR(255) NULL,
+      created_at DATETIME NOT NULL,
+      updated_at DATETIME NOT NULL,
+      PRIMARY KEY (meta_key)
+    )`);
     this.available = true;
-    for (const item of SITE_CONF_DEFAULTS) {
-      const envValue = item.envKey ? process.env[item.envKey] : undefined;
+
+    // Defaults are seed data, not undeletable records. The old implementation reinserted
+    // every default on each list/read request, making a successful DELETE appear to fail.
+    const seededRows = await this.db.query<Array<{ meta_value: string }>>(
+      'SELECT meta_value FROM dashboard_site_conf_meta WHERE meta_key = ?',
+      ['defaults_seeded_v1'],
+    );
+    if (seededRows.length === 0) {
+      const rows = await this.db.query<Array<{ total: number }>>('SELECT COUNT(*) AS total FROM dashboard_site_conf');
+      if (Number(rows[0]?.total || 0) === 0) {
+        for (const item of SITE_CONF_DEFAULTS) {
+          const envValue = item.envKey ? process.env[item.envKey] : undefined;
+          await this.db.query(
+            `INSERT INTO dashboard_site_conf
+              (conf_key, conf_value, value_type, category, description, is_sensitive, is_runtime_editable, default_value, validation_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+            [
+              item.key,
+              envValue ?? item.defaultValue ?? '',
+              item.valueType,
+              item.category,
+              item.description,
+              item.sensitive ? 1 : 0,
+              item.runtimeEditable === false ? 0 : 1,
+              item.defaultValue ?? null,
+              item.validation ? JSON.stringify(item.validation) : null,
+            ],
+          );
+        }
+      }
       await this.db.query(
-        `INSERT INTO dashboard_site_conf
-          (conf_key, conf_value, value_type, category, description, is_sensitive, is_runtime_editable, default_value, validation_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-         ON DUPLICATE KEY UPDATE
-          updated_at = updated_at`,
-        [
-          item.key,
-          envValue ?? item.defaultValue ?? '',
-          item.valueType,
-          item.category,
-          item.description,
-          item.sensitive ? 1 : 0,
-          item.runtimeEditable === false ? 0 : 1,
-          item.defaultValue ?? null,
-          item.validation ? JSON.stringify(item.validation) : null,
-        ],
+        `INSERT IGNORE INTO dashboard_site_conf_meta (meta_key, meta_value, created_at, updated_at)
+         VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        ['defaults_seeded_v1', '1'],
       );
     }
     await this.refreshCache();
