@@ -984,6 +984,17 @@ export type AssetAccount = {
   updated_at: string;
 };
 
+export type AccountAliyunEsaDomainPreviewResponse = {
+  provider: 'aliyun_esa';
+  service: 'esa';
+  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  endpoint: string;
+  fetchedAt: string;
+  total: number;
+  totalCount: number;
+  items: AliyunEsaDomainPreviewItem[];
+};
+
 export type AccountAliyunDcdnDomainPreviewResponse = {
   provider: 'aliyun_dcdn';
   service?: 'dcdn' | 'esa' | string;
@@ -1122,6 +1133,22 @@ export type WangsuCdnDomainSyncResponse = {
   fetchedAt: string;
   summary: { total: number; created: number; updated: number; unchanged: number; dryRun: boolean };
   items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged'; id?: number }>;
+};
+
+export type AliyunEsaDomainPreviewItem = {
+  provider: 'aliyun_esa';
+  domain: string;
+  siteId?: string;
+  instanceId?: string;
+  cname?: string;
+  status?: string;
+  accessType?: string;
+  planName?: string;
+  coverage?: string;
+  gmtCreated?: string;
+  gmtModified?: string;
+  resourceGroupId?: string;
+  raw: Record<string, unknown>;
 };
 
 export type AliyunDcdnDomainPreviewItem = {
@@ -1298,9 +1325,14 @@ export const syncAliyunDcdnDomains = async (data: { dryRun?: boolean } = {}) => 
   return response.data as AliyunDcdnDomainSyncResponse;
 };
 
-export const previewAccountAliyunDcdnDomains = async (accountId: number, service: 'dcdn' | 'esa' = 'dcdn') => {
-  const response = await api.get(`/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`, { params: { service } });
+export const previewAccountAliyunDcdnDomains = async (accountId: number) => {
+  const response = await api.get(`/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`);
   return response.data as AccountAliyunDcdnDomainPreviewResponse;
+};
+
+export const previewAccountAliyunEsaDomains = async (accountId: number) => {
+  const response = await api.get(`/assets/accounts/${accountId}/aliyun-esa/domains/preview`);
+  return response.data as AccountAliyunEsaDomainPreviewResponse;
 };
 
 export const syncAccountAliyunDcdnDomains = async (accountId: number, data: { dryRun?: boolean; service?: 'dcdn' | 'esa' } = {}) => {

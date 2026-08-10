@@ -116,6 +116,15 @@ export class AssetsController {
     return this.service.restoreAccount(actor, id);
   }
 
+  @Get('accounts/:id/aliyun-esa/domains/preview')
+  async previewAccountAliyunEsaDomains(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.previewAccountAliyunEsaDomains(actor, id);
+  }
+
   @Get('accounts/:id/aliyun-dcdn/domains/preview')
   async previewAccountAliyunDcdnDomains(
     @Headers('authorization') authorization: string | undefined,

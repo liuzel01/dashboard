@@ -63,6 +63,25 @@ type WangsuDomainPreviewItem = {
   raw: Record<string, unknown>;
 };
 
+type AliyunEsaDomainPreviewItem = {
+  provider: 'aliyun_esa';
+  accountId?: number;
+  accountName?: string;
+  accountIdentifier?: string;
+  domain: string;
+  siteId?: string;
+  instanceId?: string;
+  cname?: string;
+  status?: string;
+  accessType?: string;
+  planName?: string;
+  coverage?: string;
+  gmtCreated?: string;
+  gmtModified?: string;
+  resourceGroupId?: string;
+  raw: Record<string, unknown>;
+};
+
 type AliyunDcdnDomainPreviewItem = {
   provider: 'aliyun_dcdn';
   accountId?: number;
@@ -470,6 +489,56 @@ export class AssetsService {
     };
   }
 
+  async previewAccountAliyunEsaDomains(actor: ActorContext, accountId: number) {
+    this.ensureAssetPermission(actor);
+    // ESA Phase A is deliberately read-only. Account capability, account state, and credential checks
+    // below are the access boundary; do not rely on the legacy global sync feature flag here.
+    const account = await this.getSyncableAccount(accountId, 'aliyun');
+    this.ensureAccountSupportsService(account, 'esa');
+    const credentials = await this.resolveAccountSiteConfCredentials(account, { defaultEndpoint: await this.getAliyunEsaEndpoint() });
+    const client = await this.createAliyunEsaClient(credentials);
+    const timeoutMs = await this.getAliyunEsaTimeoutMs();
+    const pageSize = 100;
+    let pageNumber = 1;
+    const items: AliyunEsaDomainPreviewItem[] = [];
+    let totalCount = 0;
+
+    try {
+      do {
+        const resp = await client.request('ListSites', { PageNumber: pageNumber, PageSize: pageSize }, { method: 'GET', timeout: timeoutMs });
+        totalCount = Number(resp?.TotalCount || 0);
+        const pageData = resp?.Sites || [];
+        const rows = Array.isArray(pageData) ? pageData : [pageData].filter(Boolean);
+        items.push(...rows
+          .map((row: Record<string, unknown>) => this.parseAliyunEsaSite(row, {
+            accountId: Number(account.id),
+            accountName: String(account.account_name || ''),
+            accountIdentifier: String(account.account_identifier || ''),
+          }))
+          .filter((item: AliyunEsaDomainPreviewItem | null): item is AliyunEsaDomainPreviewItem => Boolean(item)));
+        pageNumber += 1;
+      } while (items.length < totalCount && pageNumber <= 1000);
+    } catch (error: any) {
+      throw this.mapAliyunEsaError(error) || error;
+    }
+
+    return {
+      provider: 'aliyun_esa' as const,
+      service: 'esa',
+      account: {
+        id: Number(account.id),
+        account_name: String(account.account_name || ''),
+        account_identifier: String(account.account_identifier || ''),
+        provider: String(account.provider || ''),
+      },
+      endpoint: credentials.endpoint,
+      fetchedAt: new Date().toISOString(),
+      total: items.length,
+      totalCount,
+      items,
+    };
+  }
+
   async syncAccountAliyunDcdnDomains(actor: ActorContext, accountId: number, dto: SyncAccountDomainsDto = {}) {
     this.ensureAssetPermission(actor);
     const service = String(dto.service || 'dcdn').trim().toLowerCase() || 'dcdn';
@@ -834,8 +903,17 @@ export class AssetsService {
     return (await this.siteConf.getString('cdn.aliyun.dcdn_endpoint', 'https://dcdn.aliyuncs.com')).trim() || 'https://dcdn.aliyuncs.com';
   }
 
+  private async getAliyunEsaEndpoint() {
+    return (await this.siteConf.getString('cdn.aliyun.esa.endpoint', 'https://esa.cn-hangzhou.aliyuncs.com')).trim() || 'https://esa.cn-hangzhou.aliyuncs.com';
+  }
+
   private async getAliyunTimeoutMs() {
     const timeoutMs = await this.siteConf.getNumber('cdn.aliyun.dcdn.timeout_ms', 15000);
+    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
+  }
+
+  private async getAliyunEsaTimeoutMs() {
+    const timeoutMs = await this.siteConf.getNumber('cdn.aliyun.esa.timeout_ms', 15000);
     return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
   }
 
@@ -858,6 +936,39 @@ export class AssetsService {
       apiVersion: '2018-01-15',
       opts: { timeout: await this.getAliyunTimeoutMs() },
     });
+  }
+
+  private async createAliyunEsaClient(credentials: { accessKeyId: string; accessKeySecret: string; endpoint: string }) {
+    return new RPCClient({
+      accessKeyId: credentials.accessKeyId,
+      accessKeySecret: credentials.accessKeySecret,
+      endpoint: credentials.endpoint,
+      apiVersion: '2024-09-10',
+      opts: { timeout: await this.getAliyunEsaTimeoutMs() },
+    });
+  }
+
+  private parseAliyunEsaSite(row: Record<string, unknown>, account?: { accountId: number; accountName: string; accountIdentifier: string }): AliyunEsaDomainPreviewItem | null {
+    const domain = String(row.SiteName || '').trim();
+    if (!domain) return null;
+    return {
+      provider: 'aliyun_esa',
+      accountId: account?.accountId,
+      accountName: account?.accountName,
+      accountIdentifier: account?.accountIdentifier,
+      domain,
+      siteId: row.SiteId === undefined || row.SiteId === null ? undefined : String(row.SiteId),
+      instanceId: row.InstanceId === undefined || row.InstanceId === null ? undefined : String(row.InstanceId),
+      cname: row.CnameZone === undefined || row.CnameZone === null ? undefined : String(row.CnameZone),
+      status: row.Status === undefined || row.Status === null ? undefined : String(row.Status),
+      accessType: row.AccessType === undefined || row.AccessType === null ? undefined : String(row.AccessType),
+      planName: row.PlanName === undefined || row.PlanName === null ? undefined : String(row.PlanName),
+      coverage: row.Coverage === undefined || row.Coverage === null ? undefined : String(row.Coverage),
+      gmtCreated: row.CreateTime === undefined || row.CreateTime === null ? undefined : String(row.CreateTime),
+      gmtModified: row.UpdateTime === undefined || row.UpdateTime === null ? undefined : String(row.UpdateTime),
+      resourceGroupId: row.ResourceGroupId === undefined || row.ResourceGroupId === null ? undefined : String(row.ResourceGroupId),
+      raw: row,
+    };
   }
 
   private parseAliyunDcdnDomain(row: Record<string, unknown>, account?: { accountId: number; accountName: string; accountIdentifier: string }): AliyunDcdnDomainPreviewItem | null {
@@ -1020,6 +1131,20 @@ export class AssetsService {
       throw new BadRequestException('当前网宿账号未配置域名服务能力，请先配置 domain_service_types 并包含 cdn（历史数据若为 dcdn 也兼容）');
     }
     throw new UnprocessableEntityException(`当前网宿账号未配置 CDN 服务能力；当前能力：${supported.join(', ')}`);
+  }
+
+  private mapAliyunEsaError(error: any) {
+    const body = error?.data || error?.body || error?.result || error?.response?.data || null;
+    const code = String(body?.Code || body?.code || error?.code || error?.name || '').trim();
+    const message = String(body?.Message || body?.message || error?.message || '').trim();
+    const summary = [code, message].filter(Boolean).join(': ');
+    if (/InvalidAccessKeyId|SignatureDoesNotMatch|IncompleteSignature|Forbidden\.AccessKeyDisabled/i.test(summary)) {
+      return new BadRequestException('阿里云账号凭证无效，请检查 siteconf 中配置的 access_key_id / access_key_secret');
+    }
+    if (/NoPermission|Forbidden|AccessDenied/i.test(summary)) {
+      return new BadRequestException(message || '当前阿里云账号无权访问 ESA 站点数据，请检查 ESA 只读权限');
+    }
+    return null;
   }
 
   private mapAliyunDcdnError(error: any) {

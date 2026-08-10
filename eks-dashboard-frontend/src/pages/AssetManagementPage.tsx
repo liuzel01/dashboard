@@ -44,6 +44,7 @@ import {
   previewWangsuCdnDomains,
   previewAliyunDcdnDomains,
   previewAccountAliyunDcdnDomains,
+  previewAccountAliyunEsaDomains,
   previewAccountWangsuDomains,
   syncWangsuCdnDomains,
   syncAliyunDcdnDomains,
@@ -70,9 +71,11 @@ import type {
   WangsuCdnDomainPreviewItem,
   WangsuCdnDomainPreviewResponse,
   WangsuCdnDomainSyncResponse,
+  AliyunEsaDomainPreviewItem,
   AliyunDcdnDomainPreviewItem,
   AliyunDcdnDomainPreviewResponse,
   AliyunDcdnDomainSyncResponse,
+  AccountAliyunEsaDomainPreviewResponse,
   AccountAliyunDcdnDomainPreviewResponse,
   AccountAliyunDcdnDomainSyncResponse,
   AccountWangsuDomainPreviewResponse,
@@ -668,7 +671,7 @@ const AccountManagementTab: React.FC = () => {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewPage, setPreviewPage] = useState(1);
   const [previewPageSize, setPreviewPageSize] = useState(10);
-  const [previewData, setPreviewData] = useState<(AccountAliyunDcdnDomainPreviewResponse | AccountWangsuDomainPreviewResponse) | null>(null);
+  const [previewData, setPreviewData] = useState<(AccountAliyunDcdnDomainPreviewResponse | AccountAliyunEsaDomainPreviewResponse | AccountWangsuDomainPreviewResponse) | null>(null);
   const [syncResult, setSyncResult] = useState<(AccountAliyunDcdnDomainSyncResponse | AccountWangsuDomainSyncResponse) | null>(null);
 
   const credentialRefMap = useMemo(() => new Map(credentialRefs.map((item) => [item.id, item])), [credentialRefs]);
@@ -774,8 +777,10 @@ const AccountManagementTab: React.FC = () => {
     try {
       if (provider === 'wangsu') {
         setPreviewData(await previewAccountWangsuDomains(record.id));
+      } else if (service === 'esa') {
+        setPreviewData(await previewAccountAliyunEsaDomains(record.id));
       } else {
-        setPreviewData(await previewAccountAliyunDcdnDomains(record.id, service as 'dcdn' | 'esa'));
+        setPreviewData(await previewAccountAliyunDcdnDomains(record.id));
       }
     } catch (e: any) {
       setPreviewData(null);
@@ -801,7 +806,7 @@ const AccountManagementTab: React.FC = () => {
       setSyncResult(result);
       message.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${result.summary.total} 条，新增 ${result.summary.created}，更新 ${result.summary.updated}，不变 ${result.summary.unchanged}，冲突 ${result.summary.conflicts}`);
       const [nextPreview] = await Promise.all([
-        provider === 'wangsu' ? previewAccountWangsuDomains(record.id) : previewAccountAliyunDcdnDomains(record.id, service as 'dcdn' | 'esa'),
+        provider === 'wangsu' ? previewAccountWangsuDomains(record.id) : previewAccountAliyunDcdnDomains(record.id),
         refreshAccountContext(record.id),
       ]);
       setPreviewData(nextPreview);
@@ -868,12 +873,12 @@ const AccountManagementTab: React.FC = () => {
           label: isWangsu ? '预览网宿域名' : service === 'dcdn' ? '预览DCDN域名' : '预览ESA域名',
           onClick: () => handlePreview(record, isWangsu ? 'wangsu' : 'aliyun', (isWangsu ? 'cdn' : service) as 'dcdn' | 'esa' | 'cdn'),
         }));
-        const dryRunItems = normalizedServices.map((service) => ({
+        const dryRunItems = normalizedServices.filter((service) => !isAliyun || service !== 'esa').map((service) => ({
           key: `dryrun-${service}`,
           label: isWangsu ? '网宿 Dry Run' : service === 'dcdn' ? 'DCDN Dry Run' : 'ESA Dry Run',
           onClick: () => handleSync(record, isWangsu ? 'wangsu' : 'aliyun', true, (isWangsu ? 'cdn' : service) as 'dcdn' | 'esa' | 'cdn'),
         }));
-        const syncItems = normalizedServices.map((service) => ({
+        const syncItems = normalizedServices.filter((service) => !isAliyun || service !== 'esa').map((service) => ({
           key: `sync-${service}`,
           label: isWangsu ? '同步网宿域名' : service === 'dcdn' ? '同步DCDN域名' : '同步ESA域名',
           disabled: isAliyun ? service !== 'dcdn' : false,
@@ -1008,7 +1013,7 @@ const AccountManagementTab: React.FC = () => {
           {!syncLoading && previewLoading && <Alert type="info" showIcon message="正在执行 Dry Run…" description="正在预检本次同步将产生的变更，请稍候。完成后会展示本次预检结果。" />}
           {previewError && <Alert type="error" showIcon message="账号域名操作失败" description={previewError} />}
           {syncResult && <Alert type={syncResult.summary.dryRun ? 'warning' : 'success'} showIcon message={syncResult.summary.dryRun ? 'Dry Run 结果' : '同步完成'} description={`共 ${syncResult.summary.total} 条，新增 ${syncResult.summary.created}，更新 ${syncResult.summary.updated}，不变 ${syncResult.summary.unchanged}，冲突 ${syncResult.summary.conflicts}`} />}
-          <Table<WangsuCdnDomainPreviewItem | AliyunDcdnDomainPreviewItem> rowKey={(record) => record.domainId || record.domain} loading={previewLoading} dataSource={previewData?.items || []} pagination={{ current: previewPage, pageSize: previewPageSize, total: previewData?.items?.length || 0, showSizeChanger: true, onChange: (page, pageSize) => { setPreviewPage(page); setPreviewPageSize(pageSize); } }} scroll={{ x: 1000 }} columns={previewData?.provider === 'wangsu' ? [
+          <Table<WangsuCdnDomainPreviewItem | AliyunDcdnDomainPreviewItem | AliyunEsaDomainPreviewItem> rowKey={(record) => ('domainId' in record ? record.domainId : 'siteId' in record ? record.siteId : undefined) || record.domain} loading={previewLoading} dataSource={previewData?.items || []} pagination={{ current: previewPage, pageSize: previewPageSize, total: previewData?.items?.length || 0, showSizeChanger: true, onChange: (page, pageSize) => { setPreviewPage(page); setPreviewPageSize(pageSize); } }} scroll={{ x: 1000 }} columns={previewData?.provider === 'wangsu' ? [
             { title: '域名', dataIndex: 'domain', width: 220 },
             { title: 'DomainId', dataIndex: 'domainId', width: 120, render: renderValue },
             { title: 'CNAME', dataIndex: 'cname', width: 220, ellipsis: true, render: renderValue },
@@ -1016,6 +1021,16 @@ const AccountManagementTab: React.FC = () => {
             { title: '状态', dataIndex: 'status', width: 110, render: renderValue },
             { title: '已启用', dataIndex: 'enabled', width: 90, render: renderValue },
             { title: '最近更新时间', dataIndex: 'lastModified', width: 170, render: renderValue },
+          ] : previewData?.provider === 'aliyun_esa' ? [
+            { title: '站点域名', dataIndex: 'domain', width: 220 },
+            { title: 'Site ID', dataIndex: 'siteId', width: 160, render: renderValue },
+            { title: 'Instance ID', dataIndex: 'instanceId', width: 180, render: renderValue },
+            { title: 'CNAME', dataIndex: 'cname', width: 220, ellipsis: true, render: renderValue },
+            { title: '状态', dataIndex: 'status', width: 110, render: renderValue },
+            { title: '接入方式', dataIndex: 'accessType', width: 100, render: renderValue },
+            { title: '套餐', dataIndex: 'planName', width: 140, render: renderValue },
+            { title: '创建时间', dataIndex: 'gmtCreated', width: 170, render: renderValue },
+            { title: '更新时间', dataIndex: 'gmtModified', width: 170, render: renderValue },
           ] : [
             { title: '域名', dataIndex: 'domain', width: 220 },
             { title: 'DomainId', dataIndex: 'domainId', width: 120, render: renderValue },
