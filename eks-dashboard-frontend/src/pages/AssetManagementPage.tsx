@@ -131,6 +131,7 @@ type TenantOption = {
 type TenantMapByEnvironment = Record<string, TenantOption[]>;
 
 type EntityTabProps<T extends AssetEntity> = {
+  initialFilters?: AssetListParams;
   title: string;
   fields: FieldConfig<T>[];
   list: (params: AssetListParams) => Promise<AssetListResponse<T>>;
@@ -324,6 +325,7 @@ const getDomainSourceMeta = (domain: AssetDomain) => {
 };
 
 function EntityTab<T extends AssetEntity>({
+  initialFilters,
   title,
   fields,
   list,
@@ -345,7 +347,7 @@ function EntityTab<T extends AssetEntity>({
   const [submitting, setSubmitting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<T | null>(null);
-  const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20 });
+  const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20, ...initialFilters });
   const [total, setTotal] = useState(0);
   const tableFields = fields.filter((field) => field.table !== false);
   const columnOptions = [
@@ -661,7 +663,7 @@ const AccountManagementTab: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AssetAccount | null>(null);
-  const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20 });
+  const [filters, setFilters] = useState<AssetListParams>({ page: 1, pageSize: 20, status: 'active' });
   const [total, setTotal] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [credentialRefs, setCredentialRefs] = useState<CredentialRef[]>([]);
@@ -949,7 +951,7 @@ const AccountManagementTab: React.FC = () => {
         <Input.Search allowClear placeholder="搜索账号" style={{ width: 260 }} onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))} />
         <Input allowClear placeholder="服务商" style={{ width: 160 }} onChange={(event) => setFilters((prev) => ({ ...prev, provider: event.target.value || undefined, page: 1 }))} />
         <Input allowClear placeholder="负责人" style={{ width: 160 }} onChange={(event) => setFilters((prev) => ({ ...prev, owner: event.target.value || undefined, page: 1 }))} />
-        <Select allowClear placeholder="状态" style={{ width: 150 }} options={accountStatusOptions} onChange={(status) => setFilters((prev) => ({ ...prev, status, page: 1 }))} />
+        <Select allowClear placeholder="状态" style={{ width: 150 }} value={filters.status} options={accountStatusOptions} onChange={(status) => setFilters((prev) => ({ ...prev, status: status || undefined, page: 1 }))} />
         <Checkbox checked={Boolean(filters.includeDeleted)} onChange={(event) => setFilters((prev) => ({ ...prev, includeDeleted: event.target.checked, page: 1 }))}>包含已删除</Checkbox>
         <Button type="primary" onClick={() => void openCreate()}>新增</Button>
       </Space>
@@ -1754,6 +1756,7 @@ const DomainManagementTab: React.FC = () => {
       <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不应覆盖人工分类字段。" />
       {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时会默认带入该环境；但编辑框内可单独切换 environment/tenant，已不再依赖左上角环境。列表也不会因左上角环境自动过滤历史域名。" />}
       <EntityTab<AssetDomain>
+        initialFilters={{ status: 'active' }}
         title="域名"
         fields={domainFieldsPhase1}
         list={listDomainsPhase1}
@@ -1880,6 +1883,7 @@ const AssetManagementPage: React.FC<AssetManagementPageProps> = ({ activeTab = '
       label: '凭证索引',
       children: (
         <EntityTab<CredentialRef>
+          initialFilters={{ status: 'active' }}
           title="凭证索引"
           fields={credentialFields}
           list={getCredentialRefs}

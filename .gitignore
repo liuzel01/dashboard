@@ -11,6 +11,7 @@ eks-dashboard-backend/sites.csv
 # ------------
 # For Vite (frontend) and NestJS (backend)
 **/dist
+**/dist-agent
 **/dist-ssr
 /build
 
