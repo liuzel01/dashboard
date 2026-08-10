@@ -59,6 +59,7 @@ const SiteConfPage: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SiteConfItem | null>(null);
   const [editing, setEditing] = useState<SiteConfItem | null>(null);
   const [form] = Form.useForm();
   const valueType = Form.useWatch('valueType', form) as ValueType | undefined;
@@ -153,10 +154,9 @@ const SiteConfPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (record: SiteConfItem) => {
-    if (deletingKey) return;
-    const confirmed = window.confirm(`确认删除 ${record.confKey}？删除后程序会回退到 legacy env 或默认值。`);
-    if (!confirmed) return;
+  const handleDelete = async () => {
+    const record = deleteTarget;
+    if (!record || deletingKey) return;
 
     try {
       setDeletingKey(record.confKey);
@@ -171,6 +171,7 @@ const SiteConfPage: React.FC = () => {
       message.error(e?.response?.data?.message || e?.message || '删除 siteconf 配置失败');
     } finally {
       setDeletingKey(null);
+      setDeleteTarget(null);
     }
   };
 
@@ -255,7 +256,7 @@ const SiteConfPage: React.FC = () => {
         render: (_: any, record: SiteConfItem) => (
           <Space size={4}>
             <Button aria-label="编辑" title="编辑" type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
-            <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} loading={deletingKey === record.confKey} disabled={Boolean(deletingKey)} onClick={() => void handleDelete(record)} />
+            <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} loading={deletingKey === record.confKey} disabled={Boolean(deletingKey)} onClick={() => setDeleteTarget(record)} />
           </Space>
         ),
       },
@@ -301,6 +302,28 @@ const SiteConfPage: React.FC = () => {
           }}
         />
       </Spin>
+
+      <Modal
+        title="确认删除 Siteconf 配置？"
+        open={Boolean(deleteTarget)}
+        onCancel={() => !deletingKey && setDeleteTarget(null)}
+        onOk={() => void handleDelete()}
+        okText="确认删除"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        confirmLoading={Boolean(deletingKey)}
+        cancelButtonProps={{ disabled: Boolean(deletingKey) }}
+        maskClosable={!deletingKey}
+        keyboard={!deletingKey}
+        destroyOnClose
+      >
+        <Typography.Paragraph>
+          确认删除 <Typography.Text code>{deleteTarget?.confKey}</Typography.Text>？
+        </Typography.Paragraph>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          删除后将移除当前 Siteconf 配置；如该项存在环境变量或系统默认值，程序将自动回退使用它。
+        </Typography.Paragraph>
+      </Modal>
 
       <Modal
         title={editing ? '编辑 siteconf 配置' : '新增 siteconf 配置'}
