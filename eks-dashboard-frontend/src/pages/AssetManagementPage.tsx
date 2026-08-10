@@ -654,6 +654,7 @@ function EntityTab<T extends AssetEntity>({
 
 const AccountManagementTab: React.FC = () => {
   const { message } = AntApp.useApp();
+  const [modal, modalContextHolder] = Modal.useModal();
   const [form] = Form.useForm();
   const [items, setItems] = useState<AssetAccount[]>([]);
   const [loading, setLoading] = useState(false);
@@ -824,14 +825,12 @@ const AccountManagementTab: React.FC = () => {
   };
 
   const confirmEsaSync = (record: AssetAccount) => {
-    Modal.confirm({
+    modal.confirm({
       title: '确认同步 ESA DNS 记录到域名管理？',
       content: '将仅把 ESA DNS 记录写入 Dashboard 的资产域名表；不会修改阿里云 ESA 的 DNS、代理、源站或站点配置。不同 Provider 或其他账号归属的已有域名将跳过覆盖。',
       okText: '确认同步',
       cancelText: '取消',
-      onOk: async () => {
-        await handleSync(record, 'aliyun', false, 'esa');
-      },
+      onOk: () => handleSync(record, 'aliyun', false, 'esa'),
     });
   };
 
@@ -941,7 +940,9 @@ const AccountManagementTab: React.FC = () => {
   ];
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <>
+      {modalContextHolder}
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Alert type="info" showIcon message="账号管理是账号维度域名同步主入口" description="当前支持按账号读取 siteconf 凭证并预览/同步阿里云 DCDN、ESA DNS 记录或网宿 CDN 域名。需先绑定 credential_ref_id，且对应 credential_ref.storage_type=siteconf。ESA 同步仅写入 Dashboard 资产库，不会修改云侧 DNS 或站点配置。" />
       {credentialRefsLoadError && <Alert type="warning" showIcon message="凭证索引附加信息加载失败" description="账号主列表仍可正常显示与编辑；仅凭证名称 / siteconf 路径等增强展示暂不可用。" />}
       <Space wrap>
@@ -1059,7 +1060,8 @@ const AccountManagementTab: React.FC = () => {
           ]} />
         </Space>
       </Modal>
-    </Space>
+      </Space>
+    </>
   );
 };
 
