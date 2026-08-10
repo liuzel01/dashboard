@@ -390,6 +390,10 @@ export class CreateCredentialRefDto {
 
   @IsOptional()
   @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsString()
   remark?: string;
 }
 

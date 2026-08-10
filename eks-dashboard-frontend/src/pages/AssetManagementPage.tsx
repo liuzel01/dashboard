@@ -1860,6 +1860,7 @@ const credentialFields: FieldConfig<CredentialRef>[] = [
   { name: 'related_account_id', label: '关联账号ID', number: true, help: '这里填 asset_accounts.id（即账号这条记录自己的 ID），不是凭证索引 ID。' },
   { name: 'visibility_level', label: '可见级别' },
   { name: 'owner', label: '负责人' },
+  { name: 'status', label: '状态', options: accountStatusOptions },
   { name: 'remark', label: '备注', textarea: true, table: false },
 ];
 

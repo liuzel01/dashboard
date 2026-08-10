@@ -212,13 +212,15 @@ const credentialRefConfig: AssetConfig = {
     'related_account_id',
     'visibility_level',
     'owner',
+    'status',
     'remark',
   ],
   requiredField: 'ref_name',
-  defaultValues: { ref_type: 'other', storage_type: 'other' },
+  defaultValues: { ref_type: 'other', storage_type: 'other', status: 'active' },
   keywordFields: ['ref_name', 'ref_type', 'storage_type', 'storage_path', 'visibility_level', 'owner', 'remark'],
   typeField: 'ref_type',
   ownerField: 'owner',
+  statusField: 'status',
   accountField: 'related_account_id',
 };
 

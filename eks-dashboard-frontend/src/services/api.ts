@@ -1097,6 +1097,7 @@ export type CredentialRef = {
   related_account_id: number | null;
   visibility_level: string | null;
   owner: string | null;
+  status: string;
   remark: string | null;
   deleted_at: string | null;
   created_at: string;
