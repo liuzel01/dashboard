@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Table, Input, Button, App, Spin, Space, Alert, Tag, Modal, Select, Descriptions } from 'antd';
+import { Table, Input, Button, App, Spin, Space, Alert, Tag, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
 import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, type DeploymentImageHistory } from '../services/api';
@@ -72,6 +72,8 @@ const getRolloutPhase = (deployment: Deployment): RolloutPhase => {
 
   return 'unknown';
 };
+
+const { Text } = Typography;
 
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => {
@@ -267,84 +269,71 @@ const DeploymentListPage: React.FC = () => {
   };
 
   const columns = [
-    { title: '名称', dataIndex: 'name', key: 'name', width: '30%' },
     {
-      title: '副本',
-      dataIndex: 'replicas',
+      title: '服务名称',
+      dataIndex: 'name',
+      key: 'name',
+      width: 290,
+      fixed: 'left' as const,
+      ellipsis: true,
+      render: (value?: string) => <Tooltip title={value}><Text ellipsis style={{ maxWidth: 270, display: 'block' }}>{value || '-'}</Text></Tooltip>,
+    },
+    {
+      title: '运行副本',
       key: 'replicas',
-      render: (_: any, record: Deployment) =>
-        `${record.availableReplicas || 0}/${record.replicas}`,
-    },
-    { title: '镜像', dataIndex: 'images', key: 'images', width: '40%' },
-    {
-      title: '最近重启时间',
-      dataIndex: 'lastRestartAt',
-      key: 'lastRestartAt',
-      render: (ts?: string | null) => (ts ? new Date(ts).toLocaleString() : '-'),
+      width: 100,
+      fixed: 'left' as const,
+      align: 'center' as const,
+      render: (_: any, record: Deployment) => `${record.availableReplicas || 0}/${record.replicas ?? 0}`,
     },
     {
-      title: '状态',
+      title: '当前镜像',
+      dataIndex: 'images',
+      key: 'images',
+      width: 390,
+      ellipsis: true,
+      render: (value?: string) => <Tooltip title={value}><Text code ellipsis style={{ maxWidth: 370, display: 'block' }}>{value || '-'}</Text></Tooltip>,
+    },
+    {
+      title: '发布状态',
       key: 'status',
+      width: 190,
       render: (_: any, record: Deployment) => {
         const phase = getRolloutPhase(record);
         const desired = record.replicas ?? 0;
         const ready = record.readyReplicas ?? 0;
         const updated = record.updatedReplicas ?? 0;
         const unavailable = record.unavailableReplicas ?? 0;
-
-        if (phase === 'completed') {
-          return (
-            <Space direction="vertical" size={0}>
-              <Tag color="success">已完成</Tag>
-              <span>{`ready ${ready}/${desired}, updated ${updated}/${desired}`}</span>
-            </Space>
-          );
-        }
-
-        if (phase === 'failed') {
-          return (
-            <Space direction="vertical" size={0}>
-              <Tag color="error">异常</Tag>
-              <span>{record.progressingReason || 'Progressing=False'}</span>
-            </Space>
-          );
-        }
-
-        return (
-          <Space direction="vertical" size={0}>
-            <Tag color="processing">进行中</Tag>
-            <span>{`ready ${ready}/${desired}, updated ${updated}/${desired}, unavailable ${unavailable}`}</span>
-          </Space>
-        );
+        if (phase === 'completed') return <Space size={6}><Tag color="success">已完成</Tag><span>{`${ready}/${desired}`}</span></Space>;
+        if (phase === 'failed') return <Tooltip title={record.progressingReason || 'Progressing=False'}><Tag color="error">发布异常</Tag></Tooltip>;
+        return <Tooltip title={`ready ${ready}/${desired}, updated ${updated}/${desired}, unavailable ${unavailable}`}><Tag color="processing">发布中</Tag></Tooltip>;
       },
+    },
+    {
+      title: '最近重启',
+      dataIndex: 'lastRestartAt',
+      key: 'lastRestartAt',
+      width: 175,
+      render: (ts?: string | null) => (ts ? new Date(ts).toLocaleString() : '-'),
     },
     {
       title: '创建时间',
       dataIndex: 'creationTimestamp',
       key: 'creationTimestamp',
+      width: 175,
       render: (ts?: string) => (ts ? new Date(ts).toLocaleString() : '-'),
     },
     {
       title: '操作',
       key: 'action',
+      width: 230,
+      fixed: 'right' as const,
+      align: 'center' as const,
       render: (_: any, record: Deployment) => (
-        <Space size="middle">
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => handleRestart(record.name)}
-            loading={restarting === record.name}
-          >
-            重启
-          </Button>
-          <Button onClick={() => handleOpenImageHistory(record.name)}>
-            镜像回退
-          </Button>
-          <Button
-            icon={<FileTextOutlined />}
-            onClick={() => handleViewLogs(record.name)}
-          >
-            日志
-          </Button>
+        <Space size={4}>
+          <Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name)} loading={restarting === record.name}>重启</Button>
+          <Button size="small" onClick={() => handleOpenImageHistory(record.name)}>镜像回退</Button>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(record.name)}>日志</Button>
         </Space>
       ),
     },
@@ -371,7 +360,8 @@ const DeploymentListPage: React.FC = () => {
             columns={columns}
             dataSource={allDeployments}
             rowKey="name"
-            // 显式配置分页，以确保在数据量少于一页时也显示分页器，保持UI一致性
+            tableLayout="fixed"
+            scroll={{ x: 1550 }}
             pagination={{ showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
           />
         </Spin>
