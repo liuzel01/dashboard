@@ -206,15 +206,42 @@ export class KubernetesService {
       .filter((item) => item.revision > 0 && item.images.length > 0)
       .sort((a, b) => b.revision - a.revision);
 
+    const imageVersions = new Map<string, {
+      id: string;
+      images: Array<{ name: string; image: string }>;
+      revisions: typeof revisions;
+      isCurrent: boolean;
+    }>();
+    for (const revision of revisions) {
+      const id = revision.images
+        .map((image) => `${image.name}\u0000${image.image}`)
+        .sort()
+        .join('\u0001');
+      const isCurrent = revision.images.length === currentImages.length && revision.images.every(
+        (image, index) => image.name === currentImages[index]?.name && image.image === currentImages[index]?.image,
+      );
+      const existing = imageVersions.get(id);
+      if (existing) {
+        existing.revisions.push(revision);
+        existing.isCurrent = existing.isCurrent || isCurrent;
+      } else {
+        imageVersions.set(id, { id, images: revision.images, revisions: [revision], isCurrent });
+      }
+    }
+
     return {
       deployment: name,
       namespace,
       currentImages,
-      revisions: revisions.map((item) => ({
-        ...item,
-        isCurrent: item.images.length === currentImages.length && item.images.every(
-          (image, index) => image.name === currentImages[index]?.name && image.image === currentImages[index]?.image,
-        ),
+      imageVersions: Array.from(imageVersions.values()).map((version) => ({
+        id: version.id,
+        images: version.images,
+        isCurrent: version.isCurrent,
+        revisions: version.revisions.map(({ revision, replicaSetName, createdAt }) => ({
+          revision,
+          replicaSetName,
+          createdAt,
+        })),
       })),
     };
   }

@@ -56,8 +56,9 @@ export const restartDeployment = async (name: string) => {
 };
 
 export type DeploymentImage = { name: string; image: string };
-export type DeploymentImageRevision = { revision: number; replicaSetName: string; createdAt: string | null; images: DeploymentImage[]; isCurrent: boolean };
-export type DeploymentImageHistory = { deployment: string; namespace: string; currentImages: DeploymentImage[]; revisions: DeploymentImageRevision[] };
+export type DeploymentImageRevision = { revision: number; replicaSetName: string; createdAt: string | null };
+export type DeploymentImageVersion = { id: string; images: DeploymentImage[]; isCurrent: boolean; revisions: DeploymentImageRevision[] };
+export type DeploymentImageHistory = { deployment: string; namespace: string; currentImages: DeploymentImage[]; imageVersions: DeploymentImageVersion[] };
 
 export const getDeploymentImageHistory = async (name: string): Promise<DeploymentImageHistory> => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');

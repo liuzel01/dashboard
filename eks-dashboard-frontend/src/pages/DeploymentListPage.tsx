@@ -91,7 +91,7 @@ const DeploymentListPage: React.FC = () => {
   const [imageHistoryTarget, setImageHistoryTarget] = useState<string | null>(null);
   const [imageHistory, setImageHistory] = useState<DeploymentImageHistory | null>(null);
   const [imageHistoryLoading, setImageHistoryLoading] = useState(false);
-  const [selectedRevision, setSelectedRevision] = useState<number | null>(null);
+  const [selectedImageVersionId, setSelectedImageVersionId] = useState<string | null>(null);
   const [rollbackConfirmation, setRollbackConfirmation] = useState('');
   const [rollingBack, setRollingBack] = useState(false);
 
@@ -239,12 +239,12 @@ const DeploymentListPage: React.FC = () => {
 
   const handleOpenImageHistory = async (deploymentName: string | undefined) => {
     if (!deploymentName) { message.error('无法查看镜像历史：应用名称未知。'); return; }
-    setImageHistoryTarget(deploymentName); setImageHistory(null); setSelectedRevision(null); setRollbackConfirmation(''); setImageHistoryLoading(true);
+    setImageHistoryTarget(deploymentName); setImageHistory(null); setSelectedImageVersionId(null); setRollbackConfirmation(''); setImageHistoryLoading(true);
     try {
       const history = await getDeploymentImageHistory(deploymentName);
       setImageHistory(history);
-      const recommended = history.revisions.find((item) => !item.isCurrent);
-      setSelectedRevision(recommended?.revision ?? null);
+      const recommended = history.imageVersions.find((item) => !item.isCurrent);
+      setSelectedImageVersionId(recommended?.id ?? null);
       if (!recommended) message.warning('未找到可用于回退的历史镜像版本。');
     } catch (error: any) {
       message.error(`获取镜像历史失败: ${error.response?.data?.message || error.message}`);
@@ -252,8 +252,8 @@ const DeploymentListPage: React.FC = () => {
   };
 
   const handleRollbackImages = async () => {
-    if (!imageHistoryTarget || !imageHistory || selectedRevision === null) return;
-    const target = imageHistory.revisions.find((item) => item.revision === selectedRevision);
+    if (!imageHistoryTarget || !imageHistory || selectedImageVersionId === null) return;
+    const target = imageHistory.imageVersions.find((item) => item.id === selectedImageVersionId);
     if (!target) return;
     setRollingBack(true);
     try {
@@ -382,7 +382,7 @@ const DeploymentListPage: React.FC = () => {
         open={Boolean(imageHistoryTarget)} width={860} destroyOnHidden
         onCancel={() => setImageHistoryTarget(null)} okText="仅回退镜像" cancelText="取消"
         confirmLoading={rollingBack}
-        okButtonProps={{ danger: true, disabled: !imageHistory || selectedRevision === null || rollbackConfirmation !== imageHistoryTarget }}
+        okButtonProps={{ danger: true, disabled: !imageHistory || selectedImageVersionId === null || rollbackConfirmation !== imageHistoryTarget }}
         onOk={handleRollbackImages}
       >
         <Spin spinning={imageHistoryLoading}>
@@ -392,15 +392,16 @@ const DeploymentListPage: React.FC = () => {
               <Descriptions.Item label="当前镜像">{imageHistory.currentImages.map((item) => `${item.name}: ${item.image}`).join('；')}</Descriptions.Item>
             </Descriptions>
             <div>
-              <div style={{ marginBottom: 8 }}>选择历史版本（默认：上一可用 Revision）</div>
-              <Select style={{ width: '100%' }} value={selectedRevision ?? undefined} placeholder="没有可回退的历史版本" onChange={setSelectedRevision}
-                options={imageHistory.revisions.filter((item) => !item.isCurrent).map((item) => ({ value: item.revision, label: `Revision ${item.revision} · ${item.createdAt ? new Date(item.createdAt).toLocaleString() : '时间未知'} · ${item.images.map((image) => `${image.name}: ${image.image}`).join(' | ')}` }))} />
+              <div style={{ marginBottom: 8 }}>选择历史镜像版本（默认：上一不同镜像）</div>
+              <Select style={{ width: '100%' }} value={selectedImageVersionId ?? undefined} placeholder="没有可回退的历史版本" onChange={setSelectedImageVersionId}
+                options={imageHistory.imageVersions.filter((item) => !item.isCurrent).map((item) => ({ value: item.id, label: `${item.images.map((image) => `${image.name}: ${image.image}`).join(' | ')} · 最近 Revision ${item.revisions[0]?.revision ?? '-'} · ${item.revisions[0]?.createdAt ? new Date(item.revisions[0].createdAt).toLocaleString() : '时间未知'}` }))} />
             </div>
-            {selectedRevision !== null && (() => {
-              const target = imageHistory.revisions.find((item) => item.revision === selectedRevision);
-              return target ? <Descriptions size="small" bordered column={1} title={`目标镜像（Revision ${target.revision}）`}>
+            {selectedImageVersionId !== null && (() => {
+              const target = imageHistory.imageVersions.find((item) => item.id === selectedImageVersionId);
+              return target ? <Descriptions size="small" bordered column={1} title="目标镜像">
                 <Descriptions.Item label="镜像">{target.images.map((item) => `${item.name}: ${item.image}`).join('；')}</Descriptions.Item>
-                <Descriptions.Item label="ReplicaSet">{target.replicaSetName}</Descriptions.Item>
+                <Descriptions.Item label="关联 Revision">{target.revisions.map((item) => item.revision).join('、')}</Descriptions.Item>
+                <Descriptions.Item label="ReplicaSet">{target.revisions.map((item) => item.replicaSetName).join('、')}</Descriptions.Item>
               </Descriptions> : null;
             })()}
             <Input value={rollbackConfirmation} onChange={(event) => setRollbackConfirmation(event.target.value)} placeholder={`请输入服务名 ${imageHistoryTarget} 以确认`} />
