@@ -7,10 +7,16 @@ import { MonitorScheduler } from './monitor.scheduler';
 import { AlertsService } from './alerts.service';
 import { AlertsController } from './alerts.controller';
 import { EnvironmentsModule } from '../environments/environments.module';
+import { LinesModule } from '../lines/lines.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), EnvironmentsModule],
-  providers: [CentralDatabaseService, SiteMonitorService, MonitorScheduler, AlertsService],
+  imports: [ScheduleModule.forRoot(), EnvironmentsModule, LinesModule],
+  providers: [
+    CentralDatabaseService,
+    SiteMonitorService,
+    MonitorScheduler,
+    AlertsService,
+  ],
   controllers: [SiteMonitorController, AlertsController],
   exports: [CentralDatabaseService],
 })

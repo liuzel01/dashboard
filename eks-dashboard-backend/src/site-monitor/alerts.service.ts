@@ -36,8 +36,10 @@ export class AlertsService {
           if (Number.isFinite(v)) ranges.push([v, v]);
         }
       }
-      if (ranges.length === 0) return (code: number) => code >= 200 && code < 400;
-      return (code: number) => ranges.some(([lo, hi]) => code >= lo && code <= hi);
+      if (ranges.length === 0)
+        return (code: number) => code >= 200 && code < 400;
+      return (code: number) =>
+        ranges.some(([lo, hi]) => code >= lo && code <= hi);
     } catch {
       return (code: number) => code >= 200 && code < 400;
     }
@@ -51,7 +53,9 @@ export class AlertsService {
   async getEffectiveWebhook(environmentId: string): Promise<string | null> {
     // 1) DB first
     try {
-      const [row] = await this.db.query<{ lark_webhook_url: string; lark_sign_secret?: string | null }[]>(
+      const [row] = await this.db.query<
+        { lark_webhook_url: string; lark_sign_secret?: string | null }[]
+      >(
         'SELECT lark_webhook_url, lark_sign_secret FROM environment_alerts WHERE environment_id = ? LIMIT 1',
         [environmentId],
       );
@@ -75,16 +79,21 @@ export class AlertsService {
     const data = resp?.data || {};
     const statusCode = data?.StatusCode ?? data?.code;
     if (statusCode !== undefined && statusCode !== 0) {
-      throw new Error(`Lark returned non-success code: ${statusCode} message=${data?.StatusMessage || data?.msg}`);
+      throw new Error(
+        `Lark returned non-success code: ${statusCode} message=${data?.StatusMessage || data?.msg}`,
+      );
     }
   }
 
   async sendUnavailableAlert(environmentId: string, site: any) {
-    const tenantName = await this.getTenantName(environmentId, (site as any).tenant_id);
+    const tenantName = await this.getTenantName(
+      environmentId,
+      (site as any).tenant_id,
+    );
     const text = [
       `【站点不可用告警】`,
       `环境: ${environmentId}`,
-      `租户: ${tenantName ?? (site.tenant_id ?? '-')}`,
+      `租户: ${tenantName ?? site.tenant_id ?? '-'}`,
       `名称: ${site.name}`,
       // 避免在 Lark 中自动变成可点击的 http://host:port 链接，改为拆分展示
       `Host: ${site.host} (${site.is_https ? 'HTTPS' : 'HTTP'}, port ${site.port})`,
@@ -100,7 +109,10 @@ export class AlertsService {
   }
 
   async markAlertSent(environmentId: string, siteId: number) {
-    await this.db.query('UPDATE site_monitors SET last_alert_at = UTC_TIMESTAMP() WHERE id = ? AND environment_id = ?', [siteId, environmentId]);
+    await this.db.query(
+      'UPDATE site_monitors SET last_alert_at = UTC_TIMESTAMP() WHERE id = ? AND environment_id = ?',
+      [siteId, environmentId],
+    );
   }
 
   async sendTestAlert(environmentId: string) {
@@ -112,10 +124,29 @@ export class AlertsService {
     await this.postLark(environmentId, text);
   }
 
-  async getEnvAlertConfig(environmentId: string): Promise<{ failureThreshold: number; cooldownMinutes: number; probeTimeoutMs?: number | null; acceptableStatusCodes?: string | null }> {
-    const defaults = { failureThreshold: 3, cooldownMinutes: 10, probeTimeoutMs: null as number | null, acceptableStatusCodes: null as string | null };
+  async getEnvAlertConfig(
+    environmentId: string,
+  ): Promise<{
+    failureThreshold: number;
+    cooldownMinutes: number;
+    probeTimeoutMs?: number | null;
+    acceptableStatusCodes?: string | null;
+  }> {
+    const defaults = {
+      failureThreshold: 3,
+      cooldownMinutes: 10,
+      probeTimeoutMs: null as number | null,
+      acceptableStatusCodes: null as string | null,
+    };
     try {
-      const [row] = await this.db.query<{ failure_threshold?: number | null; cooldown_minutes?: number | null; probe_timeout_ms?: number | null; acceptable_status_codes?: string | null }[]>(
+      const [row] = await this.db.query<
+        {
+          failure_threshold?: number | null;
+          cooldown_minutes?: number | null;
+          probe_timeout_ms?: number | null;
+          acceptable_status_codes?: string | null;
+        }[]
+      >(
         'SELECT failure_threshold, cooldown_minutes, probe_timeout_ms, acceptable_status_codes FROM environment_alerts WHERE environment_id = ? LIMIT 1',
         [environmentId],
       );
@@ -131,20 +162,71 @@ export class AlertsService {
         failureThreshold: row.failure_threshold ?? defaults.failureThreshold,
         cooldownMinutes: row.cooldown_minutes ?? defaults.cooldownMinutes,
         probeTimeoutMs: row.probe_timeout_ms ?? defaults.probeTimeoutMs,
-        acceptableStatusCodes: row.acceptable_status_codes ?? this.envs.getEnvironmentById(environmentId)?.alerts?.acceptable_status_codes ?? null,
+        acceptableStatusCodes:
+          row.acceptable_status_codes ??
+          this.envs.getEnvironmentById(environmentId)?.alerts
+            ?.acceptable_status_codes ??
+          null,
       };
     } catch {
       const env = this.envs.getEnvironmentById(environmentId);
-      return { ...defaults, acceptableStatusCodes: env?.alerts?.acceptable_status_codes ?? null };
+      return {
+        ...defaults,
+        acceptableStatusCodes: env?.alerts?.acceptable_status_codes ?? null,
+      };
+    }
+  }
+
+  async sendLineUnavailableAlert(
+    environmentId: string,
+    line: any,
+    failureCount: number,
+  ) {
+    const text = [
+      '【线路不可用告警】',
+      `环境: ${environmentId}`,
+      `线路: ${line.zh || line.en || line.lineUrl}`,
+      `Line URL: ${line.lineUrl}`,
+      `多地域可用性: ${line.availabilityScore ?? '-'}% (${line.successRegions ?? 0}/${line.totalRegions ?? 0} 成功)`,
+      `状态: ${line.availability}  失败次数: ${failureCount}`,
+      `错误: ${line.error || '-'}`,
+      `探测时间: ${line.lastCheckedAt || '-'}`,
+    ].join('\n');
+    try {
+      await this.postLark(environmentId, text);
+    } catch (e: any) {
+      this.logger.error(`Failed to send Lark line alert: ${e?.message || e}`);
+    }
+  }
+
+  async sendLineRecoveryAlert(environmentId: string, line: any) {
+    const text = [
+      '【线路恢复通知】',
+      `环境: ${environmentId}`,
+      `线路: ${line.zh || line.en || line.lineUrl}`,
+      `Line URL: ${line.lineUrl}`,
+      `多地域可用性: ${line.availabilityScore ?? '-'}% (${line.successRegions ?? 0}/${line.totalRegions ?? 0} 成功)`,
+      `当前状态: ${line.availability}（已恢复可用）`,
+      `探测时间: ${line.lastCheckedAt || '-'}`,
+    ].join('\n');
+    try {
+      await this.postLark(environmentId, text);
+    } catch (e: any) {
+      this.logger.error(
+        `Failed to send Lark line recovery: ${e?.message || e}`,
+      );
     }
   }
 
   async sendRecoveryAlert(environmentId: string, site: any) {
-    const tenantName = await this.getTenantName(environmentId, (site as any).tenant_id);
+    const tenantName = await this.getTenantName(
+      environmentId,
+      (site as any).tenant_id,
+    );
     const text = [
       `【站点恢复通知】`,
       `环境: ${environmentId}`,
-      `租户: ${tenantName ?? (site.tenant_id ?? '-')}`,
+      `租户: ${tenantName ?? site.tenant_id ?? '-'}`,
       `名称: ${site.name}`,
       `Host: ${site.host} (${site.is_https ? 'HTTPS' : 'HTTP'}, port ${site.port})`,
       `当前状态: ${site.http_status ?? '-'}（已恢复可用）`,
@@ -153,11 +235,16 @@ export class AlertsService {
     try {
       await this.postLark(environmentId, text);
     } catch (e: any) {
-      this.logger.error(`Failed to send Lark recovery alert: ${e?.message || e}`);
+      this.logger.error(
+        `Failed to send Lark recovery alert: ${e?.message || e}`,
+      );
     }
   }
 
-  async getTenantName(environmentId: string, tenantId?: number | null): Promise<string | null> {
+  async getTenantName(
+    environmentId: string,
+    tenantId?: number | null,
+  ): Promise<string | null> {
     if (!tenantId && tenantId !== 0) return null;
     try {
       const [row] = await this.db.query<{ name: string }[]>(

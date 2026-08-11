@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { CentralDatabaseService } from './central-database.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import * as dns from 'dns/promises';
@@ -8,6 +8,7 @@ import * as http from 'http';
 import * as https from 'https';
 import { AlertsService } from './alerts.service';
 import { UpdateSiteDto } from './dto/update-site.dto';
+import { LinesService } from '../lines/lines.service';
 
 type SiteRow = {
   id: number;
@@ -42,9 +43,17 @@ type SiteRow = {
 export class SiteMonitorService {
   private readonly logger = new Logger(SiteMonitorService.name);
 
-  constructor(private readonly db: CentralDatabaseService, private readonly alerts: AlertsService) {}
+  constructor(
+    private readonly db: CentralDatabaseService,
+    private readonly alerts: AlertsService,
+    @Inject(forwardRef(() => LinesService))
+    private readonly lines: LinesService,
+  ) {}
 
-  async listSites(environmentId: string, tenantId?: number): Promise<(SiteRow & { treated_ok?: boolean })[]> {
+  async listSites(
+    environmentId: string,
+    tenantId?: number,
+  ): Promise<(SiteRow & { treated_ok?: boolean })[]> {
     let sql = 'SELECT * FROM site_monitors WHERE environment_id = ?';
     const params: any[] = [environmentId];
     if (typeof tenantId === 'number') {
@@ -54,22 +63,60 @@ export class SiteMonitorService {
     sql += ' ORDER BY id DESC';
     const rows = await this.db.query<SiteRow[]>(sql, params);
     const cfg = await this.alerts.getEnvAlertConfig(environmentId);
-    return rows.map((r) => ({
+    const siteRows = rows.map((r) => ({
       ...r,
-      treated_ok: this.alerts.isAcceptableStatus(r.http_status ?? null, (r as any).acceptable_status_codes || cfg.acceptableStatusCodes || null),
+      monitor_source: 'dashboard_probe',
+      monitor_type: 'website',
+      treated_ok: this.alerts.isAcceptableStatus(
+        r.http_status ?? null,
+        (r as any).acceptable_status_codes || cfg.acceptableStatusCodes || null,
+      ),
     }));
+    if (typeof tenantId === 'number') return siteRows;
+    try {
+      return [
+        ...siteRows,
+        ...(await this.listLineMonitors(environmentId)),
+      ] as any;
+    } catch (error: any) {
+      this.logger.warn(
+        `Unable to load line monitor inventory for ${environmentId}: ${error?.message || error}`,
+      );
+      return siteRows;
+    }
   }
 
   async updateSite(environmentId: string, id: number, dto: UpdateSiteDto) {
     const fields: string[] = [];
     const params: any[] = [];
-    if (dto.tenantId !== undefined) { fields.push('tenant_id = ?'); params.push(dto.tenantId); }
-    if (dto.name !== undefined) { fields.push('name = ?'); params.push(dto.name); }
-    if (dto.host !== undefined) { fields.push('host = ?'); params.push(dto.host); }
-    if (dto.port !== undefined) { fields.push('port = ?'); params.push(dto.port); }
-    if (dto.isHttps !== undefined) { fields.push('is_https = ?'); params.push(dto.isHttps ? 1 : 0); }
-    if (dto.notes !== undefined) { fields.push('notes = ?'); params.push(dto.notes); }
-    if (dto.acceptableStatusCodes !== undefined) { fields.push('acceptable_status_codes = ?'); params.push(dto.acceptableStatusCodes || null); }
+    if (dto.tenantId !== undefined) {
+      fields.push('tenant_id = ?');
+      params.push(dto.tenantId);
+    }
+    if (dto.name !== undefined) {
+      fields.push('name = ?');
+      params.push(dto.name);
+    }
+    if (dto.host !== undefined) {
+      fields.push('host = ?');
+      params.push(dto.host);
+    }
+    if (dto.port !== undefined) {
+      fields.push('port = ?');
+      params.push(dto.port);
+    }
+    if (dto.isHttps !== undefined) {
+      fields.push('is_https = ?');
+      params.push(dto.isHttps ? 1 : 0);
+    }
+    if (dto.notes !== undefined) {
+      fields.push('notes = ?');
+      params.push(dto.notes);
+    }
+    if (dto.acceptableStatusCodes !== undefined) {
+      fields.push('acceptable_status_codes = ?');
+      params.push(dto.acceptableStatusCodes || null);
+    }
     if (fields.length === 0) return { ok: true };
     const sql = `UPDATE site_monitors SET ${fields.join(', ')}, updated_at = UTC_TIMESTAMP() WHERE id = ? AND environment_id = ?`;
     params.push(id, environmentId);
@@ -113,7 +160,11 @@ export class SiteMonitorService {
     }
 
     // 多域名批量插入
-    const valuesSql = hosts.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())').join(',');
+    const valuesSql = hosts
+      .map(
+        () => '(?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())',
+      )
+      .join(',');
     const sql = `INSERT INTO site_monitors
       (environment_id, tenant_id, name, host, port, is_https, environment_label, notes, acceptable_status_codes, created_at, updated_at)
       VALUES ${valuesSql}`;
@@ -135,22 +186,144 @@ export class SiteMonitorService {
     return { ids: [] };
   }
 
-  async getSiteById(environmentId: string, id: number): Promise<SiteRow & { treated_ok?: boolean }> {
+  async getSiteById(
+    environmentId: string,
+    id: number,
+  ): Promise<SiteRow & { treated_ok?: boolean }> {
     const [site] = await this.db.query<SiteRow[]>(
       'SELECT * FROM site_monitors WHERE id = ? AND environment_id = ? LIMIT 1',
       [id, environmentId],
     );
     if (!site) throw new Error('Site not found');
     const cfg = await this.alerts.getEnvAlertConfig(environmentId);
-    return { ...site, treated_ok: this.alerts.isAcceptableStatus(site.http_status ?? null, (site as any).acceptable_status_codes || cfg.acceptableStatusCodes || null) } as any;
+    return {
+      ...site,
+      treated_ok: this.alerts.isAcceptableStatus(
+        site.http_status ?? null,
+        (site as any).acceptable_status_codes ||
+          cfg.acceptableStatusCodes ||
+          null,
+      ),
+    } as any;
   }
 
   async deleteSite(environmentId: string, id: number) {
-    await this.db.query('DELETE FROM site_monitors WHERE id = ? AND environment_id = ?', [id, environmentId]);
+    await this.db.query(
+      'DELETE FROM site_monitors WHERE id = ? AND environment_id = ?',
+      [id, environmentId],
+    );
     return { ok: true };
   }
 
-  async checkSite(environmentId: string, id: number): Promise<SiteRow & { treated_ok?: boolean }> {
+  async listLineMonitors(environmentId: string) {
+    const inventory = await this.lines.getLineInventory(environmentId, {
+      status: true,
+      page: 1,
+      size: 500,
+    } as any);
+    const states = await this.db.query<
+      Array<{
+        line_id: number | null;
+        line_url: string;
+        failure_count: number;
+        last_alert_at: Date | null;
+      }>
+    >(
+      'SELECT line_id, line_url, failure_count, last_alert_at FROM line_monitor_alert_states WHERE environment_id = ?',
+      [environmentId],
+    );
+    const stateByUrl = new Map(states.map((state) => [state.line_url, state]));
+    return (inventory.items || []).map((line: any) => ({
+      id: `line:${line.id ?? line.lineUrl}`,
+      monitor_source: 'line_inventory',
+      monitor_type: 'lineurl',
+      name: line.zh || line.en || line.lineUrl,
+      host: line.lineUrl,
+      line_id: line.id ?? null,
+      line_name: line.zh || line.en || null,
+      availability: line.availability,
+      availability_score: line.availabilityScore,
+      success_regions: line.successRegions,
+      failed_regions: line.failedRegions,
+      unknown_regions: line.unknownRegions,
+      total_regions: line.totalRegions,
+      last_checked_at: line.lastCheckedAt,
+      last_error: line.error,
+      failure_count: stateByUrl.get(line.lineUrl)?.failure_count ?? 0,
+      last_alert_at: stateByUrl.get(line.lineUrl)?.last_alert_at ?? null,
+      treated_ok: line.availability === 'up',
+    }));
+  }
+
+  async syncLineMonitorAlerts(environmentId: string) {
+    const lines = await this.listLineMonitors(environmentId);
+    const cfg = await this.alerts.getEnvAlertConfig(environmentId);
+    const now = Date.now();
+    for (const line of lines) {
+      // Unknown means a probe data issue, not a confirmed line outage; do not send outage alerts.
+      if (line.availability === 'unknown') continue;
+      const previous = await this.db.query<
+        Array<{
+          failure_count: number;
+          last_status: string | null;
+          last_alert_at: string | null;
+        }>
+      >(
+        'SELECT failure_count, last_status, last_alert_at FROM line_monitor_alert_states WHERE environment_id = ? AND line_url = ? LIMIT 1',
+        [environmentId, line.host],
+      );
+      const prev = previous[0];
+      const isUp = line.availability === 'up';
+      const failureCount = isUp ? 0 : (prev?.failure_count ?? 0) + 1;
+      const lastAlertAt = prev?.last_alert_at
+        ? new Date(String(prev.last_alert_at).replace(' ', 'T') + 'Z').getTime()
+        : 0;
+      const inCooldown =
+        lastAlertAt > 0 && now - lastAlertAt < cfg.cooldownMinutes * 60 * 1000;
+
+      if (isUp && prev?.last_status === 'down') {
+        await this.alerts.sendLineRecoveryAlert(environmentId, line);
+      }
+      let lastAlertAtSql: string | null = null;
+      if (!isUp && failureCount >= cfg.failureThreshold && !inCooldown) {
+        await this.alerts.sendLineUnavailableAlert(
+          environmentId,
+          line,
+          failureCount,
+        );
+        lastAlertAtSql = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace('T', ' ');
+      }
+      await this.db.query(
+        `INSERT INTO line_monitor_alert_states(environment_id, line_id, line_url, failure_count, last_status, last_checked_at, last_ok_at, last_alert_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? THEN UTC_TIMESTAMP() ELSE NULL END, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+         ON DUPLICATE KEY UPDATE line_id=VALUES(line_id), failure_count=VALUES(failure_count), last_status=VALUES(last_status), last_checked_at=VALUES(last_checked_at), last_ok_at=CASE WHEN ? THEN UTC_TIMESTAMP() ELSE last_ok_at END, last_alert_at=COALESCE(VALUES(last_alert_at), last_alert_at), updated_at=UTC_TIMESTAMP()`,
+        [
+          environmentId,
+          line.line_id,
+          line.host,
+          failureCount,
+          line.availability,
+          line.last_checked_at
+            ? new Date(line.last_checked_at)
+                .toISOString()
+                .slice(0, 19)
+                .replace('T', ' ')
+            : null,
+          isUp ? 1 : 0,
+          lastAlertAtSql,
+          isUp ? 1 : 0,
+        ],
+      );
+    }
+  }
+
+  async checkSite(
+    environmentId: string,
+    id: number,
+  ): Promise<SiteRow & { treated_ok?: boolean }> {
     const [site] = await this.db.query<SiteRow[]>(
       'SELECT * FROM site_monitors WHERE id = ? AND environment_id = ? LIMIT 1',
       [id, environmentId],
@@ -160,7 +333,7 @@ export class SiteMonitorService {
     let dnsOk = 0;
     let resolvedIps: string | null = null;
     let tcpLatency: number | null = null;
-  let httpStatus: number | null = null;
+    let httpStatus: number | null = null;
     let sslValid: number | null = null;
     let sslIssuer: string | null = null;
     let sslSubject: string | null = null;
@@ -206,7 +379,9 @@ export class SiteMonitorService {
           });
         });
       } catch (e: any) {
-        lastError = lastError ? `${lastError}; TCP: ${e?.message || e}` : `TCP: ${e?.message || e}`;
+        lastError = lastError
+          ? `${lastError}; TCP: ${e?.message || e}`
+          : `TCP: ${e?.message || e}`;
       }
 
       // SSL cert (for HTTPS only)
@@ -220,19 +395,33 @@ export class SiteMonitorService {
           sslNotAfter = certInfo.notAfter || null;
         } catch (e: any) {
           sslValid = 0;
-          lastError = lastError ? `${lastError}; SSL: ${e?.message || e}` : `SSL: ${e?.message || e}`;
+          lastError = lastError
+            ? `${lastError}; SSL: ${e?.message || e}`
+            : `SSL: ${e?.message || e}`;
         }
       }
 
       // HTTP status — GET / with small timeout and early abort on first data
       try {
-        const primary = await this.httpProbe(!!site.is_https, site.host, site.port || (site.is_https ? 443 : 80), httpTimeout);
+        const primary = await this.httpProbe(
+          !!site.is_https,
+          site.host,
+          site.port || (site.is_https ? 443 : 80),
+          httpTimeout,
+        );
         httpStatus = primary.statusCode ?? null;
       } catch (e1: any) {
-        lastError = lastError ? `${lastError}; HTTP(primary): ${e1?.message || e1}` : `HTTP(primary): ${e1?.message || e1}`;
+        lastError = lastError
+          ? `${lastError}; HTTP(primary): ${e1?.message || e1}`
+          : `HTTP(primary): ${e1?.message || e1}`;
         // try alternate scheme/port: if primary was HTTP(80), try HTTPS(443); if primary was HTTPS, try HTTP(80)
         try {
-          const alt = await this.httpProbe(!site.is_https, site.host, site.is_https ? 80 : 443, httpTimeout);
+          const alt = await this.httpProbe(
+            !site.is_https,
+            site.host,
+            site.is_https ? 80 : 443,
+            httpTimeout,
+          );
           httpStatus = alt.statusCode ?? null;
         } catch (e2: any) {
           lastError = `${lastError}; HTTP(alt): ${e2?.message || e2}`;
@@ -242,8 +431,13 @@ export class SiteMonitorService {
     } finally {
       // persist results
       // compute failure count using acceptable status codes (site > env > default)
-      const treatedOk = !!httpStatus && this.alerts.isAcceptableStatus(httpStatus, site.acceptable_status_codes || cfg.acceptableStatusCodes || '');
-      const nextFailureCount = treatedOk ? 0 : ((site.failure_count ?? 0) + 1);
+      const treatedOk =
+        !!httpStatus &&
+        this.alerts.isAcceptableStatus(
+          httpStatus,
+          site.acceptable_status_codes || cfg.acceptableStatusCodes || '',
+        );
+      const nextFailureCount = treatedOk ? 0 : (site.failure_count ?? 0) + 1;
 
       await this.db.query(
         `UPDATE site_monitors
@@ -274,10 +468,21 @@ export class SiteMonitorService {
       'SELECT * FROM site_monitors WHERE id = ? AND environment_id = ? LIMIT 1',
       [id, environmentId],
     );
-    return { ...updated, treated_ok: this.alerts.isAcceptableStatus(updated.http_status ?? null, (updated as any).acceptable_status_codes || cfg.acceptableStatusCodes || null) } as any;
+    return {
+      ...updated,
+      treated_ok: this.alerts.isAcceptableStatus(
+        updated.http_status ?? null,
+        (updated as any).acceptable_status_codes ||
+          cfg.acceptableStatusCodes ||
+          null,
+      ),
+    } as any;
   }
 
-  private fetchCert(host: string, port = 443): Promise<{
+  private fetchCert(
+    host: string,
+    port = 443,
+  ): Promise<{
     valid: boolean;
     issuer: string | null;
     subject: string | null;
@@ -286,12 +491,22 @@ export class SiteMonitorService {
   }> {
     return new Promise((resolve, reject) => {
       const socket = tls.connect(
-        { host, port, servername: host, rejectUnauthorized: false, timeout: 5000 },
+        {
+          host,
+          port,
+          servername: host,
+          rejectUnauthorized: false,
+          timeout: 5000,
+        },
         () => {
           try {
             const cert: any = socket.getPeerCertificate();
-            const notBefore = cert?.valid_from ? new Date(cert.valid_from) : undefined;
-            const notAfter = cert?.valid_to ? new Date(cert.valid_to) : undefined;
+            const notBefore = cert?.valid_from
+              ? new Date(cert.valid_from)
+              : undefined;
+            const notAfter = cert?.valid_to
+              ? new Date(cert.valid_to)
+              : undefined;
             const valid = !!notAfter && notAfter.getTime() > Date.now();
             resolve({
               valid,
@@ -314,15 +529,30 @@ export class SiteMonitorService {
     });
   }
 
-  private httpProbe(isHttps: boolean, host: string, port: number, timeoutMs = 5000): Promise<{ statusCode?: number }> {
+  private httpProbe(
+    isHttps: boolean,
+    host: string,
+    port: number,
+    timeoutMs = 5000,
+  ): Promise<{ statusCode?: number }> {
     return new Promise((resolve, reject) => {
       const lib = isHttps ? https : http;
-      const req = lib.request({ host, port, method: 'GET', path: '/', timeout: timeoutMs, rejectUnauthorized: false }, (res) => {
-        // close early; we only need status code
-        res.resume();
-        resolve({ statusCode: res.statusCode });
-        req.destroy();
-      });
+      const req = lib.request(
+        {
+          host,
+          port,
+          method: 'GET',
+          path: '/',
+          timeout: timeoutMs,
+          rejectUnauthorized: false,
+        },
+        (res) => {
+          // close early; we only need status code
+          res.resume();
+          resolve({ statusCode: res.statusCode });
+          req.destroy();
+        },
+      );
       req.on('timeout', () => {
         req.destroy(new Error('HTTP timeout'));
       });

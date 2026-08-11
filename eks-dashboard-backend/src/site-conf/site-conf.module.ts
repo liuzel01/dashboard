@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
-import { SiteMonitorModule } from '../site-monitor/site-monitor.module';
+import { CentralDatabaseService } from '../site-monitor/central-database.service';
 import { SiteConfController } from './site-conf.controller';
 import { SiteConfService } from './site-conf.service';
 
 @Module({
-  imports: [SiteMonitorModule],
   controllers: [SiteConfController],
-  providers: [SiteConfService],
+  providers: [SiteConfService, CentralDatabaseService],
   exports: [SiteConfService],
 })
 export class SiteConfModule {}
