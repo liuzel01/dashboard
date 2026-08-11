@@ -24,7 +24,7 @@ import {
 } from 'antd';
 import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
-import { SettingOutlined } from '@ant-design/icons';
+import { InfoCircleOutlined, SettingOutlined } from '@ant-design/icons';
 import {
   createAssetAccount,
   createAssetDomain,
@@ -962,7 +962,19 @@ const AccountManagementTab: React.FC = () => {
     <>
       {modalContextHolder}
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="账号管理是账号维度域名同步主入口" description="当前支持按账号读取 siteconf 凭证并预览/同步阿里云 DCDN、ESA DNS 记录或网宿 CDN 域名。需先绑定 credential_ref_id，且对应 credential_ref.storage_type=siteconf。ESA 同步仅写入 Dashboard 资产库，不会修改云侧 DNS 或站点配置。" />
+      <Space size={6} align="center">
+        <Text type="secondary">账号维度域名同步入口</Text>
+        <Tooltip
+          placement="right"
+          title={<div style={{ maxWidth: 420, lineHeight: 1.7 }}>
+            <div>支持按账号读取 siteconf 凭证并预览/同步阿里云 DCDN、ESA DNS 记录或网宿 CDN 域名。</div>
+            <div>前置条件：需绑定 credential_ref_id，且对应 credential_ref.storage_type 为 siteconf。</div>
+            <div>注意：ESA 同步仅写入 Dashboard 资产库，不会修改云侧 DNS 或站点配置。</div>
+          </div>}
+        >
+          <InfoCircleOutlined aria-label="账号管理使用说明" style={{ color: '#1677ff', cursor: 'help' }} />
+        </Tooltip>
+      </Space>
       {credentialRefsLoadError && <Alert type="warning" showIcon message="凭证索引附加信息加载失败" description="账号主列表仍可正常显示与编辑；仅凭证名称 / siteconf 路径等增强展示暂不可用。" />}
       <Space wrap>
         <Input.Search allowClear placeholder="搜索账号" style={{ width: 260 }} onSearch={(keyword) => setFilters((prev) => ({ ...prev, keyword, page: 1 }))} />
