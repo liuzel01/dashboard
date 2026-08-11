@@ -10,7 +10,6 @@ import {
   InputNumber,
   Switch,
   message,
-  Popconfirm,
   Descriptions,
   Select,
 } from "antd";
@@ -69,6 +68,8 @@ const SiteMonitorPage: React.FC = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<SiteRow | null>(null);
   const [checkingId, setCheckingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SiteRow | null>(null);
   const [tenantFilter, setTenantFilter] = useState<number | undefined>(
     undefined,
   );
@@ -188,13 +189,22 @@ const SiteMonitorPage: React.FC = () => {
     }
   };
 
-  const onDelete = async (id: number) => {
+  const onDelete = async () => {
+    const target = deleteTarget;
+    if (!target || deletingId) return;
+
     try {
-      await deleteSiteMonitor(id);
-      message.success("已删除");
-      await load();
+      setDeletingId(target.id);
+      await deleteSiteMonitor(target.id);
+      // 删除仅影响当前行：就地更新避免整张表重载、闪烁和分页跳转。
+      setData((prev) => prev.filter((row) => row.id !== target.id));
+      setDetailRecord((prev) => (prev?.id === target.id ? null : prev));
+      message.success("站点已删除");
     } catch (e: any) {
       message.error(e?.message || "删除失败");
+    } finally {
+      setDeletingId(null);
+      setDeleteTarget(null);
     }
   };
 
@@ -268,11 +278,19 @@ const SiteMonitorPage: React.FC = () => {
           pageSizeOptions: [10, 20, 50, 100],
           showTotal: (total, range) => `${range[0]}-${range[1]} / 共 ${total}`,
         }}
-        scroll={{ x: 1700 }}
+        tableLayout="fixed"
+        scroll={{ x: 1900 }}
         columns={[
-          { title: "名称", dataIndex: "name", width: 200, ellipsis: true },
+          {
+            title: "名称",
+            dataIndex: "name",
+            width: 200,
+            fixed: "left",
+            ellipsis: true,
+          },
           {
             title: "类型",
+            fixed: "left",
             dataIndex: "monitor_type",
             width: 100,
             render: (v) =>
@@ -406,14 +424,15 @@ const SiteMonitorPage: React.FC = () => {
                     >
                       检查
                     </Button>
-                    <Popconfirm
-                      title="确认删除?"
-                      onConfirm={() => onDelete(r.id)}
+                    <Button
+                      size="small"
+                      danger
+                      loading={deletingId === r.id}
+                      disabled={Boolean(deletingId)}
+                      onClick={() => setDeleteTarget(r)}
                     >
-                      <Button size="small" danger>
-                        删除
-                      </Button>
-                    </Popconfirm>
+                      删除
+                    </Button>
                   </>
                 )}
               </Space>
@@ -421,6 +440,28 @@ const SiteMonitorPage: React.FC = () => {
           },
         ]}
       />
+
+      <Modal
+        title="确认删除站点？"
+        open={Boolean(deleteTarget)}
+        onCancel={() => !deletingId && setDeleteTarget(null)}
+        onOk={() => void onDelete()}
+        okText="确认删除"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        confirmLoading={Boolean(deletingId)}
+        cancelButtonProps={{ disabled: Boolean(deletingId) }}
+        maskClosable={!deletingId}
+        keyboard={!deletingId}
+        destroyOnClose
+      >
+        <div>
+          将删除单点监控站点：<strong>{deleteTarget?.name}</strong>
+        </div>
+        <div style={{ color: "#8c8c8c", marginTop: 8 }}>
+          Host：{deleteTarget?.host}
+        </div>
+      </Modal>
 
       <Modal
         title="站点详情"
