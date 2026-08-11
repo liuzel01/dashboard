@@ -965,8 +965,9 @@ const AccountManagementTab: React.FC = () => {
       <Space size={6} align="center">
         <Text type="secondary">账号维度域名同步入口</Text>
         <Tooltip
-          placement="right"
-          title={<div style={{ maxWidth: 420, lineHeight: 1.7 }}>
+          placement="bottomLeft"
+          overlayStyle={{ maxWidth: 620 }}
+          title={<div style={{ width: 560, lineHeight: 1.8, whiteSpace: 'normal' }}>
             <div>支持按账号读取 siteconf 凭证并预览/同步阿里云 DCDN、ESA DNS 记录或网宿 CDN 域名。</div>
             <div>前置条件：需绑定 credential_ref_id，且对应 credential_ref.storage_type 为 siteconf。</div>
             <div>注意：ESA 同步仅写入 Dashboard 资产库，不会修改云侧 DNS 或站点配置。</div>
@@ -1786,8 +1787,32 @@ const DomainManagementTab: React.FC = () => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert type="info" showIcon message="域名管理展示最终资产结果" description="Phase 1：environment 存 dashboard environment_id；tenant 存当前 environment 下的 tenant.id；同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不应覆盖人工分类字段。" />
-      {currentEnvironment && <Alert type="success" showIcon message={`当前左上角环境：${currentEnvironment.name || currentEnvironment.id}`} description="新增域名时会默认带入该环境；但编辑框内可单独切换 environment/tenant，已不再依赖左上角环境。列表也不会因左上角环境自动过滤历史域名。" />}
+      <Space size={6} align="center">
+        <Text type="secondary">域名管理展示最终资产结果</Text>
+        <Tooltip
+          placement="bottomLeft"
+          overlayStyle={{ maxWidth: 620 }}
+          title={<div style={{ width: 560, lineHeight: 1.8, whiteSpace: 'normal' }}>
+            <div>Phase 1：environment 保存 Dashboard environment_id；tenant 保存当前 environment 下的 tenant.id。</div>
+            <div>同步来源仅作为表格展示字段，编辑框内不再单独暴露；同步不会覆盖人工分类字段。</div>
+          </div>}
+        >
+          <InfoCircleOutlined aria-label="域名管理数据说明" style={{ color: '#1677ff', cursor: 'help' }} />
+        </Tooltip>
+      </Space>
+      {currentEnvironment && <Space size={6} align="center">
+        <Text type="secondary">当前左上角环境：{currentEnvironment.name || currentEnvironment.id}</Text>
+        <Tooltip
+          placement="bottomLeft"
+          overlayStyle={{ maxWidth: 620 }}
+          title={<div style={{ width: 560, lineHeight: 1.8, whiteSpace: 'normal' }}>
+            <div>新增域名时会默认带入当前环境；编辑时仍可单独切换 environment / tenant，不再依赖左上角环境。</div>
+            <div>列表不会因为左上角环境自动过滤历史域名。</div>
+          </div>}
+        >
+          <InfoCircleOutlined aria-label="当前环境使用说明" style={{ color: '#1677ff', cursor: 'help' }} />
+        </Tooltip>
+      </Space>}
       <EntityTab<AssetDomain>
         initialFilters={{ status: 'active' }}
         title="域名"
