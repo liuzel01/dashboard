@@ -55,6 +55,22 @@ export const restartDeployment = async (name: string) => {
   return response.data;
 };
 
+export type DeploymentImage = { name: string; image: string };
+export type DeploymentImageRevision = { revision: number; replicaSetName: string; createdAt: string | null; images: DeploymentImage[]; isCurrent: boolean };
+export type DeploymentImageHistory = { deployment: string; namespace: string; currentImages: DeploymentImage[]; revisions: DeploymentImageRevision[] };
+
+export const getDeploymentImageHistory = async (name: string): Promise<DeploymentImageHistory> => {
+  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+  const response = await api.get(`/deployments/${encodeURIComponent(name)}/image-history`);
+  return response.data;
+};
+
+export const rollbackDeploymentImages = async (name: string, images: DeploymentImage[]) => {
+  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+  const response = await api.post(`/deployments/${encodeURIComponent(name)}/rollback-images`, { images });
+  return response.data;
+};
+
 /**
  * 对指定标识符执行聚合查询
  * @param identifier - 要查询的ID (例如 UID, email, phone)

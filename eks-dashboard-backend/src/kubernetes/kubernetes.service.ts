@@ -7,6 +7,7 @@ import { PassThrough } from 'node:stream';
 import { spawn } from 'node:child_process';
 
 const RESTART_ANNOTATION = 'kubectl.kubernetes.io/restartedAt';
+const DEPLOYMENT_REVISION_ANNOTATION = 'deployment.kubernetes.io/revision';
 
 interface K8sApis {
   kc: k8s.KubeConfig;
@@ -172,6 +173,78 @@ export class KubernetesService {
       this.logger.error(`Error restarting deployment ${name}:`, errorDetails);
       throw e;
     }
+  }
+
+  async getDeploymentImageHistory(
+    environmentId: string,
+    name: string,
+    namespace = 'default',
+  ) {
+    const { k8sAppsV1Api } = await this.getK8sApis(environmentId);
+    const [{ body: deployment }, { body: replicaSets }] = await Promise.all([
+      k8sAppsV1Api.readNamespacedDeployment(name, namespace),
+      k8sAppsV1Api.listNamespacedReplicaSet(namespace),
+    ]);
+    const deploymentUid = deployment.metadata?.uid;
+    const currentImages = (deployment.spec?.template?.spec?.containers || []).map((container) => ({
+      name: container.name,
+      image: container.image || '',
+    }));
+    const revisions = replicaSets.items
+      .filter((replicaSet) => replicaSet.metadata?.ownerReferences?.some(
+        (owner) => owner.kind === 'Deployment' && owner.uid === deploymentUid,
+      ))
+      .map((replicaSet) => ({
+        revision: Number(replicaSet.metadata?.annotations?.[DEPLOYMENT_REVISION_ANNOTATION] || 0),
+        replicaSetName: replicaSet.metadata?.name || '',
+        createdAt: replicaSet.metadata?.creationTimestamp || null,
+        images: (replicaSet.spec?.template?.spec?.containers || []).map((container) => ({
+          name: container.name,
+          image: container.image || '',
+        })),
+      }))
+      .filter((item) => item.revision > 0 && item.images.length > 0)
+      .sort((a, b) => b.revision - a.revision);
+
+    return {
+      deployment: name,
+      namespace,
+      currentImages,
+      revisions: revisions.map((item) => ({
+        ...item,
+        isCurrent: item.images.length === currentImages.length && item.images.every(
+          (image, index) => image.name === currentImages[index]?.name && image.image === currentImages[index]?.image,
+        ),
+      })),
+    };
+  }
+
+  async rollbackDeploymentImages(
+    environmentId: string,
+    name: string,
+    images: Array<{ name: string; image: string }>,
+    namespace = 'default',
+  ) {
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new Error('At least one container image is required.');
+    }
+    const requestedImages = new Map(images.map((item) => [item.name, item.image]));
+    if (requestedImages.size !== images.length || images.some((item) => !item.name || !item.image)) {
+      throw new Error('Container names and image references must be non-empty and unique.');
+    }
+    const { k8sAppsV1Api } = await this.getK8sApis(environmentId);
+    const { body: deployment } = await k8sAppsV1Api.readNamespacedDeployment(name, namespace);
+    const containers = deployment.spec?.template?.spec?.containers;
+    if (!containers?.length) throw new Error(`Deployment "${name}" has no containers.`);
+    const currentNames = new Set(containers.map((container) => container.name));
+    if (requestedImages.size !== currentNames.size || [...requestedImages.keys()].some((containerName) => !currentNames.has(containerName))) {
+      throw new Error('Selected images must match every current deployment container exactly.');
+    }
+    const previousImages = containers.map((container) => ({ name: container.name, image: container.image || '' }));
+    containers.forEach((container) => { container.image = requestedImages.get(container.name)!; });
+    await k8sAppsV1Api.replaceNamespacedDeployment(name, namespace, deployment);
+    this.logger.log(`Updated only container images for deployment "${name}" in namespace "${namespace}".`);
+    return { message: `Deployment ${name} image rollback started successfully.`, previousImages, targetImages: images };
   }
 
   async getPodsForDeployment(

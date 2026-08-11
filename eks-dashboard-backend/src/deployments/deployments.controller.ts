@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Query,
   Headers,
+  Body,
 } from '@nestjs/common';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 
@@ -126,6 +127,39 @@ export class DeploymentsController {
         'Failed to restart deployment',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
+    }
+  }
+  @Get(':name/image-history')
+  async getDeploymentImageHistory(
+    @Param('name') name: string,
+    @Headers('x-target-environment') environmentId: string,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    try {
+      return await this.k8sService.getDeploymentImageHistory(environmentId, name, 'default');
+    } catch (error) {
+      this.logger.error(`Failed to get image history for ${name} in env "${environmentId}"`, error.body || error);
+      throw new HttpException('Failed to fetch deployment image history', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Post(':name/rollback-images')
+  async rollbackDeploymentImages(
+    @Param('name') name: string,
+    @Body() body: { images?: Array<{ name?: string; image?: string }> },
+    @Headers('x-target-environment') environmentId: string,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    try {
+      const images = body?.images?.map((item) => ({ name: String(item.name || ''), image: String(item.image || '') })) || [];
+      return await this.k8sService.rollbackDeploymentImages(environmentId, name, images, 'default');
+    } catch (error) {
+      this.logger.error(`Failed to roll back images for ${name} in env "${environmentId}"`, error.body || error);
+      throw new HttpException(error?.message || 'Failed to roll back deployment images', HttpStatus.BAD_REQUEST);
     }
   }
 }

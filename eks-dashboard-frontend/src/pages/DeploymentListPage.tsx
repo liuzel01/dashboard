@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Table, Input, Button, App, Spin, Space, Alert, Tag } from 'antd';
+import { Table, Input, Button, App, Spin, Space, Alert, Tag, Modal, Select, Descriptions } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
-import { getDeployments, restartDeployment } from '../services/api';
+import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, type DeploymentImageHistory } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
 // 定义 Deployment 对象的接口
@@ -88,6 +88,12 @@ const DeploymentListPage: React.FC = () => {
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
   const [loading, setLoading] = useState(false);
   const [restarting, setRestarting] = useState<string | null>(null);
+  const [imageHistoryTarget, setImageHistoryTarget] = useState<string | null>(null);
+  const [imageHistory, setImageHistory] = useState<DeploymentImageHistory | null>(null);
+  const [imageHistoryLoading, setImageHistoryLoading] = useState(false);
+  const [selectedRevision, setSelectedRevision] = useState<number | null>(null);
+  const [rollbackConfirmation, setRollbackConfirmation] = useState('');
+  const [rollingBack, setRollingBack] = useState(false);
 
   // 日志查看器弹窗的状态
   const [logViewerVisible, setLogViewerVisible] = useState(false);
@@ -231,6 +237,35 @@ const DeploymentListPage: React.FC = () => {
     });
   };
 
+  const handleOpenImageHistory = async (deploymentName: string | undefined) => {
+    if (!deploymentName) { message.error('无法查看镜像历史：应用名称未知。'); return; }
+    setImageHistoryTarget(deploymentName); setImageHistory(null); setSelectedRevision(null); setRollbackConfirmation(''); setImageHistoryLoading(true);
+    try {
+      const history = await getDeploymentImageHistory(deploymentName);
+      setImageHistory(history);
+      const recommended = history.revisions.find((item) => !item.isCurrent);
+      setSelectedRevision(recommended?.revision ?? null);
+      if (!recommended) message.warning('未找到可用于回退的历史镜像版本。');
+    } catch (error: any) {
+      message.error(`获取镜像历史失败: ${error.response?.data?.message || error.message}`);
+    } finally { setImageHistoryLoading(false); }
+  };
+
+  const handleRollbackImages = async () => {
+    if (!imageHistoryTarget || !imageHistory || selectedRevision === null) return;
+    const target = imageHistory.revisions.find((item) => item.revision === selectedRevision);
+    if (!target) return;
+    setRollingBack(true);
+    try {
+      await rollbackDeploymentImages(imageHistoryTarget, target.images);
+      message.loading({ content: `应用 "${imageHistoryTarget}" 已开始回退镜像，正在跟踪发布状态...`, duration: 2 });
+      setImageHistoryTarget(null);
+      void trackRestartProgress(imageHistoryTarget);
+    } catch (error: any) {
+      message.error(`镜像回退失败: ${error.response?.data?.message || error.message}`);
+    } finally { setRollingBack(false); void fetchDeployments(filter); }
+  };
+
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name', width: '30%' },
     {
@@ -301,6 +336,9 @@ const DeploymentListPage: React.FC = () => {
           >
             重启
           </Button>
+          <Button onClick={() => handleOpenImageHistory(record.name)}>
+            镜像回退
+          </Button>
           <Button
             icon={<FileTextOutlined />}
             onClick={() => handleViewLogs(record.name)}
@@ -338,6 +376,37 @@ const DeploymentListPage: React.FC = () => {
           />
         </Spin>
       </div>
+
+      <Modal
+        title={imageHistoryTarget ? `镜像历史与回退：${imageHistoryTarget}` : '镜像历史与回退'}
+        open={Boolean(imageHistoryTarget)} width={860} destroyOnHidden
+        onCancel={() => setImageHistoryTarget(null)} okText="仅回退镜像" cancelText="取消"
+        confirmLoading={rollingBack}
+        okButtonProps={{ danger: true, disabled: !imageHistory || selectedRevision === null || rollbackConfirmation !== imageHistoryTarget }}
+        onOk={handleRollbackImages}
+      >
+        <Spin spinning={imageHistoryLoading}>
+          {imageHistory && <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Alert type="warning" showIcon message="此操作只更新容器镜像，不会回退环境变量、资源规格、探针或其他 Pod Template 配置。" />
+            <Descriptions size="small" bordered column={1}>
+              <Descriptions.Item label="当前镜像">{imageHistory.currentImages.map((item) => `${item.name}: ${item.image}`).join('；')}</Descriptions.Item>
+            </Descriptions>
+            <div>
+              <div style={{ marginBottom: 8 }}>选择历史版本（默认：上一可用 Revision）</div>
+              <Select style={{ width: '100%' }} value={selectedRevision ?? undefined} placeholder="没有可回退的历史版本" onChange={setSelectedRevision}
+                options={imageHistory.revisions.filter((item) => !item.isCurrent).map((item) => ({ value: item.revision, label: `Revision ${item.revision} · ${item.createdAt ? new Date(item.createdAt).toLocaleString() : '时间未知'} · ${item.images.map((image) => `${image.name}: ${image.image}`).join(' | ')}` }))} />
+            </div>
+            {selectedRevision !== null && (() => {
+              const target = imageHistory.revisions.find((item) => item.revision === selectedRevision);
+              return target ? <Descriptions size="small" bordered column={1} title={`目标镜像（Revision ${target.revision}）`}>
+                <Descriptions.Item label="镜像">{target.images.map((item) => `${item.name}: ${item.image}`).join('；')}</Descriptions.Item>
+                <Descriptions.Item label="ReplicaSet">{target.replicaSetName}</Descriptions.Item>
+              </Descriptions> : null;
+            })()}
+            <Input value={rollbackConfirmation} onChange={(event) => setRollbackConfirmation(event.target.value)} placeholder={`请输入服务名 ${imageHistoryTarget} 以确认`} />
+          </Space>}
+        </Spin>
+      </Modal>
 
       {logTarget && (
         <LogViewer
