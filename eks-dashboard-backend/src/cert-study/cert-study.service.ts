@@ -143,7 +143,7 @@ export class CertStudyService {
   async listExams(actor: ActorContext) {
     this.ensurePermissions(actor, ['menu:cert-study']);
     await this.ensureSchema();
-    await Promise.all(['SAP-C02', 'DOP-C02'].map((code) => this.ensureExamByCode(code)));
+    await Promise.all(['SAP-C02', 'DOP-C02', 'SCS-C03'].map((code) => this.ensureExamByCode(code)));
     const rows = await this.db.query<any[]>(
       'SELECT id, code, name, provider, created_at, updated_at FROM cert_exams ORDER BY id ASC',
     );
@@ -776,6 +776,10 @@ export class CertStudyService {
       },
       'DOP-C02': {
         name: 'AWS Certified DevOps Engineer - Professional',
+        provider: 'aws',
+      },
+      'SCS-C03': {
+        name: 'AWS Certified Security - Specialty',
         provider: 'aws',
       },
     };

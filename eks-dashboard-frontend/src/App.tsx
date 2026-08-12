@@ -164,6 +164,7 @@ const AppLayout: React.FC = () => {
     children: [
       { key: '/cert-study/sap-c02', label: <Link to="/cert-study/sap-c02">SAP-C02</Link> },
       { key: '/cert-study/dop-c02', label: <Link to="/cert-study/dop-c02">DOP-C02</Link> },
+      { key: '/cert-study/scs-c03', label: <Link to="/cert-study/scs-c03">SCS-C03</Link> },
     ],
   };
 
@@ -347,6 +348,10 @@ const AppLayout: React.FC = () => {
               <Route
                 path="/cert-study/dop-c02"
                 element={<ProtectedRoute required={[certStudyPermission]}><CertStudyPage examCode="DOP-C02" examTitle="DOP-C02" /></ProtectedRoute>}
+              />
+              <Route
+                path="/cert-study/scs-c03"
+                element={<ProtectedRoute required={[certStudyPermission]}><CertStudyPage examCode="SCS-C03" examTitle="SCS-C03" /></ProtectedRoute>}
               />
               <Route path="/signal-monitor/realtime" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorRealtimePage /></ProtectedRoute>} />
               <Route path="/signal-monitor/history" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorHistoryPage /></ProtectedRoute>} />
