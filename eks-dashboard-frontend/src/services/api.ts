@@ -757,7 +757,7 @@ export type CertStudyQuestionListItem = {
   tags: string[];
 };
 
-export const getCertStudyQuestions = async (params: {
+type CertStudyQuestionsParams = {
   examCode?: string;
   keyword?: string;
   status?: string;
@@ -769,15 +769,37 @@ export const getCertStudyQuestions = async (params: {
   sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
-}) => {
-  const response = await api.get('/cert-study/questions', { params });
-  return response.data as {
-    exam: { id: number; code: string; name: string; provider: string };
-    pagination: { page: number; pageSize: number; total: number };
-    statusSummary: Record<string, number>;
-    availableTags: string[];
-    items: CertStudyQuestionListItem[];
-  };
+};
+
+type CertStudyQuestionsResponse = {
+  exam: { id: number; code: string; name: string; provider: string };
+  pagination: { page: number; pageSize: number; total: number };
+  statusSummary: Record<string, number>;
+  availableTags: string[];
+  items: CertStudyQuestionListItem[];
+};
+
+// StrictMode development remounts can request the same initial list concurrently.
+// Reuse only in-flight requests; completed results are not cached on the client.
+const pendingCertStudyQuestionRequests = new Map<string, Promise<CertStudyQuestionsResponse>>();
+
+export const getCertStudyQuestions = async (params: CertStudyQuestionsParams) => {
+  const requestKey = JSON.stringify(params);
+  const existingRequest = pendingCertStudyQuestionRequests.get(requestKey);
+  if (existingRequest) return existingRequest;
+
+  const request = api
+    .get('/cert-study/questions', { params })
+    .then((response) => response.data as CertStudyQuestionsResponse);
+  pendingCertStudyQuestionRequests.set(requestKey, request);
+
+  try {
+    return await request;
+  } finally {
+    if (pendingCertStudyQuestionRequests.get(requestKey) === request) {
+      pendingCertStudyQuestionRequests.delete(requestKey);
+    }
+  }
 };
 
 export const getCertStudyQuestionDetail = async (id: number) => {
