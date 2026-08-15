@@ -1268,7 +1268,7 @@ export class LinesService {
   async listIngressSourceCandidates(
     environmentId: string,
     input: {
-      namespace: string;
+      namespace?: string;
       keyword?: string;
       requestId?: string;
       userId?: string;
@@ -1276,11 +1276,10 @@ export class LinesService {
     },
   ) {
     const namespace = String(input.namespace || '').trim();
-    if (!namespace) throw new BadRequestException('namespace is required');
     return this.ingressGatewayClient.listSourceCandidates(
       environmentId,
       {
-        namespace,
+        ...(namespace ? { namespace } : {}),
         keyword: input.keyword,
       },
       {

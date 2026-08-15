@@ -32,7 +32,7 @@ export class IngressGatewayClientService {
   async listSourceCandidates(
     environmentId: string,
     input: {
-      namespace: string;
+      namespace?: string;
       keyword?: string;
     },
     context?: IngressGatewayContext,

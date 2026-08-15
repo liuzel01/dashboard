@@ -505,7 +505,7 @@ export const getIngressOriginCandidates = async (params?: { keyword?: string }) 
 
 export const getIngressSourceCandidatesForLineOnboarding = async (data: {
   environmentId: string;
-  namespace: string;
+  namespace?: string;
   keyword?: string;
 }) => {
   const response = await api.post('/lines/ingress/source-candidates', data);

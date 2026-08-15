@@ -1140,12 +1140,10 @@ const LineOnboardingPage: React.FC = () => {
     try {
       const candidatesResp = (await getIngressSourceCandidatesForLineOnboarding({
         environmentId: currentEnvironment?.id || '',
-        namespace: 'default',
-        keyword: 'nginx-web-app',
       })) as {
         success?: boolean;
         data?: {
-          namespace: string;
+          namespace?: string | null;
           keyword?: string | null;
           total?: number;
           items?: NonNullable<ResolvedIngressSource['candidates']>;
@@ -1153,7 +1151,7 @@ const LineOnboardingPage: React.FC = () => {
       };
       const candidates = candidatesResp?.data?.items || [];
       setResolvedIngressSource({
-        namespace: candidatesResp?.data?.namespace || 'default',
+        namespace: candidatesResp?.data?.namespace || candidates[0]?.namespace || '',
         sourceIngressName: candidates[0]?.name || '',
         matchedBy: 'manual-candidates',
         candidates,
@@ -1639,7 +1637,7 @@ const LineOnboardingPage: React.FC = () => {
             </Button>
             <Select
               style={{ width: 520 }}
-              placeholder="请选择用于克隆的 source ingress"
+              placeholder="可按命名空间、Ingress 名称或 Host 搜索"
               value={selectedSourceIngressKey || undefined}
               onChange={(value) => {
                 setSelectedSourceIngressKey(value);
@@ -1649,7 +1647,7 @@ const LineOnboardingPage: React.FC = () => {
               disabled={!resolvedIngressSource?.candidates?.length}
               options={(resolvedIngressSource?.candidates || []).map((item) => ({
                 value: `${item.namespace}/${item.name}`,
-                label: `${item.namespace}/${item.name}${item.ruleHosts?.length ? ` · ${item.ruleHosts.join(', ')}` : ''}`,
+                label: `${item.namespace}/${item.name}${item.ruleHosts?.length ? ` · Host: ${item.ruleHosts.join(', ')}` : ''}`,
               }))}
               showSearch
               optionFilterProp="label"
@@ -1775,7 +1773,7 @@ const LineOnboardingPage: React.FC = () => {
             <Button onClick={handleLoadIngressOriginCandidates} disabled={!confirmedSubdomain} loading={ingressCandidatesLoading}>
               查看 Ingress 候选源站
             </Button>
-            <Text type="secondary">可通过当前环境 kubeContext 拉取 ingress（关键字：nginx-web-app）并选择源站。</Text>
+            <Text type="secondary">可通过当前环境 kubeContext 拉取全集群 Ingress，并按命名空间、名称或 Host 搜索选择源站。</Text>
           </Space>
           <Collapse
             ghost

@@ -5,9 +5,9 @@ export class ListIngressSourceCandidatesDto {
   @IsNotEmpty()
   environmentId!: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  namespace!: string;
+  namespace?: string;
 
   @IsOptional()
   @IsString()

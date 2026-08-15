@@ -1,9 +1,9 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class AgentListIngressSourceCandidatesDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  namespace!: string;
+  namespace?: string;
 
   @IsOptional()
   @IsString()

@@ -75,25 +75,24 @@ export class AgentIngressService {
 
   async listSourceCandidates(input: {
     environmentId: string;
-    namespace: string;
+    namespace?: string;
     keyword?: string;
     requestId?: string;
     userId?: string;
     username?: string;
   }) {
     const namespace = String(input.namespace || '').trim();
-    const keyword = String(input.keyword || 'nginx-web-app').trim().toLowerCase();
-    if (!namespace) throw new BadRequestException('namespace is required');
+    const keyword = String(input.keyword || '').trim().toLowerCase();
 
     this.logger.log(
-      `[AgentIngressCandidates] start env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} namespace=${namespace} keyword=${keyword || 'none'}`,
+      `[AgentIngressCandidates] start env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} namespace=${namespace || 'all'} keyword=${keyword || 'none'}`,
     );
 
     const items = await this.listIngressCandidates(namespace, keyword);
     return {
       success: true,
       data: {
-        namespace,
+        namespace: namespace || null,
         keyword: keyword || null,
         total: items.length,
         items,
@@ -318,12 +317,12 @@ export class AgentIngressService {
     };
   }
 
-  private async listIngressCandidates(namespace: string, keyword = '') {
+  private async listIngressCandidates(namespace = '', keyword = '') {
     const { body } = await this.networkingV1Api.listIngressForAllNamespaces();
     const normalizedKeyword = keyword.trim().toLowerCase();
     const items = Array.isArray(body?.items) ? body.items : [];
     return items
-      .filter((item) => String(item?.metadata?.namespace || 'default') === namespace)
+      .filter((item) => !namespace || String(item?.metadata?.namespace || 'default') === namespace)
       .filter((item) => {
         if (!normalizedKeyword) return true;
         const name = String(item?.metadata?.name || '').toLowerCase();
