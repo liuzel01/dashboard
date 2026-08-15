@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/eks-dashboard-backend"
 
-REGISTRY="${REGISTRY:-reghk.hashex.vip}"
+REGISTRY="${REGISTRY:-reghk.hashex.net}"
 PROJECT="${PROJECT:-test}"
 IMAGE_NAME="${IMAGE_NAME:-dashboard-db-gateway-agent}"
 DOCKERFILE="${DOCKERFILE:-$BACKEND_DIR/Dockerfile.agent}"
