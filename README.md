@@ -439,10 +439,11 @@ spec:
 
 ### 3.2. 前端服务 (`eks-dashboard-frontend`)
 
-前端应用需要知道后端 API 与 WebSocket 的地址。通过以下两种方式配置：
+前端应用的 API 基地址通过运行时配置管理；日志 WebSocket 地址由 dashboard 的「siteconf 配置」管理。
 
 - `public/environment.json`：用于 API 基地址（`API_BASE_URL`）。
-- `.env`（可选）：用于 `VITE_SOCKET_URL`、`VITE_API_BASE_URL` 等（仅 `VITE_` 前缀会注入前端）。
+- 「siteconf 配置」→ `frontend.logs.socket_url`：日志 Socket.IO 服务地址；留空时自动使用当前页面同源地址。该值通过白名单接口 `/api/site-conf/runtime-config` 在浏览器运行时读取，修改后刷新页面即可生效，无需重新构建前端。
+- 不再使用 `VITE_SOCKET_URL`：Vite 环境变量会在构建时固化，不适合管理线上域名。
 
 1. 在前端项目的 `public` 目录下创建一个名为 `environment.json` 的文件 (如果您的项目结构不同，请放在相应的静态资源目录下)。
 

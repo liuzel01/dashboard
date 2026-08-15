@@ -13,6 +13,7 @@ export type SiteConfDefault = {
 };
 
 export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
+  { key: 'frontend.logs.socket_url', valueType: 'string', category: 'frontend', description: '前端日志 Socket.IO 服务地址；留空时使用当前页面同源地址', defaultValue: '' },
   { key: 'line.inventory_probe.api_url', envKey: 'LINE_INVENTORY_PROBE_API_URL', valueType: 'string', category: 'line', description: '线路总览探测聚合接口地址', defaultValue: '' },
   { key: 'line.availability.window_ms', envKey: 'LINE_AVAILABILITY_WINDOW_MS', valueType: 'number', category: 'line', description: '线路可用性判定时间窗（毫秒）', defaultValue: '120000', validation: { min: 1000 } },
   { key: 'line.availability.cache_ttl_ms', envKey: 'LINE_AVAILABILITY_CACHE_TTL_MS', valueType: 'number', category: 'line', description: '线路探测快照缓存 TTL（毫秒）', defaultValue: '15000', validation: { min: 0 } },

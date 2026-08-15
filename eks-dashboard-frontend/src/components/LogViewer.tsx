@@ -3,6 +3,7 @@ import { Modal, Spin, Alert, Button, Space } from 'antd';
 import { io, Socket } from 'socket.io-client';
 import { FullscreenOutlined, FullscreenExitOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { AnsiUp } from 'ansi_up';
+import { getPublicRuntimeConfig } from '../services/runtimeConfig';
 
 interface LogViewerProps {
   deploymentName: string;
@@ -46,7 +47,6 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   // Read Vite env in a safe way and derive configurable constants early
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> })?.env || {};
   const isDev = !!viteEnv.DEV;
-  const socketUrl = viteEnv.VITE_SOCKET_URL as string | undefined;
   // Configurable parameters (can be set via Vite env variables)
   const SUPPRESS_MS = Number(viteEnv.VITE_LOGVIEWER_SUPPRESS_MS) || 5000;
   const MAX_ATTEMPTS_DEV = Number(viteEnv.VITE_LOGVIEWER_MAX_ATTEMPTS) || 3;
@@ -74,16 +74,10 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       // Production: only try the configured socket URL or the page origin and
       // use websocket transport only. Development: keep multi-candidate and
       // polling fallback for convenience during dev.
-      let candidates: (string | undefined)[];
-  const backendPreferred = socketUrl || pageOrigin;
-      let transports: ('websocket' | 'polling')[];
-      if (isDev) {
-        candidates = [undefined, socketUrl, backendPreferred];
-        transports = ['polling', 'websocket'];
-      } else {
-        candidates = [backendPreferred];
-        transports = ['websocket'];
-      }
+      let candidates: (string | undefined)[] = [];
+      const transports: ('websocket' | 'polling')[] = isDev
+        ? ['polling', 'websocket']
+        : ['websocket'];
 
   let connected = false;
       let stopped = false;
@@ -213,6 +207,19 @@ export const LogViewer: React.FC<LogViewerProps> = ({
 
       (async () => {
         let socketInstance: Socket | null = null;
+        let configuredSocketUrl = '';
+        try {
+          configuredSocketUrl = (await getPublicRuntimeConfig()).socketUrl?.trim() || '';
+        } catch (runtimeConfigError) {
+          if (DEBUG_LOGVIEWER) console.warn('加载公开运行时配置失败，回退同源日志服务', runtimeConfigError);
+        }
+        if (stopped) return;
+        const backendPreferred = configuredSocketUrl || pageOrigin;
+        candidates = isDev
+          ? [undefined, configuredSocketUrl || undefined, backendPreferred]
+          : [backendPreferred];
+        candidates = candidates.filter((candidate, index, list) => list.indexOf(candidate) === index);
+
         // Helper: limited retries with exponential backoff + jitter
         async function attemptWithRetries(candidate?: string) {
           const maxAttempts = isDev ? MAX_ATTEMPTS_DEV : MAX_ATTEMPTS_PROD;

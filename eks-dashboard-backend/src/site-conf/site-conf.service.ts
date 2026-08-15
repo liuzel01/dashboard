@@ -167,6 +167,16 @@ export class SiteConfService implements OnModuleInit {
     try { return JSON.parse(String(raw)) as T; } catch { return defaultValue; }
   }
 
+  /**
+   * Values exposed to unauthenticated browser bootstrap requests must stay on
+   * this explicit whitelist. Never return list() output from a public route.
+   */
+  async getPublicRuntimeConfig() {
+    return {
+      socketUrl: this.normalizePublicHttpUrl(await this.getString('frontend.logs.socket_url', '')),
+    };
+  }
+
   private async getRaw(key: string, explicitDefault?: string): Promise<string | undefined> {
     const item = await this.getCachedItem(key);
     if (item?.confValue !== undefined && item.confValue !== null && item.confValue !== '') return item.confValue;
@@ -259,7 +269,58 @@ export class SiteConfService implements OnModuleInit {
         ['defaults_seeded_v1', '1'],
       );
     }
+    await this.seedRuntimeConfigDefaults();
     await this.refreshCache();
+  }
+
+  private async seedRuntimeConfigDefaults() {
+    // Existing installations have already completed defaults_seeded_v1. Seed
+    // newly introduced runtime entries separately without recreating defaults
+    // an administrator deliberately deleted.
+    const metaKey = 'runtime_config_defaults_v1';
+    const seededRows = await this.db.query<Array<{ meta_value: string }>>(
+      'SELECT meta_value FROM dashboard_site_conf_meta WHERE meta_key = ?',
+      [metaKey],
+    );
+    if (seededRows.length > 0) return;
+
+    const item = SITE_CONF_DEFAULTS_BY_KEY.get('frontend.logs.socket_url');
+    if (item) {
+      await this.db.query(
+        `INSERT IGNORE INTO dashboard_site_conf
+          (conf_key, conf_value, value_type, category, description, is_sensitive, is_runtime_editable, default_value, validation_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [
+          item.key,
+          item.defaultValue ?? '',
+          item.valueType,
+          item.category,
+          item.description,
+          item.sensitive ? 1 : 0,
+          item.runtimeEditable === false ? 0 : 1,
+          item.defaultValue ?? null,
+          item.validation ? JSON.stringify(item.validation) : null,
+        ],
+      );
+    }
+    await this.db.query(
+      `INSERT IGNORE INTO dashboard_site_conf_meta (meta_key, meta_value, created_at, updated_at)
+       VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [metaKey, '1'],
+    );
+  }
+
+  private normalizePublicHttpUrl(value: string): string {
+    const raw = value.trim();
+    if (!raw) return '';
+    try {
+      const url = new URL(raw);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+      return url.toString().replace(/\/$/, '');
+    } catch {
+      this.logger.warn('Ignoring invalid frontend.logs.socket_url siteconf value');
+      return '';
+    }
   }
 
   private validateValue(value: string, type: SiteConfValueType, validationJson?: string) {

@@ -6,6 +6,11 @@ import { SiteConfService } from './site-conf.service';
 export class SiteConfController {
   constructor(private readonly siteConfService: SiteConfService) {}
 
+  @Get('/runtime-config')
+  runtimeConfig() {
+    return this.siteConfService.getPublicRuntimeConfig();
+  }
+
   @Get()
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   list(@Query() query: ListSiteConfDto) {
