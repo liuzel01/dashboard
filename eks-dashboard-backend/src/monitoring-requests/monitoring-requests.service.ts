@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { SiteConfService } from '../site-conf/site-conf.service';
 import { timingSafeEqual } from 'crypto';
 import { randomUUID } from 'crypto';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
@@ -18,7 +18,7 @@ export class MonitoringRequestsService {
     private readonly db: PlatformDatabaseService,
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
-    private readonly config: ConfigService,
+    private readonly siteConf: SiteConfService,
   ) {}
 
   private async actor(authorization?: string): Promise<Actor> {
@@ -53,9 +53,10 @@ export class MonitoringRequestsService {
   private requireNonBlank(value: string, field: string) {
     if (!value || !value.trim()) throw new BadRequestException(`${field}不能为空`);
   }
-  private approvalTokenMatches(provided?: string) {
-    const expected = this.config.get<string>('MONITORING_REQUEST_APPROVAL_TOKEN');
-    if (!expected || !provided) return false; // fail closed until Jenkins and Dashboard share a dedicated secret
+  private async approvalTokenMatches(provided?: string) {
+    // Managed through SiteConf; an absent/empty value must always fail closed.
+    const expected = await this.siteConf.getString('monitoring.requests.jenkins_approval_token', '');
+    if (!expected || !provided) return false;
     const a = Buffer.from(expected); const b = Buffer.from(provided);
     return a.length === b.length && timingSafeEqual(a, b);
   }
@@ -100,7 +101,7 @@ export class MonitoringRequestsService {
    * request, or DRY_RUN=false is rejected before any cluster command can run.
    */
   async authorizeDryRun(requestId: string, input: { mrIid: number; commitSha: string; dryRun: boolean }, token?: string) {
-    if (!this.approvalTokenMatches(token)) throw new UnauthorizedException('Invalid Jenkins approval token');
+    if (!(await this.approvalTokenMatches(token))) throw new UnauthorizedException('Invalid Jenkins approval token');
     if (input.dryRun !== true) throw new ForbiddenException('Dashboard authorization is preview-only; DRY_RUN must be true');
     const row = await this.read(requestId);
     if (row.status !== 'APPROVED') throw new ForbiddenException(`Request status must be APPROVED, received ${row.status}`);
