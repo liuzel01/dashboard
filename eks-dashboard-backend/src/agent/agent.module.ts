@@ -7,6 +7,7 @@ import { AgentConnectionService } from './agent-connection.service';
 import { AgentQueryService } from './agent-query.service';
 import { AgentIngressService } from './agent-ingress.service';
 import { AgentTenantDomainService } from './agent-tenant-domain.service';
+import { AgentMetricsService } from './agent-metrics.service';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { AgentTenantDomainService } from './agent-tenant-domain.service';
     AgentQueryService,
     AgentIngressService,
     AgentTenantDomainService,
+    AgentMetricsService,
   ],
 })
 export class AgentModule {}

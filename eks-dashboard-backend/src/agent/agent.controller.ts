@@ -10,6 +10,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
@@ -25,6 +26,8 @@ import { AgentResolveIngressTlsSecretDto } from './dto/agent-resolve-ingress-tls
 import { AgentListIngressSourceCandidatesDto } from './dto/agent-list-ingress-source-candidates.dto';
 import { AgentApplyTenantDomainDto } from './dto/agent-apply-tenant-domain.dto';
 import { AgentReadTlsSecretDto } from './dto/agent-read-tls-secret.dto';
+import { AgentMetricsService } from './agent-metrics.service';
+import type { Response } from 'express';
 
 @Controller()
 export class AgentController {
@@ -36,7 +39,15 @@ export class AgentController {
     private readonly queryService: AgentQueryService,
     private readonly ingressService: AgentIngressService,
     private readonly tenantDomainService: AgentTenantDomainService,
+    private readonly metricsService: AgentMetricsService,
   ) {}
+
+  @Get('metrics')
+  async metrics(@Res() response: Response) {
+    const metrics = await this.metricsService.render();
+    response.setHeader('Content-Type', metrics.contentType);
+    response.end(metrics.body);
+  }
 
   @Get('healthz')
   healthz() {
