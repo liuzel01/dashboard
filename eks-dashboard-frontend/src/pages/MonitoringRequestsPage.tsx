@@ -8,6 +8,8 @@ import type { MonitoringRequest, MonitoringRequestStatus } from '../services/api
 const { Text, Paragraph } = Typography;
 const colors: Record<MonitoringRequestStatus, string> = { DRAFT: 'default', SUBMITTED: 'processing', APPROVED: 'success', REJECTED: 'error', WITHDRAWN: 'default' };
 const names: Record<MonitoringRequestStatus, string> = { DRAFT: '草稿', SUBMITTED: '待审批', APPROVED: '已批准', REJECTED: '已拒绝', WITHDRAWN: '已撤回' };
+const eventNames: Record<string, string> = { CREATED: '已创建草稿', DRAFT_UPDATED: '已更新草稿', SUBMITTED: '已提交审批', APPROVED: '已批准', REJECTED: '已拒绝', WITHDRAWN: '已撤回' };
+const auditStatus = (status?: string | null) => status && names[status as MonitoringRequestStatus] ? names[status as MonitoringRequestStatus] : (status || '—');
 const statusTag = (s: MonitoringRequestStatus) => <Tag color={colors[s]}>{names[s]}</Tag>;
 
 export default function MonitoringRequestsPage() {
@@ -17,8 +19,28 @@ export default function MonitoringRequestsPage() {
   useEffect(() => { void load(); }, []);
   const openDetail = async (id: string) => { try { setDetail(await getMonitoringRequest(id)); } catch (e: any) { message.error(e?.response?.data?.message || '加载详情失败'); } };
   const create = async () => { try { const values = await form.validateFields(); const row = await createMonitoringRequest(values); message.success('草稿已创建'); setCreateOpen(false); form.resetFields(); await load(); await openDetail(row.request_id); } catch (e: any) { if (e?.errorFields) return; message.error(e?.response?.data?.message || '创建失败'); } };
-  const submit = () => Modal.confirm({ title: '提交审批', content: <SubmitForm onDone={async (data) => { if (!detail) return; await submitMonitoringRequest(detail.request_id, data); message.success('已提交审批'); await load(); await openDetail(detail.request_id); }} />, footer: null });
-  const action = async (kind: 'approve'|'reject'|'withdraw') => { if (!detail) return; const label = kind === 'approve' ? '批准' : kind === 'reject' ? '拒绝' : '撤回'; Modal.confirm({ title: `确认${label}`, content: `该操作会记录审计事件。${kind === 'approve' ? '批准仅绑定当前 MR IID 与 Commit SHA；后续 SHA 变更必须重新提交。' : ''}`, onOk: async () => { if (kind === 'withdraw') await withdrawMonitoringRequest(detail.request_id); else await decideMonitoringRequest(detail.request_id, kind); message.success(`已${label}`); await load(); await openDetail(detail.request_id); } }); };
+  // These confirmations originate from inside a Drawer (z-index 1000). Raise the
+  // static modal so its mask/panel remain clickable instead of being obscured.
+  const submit = () => {
+    let modal: ReturnType<typeof Modal.confirm>;
+    modal = Modal.confirm({
+      title: '提交审批', zIndex: 1100, closable: true, maskClosable: true, footer: null,
+      content: <SubmitForm onDone={async (data) => {
+        if (!detail) return;
+        try {
+          await submitMonitoringRequest(detail.request_id, data);
+          modal.destroy();
+          message.success('已提交审批');
+          await load();
+          await openDetail(detail.request_id);
+        } catch (e: any) {
+          message.error(e?.response?.data?.message || '提交失败');
+          throw e;
+        }
+      }} />,
+    });
+  };
+  const action = async (kind: 'approve'|'reject'|'withdraw') => { if (!detail) return; const label = kind === 'approve' ? '批准' : kind === 'reject' ? '拒绝' : '撤回'; Modal.confirm({ title: `确认${label}`, zIndex: 1100, content: `该操作会记录审计事件。${kind === 'approve' ? '批准仅绑定当前 MR IID 与 Commit SHA；后续 SHA 变更必须重新提交。' : ''}`, onOk: async () => { try { if (kind === 'withdraw') await withdrawMonitoringRequest(detail.request_id); else await decideMonitoringRequest(detail.request_id, kind); message.success(`已${label}`); await load(); await openDetail(detail.request_id); } catch (e: any) { message.error(e?.response?.data?.message || `${label}失败`); throw e; } } }); };
   const columns: ColumnsType<MonitoringRequest> = [
     { title: '申请 ID', dataIndex: 'request_id', width: 230, render: (v) => <Button type="link" onClick={() => void openDetail(v)}>{v}</Button> },
     { title: '资源', render: (_, r) => <><div>{r.resource_type}/{r.resource_name}</div><Text type="secondary">{r.app_id}</Text></> },
@@ -38,9 +60,19 @@ export default function MonitoringRequestsPage() {
     <Drawer title={detail?.request_id || '申请详情'} open={!!detail} onClose={() => setDetail(null)} width={720}>
       {detail && <Space direction="vertical" size={16} style={{ width: '100%' }}><Descriptions bordered column={1} size="small"><Descriptions.Item label="状态">{statusTag(detail.status)}</Descriptions.Item><Descriptions.Item label="受控路径"><Text code>{detail.resource_path}</Text></Descriptions.Item><Descriptions.Item label="资源">{detail.resource_type}/{detail.resource_name}</Descriptions.Item><Descriptions.Item label="申请说明">{detail.reason}</Descriptions.Item><Descriptions.Item label="GitLab 绑定">{detail.mr_iid ? `MR !${detail.mr_iid} @ ${detail.commit_sha}` : '尚未提交'}</Descriptions.Item><Descriptions.Item label="审批信息">{detail.approver_username ? `${detail.approver_username}${detail.approval_comment ? `：${detail.approval_comment}` : ''}` : '-'}</Descriptions.Item></Descriptions>
         <Space wrap>{mine && ['DRAFT','REJECTED','WITHDRAWN'].includes(detail.status) && <Button type="primary" onClick={submit}>绑定 MR 并提交</Button>}{mine && ['DRAFT','SUBMITTED','REJECTED'].includes(detail.status) && <Button onClick={() => void action('withdraw')}>撤回</Button>}{canApprove && !mine && detail.status === 'SUBMITTED' && <><Button type="primary" onClick={() => void action('approve')}>批准</Button><Button danger onClick={() => void action('reject')}>拒绝</Button></>}</Space>
-        <Card size="small" title="状态流转审计"><Steps direction="vertical" size="small" items={(detail.events || []).map(e => ({ title: e.event_type, description: <>{e.actor_username} · {e.created_at}{e.comment ? ` · ${e.comment}` : ''}</> }))} /></Card>
+        <Card size="small" title="状态流转审计"><Steps direction="vertical" size="small" current={Math.max(0, (detail.events || []).length - 1)} items={(detail.events || []).map(e => ({ title: <><Text strong>{eventNames[e.event_type] || e.event_type}</Text>{e.to_status && <Tag color={colors[e.to_status as MonitoringRequestStatus]} style={{ marginInlineStart: 8 }}>{auditStatus(e.to_status)}</Tag>}</>, description: <>{auditStatus(e.from_status)} → {auditStatus(e.to_status)} · {e.actor_username} · {e.created_at}{e.comment ? ` · ${e.comment}` : ''}</> }))} /></Card>
       </Space>}
     </Drawer>
   </Space>;
 }
-function SubmitForm({ onDone }: { onDone: (data: { mrIid: number; commitSha: string }) => Promise<void> }) { const [form] = Form.useForm(); return <Form form={form} layout="vertical" onFinish={(v) => void onDone(v)}><Paragraph type="secondary">提交前请确保 MR 目标分支为 hash-jenkins，描述包含当前申请 ID，且 SHA 是待验证的 MR HEAD。</Paragraph><Form.Item name="mrIid" label="GitLab MR IID" rules={[{ required: true }]}><Input type="number" /></Form.Item><Form.Item name="commitSha" label="Commit SHA" rules={[{ required: true, pattern: /^[a-f0-9]{40}$/i, message: '需要完整 40 位 SHA' }]}><Input /></Form.Item><Button htmlType="submit" type="primary">确认提交</Button></Form>; }
+function SubmitForm({ onDone }: { onDone: (data: { mrIid: number; commitSha: string }) => Promise<void> }) {
+  const [form] = Form.useForm();
+  return <Form form={form} layout="vertical" onFinish={(v) => void onDone({ ...v, mrIid: Number(v.mrIid) })}>
+    <Paragraph type="secondary">提交前请确保 MR 目标分支为 hash-jenkins，描述包含当前申请 ID，且 SHA 是待验证的 MR HEAD。</Paragraph>
+    <Form.Item name="mrIid" label="GitLab MR IID" rules={[{ required: true, message: '请输入 MR IID' }, { validator: (_, value) => Number.isInteger(Number(value)) && Number(value) >= 1 ? Promise.resolve() : Promise.reject(new Error('MR IID 必须是大于等于 1 的整数')) }]}>
+      <Input type="number" min={1} step={1} />
+    </Form.Item>
+    <Form.Item name="commitSha" label="Commit SHA" rules={[{ required: true, pattern: /^[a-f0-9]{40}$/i, message: '需要完整 40 位 SHA' }]}><Input /></Form.Item>
+    <Button htmlType="submit" type="primary">确认提交</Button>
+  </Form>;
+}

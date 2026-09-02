@@ -5,6 +5,7 @@ import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import { BrowserRouter } from 'react-router-dom';
 import 'antd/dist/reset.css'; // 关键：导入 Ant Design 的全局重置样式
+import '@ant-design/v5-patch-for-react-19';
 
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
