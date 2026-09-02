@@ -14,6 +14,13 @@ export type SiteConfDefault = {
 
 export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'frontend.logs.socket_url', valueType: 'string', category: 'frontend', description: '前端日志 Socket.IO 服务地址；留空时使用当前页面同源地址', defaultValue: '' },
+  { key: 'monitoring.requests.jenkins_approval_token', valueType: 'string', category: 'monitoring', description: 'Jenkins 调用监控审批授权接口的共享令牌', defaultValue: '', sensitive: true },
+  { key: 'monitoring.requests.jenkins.enabled', valueType: 'boolean', category: 'monitoring', description: '是否允许 Dashboard 触发受控 Jenkins 监控资源执行', defaultValue: 'false' },
+  { key: 'monitoring.requests.jenkins.base_url', valueType: 'string', category: 'monitoring', description: '固定 Jenkins 服务地址（仅后端使用）', defaultValue: '' },
+  { key: 'monitoring.requests.jenkins.username', valueType: 'string', category: 'monitoring', description: 'Jenkins API 用户名（仅后端使用）', defaultValue: '', sensitive: true },
+  { key: 'monitoring.requests.jenkins.api_token', valueType: 'string', category: 'monitoring', description: 'Jenkins API Token（仅后端使用）', defaultValue: '', sensitive: true },
+  { key: 'monitoring.requests.jenkins.job_name', valueType: 'string', category: 'monitoring', description: '受控 Jenkins Job 名称；仅允许 platform-bootstrap-hash', defaultValue: 'platform-bootstrap-hash', runtimeEditable: false },
+  { key: 'monitoring.requests.jenkins.timeout_ms', valueType: 'number', category: 'monitoring', description: 'Dashboard 调用 Jenkins 的 HTTP 超时（毫秒）', defaultValue: '15000', validation: { min: 1000, max: 60000 } },
   { key: 'line.inventory_probe.api_url', envKey: 'LINE_INVENTORY_PROBE_API_URL', valueType: 'string', category: 'line', description: '线路总览探测聚合接口地址', defaultValue: '' },
   { key: 'line.availability.window_ms', envKey: 'LINE_AVAILABILITY_WINDOW_MS', valueType: 'number', category: 'line', description: '线路可用性判定时间窗（毫秒）', defaultValue: '120000', validation: { min: 1000 } },
   { key: 'line.availability.cache_ttl_ms', envKey: 'LINE_AVAILABILITY_CACHE_TTL_MS', valueType: 'number', category: 'line', description: '线路探测快照缓存 TTL（毫秒）', defaultValue: '15000', validation: { min: 0 } },

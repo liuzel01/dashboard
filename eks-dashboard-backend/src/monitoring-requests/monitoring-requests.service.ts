@@ -1,4 +1,5 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import axios from 'axios';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import { timingSafeEqual } from 'crypto';
 import { randomUUID } from 'crypto';
@@ -13,6 +14,8 @@ const APPROVE = 'monitoring-requests:approve';
 const MANAGE = 'monitoring-requests:manage';
 const REAL_APPLY_MINUTES = 5;
 const REAL_APPLY_MAX_MINUTES = 30;
+const JENKINS_TIMEOUT_MIN_MS = 1_000;
+const JENKINS_TIMEOUT_MAX_MS = 60_000;
 
 @Injectable()
 export class MonitoringRequestsService {
@@ -153,6 +156,62 @@ export class MonitoringRequestsService {
     }
     return { authorized: true, requestId: row.request_id, mrIid: Number(row.mr_iid), commitSha: String(row.commit_sha), dryRun: true, approvedAt: row.approved_at };
   }
+  private async jenkinsConfig() {
+    if (!(await this.siteConf.getBoolean('monitoring.requests.jenkins.enabled', false))) throw new ServiceUnavailableException('Dashboard Jenkins 受控执行未启用');
+    const baseUrl = (await this.siteConf.getString('monitoring.requests.jenkins.base_url', '')).trim().replace(/\/+$/, '');
+    const username = (await this.siteConf.getString('monitoring.requests.jenkins.username', '')).trim();
+    const apiToken = (await this.siteConf.getString('monitoring.requests.jenkins.api_token', '')).trim();
+    const jobName = (await this.siteConf.getString('monitoring.requests.jenkins.job_name', 'platform-bootstrap-hash')).trim();
+    const timeoutMs = Math.min(JENKINS_TIMEOUT_MAX_MS, Math.max(JENKINS_TIMEOUT_MIN_MS, await this.siteConf.getNumber('monitoring.requests.jenkins.timeout_ms', 15_000)));
+    if (!baseUrl || !username || !apiToken || jobName !== 'platform-bootstrap-hash') throw new ServiceUnavailableException('Jenkins 受控执行器未完成配置');
+    if (!/^https?:\/\/[A-Za-z0-9._:-]+$/.test(baseUrl)) throw new ServiceUnavailableException('Jenkins 地址配置无效');
+    return { baseUrl, username, apiToken, jobName, timeoutMs };
+  }
+  private async jenkinsRequest<T>(method: 'get'|'post', path: string, config: any = {}) {
+    const c = await this.jenkinsConfig();
+    return axios.request<T>({ method, url: c.baseUrl + path, auth: { username: c.username, password: c.apiToken }, timeout: c.timeoutMs, validateStatus: () => true, ...config });
+  }
+  private extractDiff(consoleText: string) {
+    const start = consoleText.indexOf('diff -u -N ');
+    const end = consoleText.indexOf('DRY_RUN=true:', start < 0 ? 0 : start);
+    if (start < 0 || end < 0) return null;
+    const diff = consoleText.slice(start, end).replace(/\/tmp\/[A-Za-z0-9._-]+/g, '<server-dry-run>');
+    return diff.length <= 200_000 ? diff : null;
+  }
+  async startDashboardExecution(auth: string | undefined, requestId: string, mode: 'preview'|'apply', comment?: string, confirmation?: string) {
+    const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor, row);
+    if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
+    let applyGrantCreated = false;
+    if (mode === 'apply') {
+      if (!this.can(actor, APPROVE) || this.owns(actor, row)) throw new ForbiddenException('仅非申请人的审批人可确认真实执行');
+      if (confirmation !== 'APPLY' || !comment?.trim()) throw new BadRequestException('真实执行需要输入 APPLY 并填写确认说明');
+      const preview = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE request_id=? AND mode="preview" AND status="SUCCESS" AND mr_iid=? AND commit_sha=? AND diff_text IS NOT NULL AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 MINUTE) ORDER BY id DESC LIMIT 1', [requestId, row.mr_iid, row.commit_sha]);
+      if (!preview[0]) throw new BadRequestException('当前 MR/SHA 尚无 30 分钟内成功的最终 Diff 预检');
+    } else if (!this.owns(actor, row) && !this.can(actor, APPROVE) && !this.can(actor, MANAGE)) throw new ForbiddenException('无权发起预检');
+    const c = await this.jenkinsConfig();
+    const crumb = await this.jenkinsRequest<any>('get', '/crumbIssuer/api/json');
+    if (crumb.status !== 200 || !crumb.data?.crumbRequestField || !crumb.data?.crumb) throw new ServiceUnavailableException('Jenkins crumb 获取失败');
+    if (mode === 'apply') { await this.grantRealApply(auth, requestId, 15, `Dashboard 确认真实执行；预检已通过；${comment!.trim()}`); applyGrantCreated = true; }
+    const params = new URLSearchParams({ REQUEST_ID: requestId, MR_IID: String(row.mr_iid), COMMIT_SHA: String(row.commit_sha), APPLICATION_ID: String(row.app_id), DRY_RUN: mode === 'preview' ? 'true' : 'false' });
+    let queued: any;
+    try { queued = await this.jenkinsRequest<any>('post', `/job/${encodeURIComponent(c.jobName)}/buildWithParameters`, { data: params.toString(), headers: { [crumb.data.crumbRequestField]: crumb.data.crumb, 'content-type': 'application/x-www-form-urlencoded' }, maxRedirects: 0 }); }
+    catch (err) { if (applyGrantCreated) await this.db.query('UPDATE monitoring_real_apply_authorizations SET revoked_at=UTC_TIMESTAMP() WHERE request_id=? AND consumed_at IS NULL AND revoked_at IS NULL', [requestId]); throw err; }
+    const queueUrl = String(queued.headers?.location || '');
+    const queueId = Number((queueUrl.match(/\/queue\/item\/(\d+)/) || [])[1]);
+    if (![201, 302].includes(queued.status) || !Number.isInteger(queueId)) { if (applyGrantCreated) await this.db.query('UPDATE monitoring_real_apply_authorizations SET revoked_at=UTC_TIMESTAMP() WHERE request_id=? AND consumed_at IS NULL AND revoked_at IS NULL', [requestId]); throw new ServiceUnavailableException('Jenkins 未接受构建请求'); }
+    const result = await this.db.query<any>('INSERT INTO monitoring_jenkins_executions (request_id,mode,mr_iid,commit_sha,application_id,queue_id,status,requested_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,"QUEUED",?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())', [requestId, mode, row.mr_iid, String(row.commit_sha).toLowerCase(), row.app_id, queueId, actor.userId]);
+    await this.event(requestId, actor, mode === 'preview' ? 'PREVIEW_QUEUED' : 'REAL_APPLY_QUEUED', 'APPROVED', 'APPROVED', `Jenkins 队列 #${queueId}`);
+    return { id: Number(result.insertId), mode, queueId, status: 'QUEUED' };
+  }
+  async refreshDashboardExecution(auth: string | undefined, requestId: string, id: number) {
+    const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row);
+    const rows=await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE id=? AND request_id=? LIMIT 1',[id,requestId]); const ex=rows[0]; if(!ex) throw new NotFoundException('执行记录不存在');
+    if (!ex.build_number) { const q=await this.jenkinsRequest<any>('get', `/queue/item/${ex.queue_id}/api/json`); const n=Number(q.data?.executable?.number); if (n) await this.db.query('UPDATE monitoring_jenkins_executions SET build_number=?,status="RUNNING",updated_at=UTC_TIMESTAMP() WHERE id=?',[n,id]); }
+    const latest=(await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE id=?',[id]))[0];
+    if (latest.build_number && !['SUCCESS','FAILURE','ABORTED'].includes(latest.status)) { const b=await this.jenkinsRequest<any>('get', `/job/platform-bootstrap-hash/${latest.build_number}/api/json`); if(!b.data?.building) { const status=String(b.data?.result||'FAILURE'); const log=(await this.jenkinsRequest<string>('get', `/job/platform-bootstrap-hash/${latest.build_number}/consoleText`, { responseType:'text' })).data || ''; const diff=latest.mode==='preview' && status==='SUCCESS' ? this.extractDiff(log) : null; await this.db.query('UPDATE monitoring_jenkins_executions SET status=?,diff_text=?,finished_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=?',[status,diff,id]); } }
+    const out=(await this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE id=?',[id]))[0]; return out;
+  }
+  async listDashboardExecutions(auth: string | undefined, requestId: string) { const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row); return this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE request_id=? ORDER BY id DESC',[requestId]); }
   async withdraw(auth: string | undefined, requestId: string, comment?: string) {
     const actor=await this.actor(auth); const row=await this.read(requestId); if (!this.owns(actor,row) || !['DRAFT','SUBMITTED','REJECTED'].includes(row.status)) throw new ForbiddenException('当前状态不可撤回');
     await this.db.query('UPDATE monitoring_requests SET status=\'WITHDRAWN\',updated_at=UTC_TIMESTAMP() WHERE request_id=?',[requestId]); await this.event(requestId,actor,'WITHDRAWN',row.status,'WITHDRAWN',comment); return this.read(requestId);

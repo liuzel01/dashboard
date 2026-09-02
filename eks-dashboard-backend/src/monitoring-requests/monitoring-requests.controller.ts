@@ -36,6 +36,7 @@ class JenkinsRealApplyAuthorizationDto {
   @Type(() => Number) @IsInt() @Min(1) mrIid!: number;
   @IsString() @Matches(SHA) commitSha!: string;
 }
+class JenkinsExecutionDto { @IsIn(['preview','apply']) mode!: 'preview'|'apply'; @IsOptional() @IsString() @MaxLength(1000) comment?: string; @IsOptional() @IsString() @MaxLength(64) confirmation?: string; }
 class DecisionDto {
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
 }
@@ -69,6 +70,9 @@ export class MonitoringRequestsController {
     @Param('requestId') requestId: string,
     @Body(validation) body: JenkinsRealApplyAuthorizationDto,
   ) { return this.service.consumeRealApplyAuthorization(requestId, body, token); }
+  @Post(':requestId/jenkins-executions') execute(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: JenkinsExecutionDto) { return this.service.startDashboardExecution(auth, requestId, body.mode, body.comment, body.confirmation); }
+  @Get(':requestId/jenkins-executions') executions(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string) { return this.service.listDashboardExecutions(auth, requestId); }
+  @Post(':requestId/jenkins-executions/:id/refresh') refreshExecution(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Param('id') id: string) { return this.service.refreshDashboardExecution(auth, requestId, Number(id)); }
   @Post(':requestId/approve') approve(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.decide(auth, requestId, 'APPROVED', body.comment); }
   @Post(':requestId/reject') reject(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.decide(auth, requestId, 'REJECTED', body.comment); }
   @Post(':requestId/withdraw') withdraw(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.withdraw(auth, requestId, body.comment); }
