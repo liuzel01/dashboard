@@ -1440,3 +1440,19 @@ export const createSslCertificateDecryptedDownload = async (data: { environmentI
   const response = await api.post('/ssl-certificates/decrypt-download', data, { responseType: 'blob' });
   return response;
 };
+
+export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+export type MonitoringRequest = {
+  request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
+  resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null;
+  requester_user_id: number; requester_username?: string; requester_display_name?: string; approver_username?: string | null;
+  approval_comment?: string | null; approved_at?: string | null; created_at: string; updated_at: string;
+  events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
+};
+export const listMonitoringRequests = async (params: { status?: MonitoringRequestStatus; page?: number; pageSize?: number } = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
+export const getMonitoringRequest = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`)).data as MonitoringRequest;
+export const createMonitoringRequest = async (data: { appId: string; resourceType: string; resourceName: string; reason: string }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
+export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: string; resourceName: string; reason: string }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
+export const submitMonitoringRequest = async (requestId: string, data: { mrIid: number; commitSha: string }) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/submit`, data)).data as MonitoringRequest;
+export const decideMonitoringRequest = async (requestId: string, decision: 'approve' | 'reject', comment?: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/${decision}`, { comment })).data as MonitoringRequest;
+export const withdrawMonitoringRequest = async (requestId: string, comment?: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/withdraw`, { comment })).data as MonitoringRequest;

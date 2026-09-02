@@ -23,6 +23,7 @@ import { CertStudyModule } from './cert-study/cert-study.module';
 import { AssetsModule } from './assets/assets.module';
 import { SiteConfModule } from './site-conf/site-conf.module';
 import { SslCertificatesModule } from './ssl-certificates/ssl-certificates.module';
+import { MonitoringRequestsModule } from './monitoring-requests/monitoring-requests.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { SslCertificatesModule } from './ssl-certificates/ssl-certificates.modul
     AssetsModule,
     SiteConfModule,
     SslCertificatesModule,
+    MonitoringRequestsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

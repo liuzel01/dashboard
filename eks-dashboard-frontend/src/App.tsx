@@ -2,7 +2,7 @@ import React, { useContext } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -26,6 +26,7 @@ import CertStudyPage from './pages/CertStudyPage';
 import AssetManagementPage from './pages/AssetManagementPage';
 import SiteConfPage from './pages/SiteConfPage';
 import SslCertificateExportPage from './pages/SslCertificateExportPage';
+import MonitoringRequestsPage from './pages/MonitoringRequestsPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -103,6 +104,7 @@ const AppLayout: React.FC = () => {
     lines: { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines' },
     lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
     siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
+    monitoringRequests: { key: '/monitoring-requests', label: '监控资源申请', icon: <FileProtectOutlined />, permission: 'menu:monitoring-requests' },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
@@ -202,7 +204,7 @@ const AppLayout: React.FC = () => {
     '/monitoring',
     '监控与告警',
     <AimOutlined />,
-    [menuItems.siteMonitors],
+    [menuItems.siteMonitors, menuItems.monitoringRequests],
   );
 
   const opsToolsGroup = createMenuGroup(
@@ -271,7 +273,7 @@ const AppLayout: React.FC = () => {
     ...(['/deployments', '/jump-servers', '/security-groups', '/s3-upload'].some((path) => location.pathname.startsWith(path)) ? ['/cloud-resources'] : []),
     ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
     ...(['/lines', '/line-onboarding'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
-    ...(location.pathname.startsWith('/site-monitors') ? ['/monitoring'] : []),
+    ...(['/site-monitors', '/monitoring-requests'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
     ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
     ...(['/environments', '/site-conf', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
@@ -332,6 +334,7 @@ const AppLayout: React.FC = () => {
               <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
+              <Route path="/monitoring-requests" element={<ProtectedRoute required={['menu:monitoring-requests']}><MonitoringRequestsPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
               <Route path="/site-conf" element={<ProtectedRoute required={['menu:site-conf']}><SiteConfPage /></ProtectedRoute>} />
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
