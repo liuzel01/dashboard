@@ -11,6 +11,8 @@ type RequestInput = { appId: string; resourceType: string; resourceName: string;
 const MENU = 'menu:monitoring-requests';
 const APPROVE = 'monitoring-requests:approve';
 const MANAGE = 'monitoring-requests:manage';
+const REAL_APPLY_MINUTES = 5;
+const REAL_APPLY_MAX_MINUTES = 30;
 
 @Injectable()
 export class MonitoringRequestsService {
@@ -94,6 +96,47 @@ export class MonitoringRequestsService {
     if (row.status !== 'SUBMITTED') throw new BadRequestException('仅已提交申请可审批'); if (this.owns(actor,row)) throw new ForbiddenException('申请人不能审批自己的申请');
     await this.db.query('UPDATE monitoring_requests SET status=?,approver_user_id=?,approval_comment=?,approved_at=IF(?=\'APPROVED\',UTC_TIMESTAMP(),NULL),updated_at=UTC_TIMESTAMP() WHERE request_id=?', [status,actor.userId,comment?.trim() || null,status,requestId]);
     await this.event(requestId,actor,status === 'APPROVED' ? 'APPROVED' : 'REJECTED','SUBMITTED',status,comment); return this.read(requestId);
+  }
+  /** A separate approval creates one short-lived real-apply grant. */
+  async grantRealApply(auth: string | undefined, requestId: string, validMinutes: number, comment?: string) {
+    const actor = await this.actor(auth);
+    if (!this.can(actor, APPROVE)) throw new ForbiddenException(`Missing permissions: ${APPROVE}`);
+    if (!Number.isInteger(validMinutes) || validMinutes < REAL_APPLY_MINUTES || validMinutes > REAL_APPLY_MAX_MINUTES) {
+      throw new BadRequestException(`真实 Apply 授权有效期必须为 ${REAL_APPLY_MINUTES}-${REAL_APPLY_MAX_MINUTES} 分钟`);
+    }
+    const row = await this.read(requestId);
+    if (row.status !== 'APPROVED') throw new BadRequestException('仅已批准申请可授予真实 Apply 权限');
+    if (this.owns(actor, row)) throw new ForbiddenException('申请人不能授予自己的真实 Apply 权限');
+    await this.db.withTransaction(async conn => {
+      await conn.execute('UPDATE monitoring_real_apply_authorizations SET revoked_at=UTC_TIMESTAMP() WHERE request_id=? AND consumed_at IS NULL AND revoked_at IS NULL', [requestId]);
+      await conn.execute('INSERT INTO monitoring_real_apply_authorizations (request_id,mr_iid,commit_sha,granted_by_user_id,comment,expires_at,created_at) VALUES (?,?,?,?,?,DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE),UTC_TIMESTAMP())', [requestId, Number(row.mr_iid), String(row.commit_sha).toLowerCase(), actor.userId, comment?.trim() || null, validMinutes]);
+      const auditComment = '有效期 ' + validMinutes + ' 分钟' + (comment?.trim() ? '：' + comment.trim() : '');
+      await conn.execute('INSERT INTO monitoring_request_events (request_id,event_type,actor_user_id,actor_username,from_status,to_status,comment,created_at) VALUES (?,?,?,?,?,?,?,UTC_TIMESTAMP())', [requestId, 'REAL_APPLY_GRANTED', actor.userId, actor.username, 'APPROVED', 'APPROVED', auditComment]);
+    });
+    return { authorized: true, requestId, validMinutes };
+  }
+  /** Read-only preflight proves a matching one-time grant still exists. */
+  async authorizeRealApplyPreflight(requestId: string, input: { mrIid: number; commitSha: string }, token?: string) {
+    if (!(await this.approvalTokenMatches(token))) throw new UnauthorizedException('Invalid Jenkins approval token');
+    const rows = await this.db.query<any[]>(`SELECT r.status,a.mr_iid,a.commit_sha FROM monitoring_requests r JOIN monitoring_real_apply_authorizations a ON a.request_id=r.request_id WHERE r.request_id=? AND a.consumed_at IS NULL AND a.revoked_at IS NULL AND a.expires_at > UTC_TIMESTAMP() ORDER BY a.id DESC LIMIT 1`, [requestId]);
+    const row = rows[0];
+    if (!row || row.status !== 'APPROVED') throw new ForbiddenException('No active real Apply authorization for this approved request');
+    if (Number(row.mr_iid) !== input.mrIid || String(row.commit_sha).toLowerCase() !== input.commitSha.toLowerCase()) throw new ForbiddenException('Real Apply authorization MR IID/Commit SHA binding does not match this build');
+    return { authorized: true, requestId, mrIid: Number(row.mr_iid), commitSha: String(row.commit_sha), dryRun: false };
+  }
+  /** Jenkins calls this immediately before the only mutating kubectl command. */
+  async consumeRealApplyAuthorization(requestId: string, input: { mrIid: number; commitSha: string }, token?: string) {
+    if (!(await this.approvalTokenMatches(token))) throw new UnauthorizedException('Invalid Jenkins approval token');
+    return this.db.withTransaction(async conn => {
+      const [rows] = await conn.execute<any[]>('SELECT r.status,a.id,a.mr_iid,a.commit_sha FROM monitoring_requests r JOIN monitoring_real_apply_authorizations a ON a.request_id=r.request_id WHERE r.request_id=? AND a.consumed_at IS NULL AND a.revoked_at IS NULL ORDER BY a.id DESC LIMIT 1 FOR UPDATE', [requestId]);
+      const row = rows[0];
+      if (!row || row.status !== 'APPROVED') throw new ForbiddenException('No active real Apply authorization for this approved request');
+      if (Number(row.mr_iid) !== input.mrIid || String(row.commit_sha).toLowerCase() !== input.commitSha.toLowerCase()) throw new ForbiddenException('Real Apply authorization MR IID/Commit SHA binding does not match this build');
+      const [result] = await conn.execute<any>('UPDATE monitoring_real_apply_authorizations SET consumed_at=UTC_TIMESTAMP() WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()', [row.id]);
+      if (Number(result.affectedRows) !== 1) throw new ForbiddenException('Real Apply authorization is expired, revoked, or already consumed');
+      await conn.execute('INSERT INTO monitoring_real_apply_executions (request_id,authorization_id,mr_iid,commit_sha,executed_by,created_at) VALUES (?,?,?,?,?,UTC_TIMESTAMP())', [requestId, row.id, Number(row.mr_iid), String(row.commit_sha).toLowerCase(), 'jenkins']);
+      return { authorized: true, requestId, mrIid: Number(row.mr_iid), commitSha: String(row.commit_sha), dryRun: false };
+    });
   }
   /**
    * Called only by Jenkins before it runs a pipeline. This is deliberately

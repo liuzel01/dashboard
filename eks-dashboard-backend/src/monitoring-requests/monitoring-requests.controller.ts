@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, ValidationPipe } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { MonitoringRequestsService } from './monitoring-requests.service';
 
 const APP_ID = /^[a-z][a-z0-9-]{1,62}$/;
@@ -28,6 +28,14 @@ class JenkinsAuthorizationDto {
   @IsString() @Matches(SHA) commitSha!: string;
   @IsIn(['true']) dryRun!: 'true';
 }
+class RealApplyGrantDto {
+  @Type(() => Number) @IsInt() @Min(5) @Max(30) validMinutes!: number;
+  @IsOptional() @IsString() @MaxLength(1000) comment?: string;
+}
+class JenkinsRealApplyAuthorizationDto {
+  @Type(() => Number) @IsInt() @Min(1) mrIid!: number;
+  @IsString() @Matches(SHA) commitSha!: string;
+}
 class DecisionDto {
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
 }
@@ -50,6 +58,17 @@ export class MonitoringRequestsController {
     @Param('requestId') requestId: string,
     @Query(validation) query: JenkinsAuthorizationDto,
   ) { return this.service.authorizeDryRun(requestId, { mrIid: query.mrIid, commitSha: query.commitSha, dryRun: query.dryRun === 'true' }, token); }
+  @Post(':requestId/real-apply-grants') grantRealApply(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: RealApplyGrantDto) { return this.service.grantRealApply(auth, requestId, body.validMinutes, body.comment); }
+  @Post(':requestId/jenkins-real-apply-preflight') authorizeRealApplyPreflight(
+    @Headers('x-dashboard-approval-token') token: string | undefined,
+    @Param('requestId') requestId: string,
+    @Body(validation) body: JenkinsRealApplyAuthorizationDto,
+  ) { return this.service.authorizeRealApplyPreflight(requestId, body, token); }
+  @Post(':requestId/jenkins-real-apply-authorization') consumeRealApplyAuthorization(
+    @Headers('x-dashboard-approval-token') token: string | undefined,
+    @Param('requestId') requestId: string,
+    @Body(validation) body: JenkinsRealApplyAuthorizationDto,
+  ) { return this.service.consumeRealApplyAuthorization(requestId, body, token); }
   @Post(':requestId/approve') approve(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.decide(auth, requestId, 'APPROVED', body.comment); }
   @Post(':requestId/reject') reject(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.decide(auth, requestId, 'REJECTED', body.comment); }
   @Post(':requestId/withdraw') withdraw(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.withdraw(auth, requestId, body.comment); }
