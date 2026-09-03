@@ -199,7 +199,7 @@ export class MonitoringRequestsService {
     const queueUrl = String(queued.headers?.location || '');
     const queueId = Number((queueUrl.match(/\/queue\/item\/(\d+)/) || [])[1]);
     if (![201, 302].includes(queued.status) || !Number.isInteger(queueId)) { if (applyGrantCreated) await this.db.query('UPDATE monitoring_real_apply_authorizations SET revoked_at=UTC_TIMESTAMP() WHERE request_id=? AND consumed_at IS NULL AND revoked_at IS NULL', [requestId]); throw new ServiceUnavailableException('Jenkins 未接受构建请求'); }
-    const result = await this.db.query<any>('INSERT INTO monitoring_jenkins_executions (request_id,mode,mr_iid,commit_sha,application_id,queue_id,status,requested_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,"QUEUED",?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())', [requestId, mode, row.mr_iid, String(row.commit_sha).toLowerCase(), row.app_id, queueId, actor.userId]);
+    const result = await this.db.query<any>('INSERT INTO monitoring_jenkins_executions (request_id,mode,mr_iid,commit_sha,application_id,queue_id,status,requested_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,"QUEUED",?,UTC_TIMESTAMP(),UTC_TIMESTAMP())', [requestId, mode, row.mr_iid, String(row.commit_sha).toLowerCase(), row.app_id, queueId, actor.userId]);
     await this.event(requestId, actor, mode === 'preview' ? 'PREVIEW_QUEUED' : 'REAL_APPLY_QUEUED', 'APPROVED', 'APPROVED', `Jenkins 队列 #${queueId}`);
     return { id: Number(result.insertId), mode, queueId, status: 'QUEUED' };
   }
