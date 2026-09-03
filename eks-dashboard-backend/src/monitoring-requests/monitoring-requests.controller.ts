@@ -54,6 +54,7 @@ export class MonitoringRequestsController {
   @Post() create(@Headers('authorization') auth: string | undefined, @Body(validation) body: CreateRequestDto) { return this.service.create(auth, body); }
   @Patch(':requestId') update(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: UpdateDraftDto) { return this.service.updateDraft(auth, requestId, body); }
   @Post(':requestId/submit') submit(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: SubmitDto) { return this.service.submit(auth, requestId, body); }
+  @Post(':requestId/managed-submit') submitManaged(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string) { return this.service.submitManaged(auth, requestId); }
   @Get(':requestId/jenkins-authorization') authorizeDryRun(
     @Headers('x-dashboard-approval-token') token: string | undefined,
     @Param('requestId') requestId: string,

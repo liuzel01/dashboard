@@ -56,7 +56,14 @@ export class MonitoringRequestsService {
   private async event(requestId: string, actor: Actor, type: string, from: string | null, to: string | null, comment?: string) {
     await this.db.query('INSERT INTO monitoring_request_events (request_id,event_type,actor_user_id,actor_username,from_status,to_status,comment,created_at) VALUES (?,?,?,?,?,?,?,UTC_TIMESTAMP())', [requestId, type, actor.userId, actor.username, from, to, comment?.trim() || null]);
   }
-  private resourcePath(appId: string) { return `platform/environments/hash/apps/${appId}/monitoring/`; }
+  private resourcePath(appId: string) { return `k8s-yaml/platform/environments/hash/apps/${appId}/monitoring/`; }
+  private managedBranch(requestId: string) { return `platform/${requestId.toLowerCase()}`; }
+  private managedFilePath(row: any) { return `${this.resourcePath(String(row.app_id))}service-monitor.yaml`; }
+  private serviceMonitorYaml(row: any) {
+    // First managed template: a conventional HTTP /metrics Service endpoint.
+    // No user-provided YAML, paths, labels, or Git refs are accepted here.
+    return `apiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: ${row.resource_name}\n  namespace: platform-monitoring\n  labels:\n    release: kube-prometheus-stack\n    app.kubernetes.io/name: ${row.app_id}\n    app.kubernetes.io/part-of: dashboard\nspec:\n  jobLabel: app.kubernetes.io/name\n  namespaceSelector:\n    matchNames:\n      - default\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: ${row.app_id}\n  endpoints:\n    - port: http\n      path: /metrics\n      scheme: http\n      interval: 30s\n      scrapeTimeout: 10s\n`;
+  }
   private requireNonBlank(value: string, field: string) {
     if (!value || !value.trim()) throw new BadRequestException(`${field}不能为空`);
   }
@@ -96,6 +103,49 @@ export class MonitoringRequestsService {
     await this.db.query('UPDATE monitoring_requests SET status=\'SUBMITTED\',mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [input.mrIid,input.commitSha.toLowerCase(),requestId]);
     await this.event(requestId,actor,'SUBMITTED',row.status,'SUBMITTED'); return this.read(requestId);
   }
+  async submitManaged(auth: string | undefined, requestId: string) {
+    const actor = await this.actor(auth); const row = await this.read(requestId);
+    if (!this.owns(actor, row) || !['DRAFT','REJECTED','WITHDRAWN'].includes(row.status)) throw new ForbiddenException('当前状态不可提交');
+    if (row.mr_iid || row.commit_sha) throw new BadRequestException('该申请已绑定 GitLab MR；请使用手工绑定流程继续处理');
+    if (row.resource_type !== 'ServiceMonitor') throw new BadRequestException('Dashboard 托管 MR 创建一期仅支持 ServiceMonitor');
+    const config = await this.gitlabMergeConfig();
+    if (!config.enabled) throw new ServiceUnavailableException('GitLab 托管 MR 创建未启用');
+    const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row);
+    const base = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(config.targetBranch)}`);
+    const baseSha = String(base.data?.commit?.id || '').toLowerCase();
+    if (base.status !== 200 || !/^[a-f0-9]{40}$/.test(baseSha)) throw new ServiceUnavailableException('无法读取 GitLab 目标分支基线');
+    const branchResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/branches`, { branch, ref: baseSha });
+    if (![200, 201].includes(branchResponse.status)) {
+      // A prior interrupted attempt may have created this request's deterministic branch.
+      // Resume only when it still points to the immutable target baseline; otherwise fail closed.
+      const existing = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(branch)}`);
+      if (existing.status !== 200 || String(existing.data?.commit?.id || '').toLowerCase() !== baseSha) {
+        const detail = String(branchResponse.data?.message || branchResponse.data?.error || `HTTP ${branchResponse.status}`).slice(0, 800);
+        await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `创建受控分支失败：${detail}`);
+        throw new BadRequestException(`创建受控 GitLab 分支失败：${detail}`);
+      }
+    }
+    const fileResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}`, { branch, content: this.serviceMonitorYaml(row), commit_message: `feat(monitoring): add ${row.resource_name}` });
+    const sourceSha = String(fileResponse.data?.commit_id || '').toLowerCase();
+    if (![200, 201].includes(fileResponse.status) || !/^[a-f0-9]{40}$/.test(sourceSha)) {
+      const detail = String(fileResponse.data?.message || fileResponse.data?.error || `HTTP ${fileResponse.status}`).slice(0, 800);
+      await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `写入受控 YAML 失败：${detail}`);
+      throw new BadRequestException(`写入受控 GitLab YAML 失败：${detail}`);
+    }
+    const description = `Dashboard 托管的监控资源申请。\n\nDashboard-Request-ID: ${requestId}`;
+    const mrResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/merge_requests`, { source_branch: branch, target_branch: config.targetBranch, title: `feat(monitoring): add ${row.resource_name}`, description });
+    const mrIid = Number(mrResponse.data?.iid); const mrSha = String(mrResponse.data?.sha || sourceSha).toLowerCase();
+    if (mrResponse.status !== 201 || !Number.isInteger(mrIid) || mrIid < 1 || mrSha !== sourceSha) {
+      const detail = String(mrResponse.data?.message || mrResponse.data?.error || `HTTP ${mrResponse.status}`).slice(0, 800);
+      await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `创建受控 MR 失败：${detail}`);
+      throw new BadRequestException(`创建受控 GitLab MR 失败：${detail}`);
+    }
+    await this.db.query("UPDATE monitoring_requests SET status='SUBMITTED',resource_path=?,mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?", [this.resourcePath(String(row.app_id)), mrIid, sourceSha, requestId]);
+    await this.event(requestId, actor, 'GITLAB_MR_CREATED', row.status, 'SUBMITTED', `MR !${mrIid}；分支 ${branch}；${filePath}`);
+    await this.event(requestId, actor, 'SUBMITTED', row.status, 'SUBMITTED', 'Dashboard 已创建并绑定受控 GitLab MR');
+    return this.read(requestId);
+  }
+
   async decide(auth: string | undefined, requestId: string, status: 'APPROVED'|'REJECTED', comment?: string) {
     const actor = await this.actor(auth); if (!this.can(actor, APPROVE)) throw new ForbiddenException(`Missing permissions: ${APPROVE}`); let row=await this.read(requestId);
     if (row.status !== 'SUBMITTED') throw new BadRequestException('仅已提交申请可审批'); if (this.owns(actor,row)) throw new ForbiddenException('申请人不能审批自己的申请');
@@ -174,7 +224,7 @@ export class MonitoringRequestsService {
     }
     return { enabled: true as const, baseUrl, projectId, botToken, targetBranch, timeoutMs };
   }
-  private async gitlabRequest<T>(config: Extract<Awaited<ReturnType<MonitoringRequestsService['gitlabMergeConfig']>>, { enabled: true }>, method: 'get'|'put', path: string, data?: unknown) {
+  private async gitlabRequest<T>(config: Extract<Awaited<ReturnType<MonitoringRequestsService['gitlabMergeConfig']>>, { enabled: true }>, method: 'get'|'post'|'put', path: string, data?: unknown) {
     return axios.request<T>({ method, url: config.baseUrl + path, timeout: config.timeoutMs, headers: { 'PRIVATE-TOKEN': config.botToken }, data, validateStatus: () => true });
   }
   private async mergeApprovedRequest(row: any, actor: Actor) {
