@@ -124,6 +124,19 @@ export class KubernetesService {
     return apis;
   }
 
+  /** Read-only contract for the fixed first-phase ServiceMonitor template. */
+  async getServiceMonitorTarget(environmentId: string, namespace: string, labelSelector: string, portName: string) {
+    const { k8sCoreV1Api } = await this.getK8sApis(environmentId);
+    const { body: services } = await k8sCoreV1Api.listNamespacedService(namespace, undefined, undefined, undefined, undefined, labelSelector);
+    if (services.items.length !== 1) throw new Error(`expected exactly one matching Service, found ${services.items.length}`);
+    const service = services.items[0]; const serviceName = String(service.metadata?.name || '');
+    if (!serviceName || !service.spec?.ports?.some(port => port.name === portName)) throw new Error(`matching Service must expose a port named ${portName}`);
+    const { body: endpoints } = await k8sCoreV1Api.readNamespacedEndpoints(serviceName, namespace);
+    const readyEndpoints = (endpoints.subsets || []).flatMap(subset => (subset.addresses || []).flatMap(address => (subset.ports || []).filter(port => port.name === portName).map(() => address.ip || address.hostname || 'ready')));
+    if (!readyEndpoints.length) throw new Error(`matching Service has no Ready endpoints on port ${portName}`);
+    return { serviceName, readyEndpointCount: readyEndpoints.length };
+  }
+
   async getDeployments(environmentId: string, namespace = 'default') {
     const { k8sAppsV1Api } = await this.getK8sApis(environmentId);
     const { body } = await k8sAppsV1Api.listNamespacedDeployment(namespace);

@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
+import { KubernetesService } from '../kubernetes/kubernetes.service';
 
 type Actor = { userId: number; username: string; permissions: string[] };
 type RequestInput = { appId: string; resourceType: string; resourceName: string; reason: string };
@@ -26,6 +27,7 @@ export class MonitoringRequestsService {
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
     private readonly siteConf: SiteConfService,
+    private readonly kubernetes: KubernetesService,
   ) {}
 
   private async actor(authorization?: string): Promise<Actor> {
@@ -63,6 +65,17 @@ export class MonitoringRequestsService {
     // First managed template: a conventional HTTP /metrics Service endpoint.
     // No user-provided YAML, paths, labels, or Git refs are accepted here.
     return `apiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: ${row.resource_name}\n  namespace: platform-monitoring\n  labels:\n    release: kube-prometheus-stack\n    app.kubernetes.io/name: ${row.app_id}\n    app.kubernetes.io/part-of: dashboard\nspec:\n  jobLabel: app.kubernetes.io/name\n  namespaceSelector:\n    matchNames:\n      - default\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: ${row.app_id}\n  endpoints:\n    - port: http\n      path: /metrics\n      scheme: http\n      interval: 30s\n      scrapeTimeout: 10s\n`;
+  }
+  private async validateServiceMonitorTarget(row: any) {
+    // The managed YAML has a fixed namespace, selector and endpoint port. Check the
+    // live hash cluster before creating an MR and again immediately before merging.
+    // This call is read-only; it never derives or mutates the Git-managed template.
+    try { return await this.kubernetes.getServiceMonitorTarget('hash', 'default', `app.kubernetes.io/name=${String(row.app_id)}`, 'http'); }
+    catch (err: any) {
+      const detail = String(err?.message || 'unknown Kubernetes API error').slice(0, 500);
+      if (detail.startsWith('expected exactly one matching Service') || detail.startsWith('matching Service')) throw new BadRequestException(`ServiceMonitor 目标 Service 不满足受控契约：${detail}`);
+      throw new ServiceUnavailableException(`无法读取 hash 集群中的 ServiceMonitor 目标 Service：${detail}`);
+    }
   }
   private requireNonBlank(value: string, field: string) {
     if (!value || !value.trim()) throw new BadRequestException(`${field}不能为空`);
@@ -108,6 +121,7 @@ export class MonitoringRequestsService {
     if (!this.owns(actor, row) || row.status !== 'DRAFT') throw new ForbiddenException('当前状态不可提交');
     if (row.mr_iid || row.commit_sha) throw new BadRequestException('该申请已绑定 GitLab MR；请使用手工绑定流程继续处理');
     if (row.resource_type !== 'ServiceMonitor') throw new BadRequestException('Dashboard 托管 MR 创建一期仅支持 ServiceMonitor');
+    await this.validateServiceMonitorTarget(row);
     const config = await this.gitlabMergeConfig();
     if (!config.enabled) throw new ServiceUnavailableException('GitLab 托管 MR 创建未启用');
     const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row); const yaml = this.serviceMonitorYaml(row);
@@ -393,6 +407,7 @@ export class MonitoringRequestsService {
     const actor = await this.actor(auth); let row = await this.read(requestId); this.assertRead(actor, row);
     if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
     const gitlab = await this.gitlabMergeConfig();
+    if (mode === 'preview') await this.validateServiceMonitorTarget(row);
     if (gitlab.enabled && mode === 'preview' && (!row.gitlab_merged_at || String(row.gitlab_merge_commit_sha || '').toLowerCase() !== String(row.commit_sha).toLowerCase())) {
       const merged = await this.mergeApprovedRequest(row, actor);
       await this.db.query('UPDATE monitoring_requests SET commit_sha=?,gitlab_merged_at=?,gitlab_merge_commit_sha=?,gitlab_merge_error=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [merged.commit_sha, merged.gitlab_merged_at, merged.gitlab_merge_commit_sha, requestId]);
