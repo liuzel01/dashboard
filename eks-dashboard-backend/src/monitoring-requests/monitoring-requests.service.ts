@@ -99,13 +99,13 @@ export class MonitoringRequestsService {
   }
   async submit(auth: string | undefined, requestId: string, input: { mrIid:number; commitSha:string }) {
     if (!Number.isInteger(input.mrIid) || input.mrIid < 1 || !/^[a-f0-9]{40}$/i.test(input.commitSha)) throw new BadRequestException('MR IID 或 Commit SHA 无效');
-    const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || !['DRAFT','REJECTED','WITHDRAWN'].includes(row.status)) throw new ForbiddenException('当前状态不可提交');
+    const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || row.status !== 'DRAFT' || row.mr_iid || row.commit_sha) throw new ForbiddenException('当前状态不可提交');
     await this.db.query('UPDATE monitoring_requests SET status=\'SUBMITTED\',mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [input.mrIid,input.commitSha.toLowerCase(),requestId]);
     await this.event(requestId,actor,'SUBMITTED',row.status,'SUBMITTED'); return this.read(requestId);
   }
   async submitManaged(auth: string | undefined, requestId: string) {
     const actor = await this.actor(auth); const row = await this.read(requestId);
-    if (!this.owns(actor, row) || !['DRAFT','REJECTED','WITHDRAWN'].includes(row.status)) throw new ForbiddenException('当前状态不可提交');
+    if (!this.owns(actor, row) || row.status !== 'DRAFT') throw new ForbiddenException('当前状态不可提交');
     if (row.mr_iid || row.commit_sha) throw new BadRequestException('该申请已绑定 GitLab MR；请使用手工绑定流程继续处理');
     if (row.resource_type !== 'ServiceMonitor') throw new BadRequestException('Dashboard 托管 MR 创建一期仅支持 ServiceMonitor');
     const config = await this.gitlabMergeConfig();
@@ -262,6 +262,37 @@ export class MonitoringRequestsService {
   private async gitlabRequest<T>(config: Extract<Awaited<ReturnType<MonitoringRequestsService['gitlabMergeConfig']>>, { enabled: true }>, method: 'get'|'post'|'put', path: string, data?: unknown) {
     return axios.request<T>({ method, url: config.baseUrl + path, timeout: config.timeoutMs, headers: { 'PRIVATE-TOKEN': config.botToken }, data, validateStatus: () => true });
   }
+  private async closeWithdrawnRequestMr(row: any, actor: Actor) {
+    if (!row.mr_iid || !row.commit_sha) return;
+    const config = await this.gitlabMergeConfig();
+    if (!config.enabled) throw new ServiceUnavailableException('GitLab 受控自动合并器未完成配置');
+    const project = encodeURIComponent(config.projectId);
+    const mrPath = `/projects/${project}/merge_requests/${Number(row.mr_iid)}`;
+    const current = await this.gitlabRequest<any>(config, 'get', mrPath);
+    const mr = current.data;
+    const bound = current.status === 200 && mr?.target_branch === config.targetBranch
+      && String(mr?.sha || '').toLowerCase() === String(row.commit_sha).toLowerCase()
+      && String(mr?.description || '').includes(`Dashboard-Request-ID: ${row.request_id}`);
+    if (!bound || !['opened', 'closed'].includes(mr?.state)) {
+      throw new BadRequestException('GitLab MR 不满足受控撤回条件（必须为 Open 或已关闭，且目标分支/SHA/申请标记完全匹配）');
+    }
+    if (mr.state === 'closed') return;
+    const closed = await this.gitlabRequest<any>(config, 'put', mrPath, { state_event: 'close' });
+    if (closed.status !== 200) {
+      const detail = String(closed.data?.message || closed.data?.error || `HTTP ${closed.status}`).slice(0, 800);
+      await this.event(row.request_id, actor, 'GITLAB_MR_CLOSE_FAILED', row.status, row.status, `GitLab 关闭 MR 失败：${detail}`);
+      throw new BadRequestException(`GitLab 关闭 MR 失败：${detail}`);
+    }
+    const verified = await this.gitlabRequest<any>(config, 'get', mrPath);
+    if (verified.status !== 200 || verified.data?.state !== 'closed' || verified.data?.target_branch !== config.targetBranch
+      || String(verified.data?.sha || '').toLowerCase() !== String(row.commit_sha).toLowerCase()
+      || !String(verified.data?.description || '').includes(`Dashboard-Request-ID: ${row.request_id}`)) {
+      await this.event(row.request_id, actor, 'GITLAB_MR_CLOSE_FAILED', row.status, row.status, 'GitLab 关闭 MR 后回读校验失败');
+      throw new BadRequestException('GitLab 关闭 MR 后回读校验失败；未撤回该申请');
+    }
+    await this.event(row.request_id, actor, 'GITLAB_MR_CLOSED', row.status, row.status, `GitLab MR !${row.mr_iid} 已受控关闭`);
+  }
+
   private async mergeApprovedRequest(row: any, actor: Actor) {
     const config = await this.gitlabMergeConfig();
     if (!config.enabled) return row;
@@ -398,6 +429,9 @@ export class MonitoringRequestsService {
   async listDashboardExecutions(auth: string | undefined, requestId: string) { const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row); return this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE request_id=? ORDER BY id DESC',[requestId]); }
   async withdraw(auth: string | undefined, requestId: string, comment?: string) {
     const actor=await this.actor(auth); const row=await this.read(requestId); if (!this.owns(actor,row) || !['DRAFT','SUBMITTED','REJECTED'].includes(row.status)) throw new ForbiddenException('当前状态不可撤回');
+    // For a bound request, close the exact Open MR first. Dashboard status changes only
+    // after GitLab confirms closure; a manually closed matching MR is safely idempotent.
+    await this.closeWithdrawnRequestMr(row, actor);
     await this.db.query('UPDATE monitoring_requests SET status=\'WITHDRAWN\',updated_at=UTC_TIMESTAMP() WHERE request_id=?',[requestId]); await this.event(requestId,actor,'WITHDRAWN',row.status,'WITHDRAWN',comment); return this.read(requestId);
   }
 }
