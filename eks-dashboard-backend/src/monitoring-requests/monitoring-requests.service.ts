@@ -172,11 +172,39 @@ export class MonitoringRequestsService {
     return axios.request<T>({ method, url: c.baseUrl + path, auth: { username: c.username, password: c.apiToken }, timeout: c.timeoutMs, validateStatus: () => true, ...config });
   }
   private extractDiff(consoleText: string) {
+    const completed = consoleText.indexOf('DRY_RUN=true:');
+    if (completed < 0) return null;
     const start = consoleText.indexOf('diff -u -N ');
-    const end = consoleText.indexOf('DRY_RUN=true:', start < 0 ? 0 : start);
-    if (start < 0 || end < 0) return null;
-    const diff = consoleText.slice(start, end).replace(/\/tmp\/[A-Za-z0-9._-]+/g, '<server-dry-run>');
+    if (start < 0 || start > completed) return '# No server-side changes detected.\n';
+    const diff = consoleText.slice(start, completed).replace(/\/tmp\/[A-Za-z0-9._-]+/g, '<server-dry-run>');
     return diff.length <= 200_000 ? diff : null;
+  }
+  private async refreshExecutionRecord(ex: any, actor?: Actor) {
+    if (!ex.build_number) {
+      const q = await this.jenkinsRequest<any>('get', `/queue/item/${ex.queue_id}/api/json`);
+      const n = Number(q.data?.executable?.number);
+      if (n) {
+        await this.db.query('UPDATE monitoring_jenkins_executions SET build_number=?,status="RUNNING",updated_at=UTC_TIMESTAMP() WHERE id=?', [n, ex.id]);
+        ex = { ...ex, build_number: n, status: 'RUNNING' };
+      }
+    }
+    if (!ex.build_number) return ex;
+    const mustReadConsole = ex.mode === 'preview' && ex.status === 'SUCCESS' && !ex.diff_text;
+    if (!mustReadConsole && ['SUCCESS', 'FAILURE', 'ABORTED'].includes(ex.status)) return ex;
+    const b = await this.jenkinsRequest<any>('get', `/job/platform-bootstrap-hash/${ex.build_number}/api/json`);
+    if (b.data?.building) return ex;
+    const status = String(b.data?.result || 'FAILURE');
+    const log = (await this.jenkinsRequest<string>('get', `/job/platform-bootstrap-hash/${ex.build_number}/consoleText`, { responseType: 'text' })).data || '';
+    const diff = ex.mode === 'preview' && status === 'SUCCESS' ? this.extractDiff(log) : null;
+    await this.db.query('UPDATE monitoring_jenkins_executions SET status=?,diff_text=?,finished_at=COALESCE(finished_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=?', [status, diff, ex.id]);
+    if (actor && !['SUCCESS', 'FAILURE', 'ABORTED'].includes(ex.status) && ['SUCCESS', 'FAILURE', 'ABORTED'].includes(status)) {
+      await this.event(ex.request_id, actor, status === 'SUCCESS' ? (ex.mode === 'preview' ? 'PREVIEW_SUCCEEDED' : 'REAL_APPLY_SUCCEEDED') : (ex.mode === 'preview' ? 'PREVIEW_FAILED' : 'REAL_APPLY_FAILED'), 'APPROVED', 'APPROVED', `Jenkins #${ex.build_number} ${status}`);
+    }
+    return { ...ex, status, diff_text: diff, finished_at: ex.finished_at || new Date() };
+  }
+  private async refreshMatchingPreview(requestId: string, mrIid: number, commitSha: string) {
+    const rows = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE request_id=? AND mode="preview" AND mr_iid=? AND commit_sha=? AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 MINUTE) AND (status NOT IN ("SUCCESS","FAILURE","ABORTED") OR diff_text IS NULL) ORDER BY id DESC', [requestId, mrIid, commitSha]);
+    for (const execution of rows) await this.refreshExecutionRecord(execution);
   }
   async startDashboardExecution(auth: string | undefined, requestId: string, mode: 'preview'|'apply', comment?: string, confirmation?: string) {
     const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor, row);
@@ -185,7 +213,11 @@ export class MonitoringRequestsService {
     if (mode === 'apply') {
       if (!this.can(actor, APPROVE) || this.owns(actor, row)) throw new ForbiddenException('仅非申请人的审批人可确认真实执行');
       if (confirmation !== 'APPLY' || !comment?.trim()) throw new BadRequestException('真实执行需要输入 APPLY 并填写确认说明');
-      const preview = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE request_id=? AND mode="preview" AND status="SUCCESS" AND mr_iid=? AND commit_sha=? AND diff_text IS NOT NULL AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 MINUTE) ORDER BY id DESC LIMIT 1', [requestId, row.mr_iid, row.commit_sha]);
+      // Refresh matching previews here as well as from the UI. A Jenkins build can
+      // finish between UI polls; the Apply gate must never reject a completed valid preview
+      // merely because the browser has not manually refreshed it yet.
+      await this.refreshMatchingPreview(requestId, Number(row.mr_iid), String(row.commit_sha).toLowerCase());
+      const preview = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE request_id=? AND mode="preview" AND status="SUCCESS" AND mr_iid=? AND commit_sha=? AND diff_text IS NOT NULL AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 MINUTE) ORDER BY id DESC LIMIT 1', [requestId, row.mr_iid, String(row.commit_sha).toLowerCase()]);
       if (!preview[0]) throw new BadRequestException('当前 MR/SHA 尚无 30 分钟内成功的最终 Diff 预检');
     } else if (!this.owns(actor, row) && !this.can(actor, APPROVE) && !this.can(actor, MANAGE)) throw new ForbiddenException('无权发起预检');
     const c = await this.jenkinsConfig();
@@ -204,12 +236,11 @@ export class MonitoringRequestsService {
     return { id: Number(result.insertId), mode, queueId, status: 'QUEUED' };
   }
   async refreshDashboardExecution(auth: string | undefined, requestId: string, id: number) {
-    const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row);
-    const rows=await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE id=? AND request_id=? LIMIT 1',[id,requestId]); const ex=rows[0]; if(!ex) throw new NotFoundException('执行记录不存在');
-    if (!ex.build_number) { const q=await this.jenkinsRequest<any>('get', `/queue/item/${ex.queue_id}/api/json`); const n=Number(q.data?.executable?.number); if (n) await this.db.query('UPDATE monitoring_jenkins_executions SET build_number=?,status="RUNNING",updated_at=UTC_TIMESTAMP() WHERE id=?',[n,id]); }
-    const latest=(await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE id=?',[id]))[0];
-    if (latest.build_number && !['SUCCESS','FAILURE','ABORTED'].includes(latest.status)) { const b=await this.jenkinsRequest<any>('get', `/job/platform-bootstrap-hash/${latest.build_number}/api/json`); if(!b.data?.building) { const status=String(b.data?.result||'FAILURE'); const log=(await this.jenkinsRequest<string>('get', `/job/platform-bootstrap-hash/${latest.build_number}/consoleText`, { responseType:'text' })).data || ''; const diff=latest.mode==='preview' && status==='SUCCESS' ? this.extractDiff(log) : null; await this.db.query('UPDATE monitoring_jenkins_executions SET status=?,diff_text=?,finished_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE id=?',[status,diff,id]); } }
-    const out=(await this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE id=?',[id]))[0]; return out;
+    const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor, row);
+    const rows = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE id=? AND request_id=? LIMIT 1', [id, requestId]);
+    if (!rows[0]) throw new NotFoundException('执行记录不存在');
+    await this.refreshExecutionRecord(rows[0], actor);
+    return (await this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE id=?', [id]))[0];
   }
   async listDashboardExecutions(auth: string | undefined, requestId: string) { const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row); return this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE request_id=? ORDER BY id DESC',[requestId]); }
   async withdraw(auth: string | undefined, requestId: string, comment?: string) {
