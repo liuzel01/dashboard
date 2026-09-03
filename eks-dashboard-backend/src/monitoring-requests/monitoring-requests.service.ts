@@ -99,9 +99,10 @@ export class MonitoringRequestsService {
   async decide(auth: string | undefined, requestId: string, status: 'APPROVED'|'REJECTED', comment?: string) {
     const actor = await this.actor(auth); if (!this.can(actor, APPROVE)) throw new ForbiddenException(`Missing permissions: ${APPROVE}`); let row=await this.read(requestId);
     if (row.status !== 'SUBMITTED') throw new BadRequestException('仅已提交申请可审批'); if (this.owns(actor,row)) throw new ForbiddenException('申请人不能审批自己的申请');
-    if (status === 'APPROVED') row = await this.mergeApprovedRequest(row, actor);
-    await this.db.query('UPDATE monitoring_requests SET status=?,commit_sha=?,gitlab_merged_at=?,gitlab_merge_commit_sha=?,gitlab_merge_error=NULL,approver_user_id=?,approval_comment=?,approved_at=IF(?=\'APPROVED\',UTC_TIMESTAMP(),NULL),updated_at=UTC_TIMESTAMP() WHERE request_id=?', [status, row.commit_sha, row.gitlab_merged_at || null, row.gitlab_merge_commit_sha || null, actor.userId,comment?.trim() || null,status,requestId]);
-    if (status === 'APPROVED' && row.gitlab_merge_commit_sha) await this.event(requestId, actor, 'GITLAB_MERGED', 'SUBMITTED', 'SUBMITTED', `GitLab MR !${row.mr_iid} 已合并；commit ${row.gitlab_merge_commit_sha}`);
+    // Approval is intentionally non-mutating for GitLab. The approver authorizes the change;
+    // a later explicit Preview action performs the controlled merge and immediately validates
+    // the resulting immutable merge commit before any Jenkins execution is queued.
+    await this.db.query('UPDATE monitoring_requests SET status=?,approver_user_id=?,approval_comment=?,approved_at=IF(?=\'APPROVED\',UTC_TIMESTAMP(),NULL),updated_at=UTC_TIMESTAMP() WHERE request_id=?', [status, actor.userId, comment?.trim() || null, status, requestId]);
     await this.event(requestId,actor,status === 'APPROVED' ? 'APPROVED' : 'REJECTED','SUBMITTED',status,comment); return this.read(requestId);
   }
   /** A separate approval creates one short-lived real-apply grant. */
@@ -205,7 +206,12 @@ export class MonitoringRequestsService {
       await this.event(row.request_id, actor, 'GITLAB_MERGE_FAILED', 'SUBMITTED', 'SUBMITTED', 'GitLab 合并后回读未得到有效 merged 状态或 merge commit SHA');
       throw new BadRequestException('GitLab 合并后回读校验失败；未批准该申请');
     }
-    return { ...row, commit_sha: mergeSha, gitlab_merged_at: verified.data.merged_at, gitlab_merge_commit_sha: mergeSha };
+    const mergedAt = new Date(String(verified.data.merged_at || ''));
+    if (Number.isNaN(mergedAt.getTime())) {
+      await this.event(row.request_id, actor, 'GITLAB_MERGE_FAILED', 'APPROVED', 'APPROVED', 'GitLab 合并后回读未得到有效 merged_at 时间');
+      throw new BadRequestException('GitLab 合并后回读校验失败；未得到有效合并时间');
+    }
+    return { ...row, commit_sha: mergeSha, gitlab_merged_at: mergedAt, gitlab_merge_commit_sha: mergeSha };
   }
 
   private async jenkinsConfig() {
@@ -259,11 +265,17 @@ export class MonitoringRequestsService {
     for (const execution of rows) await this.refreshExecutionRecord(execution);
   }
   async startDashboardExecution(auth: string | undefined, requestId: string, mode: 'preview'|'apply', comment?: string, confirmation?: string) {
-    const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor, row);
+    const actor = await this.actor(auth); let row = await this.read(requestId); this.assertRead(actor, row);
     if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
     const gitlab = await this.gitlabMergeConfig();
+    if (gitlab.enabled && mode === 'preview' && (!row.gitlab_merged_at || String(row.gitlab_merge_commit_sha || '').toLowerCase() !== String(row.commit_sha).toLowerCase())) {
+      const merged = await this.mergeApprovedRequest(row, actor);
+      await this.db.query('UPDATE monitoring_requests SET commit_sha=?,gitlab_merged_at=?,gitlab_merge_commit_sha=?,gitlab_merge_error=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [merged.commit_sha, merged.gitlab_merged_at, merged.gitlab_merge_commit_sha, requestId]);
+      await this.event(requestId, actor, 'GITLAB_MERGED', 'APPROVED', 'APPROVED', `GitLab MR !${row.mr_iid} 已受控合并；commit ${merged.gitlab_merge_commit_sha}`);
+      row = await this.read(requestId);
+    }
     if (gitlab.enabled && (!row.gitlab_merged_at || String(row.gitlab_merge_commit_sha || '').toLowerCase() !== String(row.commit_sha).toLowerCase())) {
-      throw new BadRequestException('当前申请未完成受控 GitLab 合并，禁止发起 Preview 或真实执行');
+      throw new BadRequestException('请先通过“生成最终 Diff”完成受控 GitLab 合并，再确认真实执行');
     }
     let applyGrantCreated = false;
     if (mode === 'apply') {
