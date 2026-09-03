@@ -1,6 +1,6 @@
 # 应用接入 / 环境开通落地方案（一期）
 
-> 状态：Hash 监控资源试点已验证；GitLab 受控自动合并待实现
+> 状态：Hash 监控资源受控合并与真实发布试点已验证；Dashboard 托管 MR 创建待实现
 > 更新时间：2026-09-03
 > 适用范围：Dashboard、Jenkins、GitLab Kubernetes YAML 仓库及各目标 Kubernetes 集群
 >
@@ -375,24 +375,37 @@ flowchart LR
 | 读取 `platform-system` Secret | 拒绝 | 发布身份不具备 Secret 读取权限 |
 | 创建 Namespace | 拒绝 | 一期不开放 Namespace 自助创建 |
 
-### 12.4 已落地的受控发布闭环（2026-09-03）
+### 12.4 已验证的受控发布闭环（2026-09-03）
 
-Hash 的监控资源试点已完成 Dashboard 申请、双人审批、Jenkins server-side Preview、一次性真实 Apply 授权和集群创建验证。当前 Job 使用申请绑定的 MR HEAD SHA 进行只读 checkout，并在 MR 目标分支、SHA、请求标记、受控路径、资源白名单、`kubeconform` 与 Kubernetes server-side dry-run/diff 均通过后执行 apply。
+Hash 监控资源试点已验证完整闭环：Dashboard 申请与双人审批 → 显式“确认合并并生成最终 Diff” → Dashboard Bot 合并绑定 MR → 回读 `merged_at` 与 merge commit SHA → Jenkins Preview → 一次性授权的真实 Apply。批准本身不修改 GitLab；真实 Apply 仅接受已合并 SHA 的成功最终 Diff。
 
-Dashboard 已具备执行记录回读、无变更 Diff 识别、审计事件和 UTC+8 展示；前端在详情加载及提交审批请求期间提供 loading 反馈。真实 Apply 只允许非申请审批人确认，授权短时且在 `kubectl apply` 前原子消费；当前试点的 `ServiceMonitor` 已实际创建。
+Jenkins 仅从经 GitLab 回读确认的不可变 merge commit 生成源码树，并且只允许 `k8s-yaml/platform/environments/hash/apps/<appId>/monitoring/` 下的 `ServiceMonitor`、`PodMonitor`、`PrometheusRule` 进入 `kubeconform`、Kubernetes server-side dry-run/diff 与 apply。MR 目标分支、请求标记、绑定 SHA、受控路径和资源白名单任一不匹配均 fail-closed。
 
-### 12.5 当前缺口：GitLab 合并与发布版本一致性
+Dashboard 保存 MR、source/merge commit、合并时间、Preview/Apply 构建记录、无变更 Diff 与审计事件；真实 Apply 仅允许非申请审批人确认，短时授权在 `kubectl apply` 前原子消费。试点 `ServiceMonitor` 已经由 Jenkins #36 Preview 与 #37 Apply 验证成功。
 
-当前 Dashboard 提交阶段仍由用户填写既有 MR IID 和 MR HEAD SHA；Jenkins 使用 GitLab **只读** API 校验该 MR，再从该 SHA 发布。因而真实 Apply 成功后 MR 仍可处于 Open，`hash-jenkins` 尚未反映已发布对象。这是当前实现限制，不应以人工合并作为常规流程，否则会产生“集群已变更、目标分支未更新”的短暂或永久漂移。
+### 12.5 当前过渡模式：人工创建 MR，Dashboard 绑定与合并
 
-下一步应实现受控自动合并：审批通过后由 Dashboard 专用 GitLab Bot 以最小权限合并绑定 MR；Dashboard 回读 `merged_at` 与 merge commit SHA；Preview 和 Apply 均只接受该已合并 SHA；Jenkins 继续按不可变 SHA checkout。合并冲突、未满足保护规则、MR 不是 Open 或 merge SHA 不一致必须 fail-closed，且不得签发真实 Apply 授权。
+当前申请人仍需在 GitLab 创建受控分支、提交 YAML、创建目标为 `hash-jenkins` 的 MR，然后在 Dashboard 填写 MR IID 与 HEAD SHA。Dashboard 在提交、合并、Preview 和 Apply 各阶段重新校验绑定关系，因此手工创建并不允许绕过审批或发布门禁；但跨系统复制申请 ID、MR IID、SHA 仍有可用性与错绑风险。
 
-### 12.6 后续验收重点
+### 12.6 下一阶段：Dashboard 托管 MR 创建（推荐）
 
-- GitLab `platform/` 路径与 `hash-jenkins` 分支受保护，仅 Dashboard Bot 具备对应创建/合并权限；
-- Dashboard 保存并展示 MR、merge commit、Jenkins 构建、一次性授权消费与集群资源结果；
+应将“生成受控变更”纳入 Dashboard：申请表单收集资源规格，后端以模板生成限定 YAML，使用专用 GitLab Bot 从 `hash-jenkins` 创建 `platform/<request-id>` 分支、仅写入该申请对应的 `k8s-yaml/platform/.../monitoring/` 文件，并创建包含 `Dashboard-Request-ID` 的 MR。Dashboard 将自动保存 MR IID 与 source SHA，申请人无需再手填。
+
+实现边界：
+
+- Bot 仅可创建受控前缀分支、写入申请绑定目录、创建目标为 `hash-jenkins` 的 MR；不得提供任意路径/任意内容提交能力；
+- 模板输入需做字段级白名单、长度和资源策略校验，生成 YAML 后再进行 schema/policy 校验；
+- 提交失败必须保持草稿或可重试状态，不能产生“已提交但无 MR”的半完成申请；
+- 仍保留 GitLab MR 作为 Review 与版本记录载体；审批、显式合并、Preview、Apply 的职责边界不变；
+- 对复杂或非模板化变更，可暂保留“外部 MR 绑定”作为受控例外，并强制相同的 MR/SHA/路径校验。
+
+### 12.7 后续验收重点
+
+- 用全新申请验证：批准后 MR 仍为 Open，只有“确认合并并生成最终 Diff”触发 Bot 合并；
+- Dashboard 保存并展示 MR、source/merge commit、Jenkins 构建、一次性授权消费与集群资源结果；
 - Jenkins 仅发布已经合并到目标分支的不可变 SHA；
-- Apply 后继续验证 Prometheus Target/规则/告警链路。仅 `kubectl apply` 成功不代表监控接入完成。
+- 预发/生产分支启用保护规则，限制 Dashboard Bot 为自动合并身份，并按团队策略启用 pipeline、讨论和审批门禁；
+- Apply 后继续验证 Prometheus Target/规则/告警链路；仅 `kubectl apply` 成功不代表监控接入完成。
 
 ## 13. 文档维护约定
 
