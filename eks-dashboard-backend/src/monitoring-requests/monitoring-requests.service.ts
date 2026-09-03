@@ -185,15 +185,20 @@ export class MonitoringRequestsService {
     const mr = mrResponse.data;
     const sourceSha = String(row.commit_sha).toLowerCase();
     const marker = `Dashboard-Request-ID: ${row.request_id}`;
-    if (mrResponse.status !== 200 || mr?.state !== 'opened' || mr?.target_branch !== config.targetBranch || String(mr?.sha || '').toLowerCase() !== sourceSha || !String(mr?.description || '').includes(marker)) {
-      throw new BadRequestException('GitLab MR 不满足受控合并条件（必须为 Open、目标分支/SHA/申请标记完全匹配）');
+    const bound = mrResponse.status === 200 && mr?.target_branch === config.targetBranch && String(mr?.sha || '').toLowerCase() === sourceSha && String(mr?.description || '').includes(marker);
+    if (!bound || !['opened', 'merged'].includes(mr?.state)) {
+      throw new BadRequestException('GitLab MR 不满足受控合并条件（目标分支/SHA/申请标记完全匹配，且状态必须为 Open 或已合并）');
     }
-    const merged = await this.gitlabRequest<any>(config, 'put', `${mrPath}/merge`, { sha: sourceSha, should_remove_source_branch: false });
-    if (![200, 201].includes(merged.status)) {
-      const detail = String(merged.data?.message || merged.data?.error || `HTTP ${merged.status}`).slice(0, 800);
-      await this.event(row.request_id, actor, 'GITLAB_MERGE_FAILED', 'SUBMITTED', 'SUBMITTED', `GitLab 合并失败：${detail}`);
-      throw new BadRequestException(`GitLab 合并失败：${detail}`);
+    if (mr.state === 'opened') {
+      const merged = await this.gitlabRequest<any>(config, 'put', `${mrPath}/merge`, { sha: sourceSha, should_remove_source_branch: false });
+      if (![200, 201].includes(merged.status)) {
+        const detail = String(merged.data?.message || merged.data?.error || `HTTP ${merged.status}`).slice(0, 800);
+        await this.event(row.request_id, actor, 'GITLAB_MERGE_FAILED', 'SUBMITTED', 'SUBMITTED', `GitLab 合并失败：${detail}`);
+        throw new BadRequestException(`GitLab 合并失败：${detail}`);
+      }
     }
+    // GitLab's merge endpoint can return before a subsequent GET observes the merged state.
+    // A retry is safe: a matching already-merged MR is reconciled rather than merged again.
     const verified = await this.gitlabRequest<any>(config, 'get', mrPath);
     const mergeSha = String(verified.data?.merge_commit_sha || verified.data?.squash_commit_sha || '').toLowerCase();
     if (verified.status !== 200 || verified.data?.state !== 'merged' || verified.data?.target_branch !== config.targetBranch || !/^[a-f0-9]{40}$/.test(mergeSha)) {
