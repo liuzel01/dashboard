@@ -372,7 +372,16 @@ export class MonitoringRequestsService {
     const diff = ex.mode === 'preview' && status === 'SUCCESS' ? this.extractDiff(log) : null;
     await this.db.query('UPDATE monitoring_jenkins_executions SET status=?,diff_text=?,finished_at=COALESCE(finished_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=?', [status, diff, ex.id]);
     if (actor && !['SUCCESS', 'FAILURE', 'ABORTED'].includes(ex.status) && ['SUCCESS', 'FAILURE', 'ABORTED'].includes(status)) {
-      await this.event(ex.request_id, actor, status === 'SUCCESS' ? (ex.mode === 'preview' ? 'PREVIEW_SUCCEEDED' : 'REAL_APPLY_SUCCEEDED') : (ex.mode === 'preview' ? 'PREVIEW_FAILED' : 'REAL_APPLY_FAILED'), 'APPROVED', 'APPROVED', `Jenkins #${ex.build_number} ${status}`);
+      if (ex.mode === 'apply' && status === 'SUCCESS') {
+        // COMPLETED is a terminal business state: only an actual successful mutating
+        // Jenkins build may transition an approved request into it.
+        const updated = await this.db.query<any>("UPDATE monitoring_requests SET status='COMPLETED',updated_at=UTC_TIMESTAMP() WHERE request_id=? AND status='APPROVED'", [ex.request_id]);
+        if (Number(updated.affectedRows) === 1) {
+          await this.event(ex.request_id, actor, 'REAL_APPLY_SUCCEEDED', 'APPROVED', 'COMPLETED', `Jenkins #${ex.build_number} SUCCESS`);
+        }
+      } else {
+        await this.event(ex.request_id, actor, status === 'SUCCESS' ? 'PREVIEW_SUCCEEDED' : (ex.mode === 'preview' ? 'PREVIEW_FAILED' : 'REAL_APPLY_FAILED'), 'APPROVED', 'APPROVED', `Jenkins #${ex.build_number} ${status}`);
+      }
     }
     return { ...ex, status, diff_text: diff, finished_at: ex.finished_at || new Date() };
   }

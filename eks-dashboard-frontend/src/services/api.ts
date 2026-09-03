@@ -1441,7 +1441,7 @@ export const createSslCertificateDecryptedDownload = async (data: { environmentI
   return response;
 };
 
-export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
 export type MonitoringRequest = {
   request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
   resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null; gitlab_merged_at?: string | null; gitlab_merge_commit_sha?: string | null;

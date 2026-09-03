@@ -41,7 +41,7 @@ class DecisionDto {
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
 }
 class ListDto {
-  @IsOptional() @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN']) status?: string;
+  @IsOptional() @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'COMPLETED', 'REJECTED', 'WITHDRAWN']) status?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) pageSize?: number;
 }
