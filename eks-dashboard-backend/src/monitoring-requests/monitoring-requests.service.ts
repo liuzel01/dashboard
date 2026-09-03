@@ -142,7 +142,19 @@ export class MonitoringRequestsService {
     }
     if (!sourceSha) {
       const fileResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}`, { branch, content: yaml, commit_message: `feat(monitoring): add ${row.resource_name}` });
-      sourceSha = String(fileResponse.data?.commit_id || '').toLowerCase();
+      sourceSha = String(fileResponse.data?.commit_id || fileResponse.data?.commit?.id || '').toLowerCase();
+      // GitLab-compatible servers can return 201 without a top-level commit_id. A success
+      // response is never trusted on its own: bind only after reading the branch HEAD and
+      // generated file back, so the first click is both safe and idempotent.
+      if ([200, 201].includes(fileResponse.status) && !/^[a-f0-9]{40}$/.test(sourceSha)) {
+        const [writtenBranch, writtenFile] = await Promise.all([
+          this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(branch)}`),
+          this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(branch)}`),
+        ]);
+        const branchSha = String(writtenBranch.data?.commit?.id || '').toLowerCase();
+        const content = writtenFile.status === 200 && writtenFile.data?.encoding === 'base64' ? Buffer.from(String(writtenFile.data.content || ''), 'base64').toString('utf8') : '';
+        if (writtenBranch.status === 200 && /^[a-f0-9]{40}$/.test(branchSha) && content === yaml) sourceSha = branchSha;
+      }
       if (![200, 201].includes(fileResponse.status) || !/^[a-f0-9]{40}$/.test(sourceSha)) {
         const detail = String(fileResponse.data?.message || fileResponse.data?.error || `HTTP ${fileResponse.status}`).slice(0, 800);
         await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `写入受控 YAML 失败：${detail}`);
