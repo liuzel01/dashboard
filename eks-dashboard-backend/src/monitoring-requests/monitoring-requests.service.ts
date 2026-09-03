@@ -16,6 +16,8 @@ const REAL_APPLY_MINUTES = 5;
 const REAL_APPLY_MAX_MINUTES = 30;
 const JENKINS_TIMEOUT_MIN_MS = 1_000;
 const JENKINS_TIMEOUT_MAX_MS = 60_000;
+const GITLAB_TIMEOUT_MIN_MS = 1_000;
+const GITLAB_TIMEOUT_MAX_MS = 60_000;
 
 @Injectable()
 export class MonitoringRequestsService {
@@ -95,9 +97,11 @@ export class MonitoringRequestsService {
     await this.event(requestId,actor,'SUBMITTED',row.status,'SUBMITTED'); return this.read(requestId);
   }
   async decide(auth: string | undefined, requestId: string, status: 'APPROVED'|'REJECTED', comment?: string) {
-    const actor = await this.actor(auth); if (!this.can(actor, APPROVE)) throw new ForbiddenException(`Missing permissions: ${APPROVE}`); const row=await this.read(requestId);
+    const actor = await this.actor(auth); if (!this.can(actor, APPROVE)) throw new ForbiddenException(`Missing permissions: ${APPROVE}`); let row=await this.read(requestId);
     if (row.status !== 'SUBMITTED') throw new BadRequestException('仅已提交申请可审批'); if (this.owns(actor,row)) throw new ForbiddenException('申请人不能审批自己的申请');
-    await this.db.query('UPDATE monitoring_requests SET status=?,approver_user_id=?,approval_comment=?,approved_at=IF(?=\'APPROVED\',UTC_TIMESTAMP(),NULL),updated_at=UTC_TIMESTAMP() WHERE request_id=?', [status,actor.userId,comment?.trim() || null,status,requestId]);
+    if (status === 'APPROVED') row = await this.mergeApprovedRequest(row, actor);
+    await this.db.query('UPDATE monitoring_requests SET status=?,commit_sha=?,gitlab_merged_at=?,gitlab_merge_commit_sha=?,gitlab_merge_error=NULL,approver_user_id=?,approval_comment=?,approved_at=IF(?=\'APPROVED\',UTC_TIMESTAMP(),NULL),updated_at=UTC_TIMESTAMP() WHERE request_id=?', [status, row.commit_sha, row.gitlab_merged_at || null, row.gitlab_merge_commit_sha || null, actor.userId,comment?.trim() || null,status,requestId]);
+    if (status === 'APPROVED' && row.gitlab_merge_commit_sha) await this.event(requestId, actor, 'GITLAB_MERGED', 'SUBMITTED', 'SUBMITTED', `GitLab MR !${row.mr_iid} 已合并；commit ${row.gitlab_merge_commit_sha}`);
     await this.event(requestId,actor,status === 'APPROVED' ? 'APPROVED' : 'REJECTED','SUBMITTED',status,comment); return this.read(requestId);
   }
   /** A separate approval creates one short-lived real-apply grant. */
@@ -156,6 +160,49 @@ export class MonitoringRequestsService {
     }
     return { authorized: true, requestId: row.request_id, mrIid: Number(row.mr_iid), commitSha: String(row.commit_sha), dryRun: true, approvedAt: row.approved_at };
   }
+  private async gitlabMergeConfig() {
+    const enabled = await this.siteConf.getBoolean('monitoring.requests.gitlab.merge.enabled', false);
+    const baseUrl = (await this.siteConf.getString('monitoring.requests.gitlab.base_url', '')).trim().replace(/\/+$/, '');
+    const projectId = (await this.siteConf.getString('monitoring.requests.gitlab.project_id', '')).trim();
+    const botToken = (await this.siteConf.getString('monitoring.requests.gitlab.bot_token', '')).trim();
+    const targetBranch = (await this.siteConf.getString('monitoring.requests.gitlab.target_branch', 'hash-jenkins')).trim();
+    const timeoutMs = Math.min(GITLAB_TIMEOUT_MAX_MS, Math.max(GITLAB_TIMEOUT_MIN_MS, await this.siteConf.getNumber('monitoring.requests.gitlab.timeout_ms', 15_000)));
+    if (!enabled) return { enabled: false as const };
+    if (!/^https?:\/\/[A-Za-z0-9._:-]+(?:\/api\/v4)?$/.test(baseUrl) || !/^\d+$/.test(projectId) || !botToken || targetBranch !== 'hash-jenkins') {
+      throw new ServiceUnavailableException('GitLab 受控自动合并器未完成配置');
+    }
+    return { enabled: true as const, baseUrl, projectId, botToken, targetBranch, timeoutMs };
+  }
+  private async gitlabRequest<T>(config: Extract<Awaited<ReturnType<MonitoringRequestsService['gitlabMergeConfig']>>, { enabled: true }>, method: 'get'|'put', path: string, data?: unknown) {
+    return axios.request<T>({ method, url: config.baseUrl + path, timeout: config.timeoutMs, headers: { 'PRIVATE-TOKEN': config.botToken }, data, validateStatus: () => true });
+  }
+  private async mergeApprovedRequest(row: any, actor: Actor) {
+    const config = await this.gitlabMergeConfig();
+    if (!config.enabled) return row;
+    const project = encodeURIComponent(config.projectId);
+    const mrPath = `/projects/${project}/merge_requests/${Number(row.mr_iid)}`;
+    const mrResponse = await this.gitlabRequest<any>(config, 'get', mrPath);
+    const mr = mrResponse.data;
+    const sourceSha = String(row.commit_sha).toLowerCase();
+    const marker = `Dashboard-Request-ID: ${row.request_id}`;
+    if (mrResponse.status !== 200 || mr?.state !== 'opened' || mr?.target_branch !== config.targetBranch || String(mr?.sha || '').toLowerCase() !== sourceSha || !String(mr?.description || '').includes(marker)) {
+      throw new BadRequestException('GitLab MR 不满足受控合并条件（必须为 Open、目标分支/SHA/申请标记完全匹配）');
+    }
+    const merged = await this.gitlabRequest<any>(config, 'put', `${mrPath}/merge`, { sha: sourceSha, should_remove_source_branch: false });
+    if (![200, 201].includes(merged.status)) {
+      const detail = String(merged.data?.message || merged.data?.error || `HTTP ${merged.status}`).slice(0, 800);
+      await this.event(row.request_id, actor, 'GITLAB_MERGE_FAILED', 'SUBMITTED', 'SUBMITTED', `GitLab 合并失败：${detail}`);
+      throw new BadRequestException(`GitLab 合并失败：${detail}`);
+    }
+    const verified = await this.gitlabRequest<any>(config, 'get', mrPath);
+    const mergeSha = String(verified.data?.merge_commit_sha || verified.data?.squash_commit_sha || '').toLowerCase();
+    if (verified.status !== 200 || verified.data?.state !== 'merged' || verified.data?.target_branch !== config.targetBranch || !/^[a-f0-9]{40}$/.test(mergeSha)) {
+      await this.event(row.request_id, actor, 'GITLAB_MERGE_FAILED', 'SUBMITTED', 'SUBMITTED', 'GitLab 合并后回读未得到有效 merged 状态或 merge commit SHA');
+      throw new BadRequestException('GitLab 合并后回读校验失败；未批准该申请');
+    }
+    return { ...row, commit_sha: mergeSha, gitlab_merged_at: verified.data.merged_at, gitlab_merge_commit_sha: mergeSha };
+  }
+
   private async jenkinsConfig() {
     if (!(await this.siteConf.getBoolean('monitoring.requests.jenkins.enabled', false))) throw new ServiceUnavailableException('Dashboard Jenkins 受控执行未启用');
     const baseUrl = (await this.siteConf.getString('monitoring.requests.jenkins.base_url', '')).trim().replace(/\/+$/, '');
@@ -209,6 +256,10 @@ export class MonitoringRequestsService {
   async startDashboardExecution(auth: string | undefined, requestId: string, mode: 'preview'|'apply', comment?: string, confirmation?: string) {
     const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor, row);
     if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
+    const gitlab = await this.gitlabMergeConfig();
+    if (gitlab.enabled && (!row.gitlab_merged_at || String(row.gitlab_merge_commit_sha || '').toLowerCase() !== String(row.commit_sha).toLowerCase())) {
+      throw new BadRequestException('当前申请未完成受控 GitLab 合并，禁止发起 Preview 或真实执行');
+    }
     let applyGrantCreated = false;
     if (mode === 'apply') {
       if (!this.can(actor, APPROVE) || this.owns(actor, row)) throw new ForbiddenException('仅非申请人的审批人可确认真实执行');

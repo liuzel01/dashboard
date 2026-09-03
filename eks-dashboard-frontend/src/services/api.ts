@@ -1444,7 +1444,7 @@ export const createSslCertificateDecryptedDownload = async (data: { environmentI
 export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
 export type MonitoringRequest = {
   request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
-  resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null;
+  resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null; gitlab_merged_at?: string | null; gitlab_merge_commit_sha?: string | null;
   requester_user_id: number; requester_username?: string; requester_display_name?: string; approver_username?: string | null;
   approval_comment?: string | null; approved_at?: string | null; created_at: string; updated_at: string;
   events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
