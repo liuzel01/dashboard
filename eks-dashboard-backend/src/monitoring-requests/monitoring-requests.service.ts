@@ -110,35 +110,58 @@ export class MonitoringRequestsService {
     if (row.resource_type !== 'ServiceMonitor') throw new BadRequestException('Dashboard 托管 MR 创建一期仅支持 ServiceMonitor');
     const config = await this.gitlabMergeConfig();
     if (!config.enabled) throw new ServiceUnavailableException('GitLab 托管 MR 创建未启用');
-    const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row);
+    const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row); const yaml = this.serviceMonitorYaml(row);
     const base = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(config.targetBranch)}`);
     const baseSha = String(base.data?.commit?.id || '').toLowerCase();
     if (base.status !== 200 || !/^[a-f0-9]{40}$/.test(baseSha)) throw new ServiceUnavailableException('无法读取 GitLab 目标分支基线');
     const branchResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/branches`, { branch, ref: baseSha });
+    let sourceSha = '';
     if (![200, 201].includes(branchResponse.status)) {
-      // A prior interrupted attempt may have created this request's deterministic branch.
-      // Resume only when it still points to the immutable target baseline; otherwise fail closed.
+      // Resume an interrupted request only when its deterministic branch contains exactly
+      // the one generated YAML commit directly on the immutable target baseline.
       const existing = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(branch)}`);
-      if (existing.status !== 200 || String(existing.data?.commit?.id || '').toLowerCase() !== baseSha) {
+      const existingSha = String(existing.data?.commit?.id || '').toLowerCase();
+      if (existing.status !== 200 || !/^[a-f0-9]{40}$/.test(existingSha)) {
         const detail = String(branchResponse.data?.message || branchResponse.data?.error || `HTTP ${branchResponse.status}`).slice(0, 800);
         await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `创建受控分支失败：${detail}`);
         throw new BadRequestException(`创建受控 GitLab 分支失败：${detail}`);
       }
+      if (existingSha !== baseSha) {
+        const [file, commit] = await Promise.all([
+          this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(branch)}`),
+          this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/commits/${existingSha}`),
+        ]);
+        const content = file.status === 200 && file.data?.encoding === 'base64' ? Buffer.from(String(file.data.content || ''), 'base64').toString('utf8') : '';
+        const parents = Array.isArray(commit.data?.parent_ids) ? commit.data.parent_ids.map((x: unknown) => String(x).toLowerCase()) : [];
+        if (content !== yaml || commit.status !== 200 || !parents.includes(baseSha)) {
+          await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, '受控 GitLab 分支已存在但不符合可恢复的基线/YAML 状态');
+          throw new BadRequestException('受控 GitLab 分支已存在但不符合可恢复的基线/YAML 状态');
+        }
+        sourceSha = existingSha;
+      }
     }
-    const fileResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}`, { branch, content: this.serviceMonitorYaml(row), commit_message: `feat(monitoring): add ${row.resource_name}` });
-    const sourceSha = String(fileResponse.data?.commit_id || '').toLowerCase();
-    if (![200, 201].includes(fileResponse.status) || !/^[a-f0-9]{40}$/.test(sourceSha)) {
-      const detail = String(fileResponse.data?.message || fileResponse.data?.error || `HTTP ${fileResponse.status}`).slice(0, 800);
-      await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `写入受控 YAML 失败：${detail}`);
-      throw new BadRequestException(`写入受控 GitLab YAML 失败：${detail}`);
+    if (!sourceSha) {
+      const fileResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}`, { branch, content: yaml, commit_message: `feat(monitoring): add ${row.resource_name}` });
+      sourceSha = String(fileResponse.data?.commit_id || '').toLowerCase();
+      if (![200, 201].includes(fileResponse.status) || !/^[a-f0-9]{40}$/.test(sourceSha)) {
+        const detail = String(fileResponse.data?.message || fileResponse.data?.error || `HTTP ${fileResponse.status}`).slice(0, 800);
+        await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `写入受控 YAML 失败：${detail}`);
+        throw new BadRequestException(`写入受控 GitLab YAML 失败：${detail}`);
+      }
     }
     const description = `Dashboard 托管的监控资源申请。\n\nDashboard-Request-ID: ${requestId}`;
     const mrResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/merge_requests`, { source_branch: branch, target_branch: config.targetBranch, title: `feat(monitoring): add ${row.resource_name}`, description });
-    const mrIid = Number(mrResponse.data?.iid); const mrSha = String(mrResponse.data?.sha || sourceSha).toLowerCase();
+    let mrIid = Number(mrResponse.data?.iid); let mrSha = String(mrResponse.data?.sha || '').toLowerCase();
     if (mrResponse.status !== 201 || !Number.isInteger(mrIid) || mrIid < 1 || mrSha !== sourceSha) {
-      const detail = String(mrResponse.data?.message || mrResponse.data?.error || `HTTP ${mrResponse.status}`).slice(0, 800);
-      await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `创建受控 MR 失败：${detail}`);
-      throw new BadRequestException(`创建受控 GitLab MR 失败：${detail}`);
+      // If an earlier call created the MR but the response was lost, recover only the exact binding.
+      const existingMrs = await this.gitlabRequest<any[]>(config, 'get', `/projects/${project}/merge_requests?state=opened&source_branch=${encodeURIComponent(branch)}&target_branch=${encodeURIComponent(config.targetBranch)}`);
+      const existingMr = Array.isArray(existingMrs.data) && existingMrs.data.find(m => String(m?.sha || '').toLowerCase() === sourceSha && String(m?.description || '').includes(`Dashboard-Request-ID: ${requestId}`));
+      mrIid = Number(existingMr?.iid); mrSha = String(existingMr?.sha || '').toLowerCase();
+      if (existingMrs.status !== 200 || !Number.isInteger(mrIid) || mrIid < 1 || mrSha !== sourceSha) {
+        const detail = String(mrResponse.data?.message || mrResponse.data?.error || `HTTP ${mrResponse.status}`).slice(0, 800);
+        await this.event(requestId, actor, 'GITLAB_MR_CREATE_FAILED', row.status, row.status, `创建受控 MR 失败：${detail}`);
+        throw new BadRequestException(`创建受控 GitLab MR 失败：${detail}`);
+      }
     }
     await this.db.query("UPDATE monitoring_requests SET status='SUBMITTED',resource_path=?,mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?", [this.resourcePath(String(row.app_id)), mrIid, sourceSha, requestId]);
     await this.event(requestId, actor, 'GITLAB_MR_CREATED', row.status, 'SUBMITTED', `MR !${mrIid}；分支 ${branch}；${filePath}`);
