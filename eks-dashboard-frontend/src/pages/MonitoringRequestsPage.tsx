@@ -11,6 +11,7 @@ const names: Record<MonitoringRequestStatus, string> = { DRAFT: '草稿', SUBMIT
 const eventNames: Record<string, string> = { CREATED: '已创建草稿', DRAFT_UPDATED: '已更新草稿', SUBMITTED: '已提交审批', APPROVED: '已批准', COMPLETED: '已完成', REJECTED: '已拒绝', WITHDRAWN: '已撤回', PREVIEW_QUEUED: '已发起最终 Diff 预检', PREVIEW_SUCCEEDED: '最终 Diff 预检成功', PREVIEW_FAILED: '最终 Diff 预检失败', REAL_APPLY_GRANTED: '已签发真实执行授权', REAL_APPLY_QUEUED: '已发起真实执行', REAL_APPLY_SUCCEEDED: '真实执行成功并完成申请', REAL_APPLY_FAILED: '真实执行失败', GITLAB_MERGED: 'GitLab 已受控合并（生成最终 Diff 前）', GITLAB_MERGE_FAILED: 'GitLab 合并失败', GITLAB_MR_CREATED: 'Dashboard 已创建 GitLab MR', GITLAB_MR_CREATE_FAILED: 'Dashboard 创建 GitLab MR 失败' };
 const auditStatus = (status?: string | null) => status && names[status as MonitoringRequestStatus] ? names[status as MonitoringRequestStatus] : (status || '—');
 const statusTag = (s: MonitoringRequestStatus) => <Tag color={colors[s]}>{names[s]}</Tag>;
+const resourceOptions = ['ServiceMonitor', 'PrometheusRule'] as const;
 const beijingTime = (value?: string | null) => {
   if (!value) return '—';
   // API uses UTC DATETIME strings (mysql dateStrings=true), which have no offset.
@@ -22,6 +23,8 @@ const beijingTime = (value?: string | null) => {
 
 export default function MonitoringRequestsPage() {
   const { me, permissions } = useContext(AuthContext); const [items, setItems] = useState<MonitoringRequest[]>([]); const [loading, setLoading] = useState(false); const [createOpen, setCreateOpen] = useState(false); const [detailOpen, setDetailOpen] = useState(false); const [detailLoading, setDetailLoading] = useState(false); const [detail, setDetail] = useState<MonitoringRequest | null>(null); const [form] = Form.useForm();
+  const selectedResourceType = Form.useWatch<'ServiceMonitor' | 'PrometheusRule' | undefined>('resourceType', form);
+  const selectedAppId = Form.useWatch<string | undefined>('appId', form);
   const canApprove = permissions.includes('monitoring-requests:approve');
   const [executions, setExecutions] = useState<MonitoringJenkinsExecution[]>([]);
   const [executionLoading, setExecutionLoading] = useState(false);
@@ -65,15 +68,36 @@ export default function MonitoringRequestsPage() {
   const mine = detail && Number(detail.requester_user_id) === Number(me?.id);
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     <Card title="监控资源申请与审批" extra={<Button type="primary" onClick={() => setCreateOpen(true)}>新建申请</Button>}>
-      <Alert type="info" showIcon message="真实执行采用受控闭环：Dashboard 固定触发 Jenkins 预检，展示同一 MR/SHA 的 server-side 最终 Diff；非申请人审批后方可签发一次性授权并触发真实执行。" style={{ marginBottom: 16 }} />
+      <Alert type="info" showIcon message="当前一期仅开放 ServiceMonitor 与 PrometheusRule。PrometheusRule 走固定 YAML 与结构化字段，不支持 PodMonitor，也不修改 Alertmanager 路由。" style={{ marginBottom: 16 }} />
       <Table rowKey="request_id" loading={loading} columns={columns} dataSource={items} pagination={false} />
     </Card>
     <Modal title="新建监控资源申请" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} okText="创建草稿" destroyOnHidden>
-      <Form form={form} layout="vertical"><Form.Item name="appId" label="应用 ID" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/, message: '小写字母开头，仅小写字母、数字和连字符' }]}><Input placeholder="dashboard-chain-test" /></Form.Item><Form.Item name="resourceType" label="资源类型" rules={[{ required: true }]}><Select options={['ServiceMonitor','PodMonitor','PrometheusRule'].map(value => ({ value }))} /></Form.Item><Form.Item name="resourceName" label="资源名称" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/ }]}><Input /></Form.Item><Form.Item name="reason" label="申请说明" rules={[{ required: true, max: 1000 }]}><Input.TextArea rows={4} /></Form.Item></Form>
+      <Form form={form} layout="vertical" initialValues={{ resourceType: 'ServiceMonitor' }}>
+        <Form.Item name="appId" label="应用 ID" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/, message: '小写字母开头，仅小写字母、数字和连字符' }]}>
+          <Input placeholder="dashboard-chain-test" />
+        </Form.Item>
+        <Form.Item name="resourceType" label="资源类型" rules={[{ required: true }]}>
+          <Select options={resourceOptions.map(value => ({ value }))} />
+        </Form.Item>
+        {selectedResourceType !== 'PrometheusRule' ? (
+          <Form.Item name="resourceName" label="资源名称" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/ }]}>
+            <Input placeholder={selectedAppId ? `${selectedAppId}-metrics` : 'dashboard-chain-test-metrics'} />
+          </Form.Item>
+        ) : (
+          <Form.Item label="资源名称">
+            <Input value={selectedAppId ? `${selectedAppId}-platform-rules` : ''} disabled placeholder="自动生成：<appId>-platform-rules" />
+          </Form.Item>
+        )}
+        <Form.Item name="reason" label="申请说明" rules={[{ required: true, max: 1000 }]}>
+          <Input.TextArea rows={4} />
+        </Form.Item>
+        {selectedResourceType === 'PrometheusRule' && <PrometheusRuleFieldsForm />}
+      </Form>
     </Modal>
     <Drawer title={detail?.request_id || '申请详情'} open={detailOpen} onClose={() => { setDetailOpen(false); setDetail(null); setExecutions([]); }} width={720}>
       {detailLoading && !detail ? <Skeleton active paragraph={{ rows: 10 }} /> : detail && <Space direction="vertical" size={16} style={{ width: '100%' }}><Descriptions bordered column={1} size="small"><Descriptions.Item label="状态">{statusTag(detail.status)}</Descriptions.Item><Descriptions.Item label="受控路径"><Text code>{detail.resource_path}</Text></Descriptions.Item><Descriptions.Item label="资源">{detail.resource_type}/{detail.resource_name}</Descriptions.Item><Descriptions.Item label="申请说明">{detail.reason}</Descriptions.Item><Descriptions.Item label="GitLab 绑定">{detail.mr_iid ? `MR !${detail.mr_iid} @ ${detail.commit_sha}${detail.gitlab_merged_at ? '（已受控合并）' : ''}` : '尚未提交'}</Descriptions.Item><Descriptions.Item label="审批信息">{detail.approver_username ? `${detail.approver_username}${detail.approval_comment ? `：${detail.approval_comment}` : ''}` : '-'}</Descriptions.Item></Descriptions>
-        {detail.status === 'COMPLETED' && <Alert type="success" showIcon message="真实执行已完成" description={`Jenkins #${executions.find(e => e.mode === 'apply' && e.status === 'SUCCESS')?.build_number || '—'} 已成功完成。该申请已进入终态，不可再次预检、执行、撤回或重新提交。`} />}<Space wrap>{mine && detail.status === 'DRAFT' && !detail.mr_iid && !detail.commit_sha && <><Button type="primary" loading={executionLoading} onClick={() => void managedSubmit()}>创建 MR 并提交</Button><Button disabled={executionLoading} onClick={submit}>手工绑定 MR</Button></>}{mine && ['DRAFT','SUBMITTED','REJECTED'].includes(detail.status) && <Button onClick={() => void action('withdraw')}>撤回</Button>}{canApprove && !mine && detail.status === 'SUBMITTED' && <><Button type="primary" onClick={() => void action('approve')}>批准</Button><Button danger onClick={() => void action('reject')}>拒绝</Button></>}{detail.status === 'APPROVED' && <Button loading={executionLoading} onClick={() => void execution('preview')}>{detail.gitlab_merged_at ? '生成最终 Diff' : '确认合并并生成最终 Diff'}</Button>}{canApprove && !mine && detail.status === 'APPROVED' && <Button type="primary" danger disabled={!latestPreview} loading={executionLoading} onClick={() => void execution('apply')}>确认真实执行</Button>}{!['WITHDRAWN','COMPLETED'].includes(detail.status) && <Button loading={executionLoading} onClick={() => void refreshRuns()}>刷新执行状态</Button>}</Space>
+        {detail.resource_type === 'PrometheusRule' && <Descriptions bordered column={1} size="small"><Descriptions.Item label="告警名">{detail.prometheus_rule_alert_name}</Descriptions.Item><Descriptions.Item label="Severity">{detail.prometheus_rule_severity}</Descriptions.Item><Descriptions.Item label="For">{detail.prometheus_rule_for}</Descriptions.Item><Descriptions.Item label="Owner">{detail.prometheus_rule_owner}</Descriptions.Item><Descriptions.Item label="Runbook">{detail.prometheus_rule_runbook_url}</Descriptions.Item><Descriptions.Item label="Summary">{detail.prometheus_rule_summary}</Descriptions.Item><Descriptions.Item label="Description">{detail.prometheus_rule_description}</Descriptions.Item><Descriptions.Item label="Expr"><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{detail.prometheus_rule_expr}</pre></Descriptions.Item></Descriptions>}
+        {detail.status === 'COMPLETED' && <Alert type="success" showIcon message="真实执行已完成" description={`Jenkins #${executions.find(e => e.mode === 'apply' && e.status === 'SUCCESS')?.build_number || '—'} 已成功完成。该申请已进入终态，不可再次预检、执行、撤回或重新提交。`} />}<Space wrap>{mine && detail.status === 'DRAFT' && !detail.mr_iid && !detail.commit_sha && <><Button type="primary" loading={executionLoading} onClick={() => void managedSubmit()}>创建 MR 并提交</Button>{detail.resource_type === 'ServiceMonitor' && <Button disabled={executionLoading} onClick={submit}>手工绑定 MR</Button>}</>}{mine && ['DRAFT','SUBMITTED','REJECTED'].includes(detail.status) && <Button onClick={() => void action('withdraw')}>撤回</Button>}{canApprove && !mine && detail.status === 'SUBMITTED' && <><Button type="primary" onClick={() => void action('approve')}>批准</Button><Button danger onClick={() => void action('reject')}>拒绝</Button></>}{detail.status === 'APPROVED' && <Button loading={executionLoading} onClick={() => void execution('preview')}>{detail.gitlab_merged_at ? '生成最终 Diff' : '确认合并并生成最终 Diff'}</Button>}{canApprove && !mine && detail.status === 'APPROVED' && <Button type="primary" danger disabled={!latestPreview} loading={executionLoading} onClick={() => void execution('apply')}>确认真实执行</Button>}{!['WITHDRAWN','COMPLETED'].includes(detail.status) && <Button loading={executionLoading} onClick={() => void refreshRuns()}>刷新执行状态</Button>}</Space>
         <Card size="small" title="Jenkins 受控执行">{executions.length ? <Space direction="vertical" style={{ width: '100%' }}>{executions.map(run => <Card key={run.id} size="small" title={`${run.mode === 'preview' ? '最终 Diff 预检' : '真实执行'} #${run.build_number || `队列 ${run.queue_id}`}`} extra={<Tag color={run.status === 'SUCCESS' ? 'success' : run.status === 'FAILURE' ? 'error' : 'processing'}>{run.status}</Tag>}><Text type="secondary">MR !{run.mr_iid} @ {run.commit_sha} · {beijingTime(run.created_at)}</Text>{run.diff_text && <><Paragraph strong style={{ marginTop: 12 }}>最终 server-side Diff（仅当前绑定 SHA 有效）</Paragraph><pre style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{run.diff_text}</pre></>}</Card>)}</Space> : <Text type="secondary">尚未生成最终 Diff。</Text>}</Card>
         <Card size="small" title="状态流转审计"><Steps direction="vertical" size="small" current={Math.max(0, (detail.events || []).length - 1)} items={(detail.events || []).map(e => ({ title: <><Text strong>{eventNames[e.event_type] || e.event_type}</Text>{e.to_status && <Tag color={colors[e.to_status as MonitoringRequestStatus]} style={{ marginInlineStart: 8 }}>{auditStatus(e.to_status)}</Tag>}</>, description: <>{auditStatus(e.from_status)} → {auditStatus(e.to_status)} · {e.actor_username} · {beijingTime(e.created_at)}{e.comment ? ` · ${e.comment}` : ''}</> }))} /></Card>
       </Space>}
@@ -91,6 +115,36 @@ function SubmitForm({ onDone }: { onDone: (data: { mrIid: number; commitSha: str
     <Form.Item name="commitSha" label="Commit SHA" rules={[{ required: true, pattern: /^[a-f0-9]{40}$/i, message: '需要完整 40 位 SHA' }]}><Input /></Form.Item>
     <Button htmlType="submit" type="primary" loading={submitting} disabled={submitting}>确认提交</Button>
   </Form>;
+}
+
+function PrometheusRuleFieldsForm() {
+  return <Space direction="vertical" style={{ width: '100%' }} size={0}>
+    <Alert type="warning" showIcon message="PrometheusRule 当前一期为固定模板" description="固定生成一个 `platform.<appId>.alerts` group 和单条 alert 规则；不支持 PodMonitor、任意 YAML 或 Alertmanager 路由修改。" style={{ marginBottom: 16 }} />
+    <Form.Item name={['prometheusRule', 'alertName']} label="告警名" rules={[{ required: true, pattern: /^[A-Z][A-Za-z0-9_:]{2,127}$/, message: '大写字母开头，仅允许字母、数字、下划线、冒号' }]}>
+      <Input placeholder="DashboardChainTestDown" />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'severity']} label="Severity" rules={[{ required: true }]}>
+      <Select options={['warning', 'critical'].map(value => ({ value }))} />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'forDuration']} label="触发持续时间" rules={[{ required: true, pattern: /^([1-9][0-9]*)(s|m|h|d|w)$/, message: '示例：5m、10m、1h' }]}>
+      <Input placeholder="5m" />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'owner']} label="Owner" rules={[{ required: true, max: 64 }]}>
+      <Input placeholder="platform-oncall" />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'runbookUrl']} label="Runbook URL" rules={[{ required: true, type: 'url', message: '请输入有效 URL' }]}>
+      <Input placeholder="https://runbook.example.com/dashboard-chain-test" />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'summary']} label="Summary" rules={[{ required: true, max: 240 }]}>
+      <Input />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'description']} label="Description" rules={[{ required: true, max: 1000 }]}>
+      <Input.TextArea rows={3} />
+    </Form.Item>
+    <Form.Item name={['prometheusRule', 'expr']} label="PromQL Expr" rules={[{ required: true, max: 600 }]}>
+      <Input.TextArea rows={5} placeholder={'kube_deployment_status_replicas_available{namespace="default",deployment="dashboard-chain-test"} < 1'} />
+    </Form.Item>
+  </Space>;
 }
 
 function FinalDiffConfirmation({ detail }: { detail: MonitoringRequest }) {

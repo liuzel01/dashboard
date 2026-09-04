@@ -1,23 +1,37 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, ValidationPipe } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { MonitoringRequestsService } from './monitoring-requests.service';
+import { MONITORING_CREATABLE_RESOURCE_TYPES, MONITORING_RESOURCE_TYPES, PROMETHEUS_RULE_SEVERITIES, type MonitoringCreatableResourceType, type MonitoringResourceType, type PrometheusRuleSeverity } from './monitoring-request-policy';
 
 const APP_ID = /^[a-z][a-z0-9-]{1,62}$/;
 const SHA = /^[a-f0-9]{40}$/i;
 const validation = new ValidationPipe({ transform: true, whitelist: true });
 
+class PrometheusRuleFieldsDto {
+  @IsString() @MaxLength(128) alertName!: string;
+  @IsString() @MaxLength(600) expr!: string;
+  @IsString() @MaxLength(16) forDuration!: string;
+  @IsIn(PROMETHEUS_RULE_SEVERITIES) severity!: PrometheusRuleSeverity;
+  @IsString() @MaxLength(240) summary!: string;
+  @IsString() @MaxLength(1000) description!: string;
+  @IsString() @MaxLength(64) owner!: string;
+  @IsString() @MaxLength(500) runbookUrl!: string;
+}
+
 class CreateRequestDto {
   @IsString() @Matches(APP_ID) appId!: string;
-  @IsIn(['ServiceMonitor', 'PodMonitor', 'PrometheusRule']) resourceType!: string;
-  @IsString() @Matches(APP_ID) resourceName!: string;
+  @IsIn(MONITORING_CREATABLE_RESOURCE_TYPES) resourceType!: MonitoringCreatableResourceType;
+  @ValidateIf((o) => o.resourceType !== 'PrometheusRule') @IsString() @Matches(APP_ID) resourceName?: string;
   @IsString() @MaxLength(1000) reason!: string;
+  @ValidateIf((o) => o.resourceType === 'PrometheusRule') @ValidateNested() @Type(() => PrometheusRuleFieldsDto) prometheusRule?: PrometheusRuleFieldsDto;
 }
 class UpdateDraftDto {
   @IsOptional() @IsString() @Matches(APP_ID) appId?: string;
-  @IsOptional() @IsIn(['ServiceMonitor', 'PodMonitor', 'PrometheusRule']) resourceType?: string;
+  @IsOptional() @IsIn(MONITORING_CREATABLE_RESOURCE_TYPES) resourceType?: MonitoringCreatableResourceType;
   @IsOptional() @IsString() @Matches(APP_ID) resourceName?: string;
   @IsOptional() @IsString() @MaxLength(1000) reason?: string;
+  @IsOptional() @ValidateNested() @Type(() => PrometheusRuleFieldsDto) prometheusRule?: PrometheusRuleFieldsDto;
 }
 class SubmitDto {
   @IsInt() @Min(1) mrIid!: number;
@@ -42,6 +56,7 @@ class DecisionDto {
 }
 class ListDto {
   @IsOptional() @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'COMPLETED', 'REJECTED', 'WITHDRAWN']) status?: string;
+  @IsOptional() @IsIn(MONITORING_RESOURCE_TYPES) resourceType?: MonitoringResourceType;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) pageSize?: number;
 }

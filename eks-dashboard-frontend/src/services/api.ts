@@ -1442,17 +1442,30 @@ export const createSslCertificateDecryptedDownload = async (data: { environmentI
 };
 
 export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
+export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
+export type MonitoringPrometheusRuleFields = {
+  alertName: string;
+  expr: string;
+  forDuration: string;
+  severity: 'warning' | 'critical';
+  summary: string;
+  description: string;
+  owner: string;
+  runbookUrl: string;
+};
 export type MonitoringRequest = {
-  request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
+  request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: MonitoringRequestResourceType;
   resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null; gitlab_merged_at?: string | null; gitlab_merge_commit_sha?: string | null;
+  prometheus_rule_alert_name?: string | null; prometheus_rule_expr?: string | null; prometheus_rule_for?: string | null; prometheus_rule_severity?: 'warning' | 'critical' | null;
+  prometheus_rule_summary?: string | null; prometheus_rule_description?: string | null; prometheus_rule_owner?: string | null; prometheus_rule_runbook_url?: string | null;
   requester_user_id: number; requester_username?: string; requester_display_name?: string; approver_username?: string | null;
   approval_comment?: string | null; approved_at?: string | null; created_at: string; updated_at: string;
   events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
 };
 export const listMonitoringRequests = async (params: { status?: MonitoringRequestStatus; page?: number; pageSize?: number } = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
 export const getMonitoringRequest = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`)).data as MonitoringRequest;
-export const createMonitoringRequest = async (data: { appId: string; resourceType: string; resourceName: string; reason: string }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
-export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: string; resourceName: string; reason: string }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
+export const createMonitoringRequest = async (data: { appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
+export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
 export const submitMonitoringRequest = async (requestId: string, data: { mrIid: number; commitSha: string }) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/submit`, data)).data as MonitoringRequest;
 export const submitManagedMonitoringRequest = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/managed-submit`)).data as MonitoringRequest;
 export const decideMonitoringRequest = async (requestId: string, decision: 'approve' | 'reject', comment?: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/${decision}`, { comment })).data as MonitoringRequest;

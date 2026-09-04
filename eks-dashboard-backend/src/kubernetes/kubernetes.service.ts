@@ -13,6 +13,7 @@ interface K8sApis {
   kc: k8s.KubeConfig;
   k8sAppsV1Api: k8s.AppsV1Api;
   k8sCoreV1Api: k8s.CoreV1Api;
+  k8sCustomObjectsApi: k8s.CustomObjectsApi;
   k8sNetworkingV1Api: k8s.NetworkingV1Api;
   k8sLog: k8s.Log;
 }
@@ -82,40 +83,55 @@ export class KubernetesService {
     const user = kc.getCurrentUser();
 
     if (user?.exec?.command === 'aws') {
-      this.logger.debug(
-        `Configuring AWS credentials for Kubeconfig exec provider for env "${environmentId}".`,
+      // A kubeconfig exec stanza can carry its own explicit credentials (for
+      // example AWS_PROFILE).  Those credentials are part of the selected
+      // context and must not be silently replaced by a different Dashboard
+      // environment credential.  Replacing them may mint a valid EKS token
+      // for an IAM principal that is not authorized by this cluster.
+      const hasContextExecCredentials = (user.exec.env || []).some(
+        ({ name, value }) =>
+          Boolean(value) &&
+          ['AWS_PROFILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN'].includes(name),
       );
 
-      // Initialize with region, which is always needed.
-      const awsEnv: { name: string; value: string }[] = [
-        { name: 'AWS_REGION', value: env.aws_region },
-      ];
-
-      if (env.aws_access_key_id && env.aws_secret_access_key) {
-        this.logger.debug(`Using AWS access key for Kubeconfig.`);
-        awsEnv.push(
-          { name: 'AWS_ACCESS_KEY_ID', value: env.aws_access_key_id },
-          { name: 'AWS_SECRET_ACCESS_KEY', value: env.aws_secret_access_key },
-        );
-      } else if (env.aws_profile) {
+      if (hasContextExecCredentials) {
         this.logger.debug(
-          `Using AWS profile "${env.aws_profile}" for Kubeconfig.`,
+          `Preserving kubeconfig exec credentials for env "${environmentId}".`,
         );
-        awsEnv.push({ name: 'AWS_PROFILE', value: env.aws_profile });
       } else {
         this.logger.debug(
-          `Using default AWS credential provider chain for Kubeconfig.`,
+          `Configuring Dashboard environment credentials for Kubeconfig exec provider for env "${environmentId}".`,
         );
+        const awsEnv: { name: string; value: string }[] = [
+          { name: 'AWS_REGION', value: env.aws_region },
+        ];
+        if (env.aws_access_key_id && env.aws_secret_access_key) {
+          this.logger.debug(`Using AWS access key for Kubeconfig.`);
+          awsEnv.push(
+            { name: 'AWS_ACCESS_KEY_ID', value: env.aws_access_key_id },
+            { name: 'AWS_SECRET_ACCESS_KEY', value: env.aws_secret_access_key },
+          );
+        } else if (env.aws_profile) {
+          this.logger.debug(
+            `Using AWS profile "${env.aws_profile}" for Kubeconfig.`,
+          );
+          awsEnv.push({ name: 'AWS_PROFILE', value: env.aws_profile });
+        } else {
+          this.logger.debug(
+            `Using default AWS credential provider chain for Kubeconfig.`,
+          );
+        }
+        user.exec.env = awsEnv;
       }
-      user.exec.env = awsEnv;
     }
 
     const k8sAppsV1Api = kc.makeApiClient(k8s.AppsV1Api);
     const k8sCoreV1Api = kc.makeApiClient(k8s.CoreV1Api);
+    const k8sCustomObjectsApi = kc.makeApiClient(k8s.CustomObjectsApi);
     const k8sNetworkingV1Api = kc.makeApiClient(k8s.NetworkingV1Api);
     const k8sLog = new k8s.Log(kc);
 
-    const apis = { kc, k8sAppsV1Api, k8sCoreV1Api, k8sNetworkingV1Api, k8sLog };
+    const apis = { kc, k8sAppsV1Api, k8sCoreV1Api, k8sCustomObjectsApi, k8sNetworkingV1Api, k8sLog };
     this.k8sApiCache.set(environmentId, { fingerprint, apis });
 
     this.logger.log(
@@ -135,6 +151,30 @@ export class KubernetesService {
     const readyEndpoints = (endpoints.subsets || []).flatMap(subset => (subset.addresses || []).flatMap(address => (subset.ports || []).filter(port => port.name === portName).map(() => address.ip || address.hostname || 'ready')));
     if (!readyEndpoints.length) throw new Error(`matching Service has no Ready endpoints on port ${portName}`);
     return { serviceName, readyEndpointCount: readyEndpoints.length };
+  }
+
+  /** Read-only conflict probe for the fixed first-phase PrometheusRule template. */
+  async getPrometheusRuleConflicts(environmentId: string, namespace: string, resourceName: string, groupName: string, alertName: string) {
+    const { k8sCustomObjectsApi } = await this.getK8sApis(environmentId);
+    const { body } = await k8sCustomObjectsApi.listNamespacedCustomObject('monitoring.coreos.com', 'v1', namespace, 'prometheusrules');
+    const items = Array.isArray((body as any)?.items) ? (body as any).items : [];
+    const conflicts = { resourceName: '', groupName: '', alertName: '' };
+    for (const item of items) {
+      const currentName = String(item?.metadata?.name || '');
+      if (!conflicts.resourceName && currentName === resourceName) conflicts.resourceName = currentName;
+      const groups = Array.isArray(item?.spec?.groups) ? item.spec.groups : [];
+      for (const group of groups) {
+        const currentGroupName = String(group?.name || '');
+        if (!conflicts.groupName && currentGroupName === groupName) conflicts.groupName = currentGroupName;
+        const rules = Array.isArray(group?.rules) ? group.rules : [];
+        for (const rule of rules) {
+          const currentAlertName = String(rule?.alert || '');
+          if (!conflicts.alertName && currentAlertName === alertName) conflicts.alertName = currentAlertName;
+        }
+      }
+      if (conflicts.resourceName && conflicts.groupName && conflicts.alertName) break;
+    }
+    return conflicts;
   }
 
   async getDeployments(environmentId: string, namespace = 'default') {

@@ -7,12 +7,31 @@ import { PlatformDatabaseService } from '../access-control/platform-database.ser
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { defaultPrometheusRuleGroupName, defaultPrometheusRuleResourceName, normalizePrometheusRuleFields, renderPrometheusRuleYaml, type MonitoringCreatableResourceType, type MonitoringResourceType, type PrometheusRuleFields, validatePrometheusRuleFields } from './monitoring-request-policy';
 
 type Actor = { userId: number; username: string; permissions: string[] };
-type RequestInput = { appId: string; resourceType: string; resourceName: string; reason: string };
+type RequestInput = {
+  appId: string;
+  resourceType: MonitoringCreatableResourceType;
+  resourceName?: string;
+  reason: string;
+  prometheusRule?: Partial<PrometheusRuleFields>;
+};
+type StoredPrometheusRuleFields = {
+  prometheus_rule_alert_name: string;
+  prometheus_rule_expr: string;
+  prometheus_rule_for: string;
+  prometheus_rule_severity: string;
+  prometheus_rule_summary: string;
+  prometheus_rule_description: string;
+  prometheus_rule_owner: string;
+  prometheus_rule_runbook_url: string;
+};
 const MENU = 'menu:monitoring-requests';
 const APPROVE = 'monitoring-requests:approve';
 const MANAGE = 'monitoring-requests:manage';
+// Dashboard environment ID; KubernetesService resolves it to kubeconfig context "hash".
+const CONTROLLED_MONITORING_ENVIRONMENT_ID = 'hashex';
 const REAL_APPLY_MINUTES = 5;
 const REAL_APPLY_MAX_MINUTES = 30;
 const JENKINS_TIMEOUT_MIN_MS = 1_000;
@@ -60,22 +79,146 @@ export class MonitoringRequestsService {
   }
   private resourcePath(appId: string) { return `k8s-yaml/platform/environments/hash/apps/${appId}/monitoring/`; }
   private managedBranch(requestId: string) { return `platform/${requestId.toLowerCase()}`; }
-  private managedFilePath(row: any) { return `${this.resourcePath(String(row.app_id))}service-monitor.yaml`; }
+  private managedFilePath(row: { app_id: string; resource_type: MonitoringResourceType }) {
+    const fileName = row.resource_type === 'PrometheusRule' ? 'prometheus-rule.yaml' : 'service-monitor.yaml';
+    return `${this.resourcePath(String(row.app_id))}${fileName}`;
+  }
   private serviceMonitorYaml(row: any) {
     // First managed template: a conventional HTTP /metrics Service endpoint.
     // No user-provided YAML, paths, labels, or Git refs are accepted here.
     return `apiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: ${row.resource_name}\n  namespace: platform-monitoring\n  labels:\n    release: kube-prometheus-stack\n    app.kubernetes.io/name: ${row.app_id}\n    app.kubernetes.io/part-of: dashboard\nspec:\n  jobLabel: app.kubernetes.io/name\n  namespaceSelector:\n    matchNames:\n      - default\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: ${row.app_id}\n  endpoints:\n    - port: http\n      path: /metrics\n      scheme: http\n      interval: 30s\n      scrapeTimeout: 10s\n`;
   }
+  private prometheusRuleYaml(row: any) {
+    return renderPrometheusRuleYaml(row);
+  }
+  private managedYaml(row: any) {
+    return row.resource_type === 'PrometheusRule' ? this.prometheusRuleYaml(row) : this.serviceMonitorYaml(row);
+  }
   private async validateServiceMonitorTarget(row: any) {
     // The managed YAML has a fixed namespace, selector and endpoint port. Check the
     // live hash cluster before creating an MR and again immediately before merging.
     // This call is read-only; it never derives or mutates the Git-managed template.
-    try { return await this.kubernetes.getServiceMonitorTarget('hash', 'default', `app.kubernetes.io/name=${String(row.app_id)}`, 'http'); }
+    try { return await this.kubernetes.getServiceMonitorTarget(CONTROLLED_MONITORING_ENVIRONMENT_ID, 'default', `app.kubernetes.io/name=${String(row.app_id)}`, 'http'); }
     catch (err: any) {
       const detail = String(err?.message || 'unknown Kubernetes API error').slice(0, 500);
       if (detail.startsWith('expected exactly one matching Service') || detail.startsWith('matching Service')) throw new BadRequestException(`ServiceMonitor 目标 Service 不满足受控契约：${detail}`);
       throw new ServiceUnavailableException(`无法读取 hash 集群中的 ServiceMonitor 目标 Service：${detail}`);
     }
+  }
+  private normalizePrometheusRuleInput(appId: string, fields: Partial<PrometheusRuleFields> | undefined | null): StoredPrometheusRuleFields {
+    const normalized = normalizePrometheusRuleFields(fields);
+    try {
+      validatePrometheusRuleFields(appId, normalized);
+    } catch (err: any) {
+      throw new BadRequestException(String(err?.message || 'PrometheusRule 字段无效'));
+    }
+    return {
+      prometheus_rule_alert_name: normalized.alertName,
+      prometheus_rule_expr: normalized.expr,
+      prometheus_rule_for: normalized.forDuration,
+      prometheus_rule_severity: normalized.severity,
+      prometheus_rule_summary: normalized.summary,
+      prometheus_rule_description: normalized.description,
+      prometheus_rule_owner: normalized.owner,
+      prometheus_rule_runbook_url: normalized.runbookUrl,
+    };
+  }
+  private normalizeCreateInput(input: RequestInput) {
+    this.requireNonBlank(input.reason, '申请说明');
+    if (input.resourceType === 'PrometheusRule') {
+      return {
+        appId: input.appId,
+        resourceType: input.resourceType,
+        resourceName: defaultPrometheusRuleResourceName(input.appId),
+        reason: input.reason.trim(),
+        ...this.normalizePrometheusRuleInput(input.appId, input.prometheusRule),
+      };
+    }
+    this.requireNonBlank(String(input.resourceName || ''), '资源名称');
+    return {
+      appId: input.appId,
+      resourceType: input.resourceType,
+      resourceName: String(input.resourceName).trim(),
+      reason: input.reason.trim(),
+      prometheus_rule_alert_name: null,
+      prometheus_rule_expr: null,
+      prometheus_rule_for: null,
+      prometheus_rule_severity: null,
+      prometheus_rule_summary: null,
+      prometheus_rule_description: null,
+      prometheus_rule_owner: null,
+      prometheus_rule_runbook_url: null,
+    };
+  }
+  private normalizeUpdateInput(row: any, input: Partial<RequestInput>) {
+    const appId = String(input.appId || row.app_id);
+    const resourceType = String(input.resourceType || row.resource_type) as MonitoringCreatableResourceType;
+    const reason = input.reason?.trim() || row.reason;
+    this.requireNonBlank(reason, '申请说明');
+    if (resourceType === 'PrometheusRule') {
+      const current = {
+        alertName: row.prometheus_rule_alert_name,
+        expr: row.prometheus_rule_expr,
+        forDuration: row.prometheus_rule_for,
+        severity: row.prometheus_rule_severity,
+        summary: row.prometheus_rule_summary,
+        description: row.prometheus_rule_description,
+        owner: row.prometheus_rule_owner,
+        runbookUrl: row.prometheus_rule_runbook_url,
+      };
+      return {
+        appId,
+        resourceType,
+        resourceName: defaultPrometheusRuleResourceName(appId),
+        reason,
+        ...this.normalizePrometheusRuleInput(appId, { ...current, ...(input.prometheusRule || {}) }),
+      };
+    }
+    const resourceName = String(input.resourceName || row.resource_name).trim();
+    this.requireNonBlank(resourceName, '资源名称');
+    return {
+      appId,
+      resourceType,
+      resourceName,
+      reason,
+      prometheus_rule_alert_name: null,
+      prometheus_rule_expr: null,
+      prometheus_rule_for: null,
+      prometheus_rule_severity: null,
+      prometheus_rule_summary: null,
+      prometheus_rule_description: null,
+      prometheus_rule_owner: null,
+      prometheus_rule_runbook_url: null,
+    };
+  }
+  private async validatePrometheusRuleTarget(row: any) {
+    try {
+      const conflicts = await this.kubernetes.getPrometheusRuleConflicts(
+        CONTROLLED_MONITORING_ENVIRONMENT_ID,
+        'platform-monitoring',
+        String(row.resource_name),
+        defaultPrometheusRuleGroupName(String(row.app_id)),
+        String(row.prometheus_rule_alert_name),
+      );
+      if (conflicts.resourceName || conflicts.groupName || conflicts.alertName) {
+        throw new BadRequestException(
+          `PrometheusRule 命中现有冲突：${[
+            conflicts.resourceName ? `资源名=${conflicts.resourceName}` : '',
+            conflicts.groupName ? `group=${conflicts.groupName}` : '',
+            conflicts.alertName ? `alert=${conflicts.alertName}` : '',
+          ].filter(Boolean).join('，')}`,
+        );
+      }
+    } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
+      const detail = String(err?.message || 'unknown Kubernetes API error').slice(0, 500);
+      throw new ServiceUnavailableException(`无法读取 hash 集群中的 PrometheusRule 状态：${detail}`);
+    }
+  }
+  private async validateManagedResource(row: any) {
+    if (row.resource_type === 'PrometheusRule') return this.validatePrometheusRuleTarget(row);
+    if (row.resource_type === 'ServiceMonitor') return this.validateServiceMonitorTarget(row);
+    throw new BadRequestException(`当前不支持受控发布资源类型 ${row.resource_type}`);
   }
   private requireNonBlank(value: string, field: string) {
     if (!value || !value.trim()) throw new BadRequestException(`${field}不能为空`);
@@ -93,6 +236,7 @@ export class MonitoringRequestsService {
     const where: string[] = []; const values: any[] = [];
     if (!this.can(actor, APPROVE) && !this.can(actor, MANAGE)) { where.push('r.requester_user_id=?'); values.push(actor.userId); }
     if (query.status) { where.push('r.status=?'); values.push(query.status); }
+    if (query.resourceType) { where.push('r.resource_type=?'); values.push(query.resourceType); }
     const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const total = await this.db.query<any[]>(`SELECT COUNT(*) total FROM monitoring_requests r ${sql}`, values);
     const items = await this.db.query<any[]>(`SELECT r.*,u.username requester_username,u.display_name requester_display_name,au.username approver_username FROM monitoring_requests r JOIN users u ON u.id=r.requester_user_id LEFT JOIN users au ON au.id=r.approver_user_id ${sql} ORDER BY r.updated_at DESC LIMIT ? OFFSET ?`, [...values, pageSize, (page - 1) * pageSize]);
@@ -100,19 +244,40 @@ export class MonitoringRequestsService {
   }
   async get(auth: string | undefined, requestId: string) { const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor,row); return row; }
   async create(auth: string | undefined, input: RequestInput) {
-    this.requireNonBlank(input.reason, '申请说明');
+    const normalized = this.normalizeCreateInput(input);
     const actor = await this.actor(auth); const requestId = `HASH-MON-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
-    await this.db.query('INSERT INTO monitoring_requests (request_id,status,requester_user_id,app_id,resource_type,resource_name,resource_path,reason,created_at,updated_at) VALUES (?,\'DRAFT\',?,?,?,?,?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())', [requestId,actor.userId,input.appId,input.resourceType,input.resourceName,this.resourcePath(input.appId),input.reason.trim()]);
+    await this.db.query(`INSERT INTO monitoring_requests (
+      request_id,status,requester_user_id,app_id,resource_type,resource_name,resource_path,reason,
+      prometheus_rule_alert_name,prometheus_rule_expr,prometheus_rule_for,prometheus_rule_severity,
+      prometheus_rule_summary,prometheus_rule_description,prometheus_rule_owner,prometheus_rule_runbook_url,
+      created_at,updated_at
+    ) VALUES (?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [
+      requestId, actor.userId, normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId), normalized.reason,
+      normalized.prometheus_rule_alert_name, normalized.prometheus_rule_expr, normalized.prometheus_rule_for, normalized.prometheus_rule_severity,
+      normalized.prometheus_rule_summary, normalized.prometheus_rule_description, normalized.prometheus_rule_owner, normalized.prometheus_rule_runbook_url,
+    ]);
     await this.event(requestId,actor,'CREATED',null,'DRAFT'); return this.read(requestId);
   }
   async updateDraft(auth: string | undefined, requestId: string, input: Partial<RequestInput>) {
     const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || row.status !== 'DRAFT') throw new ForbiddenException('仅申请人可编辑草稿');
-    const appId = input.appId || row.app_id; await this.db.query('UPDATE monitoring_requests SET app_id=?,resource_type=?,resource_name=?,resource_path=?,reason=?,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [appId,input.resourceType || row.resource_type,input.resourceName || row.resource_name,this.resourcePath(appId),input.reason?.trim() || row.reason,requestId]);
+    const normalized = this.normalizeUpdateInput(row, input);
+    await this.db.query(`UPDATE monitoring_requests SET
+      app_id=?,resource_type=?,resource_name=?,resource_path=?,reason=?,
+      prometheus_rule_alert_name=?,prometheus_rule_expr=?,prometheus_rule_for=?,prometheus_rule_severity=?,
+      prometheus_rule_summary=?,prometheus_rule_description=?,prometheus_rule_owner=?,prometheus_rule_runbook_url=?,
+      updated_at=UTC_TIMESTAMP()
+      WHERE request_id=?`, [
+      normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId), normalized.reason,
+      normalized.prometheus_rule_alert_name, normalized.prometheus_rule_expr, normalized.prometheus_rule_for, normalized.prometheus_rule_severity,
+      normalized.prometheus_rule_summary, normalized.prometheus_rule_description, normalized.prometheus_rule_owner, normalized.prometheus_rule_runbook_url,
+      requestId,
+    ]);
     await this.event(requestId,actor,'DRAFT_UPDATED','DRAFT','DRAFT'); return this.read(requestId);
   }
   async submit(auth: string | undefined, requestId: string, input: { mrIid:number; commitSha:string }) {
     if (!Number.isInteger(input.mrIid) || input.mrIid < 1 || !/^[a-f0-9]{40}$/i.test(input.commitSha)) throw new BadRequestException('MR IID 或 Commit SHA 无效');
     const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || row.status !== 'DRAFT' || row.mr_iid || row.commit_sha) throw new ForbiddenException('当前状态不可提交');
+    if (row.resource_type === 'PrometheusRule') throw new BadRequestException('PrometheusRule 一期仅允许 Dashboard 托管生成固定 YAML 与受控 MR，不支持手工绑定');
     await this.db.query('UPDATE monitoring_requests SET status=\'SUBMITTED\',mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [input.mrIid,input.commitSha.toLowerCase(),requestId]);
     await this.event(requestId,actor,'SUBMITTED',row.status,'SUBMITTED'); return this.read(requestId);
   }
@@ -120,11 +285,16 @@ export class MonitoringRequestsService {
     const actor = await this.actor(auth); const row = await this.read(requestId);
     if (!this.owns(actor, row) || row.status !== 'DRAFT') throw new ForbiddenException('当前状态不可提交');
     if (row.mr_iid || row.commit_sha) throw new BadRequestException('该申请已绑定 GitLab MR；请使用手工绑定流程继续处理');
-    if (row.resource_type !== 'ServiceMonitor') throw new BadRequestException('Dashboard 托管 MR 创建一期仅支持 ServiceMonitor');
-    await this.validateServiceMonitorTarget(row);
+    if (!['ServiceMonitor', 'PrometheusRule'].includes(String(row.resource_type))) throw new BadRequestException('Dashboard 托管 MR 创建当前仅支持 ServiceMonitor 与 PrometheusRule');
+    await this.validateManagedResource(row);
     const config = await this.gitlabMergeConfig();
     if (!config.enabled) throw new ServiceUnavailableException('GitLab 托管 MR 创建未启用');
-    const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row); const yaml = this.serviceMonitorYaml(row);
+    const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row); const yaml = this.managedYaml(row);
+    if (row.resource_type === 'PrometheusRule') {
+      const existingFile = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(config.targetBranch)}`);
+      if (existingFile.status === 200) throw new BadRequestException('目标分支已存在该应用的受控 PrometheusRule 文件；一期不允许覆盖');
+      if (existingFile.status !== 404) throw new ServiceUnavailableException('无法读取 GitLab 目标分支中的 PrometheusRule 文件状态');
+    }
     const base = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(config.targetBranch)}`);
     const baseSha = String(base.data?.commit?.id || '').toLowerCase();
     if (base.status !== 200 || !/^[a-f0-9]{40}$/.test(baseSha)) throw new ServiceUnavailableException('无法读取 GitLab 目标分支基线');
@@ -407,7 +577,7 @@ export class MonitoringRequestsService {
     const actor = await this.actor(auth); let row = await this.read(requestId); this.assertRead(actor, row);
     if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
     const gitlab = await this.gitlabMergeConfig();
-    if (mode === 'preview') await this.validateServiceMonitorTarget(row);
+    if (mode === 'preview') await this.validateManagedResource(row);
     if (gitlab.enabled && mode === 'preview' && (!row.gitlab_merged_at || String(row.gitlab_merge_commit_sha || '').toLowerCase() !== String(row.commit_sha).toLowerCase())) {
       const merged = await this.mergeApprovedRequest(row, actor);
       await this.db.query('UPDATE monitoring_requests SET commit_sha=?,gitlab_merged_at=?,gitlab_merge_commit_sha=?,gitlab_merge_error=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [merged.commit_sha, merged.gitlab_merged_at, merged.gitlab_merge_commit_sha, requestId]);
