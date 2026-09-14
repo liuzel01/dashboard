@@ -54,6 +54,8 @@ rollback() {
 trap rollback ERR
 
 start_current_release() {
+  mkdir -p "$CURRENT_LINK/eks-dashboard-backend/logs" "$CURRENT_LINK/eks-dashboard-frontend/logs"
+  chown root:root "$CURRENT_LINK/eks-dashboard-backend/logs" "$CURRENT_LINK/eks-dashboard-frontend/logs"
   for app in eks-dashboard-backend eks-dashboard-frontend; do
     pm2 delete "$app" --namespace prod >/dev/null 2>&1 || true
   done
@@ -90,6 +92,8 @@ RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
 rm -rf "$RELEASE_DIR"
 mv "$STAGED_DIR" "$RELEASE_DIR"
 chown -R root:root "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR/eks-dashboard-backend/logs" "$RELEASE_DIR/eks-dashboard-frontend/logs"
+chown root:root "$RELEASE_DIR/eks-dashboard-backend/logs" "$RELEASE_DIR/eks-dashboard-frontend/logs"
 
 echo "[deploy] installing production backend dependencies"
 (cd "$RELEASE_DIR/eks-dashboard-backend" && npm ci --omit=dev)
@@ -106,10 +110,30 @@ start_current_release
 sleep 3
 pm2 describe eks-dashboard-backend --namespace prod >/dev/null
 pm2 describe eks-dashboard-frontend --namespace prod >/dev/null
-# The Nest root route currently returns 404 by design; a completed HTTP
-# response still proves the backend listener is alive. Frontend must serve 2xx.
-curl -sS --max-time 10 -o /dev/null http://127.0.0.1:3000/
-curl -fsS --max-time 10 -o /dev/null http://127.0.0.1:5173/
+
+wait_for_http() {
+  local url="$1"
+  local mode="${2:-any}"
+  local attempts=30
+  local status
+  while (( attempts > 0 )); do
+    if [[ "$mode" == "success" ]]; then
+      curl -fsS --max-time 3 -o /dev/null "$url" && return 0
+    else
+      # The Nest root route currently returns 404 by design; any completed
+      # HTTP response still proves that the backend listener is alive.
+      status=$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' "$url" || true)
+      [[ "$status" =~ ^[0-9]{3}$ ]] && return 0
+    fi
+    attempts=$((attempts - 1))
+    sleep 2
+  done
+  echo "[deploy] health check timed out: $url" >&2
+  return 1
+}
+
+wait_for_http http://127.0.0.1:3000/
+wait_for_http http://127.0.0.1:5173/ success
 
 echo "[deploy] release $RELEASE_ID is healthy"
 trap - ERR
