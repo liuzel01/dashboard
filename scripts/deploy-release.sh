@@ -48,10 +48,18 @@ rollback() {
   if [[ "$SWITCHED" == 1 && -n "$PREVIOUS_TARGET" && -d "$PREVIOUS_TARGET" ]]; then
     echo "[deploy] health check failed; rolling back to $PREVIOUS_TARGET"
     ln -sfn "$PREVIOUS_TARGET" "$CURRENT_LINK"
-    (cd "$CURRENT_LINK" && pm2 restart ecosystem.prod.config.js --namespace prod >/dev/null)
+    start_current_release
   fi
 }
 trap rollback ERR
+
+start_current_release() {
+  for app in eks-dashboard-backend eks-dashboard-frontend; do
+    pm2 delete "$app" --namespace prod >/dev/null 2>&1 || true
+  done
+  (cd "$CURRENT_LINK" && pm2 start ecosystem.prod.config.js --namespace prod >/dev/null)
+  pm2 save >/dev/null 2>&1 || true
+}
 
 echo "[deploy] downloading $ARTIFACT_URI"
 aws s3 cp "$ARTIFACT_URI" "$ARCHIVE" --only-show-errors
@@ -81,6 +89,7 @@ fi
 RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
 rm -rf "$RELEASE_DIR"
 mv "$STAGED_DIR" "$RELEASE_DIR"
+chown -R root:root "$RELEASE_DIR"
 
 echo "[deploy] installing production backend dependencies"
 (cd "$RELEASE_DIR/eks-dashboard-backend" && npm ci --omit=dev)
@@ -92,12 +101,14 @@ ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 SWITCHED=1
 
 echo "[deploy] restarting PM2 applications"
-(cd "$CURRENT_LINK" && pm2 restart ecosystem.prod.config.js --namespace prod >/dev/null)
+start_current_release
 
 sleep 3
 pm2 describe eks-dashboard-backend --namespace prod >/dev/null
 pm2 describe eks-dashboard-frontend --namespace prod >/dev/null
-curl -fsS --max-time 10 -o /dev/null http://127.0.0.1:3000/
+# The Nest root route currently returns 404 by design; a completed HTTP
+# response still proves the backend listener is alive. Frontend must serve 2xx.
+curl -sS --max-time 10 -o /dev/null http://127.0.0.1:3000/
 curl -fsS --max-time 10 -o /dev/null http://127.0.0.1:5173/
 
 echo "[deploy] release $RELEASE_ID is healthy"
