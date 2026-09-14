@@ -75,6 +75,16 @@ const createService = (overrides?: Record<string, string>) => {
     getEnvironmentById: jest.fn(() => envConfig),
   };
   const siteConf = {
+    getString: jest.fn(async (key: string, fallback: string) => {
+      const envKeyBySiteConfKey: Record<string, string> = {
+        'aiops.llm.provider': 'AIOPS_LLM_PROVIDER',
+        'aiops.openclaw.base_url': 'AIOPS_OPENCLAW_BASE_URL',
+        'aiops.openclaw.token': 'AIOPS_OPENCLAW_TOKEN',
+        'aiops.openclaw.model': 'AIOPS_OPENCLAW_MODEL',
+        'aiops.nl2sql.fewshot_cases_path': 'AIOPS_NL2SQL_FEWSHOT_CASES_PATH',
+      };
+      return configValues[envKeyBySiteConfKey[key]] ?? fallback;
+    }),
     getNumber: jest.fn(async (key: string, fallback: number) => fallback),
   };
 
