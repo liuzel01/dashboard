@@ -72,6 +72,8 @@ tar -xzf "$ARCHIVE" -C "$STAGED_DIR"
 [[ -f "$STAGED_DIR/ecosystem.prod.config.js" ]] || { echo "[deploy] missing ecosystem config" >&2; exit 1; }
 [[ -d "$STAGED_DIR/eks-dashboard-backend/dist" ]] || { echo "[deploy] missing backend build" >&2; exit 1; }
 [[ -d "$STAGED_DIR/eks-dashboard-frontend/dist" ]] || { echo "[deploy] missing frontend build" >&2; exit 1; }
+[[ -f "$STAGED_DIR/eks-dashboard-frontend/package.json" ]] || { echo "[deploy] missing frontend package manifest" >&2; exit 1; }
+[[ -f "$STAGED_DIR/eks-dashboard-frontend/package-lock.json" ]] || { echo "[deploy] missing frontend lockfile" >&2; exit 1; }
 
 # Carry host-only runtime configuration into the release.
 RUNTIME_BACKEND_DIR="$CURRENT_LINK/eks-dashboard-backend"
@@ -97,6 +99,8 @@ chown root:root "$RELEASE_DIR/eks-dashboard-backend/logs" "$RELEASE_DIR/eks-dash
 
 echo "[deploy] installing production backend dependencies"
 (cd "$RELEASE_DIR/eks-dashboard-backend" && npm ci --omit=dev)
+echo "[deploy] installing frontend preview dependencies"
+(cd "$RELEASE_DIR/eks-dashboard-frontend" && npm ci)
 
 if [[ -L "$CURRENT_LINK" || -e "$CURRENT_LINK" ]]; then
   PREVIOUS_TARGET=$(readlink -f "$CURRENT_LINK")

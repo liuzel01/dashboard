@@ -60,6 +60,7 @@ jobs:
           cp -a eks-dashboard-backend/dist build-release/eks-dashboard-backend/
           cp eks-dashboard-backend/package.json eks-dashboard-backend/package-lock.json build-release/eks-dashboard-backend/
           cp -a eks-dashboard-frontend/dist build-release/eks-dashboard-frontend/
+          cp eks-dashboard-frontend/package.json eks-dashboard-frontend/package-lock.json build-release/eks-dashboard-frontend/
           cp ecosystem.prod.config.js build-release/
           tar -czf "dashboard-${RELEASE_ID}.tar.gz" -C build-release .
           SHA256=$(sha256sum "dashboard-${RELEASE_ID}.tar.gz" | awk '{print $1}')
