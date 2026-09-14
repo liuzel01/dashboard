@@ -9,6 +9,8 @@ module.exports = {
       merge_logs: true,
       env: {
         NODE_ENV: 'production',
+        KUBECONFIG: '/root/.kube/config',
+        HOME: '/root',
       },
       error_file: 'logs/pm2-err.log',
       out_file: 'logs/pm2-out.log',
