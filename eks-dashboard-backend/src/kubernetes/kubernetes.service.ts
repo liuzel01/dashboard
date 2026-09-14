@@ -9,6 +9,19 @@ import { spawn } from 'node:child_process';
 const RESTART_ANNOTATION = 'kubectl.kubernetes.io/restartedAt';
 const DEPLOYMENT_REVISION_ANNOTATION = 'deployment.kubernetes.io/revision';
 
+// Kubernetes contexts select a cluster; they must not select a static AWS
+// credential source.  EKS exec authentication on the production Dashboard is
+// intentionally backed by the host's default credential chain (the EC2
+// instance profile), with EKS Access Entries providing Kubernetes access.
+const AWS_STATIC_CREDENTIAL_EXEC_ENV_NAMES = new Set([
+  'AWS_PROFILE',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_SHARED_CREDENTIALS_FILE',
+  'AWS_CONFIG_FILE',
+]);
+
 interface K8sApis {
   kc: k8s.KubeConfig;
   k8sAppsV1Api: k8s.AppsV1Api;
@@ -34,10 +47,51 @@ export class KubernetesService {
     return [
       env.kubeContext || '',
       env.aws_region || '',
-      env.aws_profile || '',
-      env.aws_access_key_id || '',
-      env.aws_secret_access_key || '',
     ].join('|');
+  }
+
+  private configureEksExecForHostRole(
+    environmentId: string,
+    exec: NonNullable<k8s.User['exec']>,
+    region: string,
+  ) {
+    const originalEnv = exec.env || [];
+    const sanitizedEnv = originalEnv.filter(
+      ({ name }) => !AWS_STATIC_CREDENTIAL_EXEC_ENV_NAMES.has(name),
+    );
+    const removedEnvNames = originalEnv
+      .filter(({ name }) => AWS_STATIC_CREDENTIAL_EXEC_ENV_NAMES.has(name))
+      .map(({ name }) => name);
+
+    const originalArgs = exec.args || [];
+    const sanitizedArgs = originalArgs.filter(
+      (arg, index) =>
+        arg !== '--profile' &&
+        originalArgs[index - 1] !== '--profile' &&
+        !arg.startsWith('--profile='),
+    );
+    const removedProfileArg = sanitizedArgs.length !== originalArgs.length;
+
+    // Region is cluster metadata rather than a credential. It keeps token
+    // generation deterministic while the AWS CLI resolves credentials from
+    // the host's default chain (EC2 instance profile in production).
+    exec.args = sanitizedArgs;
+    exec.env = [
+      ...sanitizedEnv.filter(({ name }) => name !== 'AWS_REGION'),
+      { name: 'AWS_REGION', value: region },
+    ];
+
+    if (removedEnvNames.length || removedProfileArg) {
+      this.logger.warn(
+        `Ignoring static AWS credential selection in kubeconfig exec for env "${environmentId}": ${[
+          ...removedEnvNames,
+          ...(removedProfileArg ? ['--profile'] : []),
+        ].join(', ')}`,
+      );
+    }
+    this.logger.debug(
+      `Using the host default AWS credential chain for Kubeconfig exec provider for env "${environmentId}".`,
+    );
   }
 
   private async getK8sApis(environmentId: string): Promise<K8sApis> {
@@ -83,46 +137,7 @@ export class KubernetesService {
     const user = kc.getCurrentUser();
 
     if (user?.exec?.command === 'aws') {
-      // A kubeconfig exec stanza can carry its own explicit credentials (for
-      // example AWS_PROFILE).  Those credentials are part of the selected
-      // context and must not be silently replaced by a different Dashboard
-      // environment credential.  Replacing them may mint a valid EKS token
-      // for an IAM principal that is not authorized by this cluster.
-      const hasContextExecCredentials = (user.exec.env || []).some(
-        ({ name, value }) =>
-          Boolean(value) &&
-          ['AWS_PROFILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN'].includes(name),
-      );
-
-      if (hasContextExecCredentials) {
-        this.logger.debug(
-          `Preserving kubeconfig exec credentials for env "${environmentId}".`,
-        );
-      } else {
-        this.logger.debug(
-          `Configuring Dashboard environment credentials for Kubeconfig exec provider for env "${environmentId}".`,
-        );
-        const awsEnv: { name: string; value: string }[] = [
-          { name: 'AWS_REGION', value: env.aws_region },
-        ];
-        if (env.aws_access_key_id && env.aws_secret_access_key) {
-          this.logger.debug(`Using AWS access key for Kubeconfig.`);
-          awsEnv.push(
-            { name: 'AWS_ACCESS_KEY_ID', value: env.aws_access_key_id },
-            { name: 'AWS_SECRET_ACCESS_KEY', value: env.aws_secret_access_key },
-          );
-        } else if (env.aws_profile) {
-          this.logger.debug(
-            `Using AWS profile "${env.aws_profile}" for Kubeconfig.`,
-          );
-          awsEnv.push({ name: 'AWS_PROFILE', value: env.aws_profile });
-        } else {
-          this.logger.debug(
-            `Using default AWS credential provider chain for Kubeconfig.`,
-          );
-        }
-        user.exec.env = awsEnv;
-      }
+      this.configureEksExecForHostRole(environmentId, user.exec, env.aws_region);
     }
 
     const k8sAppsV1Api = kc.makeApiClient(k8s.AppsV1Api);
