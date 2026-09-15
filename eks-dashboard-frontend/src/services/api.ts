@@ -97,7 +97,11 @@ export const getDeploymentImageHistory = async (name: string): Promise<Deploymen
 export const rollbackDeploymentImages = async (name: string, images: DeploymentImage[]) => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   const response = await api.post(`/deployments/${encodeURIComponent(name)}/rollback-images`, { images });
-  return response.data as { targetGeneration?: number | null };
+  return response.data as {
+    previousImages: DeploymentImage[];
+    targetImages: DeploymentImage[];
+    targetGeneration?: number | null;
+  };
 };
 
 export const getDeploymentRolloutStatus = async (

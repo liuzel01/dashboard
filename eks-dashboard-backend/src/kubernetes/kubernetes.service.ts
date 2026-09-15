@@ -22,14 +22,9 @@ const AWS_STATIC_CREDENTIAL_EXEC_ENV_NAMES = new Set([
   'AWS_CONFIG_FILE',
 ]);
 
-const ROLLOUT_FAILURE_WAITING_REASONS = new Set([
-  'ErrImagePull',
-  'ImagePullBackOff',
-  'CreateContainerConfigError',
-  'CreateContainerError',
-  'CrashLoopBackOff',
-  'RunContainerError',
-  'InvalidImageName',
+const NORMAL_CONTAINER_WAITING_REASONS = new Set([
+  'ContainerCreating',
+  'PodInitializing',
 ]);
 
 const toIsoTimestamp = (value?: Date): string | undefined =>
@@ -416,16 +411,56 @@ export class KubernetesService {
       timestamp?: string;
     }> = [];
 
+    const isPodReady = (pod: k8s.V1Pod) =>
+      pod.status?.conditions?.some(
+        (condition) => condition.type === 'Ready' && condition.status === 'True',
+      ) || false;
+
     for (const pod of rolloutPods) {
-      for (const status of pod.status?.containerStatuses || []) {
+      const podName = pod.metadata?.name;
+      const podStatuses = [
+        ...(pod.status?.initContainerStatuses || []),
+        ...(pod.status?.containerStatuses || []),
+      ];
+      for (const status of podStatuses) {
         const waiting = status.state?.waiting;
-        if (waiting?.reason && ROLLOUT_FAILURE_WAITING_REASONS.has(waiting.reason)) {
+        if (waiting?.reason && !NORMAL_CONTAINER_WAITING_REASONS.has(waiting.reason)) {
           diagnostics.push({
             source: 'container',
             reason: waiting.reason,
             message: waiting.message || waiting.reason,
-            pod: pod.metadata?.name,
+            pod: podName,
             container: status.name,
+          });
+        }
+        const terminated = status.state?.terminated;
+        if (terminated && terminated.exitCode !== 0) {
+          diagnostics.push({
+            source: 'container',
+            reason: terminated.reason || 'ContainerTerminated',
+            message: terminated.message || `Container exited with code ${terminated.exitCode}.`,
+            pod: podName,
+            container: status.name,
+            timestamp: toIsoTimestamp(terminated.finishedAt),
+          });
+        }
+      }
+      if (pod.status?.phase === 'Failed') {
+        diagnostics.push({
+          source: 'container',
+          reason: pod.status.reason || 'PodFailed',
+          message: pod.status.message || 'Pod entered Failed phase.',
+          pod: podName,
+        });
+      }
+      for (const condition of pod.status?.conditions || []) {
+        if (condition.type === 'PodScheduled' && condition.status === 'False' && condition.reason) {
+          diagnostics.push({
+            source: 'container',
+            reason: condition.reason,
+            message: condition.message || `Pod condition ${condition.type} is False.`,
+            pod: podName,
+            timestamp: toIsoTimestamp(condition.lastTransitionTime),
           });
         }
       }
@@ -438,7 +473,8 @@ export class KubernetesService {
         .filter((event) =>
           event.type === 'Warning' &&
           event.involvedObject?.uid &&
-          rolloutPodUids.has(event.involvedObject.uid),
+          rolloutPodUids.has(event.involvedObject.uid) &&
+          !isPodReady(rolloutPods.find((pod) => pod.metadata?.uid === event.involvedObject?.uid)!),
         )
         .sort((left, right) => {
           const leftTime = (left.eventTime || left.lastTimestamp || left.firstTimestamp)?.getTime() || 0;

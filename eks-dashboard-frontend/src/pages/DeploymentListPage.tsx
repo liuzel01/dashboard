@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useContext, useRef } from 'rea
 import { Table, Input, Button, App, Spin, Space, Alert, Tag, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
-import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImageHistory } from '../services/api';
+import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
 // 定义 Deployment 对象的接口
@@ -26,6 +26,14 @@ interface Deployment {
 }
 
 type RolloutPhase = 'completed' | 'in_progress' | 'failed' | 'unknown';
+type OperationName = '重启' | '镜像回退' | '故障回退';
+type RolloutOperationState = {
+  phase: 'completed' | 'progressing' | 'failed';
+  operationName: OperationName;
+  diagnostics: DeploymentRolloutDiagnostic[];
+  previousImages?: DeploymentImage[];
+};
+type RecoveryRequest = { deploymentName: string; previousImages: DeploymentImage[] };
 
 const getRolloutPhase = (deployment: Deployment): RolloutPhase => {
   const desired = deployment.replicas ?? 0;
@@ -96,6 +104,8 @@ const DeploymentListPage: React.FC = () => {
   const [selectedImageVersionId, setSelectedImageVersionId] = useState<string | null>(null);
   const [rollbackConfirmation, setRollbackConfirmation] = useState('');
   const [rollingBack, setRollingBack] = useState(false);
+  const [rolloutOperations, setRolloutOperations] = useState<Record<string, RolloutOperationState>>({});
+  const [recoveryRequest, setRecoveryRequest] = useState<RecoveryRequest | null>(null);
 
   // 日志查看器弹窗的状态
   const [logViewerVisible, setLogViewerVisible] = useState(false);
@@ -146,6 +156,7 @@ const DeploymentListPage: React.FC = () => {
       return;
     }
     setAllDeployments([]);
+    setRolloutOperations({});
   }, [fetchDeployments, currentEnvironment, filter]);
 
   // “查看日志”按钮点击处理
@@ -161,8 +172,10 @@ const DeploymentListPage: React.FC = () => {
   const trackRolloutProgress = useCallback(
     async (
       deploymentName: string,
-      operationName: '重启' | '镜像回退',
+      operationName: OperationName,
       targetGeneration?: number | null,
+      previousImages?: DeploymentImage[],
+      offerRecovery = false,
     ) => {
       let finalDeployment: Deployment | undefined;
       let finalPhase: 'completed' | 'progressing' | 'failed' = 'progressing';
@@ -177,11 +190,20 @@ const DeploymentListPage: React.FC = () => {
           finalDeployment = target;
           setAllDeployments((prev) =>
             prev.map((item) =>
-              item.name === deploymentName ? target : item,
+              item.name === deploymentName ? { ...item, ...target } : item,
             ),
           );
           finalPhase = status.phase;
           failureMessage = status.diagnostics[0]?.message || status.diagnostics[0]?.reason || '';
+          setRolloutOperations((prev) => ({
+            ...prev,
+            [deploymentName]: {
+              phase: status.phase,
+              operationName,
+              diagnostics: status.diagnostics,
+              previousImages,
+            },
+          }));
           if (finalPhase === 'completed' || finalPhase === 'failed') {
             break;
           }
@@ -195,14 +217,71 @@ const DeploymentListPage: React.FC = () => {
         message.error(
           `应用 "${deploymentName}" ${operationName}失败：${failureMessage || finalDeployment?.progressingReason || 'Kubernetes 发布状态异常'}`,
         );
+        if (offerRecovery && previousImages?.length) {
+          modal.confirm({
+            title: `应用 "${deploymentName}" 发布失败`,
+            content: (
+              <Space direction="vertical" size={4}>
+                <Text>检测到 Kubernetes 原始错误：</Text>
+                <Text type="danger" code>{failureMessage || 'Kubernetes 发布状态异常'}</Text>
+                <Text>是否回退到本次发布前的镜像版本？</Text>
+              </Space>
+            ),
+            okText: '回退到发布前镜像',
+            cancelText: '暂不处理',
+            okButtonProps: { danger: true },
+            onOk: () => setRecoveryRequest({ deploymentName, previousImages }),
+          });
+        }
       } else {
         message.warning(
           `应用 "${deploymentName}" ${operationName}仍在进行中；2 分钟内未发现 Kubernetes 错误，请稍后查看“状态”列。`,
         );
       }
     },
-    [message],
+    [message, modal],
   );
+
+  useEffect(() => {
+    if (!recoveryRequest) return;
+    let cancelled = false;
+    const recover = async () => {
+      try {
+        setRolloutOperations((prev) => ({
+          ...prev,
+          [recoveryRequest.deploymentName]: {
+            phase: 'progressing',
+            operationName: '故障回退',
+            diagnostics: [],
+          },
+        }));
+        const result = await rollbackDeploymentImages(
+          recoveryRequest.deploymentName,
+          recoveryRequest.previousImages,
+        );
+        if (!cancelled) {
+          message.loading({
+            content: `应用 "${recoveryRequest.deploymentName}" 正在回退到发布前镜像...`,
+            duration: 2,
+          });
+          void trackRolloutProgress(
+            recoveryRequest.deploymentName,
+            '故障回退',
+            result.targetGeneration,
+          );
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          const errorMessage = error.response?.data?.message || error.message;
+          message.error(`回退到发布前镜像失败: ${errorMessage}`);
+        }
+      } finally {
+        if (!cancelled) setRecoveryRequest(null);
+      }
+    };
+    void recover();
+    return () => { cancelled = true; };
+  }, [message, recoveryRequest, trackRolloutProgress]);
 
   // “重启”按钮点击处理
   const handleRestart = (deploymentName: string | undefined) => {
@@ -266,7 +345,13 @@ const DeploymentListPage: React.FC = () => {
       const result = await rollbackDeploymentImages(imageHistoryTarget, target.images);
       message.loading({ content: `应用 "${imageHistoryTarget}" 已开始回退镜像，正在跟踪发布状态...`, duration: 2 });
       setImageHistoryTarget(null);
-      void trackRolloutProgress(imageHistoryTarget, '镜像回退', result.targetGeneration);
+      void trackRolloutProgress(
+        imageHistoryTarget,
+        '镜像回退',
+        result.targetGeneration,
+        result.previousImages,
+        true,
+      );
     } catch (error: any) {
       message.error(`镜像回退失败: ${error.response?.data?.message || error.message}`);
     } finally { setRollingBack(false); void fetchDeployments(filter); }
@@ -303,6 +388,18 @@ const DeploymentListPage: React.FC = () => {
       key: 'status',
       width: 190,
       render: (_: any, record: Deployment) => {
+        const operation = record.name ? rolloutOperations[record.name] : undefined;
+        if (operation?.phase === 'failed') {
+          const diagnostic = operation.diagnostics[0];
+          const detail = diagnostic
+            ? `${diagnostic.reason}: ${diagnostic.message}`
+            : 'Kubernetes 已报告发布错误';
+          return <Tooltip title={detail}><Tag color="error">发布失败</Tag></Tooltip>;
+        }
+        if (operation?.phase === 'progressing') {
+          const diagnostic = operation.diagnostics[0];
+          return <Tooltip title={diagnostic ? `${diagnostic.reason}: ${diagnostic.message}` : `${operation.operationName}正在核查 Kubernetes 发布状态`}><Tag color="processing">发布中</Tag></Tooltip>;
+        }
         const phase = getRolloutPhase(record);
         const desired = record.replicas ?? 0;
         const ready = record.readyReplicas ?? 0;
