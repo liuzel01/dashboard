@@ -22,6 +22,19 @@ const AWS_STATIC_CREDENTIAL_EXEC_ENV_NAMES = new Set([
   'AWS_CONFIG_FILE',
 ]);
 
+const ROLLOUT_FAILURE_WAITING_REASONS = new Set([
+  'ErrImagePull',
+  'ImagePullBackOff',
+  'CreateContainerConfigError',
+  'CreateContainerError',
+  'CrashLoopBackOff',
+  'RunContainerError',
+  'InvalidImageName',
+]);
+
+const toIsoTimestamp = (value?: Date): string | undefined =>
+  value ? value.toISOString() : undefined;
+
 interface K8sApis {
   kc: k8s.KubeConfig;
   k8sAppsV1Api: k8s.AppsV1Api;
@@ -337,9 +350,170 @@ export class KubernetesService {
     }
     const previousImages = containers.map((container) => ({ name: container.name, image: container.image || '' }));
     containers.forEach((container) => { container.image = requestedImages.get(container.name)!; });
-    await k8sAppsV1Api.replaceNamespacedDeployment(name, namespace, deployment);
+    const { body: updatedDeployment } = await k8sAppsV1Api.replaceNamespacedDeployment(
+      name,
+      namespace,
+      deployment,
+    );
     this.logger.log(`Updated only container images for deployment "${name}" in namespace "${namespace}".`);
-    return { message: `Deployment ${name} image rollback started successfully.`, previousImages, targetImages: images };
+    return {
+      message: `Deployment ${name} image rollback started successfully.`,
+      previousImages,
+      targetImages: images,
+      targetGeneration: Number(updatedDeployment.metadata?.generation || 0) || null,
+    };
+  }
+
+  async getDeploymentRolloutStatus(
+    environmentId: string,
+    name: string,
+    targetGeneration?: number,
+    namespace = 'default',
+  ) {
+    const { k8sAppsV1Api, k8sCoreV1Api } = await this.getK8sApis(environmentId);
+    const { body: deployment } = await k8sAppsV1Api.readNamespacedDeployment(name, namespace);
+    const selector = deployment.spec?.selector?.matchLabels;
+    if (!selector || Object.keys(selector).length === 0) {
+      throw new Error(`No selector found for deployment ${name}`);
+    }
+
+    const labelSelector = Object.entries(selector)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(',');
+    const { body: podList } = await k8sCoreV1Api.listNamespacedPod(
+      namespace,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      labelSelector,
+    );
+
+    const targetImages = new Map(
+      (deployment.spec?.template?.spec?.containers || []).map((container) => [
+        container.name,
+        container.image || '',
+      ]),
+    );
+    const rolloutPods = podList.items.filter((pod) => {
+      const containers = pod.spec?.containers || [];
+      return containers.length === targetImages.size && containers.every(
+        (container) => targetImages.get(container.name) === (container.image || ''),
+      );
+    });
+
+    const diagnostics: Array<{
+      source: 'container' | 'event' | 'deployment';
+      reason: string;
+      message: string;
+      pod?: string;
+      container?: string;
+      timestamp?: string;
+    }> = [];
+
+    for (const pod of rolloutPods) {
+      for (const status of pod.status?.containerStatuses || []) {
+        const waiting = status.state?.waiting;
+        if (waiting?.reason && ROLLOUT_FAILURE_WAITING_REASONS.has(waiting.reason)) {
+          diagnostics.push({
+            source: 'container',
+            reason: waiting.reason,
+            message: waiting.message || waiting.reason,
+            pod: pod.metadata?.name,
+            container: status.name,
+          });
+        }
+      }
+    }
+
+    const rolloutPodUids = new Set(rolloutPods.map((pod) => pod.metadata?.uid).filter(Boolean));
+    try {
+      const { body: eventList } = await k8sCoreV1Api.listNamespacedEvent(namespace);
+      const warningEvents = eventList.items
+        .filter((event) =>
+          event.type === 'Warning' &&
+          event.involvedObject?.uid &&
+          rolloutPodUids.has(event.involvedObject.uid),
+        )
+        .sort((left, right) => {
+          const leftTime = (left.eventTime || left.lastTimestamp || left.firstTimestamp)?.getTime() || 0;
+          const rightTime = (right.eventTime || right.lastTimestamp || right.firstTimestamp)?.getTime() || 0;
+          return rightTime - leftTime;
+        })
+        .slice(0, 5);
+      for (const event of warningEvents) {
+        diagnostics.push({
+          source: 'event',
+          reason: event.reason || 'Warning',
+          message: event.message || event.reason || 'Kubernetes Warning event',
+          pod: event.involvedObject?.name,
+          timestamp: toIsoTimestamp(event.eventTime || event.lastTimestamp || event.firstTimestamp),
+        });
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Unable to load rollout events for deployment "${name}" in namespace "${namespace}": ${String(error)}`,
+      );
+    }
+
+    const conditions = deployment.status?.conditions || [];
+    const progressing = conditions.find((condition) => condition.type === 'Progressing');
+    const replicaFailure = conditions.find((condition) => condition.type === 'ReplicaFailure');
+    if (progressing?.status === 'False' || progressing?.reason === 'ProgressDeadlineExceeded') {
+      diagnostics.push({
+        source: 'deployment',
+        reason: progressing.reason || 'ProgressingFalse',
+        message: progressing.message || 'Deployment rollout did not complete.',
+        timestamp: toIsoTimestamp(progressing.lastUpdateTime || progressing.lastTransitionTime),
+      });
+    }
+    if (replicaFailure?.status === 'True') {
+      diagnostics.push({
+        source: 'deployment',
+        reason: replicaFailure.reason || 'ReplicaFailure',
+        message: replicaFailure.message || 'Deployment replica creation failed.',
+        timestamp: toIsoTimestamp(replicaFailure.lastUpdateTime || replicaFailure.lastTransitionTime),
+      });
+    }
+
+    const generation = Number(deployment.metadata?.generation || 0);
+    const observedGeneration = Number(deployment.status?.observedGeneration || 0);
+    const desired = Number(deployment.spec?.replicas || 0);
+    const updated = Number(deployment.status?.updatedReplicas || 0);
+    const ready = Number(deployment.status?.readyReplicas || 0);
+    const available = Number(deployment.status?.availableReplicas || 0);
+    const unavailable = Number(deployment.status?.unavailableReplicas || 0);
+    const availableCondition = conditions.find((condition) => condition.type === 'Available');
+    const expectedGeneration = targetGeneration || generation;
+    const completed = desired === 0 || (
+      observedGeneration >= expectedGeneration &&
+      updated >= desired &&
+      ready >= desired &&
+      available >= desired &&
+      unavailable === 0 &&
+      availableCondition?.status === 'True'
+    );
+
+    return {
+      phase: diagnostics.length > 0 ? 'failed' : completed ? 'completed' : 'progressing',
+      targetGeneration: expectedGeneration,
+      deployment: {
+        name: deployment.metadata?.name,
+        namespace: deployment.metadata?.namespace,
+        generation,
+        observedGeneration,
+        replicas: desired,
+        updatedReplicas: updated,
+        readyReplicas: ready,
+        availableReplicas: available,
+        unavailableReplicas: unavailable,
+        progressingStatus: progressing?.status || null,
+        progressingReason: progressing?.reason || null,
+        availableStatus: availableCondition?.status || null,
+        availableReason: availableCondition?.reason || null,
+      },
+      diagnostics,
+    };
   }
 
   async getPodsForDeployment(

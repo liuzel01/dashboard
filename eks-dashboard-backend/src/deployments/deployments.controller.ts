@@ -162,4 +162,36 @@ export class DeploymentsController {
       throw new HttpException(error?.message || 'Failed to roll back deployment images', HttpStatus.BAD_REQUEST);
     }
   }
+
+  @Get(':name/rollout-status')
+  async getDeploymentRolloutStatus(
+    @Param('name') name: string,
+    @Headers('x-target-environment') environmentId: string,
+    @Query('generation') generation?: string,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    const targetGeneration = generation === undefined ? undefined : Number(generation);
+    if (targetGeneration !== undefined && (!Number.isInteger(targetGeneration) || targetGeneration < 1)) {
+      throw new HttpException('Query parameter "generation" must be a positive integer.', HttpStatus.BAD_REQUEST);
+    }
+    try {
+      return await this.k8sService.getDeploymentRolloutStatus(
+        environmentId,
+        name,
+        targetGeneration,
+        'default',
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to get rollout status for deployment ${name} in env "${environmentId}"`,
+        error.body || error,
+      );
+      throw new HttpException(
+        'Failed to fetch deployment rollout status',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

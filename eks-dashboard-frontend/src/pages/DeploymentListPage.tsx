@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useContext, useRef } from 'rea
 import { Table, Input, Button, App, Spin, Space, Alert, Tag, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
-import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, type DeploymentImageHistory } from '../services/api';
+import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImageHistory } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
 // 定义 Deployment 对象的接口
@@ -158,26 +158,30 @@ const DeploymentListPage: React.FC = () => {
     setLogViewerVisible(true);
   };
 
-  const trackRestartProgress = useCallback(
-    async (deploymentName: string) => {
+  const trackRolloutProgress = useCallback(
+    async (
+      deploymentName: string,
+      operationName: '重启' | '镜像回退',
+      targetGeneration?: number | null,
+    ) => {
       let finalDeployment: Deployment | undefined;
-      let finalPhase: RolloutPhase = 'unknown';
+      let finalPhase: 'completed' | 'progressing' | 'failed' = 'progressing';
+      let failureMessage = '';
       const maxAttempts = 40;
       const intervalMs = 3000;
 
       for (let i = 0; i < maxAttempts; i += 1) {
-        const latest = await getDeployments({ name: deploymentName });
-        const target = Array.isArray(latest)
-          ? latest.find((item) => item.name === deploymentName)
-          : undefined;
-        if (target) {
+        const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration);
+        const target = status.deployment;
+        if (target?.name) {
           finalDeployment = target;
           setAllDeployments((prev) =>
             prev.map((item) =>
               item.name === deploymentName ? target : item,
             ),
           );
-          finalPhase = getRolloutPhase(target);
+          finalPhase = status.phase;
+          failureMessage = status.diagnostics[0]?.message || status.diagnostics[0]?.reason || '';
           if (finalPhase === 'completed' || finalPhase === 'failed') {
             break;
           }
@@ -186,14 +190,14 @@ const DeploymentListPage: React.FC = () => {
       }
 
       if (finalPhase === 'completed') {
-        message.success(`应用 "${deploymentName}" 已完成重启。`);
+        message.success(`应用 "${deploymentName}" 已完成${operationName}。`);
       } else if (finalPhase === 'failed') {
         message.error(
-          `应用 "${deploymentName}" 重启失败：${finalDeployment?.progressingReason || 'Kubernetes 回滚/发布状态异常'}`,
+          `应用 "${deploymentName}" ${operationName}失败：${failureMessage || finalDeployment?.progressingReason || 'Kubernetes 发布状态异常'}`,
         );
       } else {
         message.warning(
-          `应用 "${deploymentName}" 重启状态仍在进行中，请稍后查看“状态”列确认。`,
+          `应用 "${deploymentName}" ${operationName}仍在进行中；2 分钟内未发现 Kubernetes 错误，请稍后查看“状态”列。`,
         );
       }
     },
@@ -222,7 +226,7 @@ const DeploymentListPage: React.FC = () => {
             content: `应用 "${deploymentName}" 已发送重启指令，正在后台跟踪重启进度...`,
             duration: 2,
           });
-          void trackRestartProgress(deploymentName);
+          void trackRolloutProgress(deploymentName, '重启');
         } catch (error: any) {
           console.error('[Restart] Caught an error:', error);
           const errorMessage = error.response?.data?.message || error.message;
@@ -259,10 +263,10 @@ const DeploymentListPage: React.FC = () => {
     if (!target) return;
     setRollingBack(true);
     try {
-      await rollbackDeploymentImages(imageHistoryTarget, target.images);
+      const result = await rollbackDeploymentImages(imageHistoryTarget, target.images);
       message.loading({ content: `应用 "${imageHistoryTarget}" 已开始回退镜像，正在跟踪发布状态...`, duration: 2 });
       setImageHistoryTarget(null);
-      void trackRestartProgress(imageHistoryTarget);
+      void trackRolloutProgress(imageHistoryTarget, '镜像回退', result.targetGeneration);
     } catch (error: any) {
       message.error(`镜像回退失败: ${error.response?.data?.message || error.message}`);
     } finally { setRollingBack(false); void fetchDeployments(filter); }

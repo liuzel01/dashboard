@@ -59,6 +59,34 @@ export type DeploymentImage = { name: string; image: string };
 export type DeploymentImageRevision = { revision: number; replicaSetName: string; createdAt: string | null };
 export type DeploymentImageVersion = { id: string; images: DeploymentImage[]; isCurrent: boolean; revisions: DeploymentImageRevision[] };
 export type DeploymentImageHistory = { deployment: string; namespace: string; currentImages: DeploymentImage[]; imageVersions: DeploymentImageVersion[] };
+export type DeploymentRolloutDiagnostic = {
+  source: 'container' | 'event' | 'deployment';
+  reason: string;
+  message: string;
+  pod?: string;
+  container?: string;
+  timestamp?: string;
+};
+export type DeploymentRolloutStatus = {
+  phase: 'completed' | 'progressing' | 'failed';
+  targetGeneration: number;
+  deployment: {
+    name?: string;
+    namespace?: string;
+    generation?: number;
+    observedGeneration?: number;
+    replicas?: number;
+    updatedReplicas?: number;
+    readyReplicas?: number;
+    availableReplicas?: number;
+    unavailableReplicas?: number;
+    progressingStatus?: 'True' | 'False' | 'Unknown' | null;
+    progressingReason?: string | null;
+    availableStatus?: 'True' | 'False' | 'Unknown' | null;
+    availableReason?: string | null;
+  };
+  diagnostics: DeploymentRolloutDiagnostic[];
+};
 
 export const getDeploymentImageHistory = async (name: string): Promise<DeploymentImageHistory> => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
@@ -69,6 +97,17 @@ export const getDeploymentImageHistory = async (name: string): Promise<Deploymen
 export const rollbackDeploymentImages = async (name: string, images: DeploymentImage[]) => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   const response = await api.post(`/deployments/${encodeURIComponent(name)}/rollback-images`, { images });
+  return response.data as { targetGeneration?: number | null };
+};
+
+export const getDeploymentRolloutStatus = async (
+  name: string,
+  generation?: number | null,
+): Promise<DeploymentRolloutStatus> => {
+  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+  const response = await api.get(`/deployments/${encodeURIComponent(name)}/rollout-status`, {
+    params: generation ? { generation } : undefined,
+  });
   return response.data;
 };
 
