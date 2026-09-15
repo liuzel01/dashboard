@@ -33,7 +33,11 @@ type RolloutOperationState = {
   diagnostics: DeploymentRolloutDiagnostic[];
   previousImages?: DeploymentImage[];
 };
-type RecoveryRequest = { deploymentName: string; previousImages: DeploymentImage[] };
+type RecoveryRequest = {
+  deploymentName: string;
+  previousImages: DeploymentImage[];
+  targetGeneration?: number | null;
+};
 
 const getRolloutPhase = (deployment: Deployment): RolloutPhase => {
   const desired = deployment.replicas ?? 0;
@@ -92,6 +96,7 @@ const DeploymentListPage: React.FC = () => {
   const { modal, message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
   const requestSeqRef = useRef(0);
+  const blockedPromptedRef = useRef(new Set<string>());
 
   const [allDeployments, setAllDeployments] = useState<Deployment[]>([]);
   const [filterInput, setFilterInput] = useState('kylin-price-kylin-price-impl');
@@ -182,6 +187,8 @@ const DeploymentListPage: React.FC = () => {
       let failureMessage = '';
       const intervalMs = 3000;
       let maxAttempts = 40;
+      const operationKey = `${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
+      blockedPromptedRef.current.delete(operationKey);
 
       for (let i = 0; i < maxAttempts; i += 1) {
         const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration);
@@ -208,6 +215,36 @@ const DeploymentListPage: React.FC = () => {
               previousImages,
             },
           }));
+          if (
+            status.phase === 'blocked' &&
+            offerRecovery &&
+            previousImages?.length &&
+            !blockedPromptedRef.current.has(operationKey)
+          ) {
+            blockedPromptedRef.current.add(operationKey);
+            const diagnostic = status.diagnostics[0];
+            const detail = diagnostic
+              ? `${diagnostic.reason}: ${diagnostic.message}`
+              : 'Kubernetes 正在报告启动或发布阻塞信号。';
+            modal.confirm({
+              title: `应用 "${deploymentName}" 发布受阻`,
+              content: (
+                <Space direction="vertical" size={4}>
+                  <Text>检测到 Kubernetes 原始诊断，但尚未确认终态发布失败：</Text>
+                  <Text type="warning" code>{detail}</Text>
+                  <Text>可继续等待服务自行恢复，或回退到本次发布前的镜像版本。</Text>
+                </Space>
+              ),
+              okText: '回退到发布前镜像',
+              cancelText: '继续等待',
+              okButtonProps: { danger: true },
+              onOk: () => setRecoveryRequest({
+                deploymentName,
+                previousImages,
+                targetGeneration: status.targetGeneration,
+              }),
+            });
+          }
           if (finalPhase === 'completed' || finalPhase === 'failed') {
             break;
           }
@@ -251,6 +288,14 @@ const DeploymentListPage: React.FC = () => {
     let cancelled = false;
     const recover = async () => {
       try {
+        const current = await getDeploymentRolloutStatus(
+          recoveryRequest.deploymentName,
+          recoveryRequest.targetGeneration,
+        );
+        if (current.phase === 'completed') {
+          message.success(`应用 "${recoveryRequest.deploymentName}" 已自行恢复，无需回退镜像。`);
+          return;
+        }
         setRolloutOperations((prev) => ({
           ...prev,
           [recoveryRequest.deploymentName]: {
