@@ -9,6 +9,7 @@ module.exports = {
       merge_logs: true,
       env: {
         NODE_ENV: 'production',
+        DASHBOARD_K8S_PRESERVE_EXEC_AUTH: 'false',
         KUBECONFIG: '/root/.kube/config',
         HOME: '/root',
       },

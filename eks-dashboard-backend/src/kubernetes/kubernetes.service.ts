@@ -149,7 +149,12 @@ export class KubernetesService {
 
     const user = kc.getCurrentUser();
 
-    if (user?.exec?.command === 'aws') {
+    // Local development may intentionally use the AWS profile embedded in the
+    // kubeconfig exec stanza. Production keeps the safer host-role default by
+    // sanitizing static credential selection unless explicitly overridden.
+    const preserveKubeconfigExecAuth =
+      process.env.DASHBOARD_K8S_PRESERVE_EXEC_AUTH === 'true';
+    if (user?.exec?.command === 'aws' && !preserveKubeconfigExecAuth) {
       this.configureEksExecForHostRole(environmentId, user.exec, env.aws_region);
     }
 

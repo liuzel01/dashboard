@@ -111,7 +111,7 @@ restart() {
   ensure_build
   echo "[dev] Restarting apps..."
   for name in "${APPS[@]}"; do
-    pm2 restart "$name" --namespace "$PM2_NAMESPACE" >/dev/null || true
+    pm2 start "$ROOT_DIR/ecosystem.dev.config.js" --only "$name" --update-env >/dev/null || true
   done
   pm2_status_compact || true
 }
