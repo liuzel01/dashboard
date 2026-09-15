@@ -58,7 +58,7 @@ spec:
       serviceAccountName: kms-app-sa
       containers:
         - name: agent
-          image: reghk.hashex.vip/test/dashboard-db-gateway-agent:latest
+          image: reghk.hashex.net/hash/dashboard-db-gateway-agent:latest
           imagePullPolicy: Always
           envFrom:
             - configMapRef:
