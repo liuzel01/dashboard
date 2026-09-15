@@ -27,7 +27,6 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
-  const [currentCandidate, setCurrentCandidate] = useState<string | null>(null);
   // keep refs for suppression/last error so we don't need to include them
   // in the connection effect dependency array
   const suppressErrorsUntilRef = useRef<number | null>(null);
@@ -93,7 +92,6 @@ export const LogViewer: React.FC<LogViewerProps> = ({
         const socket = candidate
           ? io(candidate, { path: '/socket.io', transports })
           : io({ path: '/socket.io', transports });
-        setCurrentCandidate(candidate ?? '页面代理(default)');
 
         const timeout = setTimeout(() => {
           if (!connected) {
@@ -300,7 +298,6 @@ export const LogViewer: React.FC<LogViewerProps> = ({
         } catch {
           // ignore
         }
-        setCurrentCandidate(null);
         // clean refs as well to avoid stale values
         suppressErrorsUntilRef.current = null;
         lastErrorMessageRef.current = null;
@@ -353,10 +350,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       return <Spin tip="正在连接日志服务..." />;
     }
     if (error) {
-      const desc = currentCandidate
-        ? `${error}（尝试地址：${currentCandidate}）`
-        : error;
-      return <Alert message="日志错误" description={desc} type="error" showIcon />;
+      return <Alert message="日志错误" description={error} type="error" showIcon />;
     }
     if (logs.length === 0 && isConnected && !error) {
       return <Spin tip="正在等待日志流..." />;
