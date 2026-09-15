@@ -61,6 +61,7 @@ export type DeploymentImageVersion = { id: string; images: DeploymentImage[]; is
 export type DeploymentImageHistory = { deployment: string; namespace: string; currentImages: DeploymentImage[]; imageVersions: DeploymentImageVersion[] };
 export type DeploymentRolloutDiagnostic = {
   source: 'container' | 'event' | 'deployment';
+  severity: 'error' | 'warning';
   reason: string;
   message: string;
   pod?: string;
@@ -68,8 +69,9 @@ export type DeploymentRolloutDiagnostic = {
   timestamp?: string;
 };
 export type DeploymentRolloutStatus = {
-  phase: 'completed' | 'progressing' | 'failed';
+  phase: 'completed' | 'progressing' | 'blocked' | 'failed';
   targetGeneration: number;
+  progressDeadlineSeconds: number;
   deployment: {
     name?: string;
     namespace?: string;

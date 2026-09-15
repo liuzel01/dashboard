@@ -28,7 +28,7 @@ interface Deployment {
 type RolloutPhase = 'completed' | 'in_progress' | 'failed' | 'unknown';
 type OperationName = '重启' | '镜像回退' | '故障回退';
 type RolloutOperationState = {
-  phase: 'completed' | 'progressing' | 'failed';
+  phase: 'completed' | 'progressing' | 'blocked' | 'failed';
   operationName: OperationName;
   diagnostics: DeploymentRolloutDiagnostic[];
   previousImages?: DeploymentImage[];
@@ -178,13 +178,17 @@ const DeploymentListPage: React.FC = () => {
       offerRecovery = false,
     ) => {
       let finalDeployment: Deployment | undefined;
-      let finalPhase: 'completed' | 'progressing' | 'failed' = 'progressing';
+      let finalPhase: 'completed' | 'progressing' | 'blocked' | 'failed' = 'progressing';
       let failureMessage = '';
-      const maxAttempts = 40;
       const intervalMs = 3000;
+      let maxAttempts = 40;
 
       for (let i = 0; i < maxAttempts; i += 1) {
         const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration);
+        maxAttempts = Math.max(
+          maxAttempts,
+          Math.ceil((status.progressDeadlineSeconds * 1000) / intervalMs) + 1,
+        );
         const target = status.deployment;
         if (target?.name) {
           finalDeployment = target;
@@ -235,7 +239,7 @@ const DeploymentListPage: React.FC = () => {
         }
       } else {
         message.warning(
-          `应用 "${deploymentName}" ${operationName}仍在进行中；2 分钟内未发现 Kubernetes 错误，请稍后查看“状态”列。`,
+          `应用 "${deploymentName}" ${operationName}${finalPhase === 'blocked' ? '受阻' : '仍在进行中'}；Kubernetes 尚未报告终态失败，请稍后查看“状态”列。`,
         );
       }
     },
@@ -399,6 +403,13 @@ const DeploymentListPage: React.FC = () => {
         if (operation?.phase === 'progressing') {
           const diagnostic = operation.diagnostics[0];
           return <Tooltip title={diagnostic ? `${diagnostic.reason}: ${diagnostic.message}` : `${operation.operationName}正在核查 Kubernetes 发布状态`}><Tag color="processing">发布中</Tag></Tooltip>;
+        }
+        if (operation?.phase === 'blocked') {
+          const diagnostic = operation.diagnostics[0];
+          const detail = diagnostic
+            ? `${diagnostic.reason}: ${diagnostic.message}`
+            : 'Kubernetes 报告暂态诊断，Dashboard 正在继续跟踪';
+          return <Tooltip title={detail}><Tag color="warning">发布受阻</Tag></Tooltip>;
         }
         const phase = getRolloutPhase(record);
         const desired = record.replicas ?? 0;

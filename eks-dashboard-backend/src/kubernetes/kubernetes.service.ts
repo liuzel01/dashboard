@@ -27,6 +27,17 @@ const NORMAL_CONTAINER_WAITING_REASONS = new Set([
   'PodInitializing',
 ]);
 
+const TERMINAL_CONTAINER_WAITING_REASONS = new Set([
+  'CreateContainerConfigError',
+  'CreateContainerError',
+  'CrashLoopBackOff',
+  'InvalidImageName',
+  'RunContainerError',
+]);
+
+const isPermanentImageError = (message: string) =>
+  /\b(not found|manifest unknown|pull access denied|unauthorized|invalid reference format)\b/i.test(message);
+
 const toIsoTimestamp = (value?: Date): string | undefined =>
   value ? value.toISOString() : undefined;
 
@@ -404,6 +415,7 @@ export class KubernetesService {
 
     const diagnostics: Array<{
       source: 'container' | 'event' | 'deployment';
+      severity: 'error' | 'warning';
       reason: string;
       message: string;
       pod?: string;
@@ -425,10 +437,16 @@ export class KubernetesService {
       for (const status of podStatuses) {
         const waiting = status.state?.waiting;
         if (waiting?.reason && !NORMAL_CONTAINER_WAITING_REASONS.has(waiting.reason)) {
+          const message = waiting.message || waiting.reason;
+          const isTerminal =
+            TERMINAL_CONTAINER_WAITING_REASONS.has(waiting.reason) ||
+            ((waiting.reason === 'ErrImagePull' || waiting.reason === 'ImagePullBackOff') &&
+              isPermanentImageError(message));
           diagnostics.push({
             source: 'container',
+            severity: isTerminal ? 'error' : 'warning',
             reason: waiting.reason,
-            message: waiting.message || waiting.reason,
+            message,
             pod: podName,
             container: status.name,
           });
@@ -437,6 +455,7 @@ export class KubernetesService {
         if (terminated && terminated.exitCode !== 0) {
           diagnostics.push({
             source: 'container',
+            severity: 'warning',
             reason: terminated.reason || 'ContainerTerminated',
             message: terminated.message || `Container exited with code ${terminated.exitCode}.`,
             pod: podName,
@@ -448,6 +467,7 @@ export class KubernetesService {
       if (pod.status?.phase === 'Failed') {
         diagnostics.push({
           source: 'container',
+          severity: 'error',
           reason: pod.status.reason || 'PodFailed',
           message: pod.status.message || 'Pod entered Failed phase.',
           pod: podName,
@@ -457,6 +477,7 @@ export class KubernetesService {
         if (condition.type === 'PodScheduled' && condition.status === 'False' && condition.reason) {
           diagnostics.push({
             source: 'container',
+            severity: 'warning',
             reason: condition.reason,
             message: condition.message || `Pod condition ${condition.type} is False.`,
             pod: podName,
@@ -483,10 +504,15 @@ export class KubernetesService {
         })
         .slice(0, 5);
       for (const event of warningEvents) {
+        const message = event.message || event.reason || 'Kubernetes Warning event';
+        const isTerminal =
+          (event.reason === 'Failed' && isPermanentImageError(message)) ||
+          event.reason === 'FailedCreatePodSandBox';
         diagnostics.push({
           source: 'event',
+          severity: isTerminal ? 'error' : 'warning',
           reason: event.reason || 'Warning',
-          message: event.message || event.reason || 'Kubernetes Warning event',
+          message,
           pod: event.involvedObject?.name,
           timestamp: toIsoTimestamp(event.eventTime || event.lastTimestamp || event.firstTimestamp),
         });
@@ -503,6 +529,7 @@ export class KubernetesService {
     if (progressing?.status === 'False' || progressing?.reason === 'ProgressDeadlineExceeded') {
       diagnostics.push({
         source: 'deployment',
+        severity: 'error',
         reason: progressing.reason || 'ProgressingFalse',
         message: progressing.message || 'Deployment rollout did not complete.',
         timestamp: toIsoTimestamp(progressing.lastUpdateTime || progressing.lastTransitionTime),
@@ -511,6 +538,7 @@ export class KubernetesService {
     if (replicaFailure?.status === 'True') {
       diagnostics.push({
         source: 'deployment',
+        severity: 'error',
         reason: replicaFailure.reason || 'ReplicaFailure',
         message: replicaFailure.message || 'Deployment replica creation failed.',
         timestamp: toIsoTimestamp(replicaFailure.lastUpdateTime || replicaFailure.lastTransitionTime),
@@ -525,6 +553,7 @@ export class KubernetesService {
     const available = Number(deployment.status?.availableReplicas || 0);
     const unavailable = Number(deployment.status?.unavailableReplicas || 0);
     const availableCondition = conditions.find((condition) => condition.type === 'Available');
+    const progressDeadlineSeconds = Number(deployment.spec?.progressDeadlineSeconds || 600);
     const expectedGeneration = targetGeneration || generation;
     const completed = desired === 0 || (
       observedGeneration >= expectedGeneration &&
@@ -536,8 +565,15 @@ export class KubernetesService {
     );
 
     return {
-      phase: diagnostics.length > 0 ? 'failed' : completed ? 'completed' : 'progressing',
+      phase: diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+        ? 'failed'
+        : completed
+          ? 'completed'
+          : diagnostics.length > 0
+            ? 'blocked'
+            : 'progressing',
       targetGeneration: expectedGeneration,
+      progressDeadlineSeconds,
       deployment: {
         name: deployment.metadata?.name,
         namespace: deployment.metadata?.namespace,
