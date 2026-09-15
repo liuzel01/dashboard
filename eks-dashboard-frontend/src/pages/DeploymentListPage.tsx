@@ -101,6 +101,7 @@ const DeploymentListPage: React.FC = () => {
   const [allDeployments, setAllDeployments] = useState<Deployment[]>([]);
   const [filterInput, setFilterInput] = useState('kylin-price-kylin-price-impl');
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
+  const [searchRevision, setSearchRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [restarting, setRestarting] = useState<string | null>(null);
   const [imageHistoryTarget, setImageHistoryTarget] = useState<string | null>(null);
@@ -145,24 +146,22 @@ const DeploymentListPage: React.FC = () => {
   }, [currentEnvironment, message]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setFilter(filterInput);
-    }, 250);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [filterInput]);
-
-  useEffect(() => {
-    // 当环境或过滤器变化时重新获取
+    // 仅在首次加载、环境切换或用户明确提交搜索时请求。
     if (currentEnvironment) {
       fetchDeployments(filter);
       return;
     }
     setAllDeployments([]);
     setRolloutOperations({});
-  }, [fetchDeployments, currentEnvironment, filter]);
+  }, [fetchDeployments, currentEnvironment, filter, searchRevision]);
+
+  const handleSearch = (value: string) => {
+    const keyword = value.trim();
+    setFilterInput(value);
+    setFilter(keyword);
+    // 即使关键词未变化，也允许用户手动刷新当前结果。
+    setSearchRevision((revision) => revision + 1);
+  };
 
   // “查看日志”按钮点击处理
   const handleViewLogs = (deploymentName: string | undefined) => {
@@ -503,12 +502,14 @@ const DeploymentListPage: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Space style={{ marginBottom: 20 }}>
-        <Input
+        <Input.Search
           placeholder="按名称模糊筛选..."
           value={filterInput}
           onChange={(e) => setFilterInput(e.target.value)}
+          onSearch={handleSearch}
           style={{ width: 400 }}
           allowClear
+          enterButton
         />
       </Space>
       <div style={{ flex: 1, overflow: 'auto' }}>
