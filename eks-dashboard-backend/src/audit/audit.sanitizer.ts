@@ -11,6 +11,7 @@ const SENSITIVE_KEYWORDS = [
   'aws_secret_access_key',
   'private_key',
   'kubeconfig',
+  'manifestyaml',
   'cookie',
 ];
 

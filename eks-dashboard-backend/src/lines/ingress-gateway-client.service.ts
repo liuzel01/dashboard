@@ -95,6 +95,20 @@ export class IngressGatewayClientService {
     return this.postToAgent(environmentId, '/v1/ingress/clone', input, context, 'clone');
   }
 
+  async applyIngressManifest(
+    environmentId: string,
+    input: { manifestYaml: string; sourceIngressName?: string; confirmed: boolean },
+    context?: IngressGatewayContext,
+  ) {
+    return this.postToAgent(
+      environmentId,
+      '/v1/ingress/manifest/apply',
+      input,
+      context,
+      input.confirmed ? 'manifest-create' : 'manifest-dry-run',
+    );
+  }
+
   private async postToAgent(
     environmentId: string,
     path: string,

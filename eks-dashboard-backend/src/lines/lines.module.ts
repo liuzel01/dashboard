@@ -8,9 +8,11 @@ import { IngressGatewayClientService } from './ingress-gateway-client.service';
 import { LineOnboardingGatewayClientService } from './line-onboarding-gateway-client.service';
 import { SiteConfModule } from '../site-conf/site-conf.module';
 import { CentralDatabaseService } from '../site-monitor/central-database.service';
+import { AuthModule } from '../auth/auth.module';
+import { AccessControlModule } from '../access-control/access-control.module';
 
 @Module({
-  imports: [HttpModule, KubernetesModule, EnvironmentsModule, SiteConfModule],
+  imports: [HttpModule, KubernetesModule, EnvironmentsModule, SiteConfModule, AuthModule, AccessControlModule],
   controllers: [LinesController],
   providers: [
     LinesService,

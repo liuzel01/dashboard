@@ -27,7 +27,7 @@ import {
   getIngressOriginCandidates,
   getIngressSourceCandidatesForLineOnboarding,
   previewCloneIngressForLineOnboarding,
-  cloneIngressForLineOnboarding,
+  applyIngressManifestForLineOnboarding,
   applyTenantDomainForLineOnboarding,
   provisionDcdnDomain,
   registerSuperAdminLine,
@@ -301,6 +301,7 @@ const LineOnboardingPage: React.FC = () => {
     tlsSecretNames?: string[];
     yaml?: string;
   } | null>(null);
+  const [ingressYamlInput, setIngressYamlInput] = useState('');
   const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
   const [superAdminLineZh, setSuperAdminLineZh] = useState('');
   const [superAdminLineEn, setSuperAdminLineEn] = useState('');
@@ -1157,6 +1158,7 @@ const LineOnboardingPage: React.FC = () => {
         candidates,
       });
       setIngressPreviewResult(null);
+      setIngressYamlInput('');
       setIngressPreviewError(null);
       if (candidates.length === 0) {
         setSourceIngressError('未找到可用 source ingress 候选');
@@ -1221,6 +1223,7 @@ const LineOnboardingPage: React.FC = () => {
     setIngressPreviewLoading(true);
     setIngressPreviewError(null);
     setIngressPreviewResult(null);
+    setIngressYamlInput('');
     setIngressApplyError(null);
     setIngressApplyResult(null);
     setIngressApplied(false);
@@ -1252,6 +1255,7 @@ const LineOnboardingPage: React.FC = () => {
       }
 
       setIngressPreviewResult(resp.data);
+      setIngressYamlInput(resp.data.yaml || '');
       if (!tlsSecretNameInput.trim() && resp.data.tlsSecretNames?.[0]) {
         setTlsSecretNameInput(resp.data.tlsSecretNames[0]);
       }
@@ -1270,10 +1274,12 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleCloneIngressApply = async () => {
-    const validated = validateIngressCloneInputs();
-    if (!validated || !confirmedSubdomain) return;
     if (!ingressPreviewResult) {
       message.warning('请先生成 Ingress YAML 预览并确认');
+      return;
+    }
+    if (!ingressYamlInput.trim()) {
+      message.warning('请输入要创建的 Ingress YAML');
       return;
     }
 
@@ -1282,42 +1288,88 @@ const LineOnboardingPage: React.FC = () => {
     setIngressApplyResult(null);
 
     try {
-      const resp = (await cloneIngressForLineOnboarding({
+      const preflight = (await applyIngressManifestForLineOnboarding({
         environmentId: currentEnvironment?.id || '',
-        namespace: validated.sourceNamespace,
-        sourceIngressName: validated.sourceIngressName,
-        newHost: confirmedSubdomain,
-        newIngressName: validated.newIngressName,
-        tlsSecretMode: 'new',
-        ...(validated.tlsSecretName ? { tlsSecretName: validated.tlsSecretName } : {}),
-        confirmed: true,
+        sourceIngressName: ingressPreviewResult.sourceIngressName,
+        manifestYaml: ingressYamlInput,
+        confirmed: false,
       })) as {
         success?: boolean;
         preview?: boolean;
-        data?: { newIngressName: string; namespace: string; host: string };
+        data?: {
+          newIngressName: string;
+          namespace: string;
+          host: string;
+          warnings?: Array<{ annotation: string; message: string }>;
+        };
       };
 
-      if (!resp?.data?.newIngressName) {
-        throw new Error('克隆结果不完整，请检查后端返回');
+      if (!preflight?.data?.newIngressName) {
+        throw new Error('Ingress dry-run 结果不完整，请检查后端返回');
       }
 
-      setIngressApplyResult(resp.data);
-      setIngressApplied(true);
-      setSuperAdminRegistered(false);
-      setSuperAdminRegisterError(null);
-      setSuperAdminRegisterResult(null);
-      setSuperAdminPendingUpdate(false);
-      setConnectivityChecked(false);
-      setSqlConfirmed(false);
-      setVerifyResult(null);
-      setVerifyError(null);
-      message.success(`Ingress 创建成功：${resp.data.newIngressName}`);
+      const warnings = preflight.data.warnings || [];
+      Modal.confirm({
+        title: warnings.length > 0 ? '检测到高风险 Ingress 配置' : '确认创建 Ingress',
+        width: 680,
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Text>已通过 Kubernetes dry-run 校验，将创建 <Text code>{preflight.data.namespace}/{preflight.data.newIngressName}</Text>。</Text>
+            {warnings.length > 0 ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="以下配置可能改变流量、认证或 Nginx 行为"
+                description={warnings.map((warning) => (
+                  <div key={warning.annotation}><Text code>{warning.annotation}</Text>：{warning.message}</div>
+                ))}
+              />
+            ) : null}
+            <Text type="secondary">确认后会再次执行 dry-run，再创建实际资源。</Text>
+          </Space>
+        ),
+        okText: '确认创建',
+        cancelText: '返回编辑',
+        onOk: async () => {
+          setIngressApplying(true);
+          setIngressApplyError(null);
+          try {
+            const resp = (await applyIngressManifestForLineOnboarding({
+              environmentId: currentEnvironment?.id || '',
+              sourceIngressName: ingressPreviewResult.sourceIngressName,
+              manifestYaml: ingressYamlInput,
+              confirmed: true,
+            })) as { data?: { newIngressName: string; namespace: string; host: string } };
+            if (!resp?.data?.newIngressName) throw new Error('Ingress 创建结果不完整，请检查后端返回');
+            setIngressApplyResult(resp.data);
+            setIngressApplied(true);
+            setSuperAdminRegistered(false);
+            setSuperAdminRegisterError(null);
+            setSuperAdminRegisterResult(null);
+            setSuperAdminPendingUpdate(false);
+            setConnectivityChecked(false);
+            setSqlConfirmed(false);
+            setVerifyResult(null);
+            setVerifyError(null);
+            message.success(`Ingress 创建成功：${resp.data.newIngressName}`);
+          } catch (error: any) {
+            const backendMsg = error?.response?.data?.message;
+            const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || error?.message || 'Ingress 创建失败';
+            setIngressApplied(false);
+            setIngressApplyError(msg);
+            message.error(msg);
+            throw error;
+          } finally {
+            setIngressApplying(false);
+          }
+        },
+      });
     } catch (error: any) {
       const status = Number(error?.response?.status);
       const backendMsg = error?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || error?.message || 'Ingress 克隆应用失败';
+        : backendMsg || error?.message || 'Ingress dry-run 校验失败';
 
       setIngressApplied(false);
       setIngressApplyError(msg);
@@ -1662,6 +1714,7 @@ const LineOnboardingPage: React.FC = () => {
               onChange={(e) => {
                 setNewIngressNameInput(e.target.value.trim().toLowerCase());
                 setIngressPreviewResult(null);
+                setIngressYamlInput('');
               }}
               placeholder="例如 nginx-web-app-l01-test-2605040650"
               disabled={!confirmedSubdomain}
@@ -1691,7 +1744,7 @@ const LineOnboardingPage: React.FC = () => {
               onClick={handleCloneIngressApply}
               disabled={!ingressPreviewResult || ingressPreviewLoading}
             >
-              用户确认后执行创建
+              校验并确认创建
             </Button>
             {ingressApplied ? <Tag color="green">已执行</Tag> : null}
           </Space>
@@ -1700,38 +1753,24 @@ const LineOnboardingPage: React.FC = () => {
             <Alert
               type="info"
               showIcon
-              message="Ingress YAML 预览"
+              message="Ingress YAML 编辑"
               description={
                 <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                  <Text>新 Ingress：<Text code>{ingressPreviewResult.newIngressName}</Text></Text>
-                  <Text>Namespace：<Text code>{ingressPreviewResult.namespace}</Text></Text>
-                  <Text>Host：<Text code>{ingressPreviewResult.host}</Text></Text>
-                  <Text>TLS Secret：<Text code>{tlsSecretNameInput || (ingressPreviewResult.tlsSecretNames || []).join(', ') || '(待填写)'}</Text></Text>
-                  <Input
-                    style={{ maxWidth: 520 }}
-                    value={tlsSecretNameInput}
+                  <Text>模板来源：<Text code>{ingressPreviewResult.namespace}/{ingressPreviewResult.sourceIngressName}</Text></Text>
+                  <Text type="secondary">以下 YAML 是唯一创建来源；可直接修改或补充 Ingress 配置。</Text>
+                  <Input.TextArea
+                    aria-label="Ingress YAML 编辑器"
+                    value={ingressYamlInput}
                     onChange={(e) => {
-                      setTlsSecretNameInput(e.target.value.trim().toLowerCase());
+                      setIngressYamlInput(e.target.value);
                       setIngressApplied(false);
+                      setIngressApplyError(null);
                     }}
-                    placeholder="例如 mgggf12be7574100-tls"
+                    autoSize={{ minRows: 16, maxRows: 32 }}
+                    spellCheck={false}
+                    style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
                   />
-                  <Text type="secondary">如需覆盖预览中的 TLS Secret，可在这里修改；确认创建时会以此名称为准。</Text>
-                  {ingressPreviewResult.yaml ? (
-                    <Collapse
-                      ghost
-                      size="small"
-                      items={[{
-                        key: 'ingress-yaml-detail',
-                        label: '展开查看完整 YAML',
-                        children: (
-                          <pre style={{ whiteSpace: 'pre-wrap', margin: 0, background: '#fafafa', padding: 12, borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                            {ingressPreviewResult.yaml}
-                          </pre>
-                        ),
-                      }]}
-                    />
-                  ) : null}
+                  <Text type="secondary">创建前会执行 Kubernetes dry-run；高风险 annotations 会在最终确认框中提示，不会被自动移除。</Text>
                 </Space>
               }
             />

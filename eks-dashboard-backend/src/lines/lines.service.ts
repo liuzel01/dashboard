@@ -1414,6 +1414,33 @@ export class LinesService {
     return result;
   }
 
+  async applyIngressManifest(
+    environmentId: string,
+    input: {
+      manifestYaml: string;
+      sourceIngressName?: string;
+      confirmed: boolean;
+      requestId?: string;
+      userId?: string;
+      username?: string;
+    },
+  ) {
+    const result = await this.ingressGatewayClient.applyIngressManifest(
+      environmentId,
+      {
+        manifestYaml: input.manifestYaml,
+        ...(input.sourceIngressName ? { sourceIngressName: input.sourceIngressName } : {}),
+        confirmed: input.confirmed === true,
+      },
+      { requestId: input.requestId, userId: input.userId, username: input.username },
+    );
+
+    this.logger.log(
+      `[IngressManifest] ${input.confirmed ? 'create' : 'dry-run'} success requestId=${input.requestId || 'none'} userId=${input.userId || 'none'} username=${input.username || 'none'} env=${environmentId} target=${result?.data?.namespace || 'unknown'}/${result?.data?.newIngressName || 'unknown'}`,
+    );
+    return result;
+  }
+
   private normalizeToHost(rawLineUrl: string) {
     const value = rawLineUrl.trim().toLowerCase();
     if (!value) {

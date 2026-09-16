@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpException, HttpStatus, Post, Query, Req, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Headers, HttpException, HttpStatus, Post, Query, Req, UsePipes, ValidationPipe } from '@nestjs/common';
 import { LinesService } from './lines.service';
 import { ListLineDto } from './dto/list-line.dto';
 import { VerifyExternalLineDto } from './dto/verify-external-line.dto';
@@ -16,10 +16,33 @@ import { ListIngressSourceCandidatesDto } from './dto/list-ingress-source-candid
 import { ApplyTenantDomainDto } from './dto/apply-tenant-domain.dto';
 import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
 import { SyncDcdnSslDto } from './dto/sync-dcdn-ssl.dto';
+import { ApplyIngressManifestDto } from './dto/apply-ingress-manifest.dto';
+import { AuthService } from '../auth/auth.service';
+import { AccessControlService } from '../access-control/access-control.service';
 
 @Controller('lines')
 export class LinesController {
-  constructor(private readonly linesService: LinesService) {}
+  constructor(
+    private readonly linesService: LinesService,
+    private readonly authService: AuthService,
+    private readonly accessControl: AccessControlService,
+  ) {}
+
+  private async assertLineOnboardingAccess(authorization?: string) {
+    const raw = String(authorization || '');
+    if (!raw.toLowerCase().startsWith('bearer ')) {
+      throw new ForbiddenException('Missing permissions: menu:line-onboarding');
+    }
+    const identity = await this.authService.verifyToken(raw.slice(7).trim());
+    const user = identity.source === 'keycloak' || typeof identity.sub !== 'number'
+      ? await this.accessControl.ensureUserByUsername(identity.username, { displayName: identity.displayName })
+      : { id: Number(identity.sub), username: identity.username };
+    const me = await this.accessControl.getMe({ userId: Number(user.id) });
+    if (!(me.permissions || []).includes('menu:line-onboarding')) {
+      throw new ForbiddenException('Missing permissions: menu:line-onboarding');
+    }
+    return { userId: String(me.id), username: String(me.username || identity.username) };
+  }
 
   @Get()
   @UsePipes(new ValidationPipe({ transform: true }))
@@ -281,6 +304,30 @@ export class LinesController {
       requestId: req?.requestId,
       userId: req?.user?.id ? String(req.user.id) : undefined,
       username: req?.user?.username,
+    });
+  }
+
+  @Post('ingress/manifest/apply')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async applyIngressManifest(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string | undefined,
+    @Req() req: any,
+    @Body() body: ApplyIngressManifestDto,
+  ) {
+    if (!environmentId) {
+      throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
+    }
+    if (body.environmentId !== environmentId) {
+      throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
+    }
+    const actor = await this.assertLineOnboardingAccess(authorization);
+    return this.linesService.applyIngressManifest(environmentId, {
+      manifestYaml: body.manifestYaml,
+      sourceIngressName: body.sourceIngressName,
+      confirmed: body.confirmed,
+      requestId: req?.requestId,
+      ...actor,
     });
   }
 }

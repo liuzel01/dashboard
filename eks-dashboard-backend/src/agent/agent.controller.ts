@@ -21,6 +21,7 @@ import { AgentIngressService } from './agent-ingress.service';
 import { AgentTenantDomainService } from './agent-tenant-domain.service';
 import { AgentAggregateQueryDto } from './dto/agent-aggregate-query.dto';
 import { AgentCloneIngressDto } from './dto/agent-clone-ingress.dto';
+import { AgentApplyIngressManifestDto } from './dto/agent-apply-ingress-manifest.dto';
 import { AgentResolveIngressSourceDto } from './dto/agent-resolve-ingress-source.dto';
 import { AgentResolveIngressTlsSecretDto } from './dto/agent-resolve-ingress-tls-secret.dto';
 import { AgentListIngressSourceCandidatesDto } from './dto/agent-list-ingress-source-candidates.dto';
@@ -471,6 +472,31 @@ export class AgentController {
       newIngressName: body.newIngressName,
       tlsSecretMode: body.tlsSecretMode,
       tlsSecretName: body.tlsSecretName,
+      confirmed: body.confirmed,
+      requestId,
+      userId,
+      username,
+    });
+  }
+
+  @Post('v1/ingress/manifest/apply')
+  async applyIngressManifest(
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: AgentApplyIngressManifestDto,
+  ) {
+    this.checkAgentToken(token);
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    this.logger.log(
+      `[AgentIngress] manifest-${body.confirmed ? 'create' : 'dry-run'} env=${envId} requestId=${requestId || 'none'} userId=${userId || 'none'} username=${username || 'none'}`,
+    );
+    return this.ingressService.applyIngressManifest({
+      environmentId: envId,
+      manifestYaml: body.manifestYaml,
+      sourceIngressName: body.sourceIngressName,
       confirmed: body.confirmed,
       requestId,
       userId,

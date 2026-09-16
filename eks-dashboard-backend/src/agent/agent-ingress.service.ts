@@ -1,5 +1,18 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
+import { loadAll, YAMLException } from 'js-yaml';
+
+const K8S_RESOURCE_NAME_REGEX = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+
+const HIGH_RISK_ANNOTATIONS: Record<string, string> = {
+  'nginx.ingress.kubernetes.io/server-snippet': '会注入 Nginx server 配置。',
+  'nginx.ingress.kubernetes.io/configuration-snippet': '会注入 Nginx location 配置。',
+  'nginx.ingress.kubernetes.io/auth-url': '会改变认证链路。',
+  'nginx.ingress.kubernetes.io/auth-signin': '会改变认证跳转。',
+  'nginx.ingress.kubernetes.io/permanent-redirect': '会将请求永久重定向到指定地址。',
+  'nginx.ingress.kubernetes.io/rewrite-target': '会重写请求路径。',
+  'nginx.ingress.kubernetes.io/whitelist-source-range': '会改变允许访问的来源 IP 范围。',
+};
 
 @Injectable()
 export class AgentIngressService {
@@ -317,6 +330,55 @@ export class AgentIngressService {
     };
   }
 
+  async applyIngressManifest(input: {
+    environmentId: string;
+    manifestYaml: string;
+    sourceIngressName?: string;
+    confirmed: boolean;
+    requestId?: string;
+    userId?: string;
+    username?: string;
+  }) {
+    const manifest = this.parseIngressManifest(input.manifestYaml);
+    const namespace = String(manifest.metadata?.namespace || '').trim();
+    const name = String(manifest.metadata?.name || '').trim();
+    const warnings = this.getManifestWarnings(manifest);
+
+    this.logger.log(
+      `[AgentIngressManifest] ${input.confirmed ? 'create' : 'dry-run'} env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} userId=${input.userId || 'none'} username=${input.username || 'none'} source=${input.sourceIngressName || 'none'} target=${namespace}/${name}`,
+    );
+
+    const dryRunResult = await this.createIngress(manifest, namespace, true);
+    const host = String(manifest.spec?.rules?.[0]?.host || '').trim() || null;
+    const data = {
+      newIngressName: name,
+      namespace,
+      host,
+      warnings,
+      dryRun: true,
+      yaml: this.toYaml(manifest),
+      dryRunCreationTimestamp: dryRunResult?.metadata?.creationTimestamp || null,
+    };
+
+    if (!input.confirmed) {
+      return { success: true, preview: true, data };
+    }
+
+    const created = await this.createIngress(manifest, namespace, false);
+    this.logger.log(
+      `[AgentIngressManifest] created env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} target=${namespace}/${name}`,
+    );
+    return {
+      success: true,
+      preview: false,
+      data: {
+        ...data,
+        dryRun: false,
+        createdAt: created?.metadata?.creationTimestamp || new Date().toISOString(),
+      },
+    };
+  }
+
   private async listIngressCandidates(namespace = '', keyword = '') {
     const { body } = await this.networkingV1Api.listIngressForAllNamespaces();
     const normalizedKeyword = keyword.trim().toLowerCase();
@@ -435,6 +497,87 @@ export class AgentIngressService {
       }));
     }
     return cloned;
+  }
+
+  private parseIngressManifest(manifestYaml: string): any {
+    const raw = String(manifestYaml || '');
+    if (!raw.trim()) throw new BadRequestException('Ingress YAML is required');
+
+    const documents: unknown[] = [];
+    try {
+      loadAll(raw, (document) => {
+        if (document !== undefined && document !== null) documents.push(document);
+      });
+    } catch (error: any) {
+      if (error instanceof YAMLException && error.mark) {
+        throw new BadRequestException(`Ingress YAML syntax error at line ${error.mark.line + 1}: ${error.reason}`);
+      }
+      throw new BadRequestException(`Ingress YAML syntax error: ${String(error?.reason || error?.message || error)}`);
+    }
+
+    if (documents.length !== 1) {
+      throw new BadRequestException('Ingress YAML must contain exactly one resource document');
+    }
+    const manifest = documents[0] as any;
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+      throw new BadRequestException('Ingress YAML root must be an object');
+    }
+    if (manifest.apiVersion !== 'networking.k8s.io/v1' || manifest.kind !== 'Ingress') {
+      throw new BadRequestException('Ingress YAML must be a networking.k8s.io/v1 Ingress');
+    }
+    if (!manifest.metadata || typeof manifest.metadata !== 'object' || Array.isArray(manifest.metadata)) {
+      throw new BadRequestException('Ingress metadata is required');
+    }
+    const namespace = String(manifest.metadata.namespace || '').trim();
+    const name = String(manifest.metadata.name || '').trim();
+    if (!namespace || !K8S_RESOURCE_NAME_REGEX.test(namespace)) {
+      throw new BadRequestException('Ingress metadata.namespace format is invalid');
+    }
+    if (!name || !K8S_RESOURCE_NAME_REGEX.test(name)) {
+      throw new BadRequestException('Ingress metadata.name format is invalid');
+    }
+    if (manifest.status !== undefined) {
+      throw new BadRequestException('Ingress YAML must not include status');
+    }
+    const serverManagedFields = ['uid', 'resourceVersion', 'generation', 'creationTimestamp', 'managedFields', 'selfLink'];
+    const presentManagedFields = serverManagedFields.filter((key) => manifest.metadata[key] !== undefined);
+    if (presentManagedFields.length > 0) {
+      throw new BadRequestException(`Ingress YAML must not include server-managed metadata: ${presentManagedFields.join(', ')}`);
+    }
+    return manifest;
+  }
+
+  private getManifestWarnings(manifest: any) {
+    const annotations = manifest?.metadata?.annotations;
+    const warnings: Array<{ annotation: string; message: string }> = [];
+    if (annotations && typeof annotations === 'object' && !Array.isArray(annotations)) {
+      Object.entries(HIGH_RISK_ANNOTATIONS).forEach(([annotation, message]) => {
+        if (annotations[annotation] !== undefined) warnings.push({ annotation, message });
+      });
+    }
+    if (manifest?.spec?.ingressClassName) {
+      warnings.push({ annotation: 'spec.ingressClassName', message: '会指定或切换 Ingress Controller。' });
+    }
+    return warnings;
+  }
+
+  private async createIngress(manifest: any, namespace: string, dryRun: boolean) {
+    try {
+      const { body } = await this.networkingV1Api.createNamespacedIngress(
+        namespace,
+        manifest as k8s.V1Ingress,
+        undefined,
+        dryRun ? 'All' : undefined,
+        'dashboard-line-onboarding',
+        'Strict',
+      );
+      return body;
+    } catch (error: any) {
+      const statusCode = Number(error?.response?.statusCode || error?.statusCode || error?.response?.status);
+      const reason = String(error?.body?.message || error?.response?.body?.message || error?.message || 'Kubernetes rejected the Ingress');
+      if (statusCode === 409) throw new ConflictException(`Ingress ${dryRun ? 'dry-run ' : ''}creation conflict: ${reason}`);
+      throw new BadRequestException(`Ingress ${dryRun ? 'dry-run validation' : 'creation'} failed: ${reason}`);
+    }
   }
 
   private resolveTlsSecretName(
