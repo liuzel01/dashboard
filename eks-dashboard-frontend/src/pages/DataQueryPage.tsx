@@ -550,8 +550,10 @@ const DataQueryPage: React.FC = () => {
         setDeletingKey(key);
         try {
           await deleteRedisKey(key);
+          // The delete endpoint is authoritative; update only the affected local
+          // list instead of rerunning the whole aggregate query (which resets tabs).
+          setRedisData((current) => current?.filter((item) => item.key !== key) ?? []);
           message.success(`键 "${key}" 已成功删除！`);
-          await onSearch(lastSearchTerm); // 重新获取数据以刷新页面
         } catch (err) {
           const errObj = err as { response?: { data?: { message?: string } }; message?: string };
           const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
