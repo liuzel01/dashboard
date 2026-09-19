@@ -8,7 +8,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { verifySync } from 'otplib';
-import { fromIni } from '@aws-sdk/credential-providers';
+import { fromTemporaryCredentials } from '@aws-sdk/credential-providers';
 import {
   ACMClient,
   DescribeCertificateCommand,
@@ -174,15 +174,21 @@ export class SslCertificatesService {
 
     const clientConfig: { region: string; credentials?: any } = { region: finalRegion };
     let credentialSource = 'default-chain';
-    if (env.aws_access_key_id && env.aws_secret_access_key) {
-      clientConfig.credentials = {
-        accessKeyId: env.aws_access_key_id,
-        secretAccessKey: env.aws_secret_access_key,
-      };
-      credentialSource = `aksk:${String(env.aws_access_key_id).slice(0, 4)}***`;
-    } else if (env.aws_profile) {
-      clientConfig.credentials = fromIni({ profile: env.aws_profile });
-      credentialSource = `profile:${env.aws_profile}`;
+    const roleArn = String(env.aws_role_arn || '').trim();
+    if (roleArn) {
+      const stsRegion =
+        process.env.AWS_STS_REGION ||
+        process.env.AWS_REGION ||
+        process.env.AWS_DEFAULT_REGION ||
+        'ap-southeast-1';
+      clientConfig.credentials = fromTemporaryCredentials({
+        clientConfig: { region: stsRegion },
+        params: {
+          RoleArn: roleArn,
+          RoleSessionName: `dashboard-acm-${environmentId}`.replace(/[^A-Za-z0-9_=,.@-]/g, '-'),
+        },
+      });
+      credentialSource = `assume-role:${roleArn}`;
     }
 
     const client = new ACMClient(clientConfig);

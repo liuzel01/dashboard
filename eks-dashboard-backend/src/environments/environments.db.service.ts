@@ -114,7 +114,7 @@ export class EnvironmentsDbService {
   async getEnvironmentConfigs(): Promise<any[]> {
     if (!(await this.ensureConfigAvailable())) return [];
     const rows = await this.db.query<any[]>(
-      `SELECT environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_region,
+      `SELECT environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_role_arn, aws_region,
               kube_context, database_json, redis_json, jump_server_json, tenants_json, platforms_json, alerts_json
        FROM environments_config
        ORDER BY environment_id`,
@@ -129,6 +129,7 @@ export class EnvironmentsDbService {
         aws_access_key_id: row.aws_access_key_id || undefined,
         aws_secret_access_key: row.aws_secret_access_key || undefined,
         aws_profile: row.aws_profile || undefined,
+        aws_role_arn: row.aws_role_arn || undefined,
         aws_region: row.aws_region,
         kubeContext: row.kube_context || undefined,
         database: this.parseJson(row.database_json),
@@ -144,7 +145,7 @@ export class EnvironmentsDbService {
   async getEnvironmentConfigById(environmentId: string): Promise<any | null> {
     if (!(await this.ensureConfigAvailable())) return null;
     const rows = await this.db.query<any[]>(
-      `SELECT environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_region,
+      `SELECT environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_role_arn, aws_region,
               kube_context, database_json, redis_json, jump_server_json, tenants_json, platforms_json, alerts_json
        FROM environments_config
        WHERE environment_id = ?
@@ -162,6 +163,7 @@ export class EnvironmentsDbService {
       aws_access_key_id: row.aws_access_key_id || undefined,
       aws_secret_access_key: row.aws_secret_access_key || undefined,
       aws_profile: row.aws_profile || undefined,
+      aws_role_arn: row.aws_role_arn || undefined,
       aws_region: row.aws_region,
       kubeContext: row.kube_context || undefined,
       database: this.parseJson(row.database_json),
@@ -181,6 +183,7 @@ export class EnvironmentsDbService {
     aws_access_key_id?: string;
     aws_secret_access_key?: string;
     aws_profile?: string;
+    aws_role_arn?: string;
     aws_region?: string;
     kubeContext?: string;
     database?: any;
@@ -207,15 +210,16 @@ export class EnvironmentsDbService {
 
     await this.db.query(
       `INSERT INTO environments_config
-        (environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_region, kube_context,
+        (environment_id, name, aws_access_key_id, aws_secret_access_key, aws_profile, aws_role_arn, aws_region, kube_context,
          database_json, redis_json, jump_server_json, tenants_json, platforms_json, alerts_json, created_at, updated_at)
        VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
        ON DUPLICATE KEY UPDATE
         name = VALUES(name),
         aws_access_key_id = VALUES(aws_access_key_id),
         aws_secret_access_key = VALUES(aws_secret_access_key),
         aws_profile = VALUES(aws_profile),
+        aws_role_arn = VALUES(aws_role_arn),
         aws_region = VALUES(aws_region),
         kube_context = VALUES(kube_context),
         database_json = VALUES(database_json),
@@ -231,6 +235,7 @@ export class EnvironmentsDbService {
         env.aws_access_key_id || null,
         env.aws_secret_access_key || null,
         env.aws_profile || null,
+        env.aws_role_arn || null,
         env.aws_region || null,
         env.kubeContext || null,
         env.database ? JSON.stringify(env.database) : null,

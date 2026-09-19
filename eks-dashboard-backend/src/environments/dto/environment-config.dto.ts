@@ -23,15 +23,7 @@ export class CreateEnvironmentConfigDto {
 
   @IsOptional()
   @IsString()
-  aws_access_key_id?: string;
-
-  @IsOptional()
-  @IsString()
-  aws_secret_access_key?: string;
-
-  @IsOptional()
-  @IsString()
-  aws_profile?: string;
+  aws_role_arn?: string;
 
   @IsOptional()
   @IsString()
@@ -81,15 +73,7 @@ export class UpdateEnvironmentConfigDto {
 
   @IsOptional()
   @IsString()
-  aws_access_key_id?: string;
-
-  @IsOptional()
-  @IsString()
-  aws_secret_access_key?: string;
-
-  @IsOptional()
-  @IsString()
-  aws_profile?: string;
+  aws_role_arn?: string;
 
   @IsOptional()
   @IsString()

@@ -20,8 +20,7 @@ export class EnvironmentsController {
       super_admin_url: env.super_admin_url,
       db_gateway_agent_url: env.db_gateway_agent_url,
       aws_region: env.aws_region,
-      aws_profile: env.aws_profile,
-      aws_access_key_id: env.aws_access_key_id,
+      aws_role_arn: env.aws_role_arn,
       kubeContext: env.kubeContext,
     }));
   }
@@ -30,7 +29,14 @@ export class EnvironmentsController {
   async findConfig(@Param('id') id: string) {
     const env = await this.environmentsService.getEnvironmentConfigById(id);
     if (!env) throw new NotFoundException(`Environment "${id}" not found`);
-    return env;
+    // 历史字段可能仍存在于数据库中，但管理接口不再读取或返回静态凭证/Profile。
+    const {
+      aws_access_key_id: _awsAccessKeyId,
+      aws_secret_access_key: _awsSecretAccessKey,
+      aws_profile: _awsProfile,
+      ...safeEnv
+    } = env;
+    return safeEnv;
   }
 
   @Post('config')
@@ -43,9 +49,7 @@ export class EnvironmentsController {
       super_admin_url: body.super_admin_url,
       db_gateway_agent_url: body.db_gateway_agent_url,
       aws_region: body.aws_region,
-      aws_access_key_id: body.aws_access_key_id,
-      aws_secret_access_key: body.aws_secret_access_key,
-      aws_profile: body.aws_profile,
+      aws_role_arn: body.aws_role_arn,
       kubeContext: body.kubeContext,
       database: body.database,
       redis: body.redis,

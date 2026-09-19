@@ -10,6 +10,8 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         DASHBOARD_K8S_PRESERVE_EXEC_AUTH: 'false',
+        // STS endpoint used to obtain target-account credentials from this EC2 instance role.
+        AWS_STS_REGION: 'ap-southeast-1',
         KUBECONFIG: '/root/.kube/config',
         HOME: '/root',
       },

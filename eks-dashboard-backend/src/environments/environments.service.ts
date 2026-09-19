@@ -6,7 +6,7 @@ import { SSMClient } from '@aws-sdk/client-ssm';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Route53Client } from '@aws-sdk/client-route-53';
-import { fromIni } from '@aws-sdk/credential-providers';
+import { fromTemporaryCredentials } from '@aws-sdk/credential-providers';
 import { EnvironmentsDbService } from './environments.db.service';
 import type { Environment, Platform } from './environment.types';
 
@@ -123,24 +123,28 @@ export class EnvironmentsService implements OnModuleInit {
       region: env.aws_region,
     };
 
-    if (env.aws_access_key_id && env.aws_secret_access_key) {
+    const roleArn = String(env.aws_role_arn || '').trim();
+    if (roleArn) {
+      const stsRegion =
+        process.env.AWS_STS_REGION ||
+        process.env.AWS_REGION ||
+        process.env.AWS_DEFAULT_REGION ||
+        'ap-southeast-1';
       this.logger.debug(
-        `Using AWS access key for environment "${environmentId}"`,
+        `Assuming configured AWS role for environment "${environmentId}": ${roleArn}`,
       );
-      clientConfig.credentials = {
-        accessKeyId: env.aws_access_key_id,
-        secretAccessKey: env.aws_secret_access_key,
-      };
-    } else if (env.aws_profile) {
-      this.logger.debug(
-        `Using AWS profile "${env.aws_profile}" for environment "${environmentId}"`,
-      );
-      clientConfig.credentials = fromIni({ profile: env.aws_profile });
+      clientConfig.credentials = fromTemporaryCredentials({
+        clientConfig: { region: stsRegion },
+        params: {
+          RoleArn: roleArn,
+          RoleSessionName: `dashboard-${environmentId}`.replace(/[^A-Za-z0-9_=,.@-]/g, '-'),
+        },
+      });
     } else {
       this.logger.debug(
         `Using default AWS credential provider chain for environment "${environmentId}"`,
       );
-      // 如果没有指定凭证，SDK 将使用其默认凭证链（环境变量、EC2 实例配置文件等）
+      // 未配置目标角色时，SDK 使用运行实例的默认凭证链。
     }
 
     const clients = {

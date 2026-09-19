@@ -1,0 +1,120 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CallerIdentity",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DescribeHashClusters",
+      "Effect": "Allow",
+      "Action": "eks:DescribeCluster",
+      "Resource": [
+        "arn:aws:eks:ap-east-1:290368114919:cluster/hash",
+        "arn:aws:eks:ap-east-1:290368114919:cluster/hash-cilium",
+        "arn:aws:eks:ap-east-1:290368114919:cluster/hashdev"
+      ]
+    },
+    {
+      "Sid": "AcmCertificateOperations",
+      "Effect": "Allow",
+      "Action": [
+        "acm:ListCertificates",
+        "acm:DescribeCertificate",
+        "acm:RequestCertificate",
+        "acm:ExportCertificate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListDashboardBuckets",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadDashboardBuckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::hash-222",
+        "arn:aws:s3:::hashdev-222"
+      ]
+    },
+    {
+      "Sid": "ManageDashboardBucketObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::hash-222/*",
+        "arn:aws:s3:::hashdev-222/*"
+      ]
+    },
+    {
+      "Sid": "ReadRoute53",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZonesByName",
+        "route53:ListResourceRecordSets",
+        "route53:GetChange"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ChangePublicCnameRecords",
+      "Effect": "Allow",
+      "Action": "route53:ChangeResourceRecordSets",
+      "Resource": [
+        "arn:aws:route53:::hostedzone/Z05731182WH61B7VFTHXK",
+        "arn:aws:route53:::hostedzone/Z07038832AJX8BRHUTNFI",
+        "arn:aws:route53:::hostedzone/Z09991051EQECHG5BYVUM",
+        "arn:aws:route53:::hostedzone/Z04104362UQC63WR8J2M1",
+        "arn:aws:route53:::hostedzone/Z014973030WAB8XNR4KR0",
+        "arn:aws:route53:::hostedzone/Z09514653559I67MNAZ6",
+        "arn:aws:route53:::hostedzone/Z08076543Q82R370VMGD0"
+      ],
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "route53:ChangeResourceRecordSetsActions": "UPSERT",
+          "route53:ChangeResourceRecordSetsRecordTypes": "CNAME"
+        }
+      }
+    },
+    {
+      "Sid": "ReadDashboardNetwork",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "ec2:DescribeInstances",
+        "ec2:DescribeSecurityGroups"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageHashTrafficSecurityGroups",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress"
+      ],
+      "Resource": [
+        "arn:aws:ec2:ap-east-1:290368114919:security-group/sg-00f626f6689c94074",
+        "arn:aws:ec2:ap-east-1:290368114919:security-group/sg-08903ffba058fcd0b"
+      ]
+    },
+    {
+      "Sid": "ReadSsmCommandInvocation",
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*"
+    }
+  ]
+}

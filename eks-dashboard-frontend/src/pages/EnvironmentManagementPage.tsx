@@ -14,9 +14,7 @@ type EnvConfig = {
   name: string;
   super_admin_url?: string;
   aws_region?: string;
-  aws_profile?: string;
-  aws_access_key_id?: string;
-  aws_secret_access_key?: string;
+  aws_role_arn?: string;
   kubeContext?: string;
   database?: any;
   redis?: any;
@@ -87,9 +85,7 @@ const EnvironmentManagementPage: React.FC = () => {
         name: data.name,
         super_admin_url: data.super_admin_url ?? '',
         aws_region: data.aws_region,
-        aws_profile: data.aws_profile ?? '',
-        aws_access_key_id: data.aws_access_key_id ?? '',
-        aws_secret_access_key: data.aws_secret_access_key ?? '',
+        aws_role_arn: data.aws_role_arn ?? '',
         kubeContext: data.kubeContext ?? '',
         database: toJsonString(data.database),
         redis: toJsonString(data.redis),
@@ -122,9 +118,7 @@ const EnvironmentManagementPage: React.FC = () => {
       name: values.name,
       super_admin_url: normalizeOptionalString(values.super_admin_url),
       aws_region: values.aws_region,
-      aws_profile: normalizeOptionalString(values.aws_profile),
-      aws_access_key_id: normalizeOptionalString(values.aws_access_key_id),
-      aws_secret_access_key: normalizeOptionalString(values.aws_secret_access_key),
+      aws_role_arn: normalizeOptionalString(values.aws_role_arn),
       kubeContext: normalizeOptionalString(values.kubeContext),
     };
 
@@ -166,8 +160,7 @@ const EnvironmentManagementPage: React.FC = () => {
       { title: '名称', dataIndex: 'name', width: 220 },
       { title: '大管理端地址', dataIndex: 'super_admin_url', width: 280 },
       { title: 'Region', dataIndex: 'aws_region', width: 140 },
-      { title: 'AWS Profile', dataIndex: 'aws_profile', width: 160 },
-      { title: 'AWS Access Key ID', dataIndex: 'aws_access_key_id', width: 220 },
+      { title: 'AWS Role ARN', dataIndex: 'aws_role_arn', width: 420 },
       { title: 'Kube Context', dataIndex: 'kubeContext', width: 200 },
       {
         title: '操作',
@@ -219,7 +212,7 @@ const EnvironmentManagementPage: React.FC = () => {
           showIcon
           style={{ marginBottom: 16 }}
           message="凭证填写建议"
-          description="AWS 凭证支持两种方式：推荐填写 AK/SK（AWS Access Key ID + AWS Secret Access Key）；也可以填写 aws_profile（依赖服务器本地 AWS 配置）。两者填一项即可，Kube Context 仍需按实际集群配置。"
+          description="AWS 访问使用 Dashboard 所在 EC2 的实例角色。需要访问其他 AWS 账户时，填写允许该实例角色 AssumeRole 的目标 Role ARN；不再保存 AK/SK 或服务器 AWS Profile。Kube Context 仍需按实际集群配置。"
         />
         <Form form={form} layout="vertical">
           <Form.Item
@@ -246,14 +239,8 @@ const EnvironmentManagementPage: React.FC = () => {
           >
             <Input placeholder="例如: ap-northeast-1" />
           </Form.Item>
-          <Form.Item label="AWS Profile" name="aws_profile">
-            <Input placeholder="使用 profile 时填写" />
-          </Form.Item>
-          <Form.Item label="AWS Access Key ID" name="aws_access_key_id">
-            <Input placeholder="使用 AK/SK 时填写" />
-          </Form.Item>
-          <Form.Item label="AWS Secret Access Key" name="aws_secret_access_key">
-            <Input.Password placeholder="使用 AK/SK 时填写" />
+          <Form.Item label="AWS Role ARN（可选）" name="aws_role_arn">
+            <Input placeholder="例如: arn:aws:iam::123456789012:role/dashboard-target-role" />
           </Form.Item>
           <Form.Item label="Kube Context" name="kubeContext">
             <Input placeholder="kubeconfig context 名称" />

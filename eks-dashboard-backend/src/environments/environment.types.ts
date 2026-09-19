@@ -11,6 +11,7 @@ export interface Environment {
   aws_access_key_id?: string;
   aws_secret_access_key?: string;
   aws_profile?: string;
+  aws_role_arn?: string;
   aws_region: string;
   kubeContext?: string;
   database?: Record<string, any>;
