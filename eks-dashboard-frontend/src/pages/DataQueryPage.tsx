@@ -30,6 +30,7 @@ import {
   deleteRedisKey,
   getTenantsForEnvironment,
   getRedisKey,
+  getSystemErrorWithdrawOrderRedis,
   getTraderInfo,
   getOtcMerchantInfo,
   updateTraderNickName,
@@ -41,6 +42,7 @@ import {
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import PlaceholderPage from './PlaceholderPage';
+import type { SystemErrorWithdrawOrderRedisResult } from '../services/api';
 
 const { Search } = Input;
 const { TabPane } = Tabs;
@@ -115,6 +117,10 @@ const DataQueryPage: React.FC = () => {
   const [creatingRedisKey, setCreatingRedisKey] = useState(false);
   const [redisMatchId, setRedisMatchId] = useState<string | null>(null);
   const [redisCreateForm] = Form.useForm();
+  const [systemErrorOrderCache, setSystemErrorOrderCache] =
+    useState<SystemErrorWithdrawOrderRedisResult | null>(null);
+  const [systemErrorOrderCacheLoading, setSystemErrorOrderCacheLoading] = useState(false);
+  const [systemErrorOrderCacheVisible, setSystemErrorOrderCacheVisible] = useState(false);
   const storedTab = typeof window !== 'undefined' ? sessionStorage.getItem('dataQueryActiveTab') : null;
   const [activeTabKey, setActiveTabKey] = useState<string>(storedTab ?? '1');
 
@@ -565,6 +571,26 @@ const DataQueryPage: React.FC = () => {
     }
   };
 
+  const handleQuerySystemErrorOrderCache = async () => {
+    const uid = String(userInfo?.tenant_user_id || lastSearchTerm).trim();
+    const tenantId = userInfo?.tenant_id || currentTenantRef.current;
+    if (!uid || !tenantId) {
+      message.error('请先按 UID 查询并选择租户。');
+      return;
+    }
+    setSystemErrorOrderCacheLoading(true);
+    try {
+      const result = await getSystemErrorWithdrawOrderRedis(uid, Number(tenantId));
+      setSystemErrorOrderCache(result);
+      setSystemErrorOrderCacheVisible(true);
+    } catch (err) {
+      const e = err as { response?: { data?: { message?: string } }; message?: string };
+      message.error(`查询系统异常订单缓存失败: ${e?.response?.data?.message || e?.message || String(err)}`);
+    } finally {
+      setSystemErrorOrderCacheLoading(false);
+    }
+  };
+
   const renderResults = () => {
     if (loading) {
       return <div style={{ textAlign: 'center', marginTop: 50 }}><Spin size="large" tip="正在聚合查询..." /></div>;
@@ -792,9 +818,18 @@ const DataQueryPage: React.FC = () => {
           <Card
             title={redisMatchId ? `包含 ID ${redisMatchId} 的缓存键` : '缓存键'}
             extra={
-              <Button type="primary" onClick={() => setIsCreateRedisModalVisible(true)}>
-                新增缓存键
-              </Button>
+              <Space>
+                <Button
+                  onClick={handleQuerySystemErrorOrderCache}
+                  loading={systemErrorOrderCacheLoading}
+                  disabled={!userInfo?.tenant_user_id || !userInfo?.tenant_id}
+                >
+                  查询系统异常订单缓存
+                </Button>
+                <Button type="primary" onClick={() => setIsCreateRedisModalVisible(true)}>
+                  新增缓存键
+                </Button>
+              </Space>
             }
           >
             {redisData && redisData.length > 0 ? (
@@ -947,6 +982,46 @@ const DataQueryPage: React.FC = () => {
             </Button>
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal
+        title="系统异常提现订单缓存（tx_status = 6）"
+        open={systemErrorOrderCacheVisible}
+        onCancel={() => setSystemErrorOrderCacheVisible(false)}
+        footer={<Button onClick={() => setSystemErrorOrderCacheVisible(false)}>关闭</Button>}
+        width={1100}
+      >
+        {systemErrorOrderCache?.orders.length ? (
+          <div style={{ maxHeight: '65vh', overflow: 'auto' }}>
+            {systemErrorOrderCache.orders.map((order) => (
+              <Card
+                key={String(order.order_no)}
+                size="small"
+                title={`订单 ${String(order.order_no)}`}
+                style={{ marginBottom: 12 }}
+              >
+                <Descriptions size="small" column={3} bordered>
+                  <Descriptions.Item label="币种">{String(order.tx_coin ?? '-')}</Descriptions.Item>
+                  <Descriptions.Item label="金额">{String(order.tx_amount ?? '-')}</Descriptions.Item>
+                  <Descriptions.Item label="更新时间">{String(order.update_time ?? '-')}</Descriptions.Item>
+                </Descriptions>
+                <div style={{ marginTop: 10 }}>
+                  {order.redisKeys.length ? order.redisKeys.map((item) => (
+                    <Card key={item.key} type="inner" size="small" title={item.key} style={{ marginBottom: 8 }}>
+                      <Tag color={item.ttlSeconds > 0 ? 'blue' : item.ttlSeconds === -1 ? 'green' : 'default'}>
+                        TTL: {formatGenericTtl(item.ttlSeconds)}
+                      </Tag>
+                      {item.valueTruncated && <Tag color="orange">值已截断</Tag>}
+                      <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', maxHeight: 180, overflow: 'auto' }}>
+                        {typeof item.value === 'string' ? item.value : JSON.stringify(item.value, null, 2)}
+                      </pre>
+                    </Card>
+                  )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该订单未找到匹配的 Redis 键" />}
+                  {order.redisKeySearchTruncated && <Alert style={{ marginTop: 8 }} type="warning" showIcon message="Redis 匹配结果已达到安全上限，未继续读取。" />}
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : <Empty description="未找到 tx_status = 6 的提现订单" />}
       </Modal>
       {/* 编辑交易员 nick_name 模态框 */}
       <Modal

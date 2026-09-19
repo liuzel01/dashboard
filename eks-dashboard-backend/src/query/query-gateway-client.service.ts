@@ -301,6 +301,51 @@ export class QueryGatewayClientService {
     return response.data;
   }
 
+  async getSystemErrorWithdrawOrderRedis(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    context?: QueryRequestContext,
+  ): Promise<any | null> {
+    if (!(await this.isGatewayEnabledForEnvironment(environmentId))) return null;
+
+    const requestId = context?.requestId || randomUUID();
+    const token = await this.getAgentToken();
+    const headers = {
+      'X-Environment-Id': environmentId,
+      'X-Request-Id': requestId,
+      ...(context?.userId ? { 'X-User-Id': context.userId } : {}),
+      ...(context?.username ? { 'X-Username': context.username } : {}),
+      ...(token ? { 'X-Agent-Token': token } : {}),
+    };
+    const path = `/v1/query/users/${encodeURIComponent(uid)}/system-error-withdraw-order-redis`;
+    const transport = await this.getGatewayTransport();
+    if (transport === 'k8s-proxy') {
+      const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();
+      const timeoutMs = await this.getGatewayTimeoutMs();
+      const response = await this.kubernetesService.requestServiceProxy(environmentId, {
+        namespace,
+        serviceName,
+        port: Number.isFinite(servicePort) && servicePort > 0 ? servicePort : 8080,
+        method: 'GET',
+        path,
+        query: { tenantId },
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000,
+        headers,
+      });
+      return response.body;
+    }
+
+    const baseUrl = await this.environmentsService.getDbGatewayAgentUrl(environmentId);
+    if (!baseUrl) return null;
+    const response = await axios.get(`${baseUrl.replace(/\/+$/, '')}${path}`, {
+      timeout: await this.getGatewayTimeoutMs(),
+      params: { tenantId },
+      headers,
+    });
+    return response.data;
+  }
+
   async getOtcMerchantInfo(
     environmentId: string,
     uid: string,

@@ -89,6 +89,38 @@ export class QueryService {
     }
   }
 
+  async getSystemErrorWithdrawOrderRedis(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+    context?: QueryRequestContext,
+  ) {
+    if (!this.queryGatewayClient.isGatewayEnabledForEnvironment(environmentId)) {
+      throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
+    }
+    try {
+      const data = await this.queryGatewayClient.getSystemErrorWithdrawOrderRedis(
+        environmentId,
+        uid,
+        tenantId,
+        context,
+      );
+      if (!data) throw new InternalServerErrorException('AGENT_UNREACHABLE');
+      if (data?.status === 'not_found') {
+        throw new NotFoundException(data?.error || 'No system-error withdrawal orders found');
+      }
+      if (data?.status === 'success') return data.data;
+      return data;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `Error fetching system-error withdrawal order Redis data for uid ${uid} in env ${environmentId}:`,
+        error,
+      );
+      throw new InternalServerErrorException('Failed to fetch system-error withdrawal order Redis data');
+    }
+  }
+
   private formatTtl(ttl: number) {
     if (ttl === -2) return '不存在';
     if (ttl === -1) return '无过期时间';

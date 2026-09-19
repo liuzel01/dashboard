@@ -206,6 +206,37 @@ export const getRedisKey = async (key: string) => {
   const response = await api.get('/query/redis-key', { params: { key } });
   return response.data;
 };
+
+export type SystemErrorWithdrawOrderRedisResult = {
+  uid: string;
+  userId: string;
+  tenantId: number;
+  txStatus: number;
+  orderLimit: number;
+  redisKeyLimit: number;
+  orders: Array<Record<string, unknown> & {
+    order_no: string;
+    redisKeys: Array<{
+      key: string;
+      value?: string | object | null;
+      ttlSeconds: number;
+      valueTruncated?: boolean;
+    }>;
+    redisKeySearchTruncated?: boolean;
+  }>;
+};
+
+/** Query read-only Redis records for withdrawal orders whose tx_status is fixed to 6. */
+export const getSystemErrorWithdrawOrderRedis = async (
+  uid: string,
+  tenantId: number,
+): Promise<SystemErrorWithdrawOrderRedisResult> => {
+  const response = await api.get(
+    `/query/users/${encodeURIComponent(uid)}/system-error-withdraw-order-redis`,
+    { params: { tenantId } },
+  );
+  return response.data;
+};
 /**
  * 获取指定用户的交易员信息（tiger.copy_trade_user_info）
  * @param uid - tbl_user.tenant_user_id

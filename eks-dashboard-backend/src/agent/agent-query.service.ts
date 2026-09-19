@@ -14,6 +14,11 @@ interface JdbcConfig {
 
 @Injectable()
 export class AgentQueryService implements OnModuleDestroy {
+  private static readonly SYSTEM_ERROR_TX_STATUS = 6;
+  private static readonly MAX_SYSTEM_ERROR_ORDERS = 100;
+  private static readonly MAX_REDIS_KEYS_PER_ORDER = 20;
+  private static readonly MAX_REDIS_KEYS_TOTAL = 200;
+  private static readonly MAX_REDIS_VALUE_BYTES = 16 * 1024;
   private readonly logger = new Logger(AgentQueryService.name);
   private mysqlPool: mysql.Pool | null = null;
   private mysqlKey = '';
@@ -253,6 +258,104 @@ export class AgentQueryService implements OnModuleDestroy {
     };
   }
 
+  /**
+   * Read-only diagnostic query for the Redis records associated with system-error
+   * withdrawal orders. It deliberately accepts only a UID and tenant, fixes
+   * tx_status to 6, and scans a fixed Redis key prefix rather than exposing a
+   * caller-controlled key pattern.
+   */
+  async getSystemErrorWithdrawOrderRedis(
+    environmentId: string,
+    uid: string,
+    tenantId: number,
+  ) {
+    const pool = await this.getMysqlPool(environmentId);
+    const userSql =
+      'SELECT `id` FROM `spot`.`tbl_user` WHERE `tenant_user_id` = ? AND `tenant_id` = ? LIMIT 1';
+    const [userRows] = (await pool.execute(userSql, [uid, tenantId])) as any;
+    if (!Array.isArray(userRows) || userRows.length === 0 || !userRows[0]?.id) {
+      return { status: 'not_found', error: `User with UID ${uid} not found.` };
+    }
+
+    const userId = String(userRows[0].id);
+    const ordersSql = `
+      SELECT
+        id AS order_no, user_id, tenant_id, tx_type, tx_status,
+        tx_deposit_status, tx_coin, tx_amount, tx_fee,
+        tx_from_wallet, tx_to_wallet, remark, created_time, update_time
+      FROM \`spot\`.\`tbl_tx\`
+      WHERE user_id = ? AND tenant_id = ? AND tx_status = ?
+      ORDER BY update_time DESC
+      LIMIT ${AgentQueryService.MAX_SYSTEM_ERROR_ORDERS}`;
+    const [orderRows] = (await pool.execute(ordersSql, [
+      userId,
+      tenantId,
+      AgentQueryService.SYSTEM_ERROR_TX_STATUS,
+    ])) as any;
+    const orders = Array.isArray(orderRows) ? orderRows : [];
+    const client = await this.getRedisClient(environmentId);
+    let remainingKeys = AgentQueryService.MAX_REDIS_KEYS_TOTAL;
+
+    const ordersWithRedis: Array<Record<string, any> & {
+      redisKeys: Array<{
+        key: string;
+        value: string | object | null;
+        valueTruncated: boolean;
+        ttlSeconds: number;
+      }>;
+      redisKeySearchTruncated: boolean;
+    }> = [];
+    for (const order of orders) {
+      if (remainingKeys <= 0) {
+        ordersWithRedis.push({ ...order, redisKeys: [], redisKeySearchTruncated: true });
+        continue;
+      }
+      const orderNo = String(order.order_no);
+      const limit = Math.min(AgentQueryService.MAX_REDIS_KEYS_PER_ORDER, remainingKeys);
+      const keys = await this.scanRedisKeys(
+        client,
+        `BALANCE_EXCHANGE_BIZ:${orderNo}:*`,
+        limit,
+      );
+      remainingKeys -= keys.length;
+      const redisKeys: Array<{
+        key: string;
+        value: string | object | null;
+        valueTruncated: boolean;
+        ttlSeconds: number;
+      }> = [];
+      for (const key of keys) {
+        const result = await this.readRedisKey(client, key);
+        if (result.status === 'success' && result.data) redisKeys.push(result.data);
+      }
+      ordersWithRedis.push({
+        ...order,
+        redisKeys,
+        redisKeySearchTruncated: keys.length === limit,
+      });
+    }
+
+    const redisKeyCount = ordersWithRedis.reduce(
+      (count, order) => count + order.redisKeys.length,
+      0,
+    );
+    this.logger.log(
+      `[AgentQuery] system-error-withdraw-order-redis env=${environmentId} tenantId=${tenantId} orders=${ordersWithRedis.length} redisKeys=${redisKeyCount}`,
+    );
+    return {
+      status: 'success',
+      data: {
+        uid,
+        userId,
+        tenantId,
+        txStatus: AgentQueryService.SYSTEM_ERROR_TX_STATUS,
+        orderLimit: AgentQueryService.MAX_SYSTEM_ERROR_ORDERS,
+        redisKeyLimit: AgentQueryService.MAX_REDIS_KEYS_TOTAL,
+        orders: ordersWithRedis,
+      },
+    };
+  }
+
   async getOtcMerchantInfoByUserUid(
     environmentId: string,
     uid: string,
@@ -426,6 +529,36 @@ export class AgentQueryService implements OnModuleDestroy {
 
   async getRedisKey(environmentId: string, key: string) {
     const client = await this.getRedisClient(environmentId);
+    return this.readRedisKey(client, key);
+  }
+
+  private async scanRedisKeys(client: RedisClient, pattern: string, limit: number) {
+    let cursor = '0';
+    const keys: string[] = [];
+    do {
+      const [nextCursor, batch] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = nextCursor;
+      for (const key of batch) {
+        keys.push(key);
+        if (keys.length >= limit) return keys;
+      }
+    } while (cursor !== '0');
+    return keys;
+  }
+
+  private truncateRedisValue(value: string | object | null) {
+    if (value == null) return { value, valueTruncated: false };
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    if (Buffer.byteLength(serialized, 'utf8') <= AgentQueryService.MAX_REDIS_VALUE_BYTES) {
+      return { value, valueTruncated: false };
+    }
+    return {
+      value: `${serialized.slice(0, AgentQueryService.MAX_REDIS_VALUE_BYTES)}…`,
+      valueTruncated: true,
+    };
+  }
+
+  private async readRedisKey(client: RedisClient, key: string) {
     const metaPipeline = client.pipeline();
     metaPipeline.type(key);
     metaPipeline.ttl(key);
@@ -491,11 +624,13 @@ export class AgentQueryService implements OnModuleDestroy {
       }
     }
 
+    const limitedValue = this.truncateRedisValue(value);
     return {
       status: 'success',
       data: {
         key,
-        value,
+        value: limitedValue.value,
+        valueTruncated: limitedValue.valueTruncated,
         ttlSeconds: ttl,
       },
     };

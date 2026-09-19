@@ -176,6 +176,31 @@ export class QueryController {
     return this.queryService.getRedisKey(environmentId, key);
   }
 
+  @Get('users/:uid/system-error-withdraw-order-redis')
+  async getSystemErrorWithdrawOrderRedis(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('x-request-id') requestId: string | undefined,
+    @Headers('x-user-id') userId: string | undefined,
+    @Headers('x-username') username: string | undefined,
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId: string | undefined,
+  ) {
+    this.checkEnvironmentHeader(environmentId);
+    const normalizedTenantId = Number(tenantId);
+    if (!tenantId || !Number.isInteger(normalizedTenantId) || normalizedTenantId <= 0) {
+      throw new HttpException(
+        'Query parameter "tenantId" must be a positive integer.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.queryService.getSystemErrorWithdrawOrderRedis(
+      environmentId,
+      uid,
+      normalizedTenantId,
+      { requestId, userId, username },
+    );
+  }
+
   @Get('users/:uid/otc-merchant')
   async getOtcMerchantInfo(
     @Headers('x-target-environment') environmentId: string,

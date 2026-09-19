@@ -124,6 +124,26 @@ export class AgentController {
     return this.queryService.getTraderInfoByUserUid(envId, uid, Number(tenantId));
   }
 
+  @Get('v1/query/users/:uid/system-error-withdraw-order-redis')
+  async getSystemErrorWithdrawOrderRedis(
+    @Param('uid') uid: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Headers('x-environment-id') environmentId: string | undefined,
+    @Headers('x-agent-token') token: string | undefined,
+  ) {
+    this.checkAgentToken(token);
+    const normalizedTenantId = Number(tenantId);
+    if (!tenantId || !Number.isInteger(normalizedTenantId) || normalizedTenantId <= 0) {
+      throw new BadRequestException('tenantId must be a positive integer');
+    }
+    const envId = environmentId || this.configService.getAgentEnvironmentId();
+    return this.queryService.getSystemErrorWithdrawOrderRedis(
+      envId,
+      uid,
+      normalizedTenantId,
+    );
+  }
+
   @Patch('v1/query/users/:uid')
   async updateUser(
     @Param('uid') uid: string,
