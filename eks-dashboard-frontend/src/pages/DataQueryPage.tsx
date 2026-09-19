@@ -76,6 +76,12 @@ type RedisKeyResult = {
   ttl?: number;
 };
 
+type DetailField = {
+  key: string;
+  field: string;
+  value: unknown;
+};
+
 const DataQueryPage: React.FC = () => {
   const { message, modal } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
@@ -654,6 +660,45 @@ const DataQueryPage: React.FC = () => {
     },
   ];
 
+  const renderDetailValue = (value: unknown) => {
+    if (value == null || value === '') return <span style={{ color: '#888' }}>N/A</span>;
+    if (typeof value === 'object') {
+      return (
+        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto', fontSize: 12 }}>
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      );
+    }
+    return String(value);
+  };
+
+  const detailFieldColumns: ColumnsType<DetailField> = [
+    {
+      title: '字段',
+      dataIndex: 'field',
+      key: 'field',
+      width: 240,
+      render: (field: string) => <code style={{ fontSize: 12 }}>{field}</code>,
+    },
+    {
+      title: '值',
+      dataIndex: 'value',
+      key: 'value',
+      render: (value: unknown) => renderDetailValue(value),
+    },
+  ];
+
+  const renderDetailTable = (fields: DetailField[]) => (
+    <Table<DetailField>
+      rowKey="key"
+      columns={detailFieldColumns}
+      dataSource={fields}
+      size="middle"
+      pagination={false}
+      scroll={{ x: 600 }}
+    />
+  );
+
   const renderResults = () => {
     if (loading) {
       return <div style={{ textAlign: 'center', marginTop: 50 }}><Spin size="large" tip="正在聚合查询..." /></div>;
@@ -714,15 +759,14 @@ const DataQueryPage: React.FC = () => {
                 </Dropdown>
               }
             >
-              <Descriptions bordered column={1}>
-                <Descriptions.Item label="UID">{userInfo.tenant_user_id || 'N/A'}</Descriptions.Item>
-                <Descriptions.Item label="Tenant ID">{userInfo.tenant_id || 'N/A'}</Descriptions.Item>
-                <Descriptions.Item label="邀请人ID">{inviteByValue || 'N/A'}</Descriptions.Item>
-                <Descriptions.Item label="Email">{userInfo.email || 'N/A'}</Descriptions.Item>
-                <Descriptions.Item label="Telephone">{userInfo.tel || 'N/A'}</Descriptions.Item>
-                <Descriptions.Item label="Telephone Country Code">{userInfo.tel_country_code || 'N/A'}</Descriptions.Item>
-
-              </Descriptions>
+              {renderDetailTable([
+                { key: 'tenant_user_id', field: 'UID', value: userInfo.tenant_user_id },
+                { key: 'tenant_id', field: 'Tenant ID', value: userInfo.tenant_id },
+                { key: 'invite_by', field: '邀请人 ID', value: inviteByValue },
+                { key: 'email', field: 'Email', value: userInfo.email },
+                { key: 'tel', field: 'Telephone', value: userInfo.tel },
+                { key: 'tel_country_code', field: 'Telephone Country Code', value: userInfo.tel_country_code },
+              ])}
               <Button
                 type="link"
                 style={{ marginTop: '16px', paddingLeft: 0 }}
@@ -755,24 +799,16 @@ const DataQueryPage: React.FC = () => {
                 <Spin spinning={traderLoading} tip="正在查询交易员信息...">
                   {traderInfo ? (
                     <div>
-                      <Descriptions bordered column={1}>
-                        {(() => {
-                          const commonKeys = ['user_id', 'nick_name', 'id', 'status', 'create_time'];
-                          const entries = Object.entries(traderInfo);
-                          const shown: [string, unknown][] = [];
-                          for (const k of commonKeys) {
-                            if (k in (traderInfo as Record<string, unknown>)) {
-                              shown.push([k, (traderInfo as Record<string, unknown>)[k]]);
-                            }
-                          }
-                          if (shown.length === 0) {
-                            for (let i = 0; i < Math.min(3, entries.length); i++) shown.push(entries[i]);
-                          }
-                          return shown.map(([k, v]) => (
-                            <Descriptions.Item key={k} label={k}>{v == null ? 'N/A' : String(v)}</Descriptions.Item>
-                          ));
-                        })()}
-                      </Descriptions>
+                      {renderDetailTable((() => {
+                        const commonKeys = ['user_id', 'nick_name', 'id', 'status', 'create_time'];
+                        const entries = Object.entries(traderInfo);
+                        const shown: [string, unknown][] = [];
+                        for (const key of commonKeys) {
+                          if (key in traderInfo) shown.push([key, traderInfo[key]]);
+                        }
+                        if (shown.length === 0) shown.push(...entries.slice(0, 3));
+                        return shown.map(([key, value]) => ({ key, field: key, value }));
+                      })())}
                       <div style={{ marginTop: 12 }}>
                         <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setTraderDetailVisible(true)}>查看全部字段</Button>
                       </div>
@@ -812,11 +848,11 @@ const DataQueryPage: React.FC = () => {
                 <Spin spinning={otcLoading} tip="正在查询OTC商家信息...">
                   {otcMerchantInfo ? (
                     <div>
-                      <Descriptions bordered column={1}>
-                        <Descriptions.Item label="user_id">{otcMerchantInfo.user_id == null ? 'N/A' : String(otcMerchantInfo.user_id)}</Descriptions.Item>
-                        <Descriptions.Item label="name">{otcMerchantInfo.name == null || otcMerchantInfo.name === '' ? 'N/A' : String(otcMerchantInfo.name)}</Descriptions.Item>
-                        <Descriptions.Item label="level">{otcMerchantInfo.level == null ? 'N/A' : String(otcMerchantInfo.level)}</Descriptions.Item>
-                      </Descriptions>
+                      {renderDetailTable([
+                        { key: 'user_id', field: 'user_id', value: otcMerchantInfo.user_id },
+                        { key: 'name', field: 'name', value: otcMerchantInfo.name },
+                        { key: 'level', field: 'level', value: otcMerchantInfo.level },
+                      ])}
                       <div style={{ marginTop: 12 }}>
                         <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setOtcDetailVisible(true)}>查看全部字段</Button>
                       </div>
@@ -859,11 +895,11 @@ const DataQueryPage: React.FC = () => {
                 <Spin spinning={authLoading} tip="正在查询用户认证信息...">
                   {authRecordInfo ? (
                     <div>
-                      <Descriptions bordered column={1}>
-                        <Descriptions.Item label="realName">{authRecordInfo.realName == null || authRecordInfo.realName === '' ? 'N/A' : String(authRecordInfo.realName)}</Descriptions.Item>
-                        <Descriptions.Item label="cardNo">{authRecordInfo.cardNo == null || authRecordInfo.cardNo === '' ? 'N/A' : String(authRecordInfo.cardNo)}</Descriptions.Item>
-                        <Descriptions.Item label="idType">{authRecordInfo.idType == null ? 'N/A' : String(authRecordInfo.idType)}</Descriptions.Item>
-                      </Descriptions>
+                      {renderDetailTable([
+                        { key: 'realName', field: 'realName', value: authRecordInfo.realName },
+                        { key: 'cardNo', field: 'cardNo', value: authRecordInfo.cardNo },
+                        { key: 'idType', field: 'idType', value: authRecordInfo.idType },
+                      ])}
                       <div style={{ marginTop: 12 }}>
                         <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setAuthDetailVisible(true)}>查看全部字段</Button>
                       </div>
