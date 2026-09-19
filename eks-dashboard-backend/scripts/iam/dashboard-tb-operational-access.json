@@ -1,0 +1,13 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "CallerIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" },
+    { "Sid": "DescribeVlinkCluster", "Effect": "Allow", "Action": "eks:DescribeCluster", "Resource": "arn:aws:eks:ap-southeast-1:249563934516:cluster/vlink" },
+    { "Sid": "AcmCertificateOperations", "Effect": "Allow", "Action": ["acm:ListCertificates", "acm:DescribeCertificate", "acm:RequestCertificate", "acm:ExportCertificate"], "Resource": "*" },
+    { "Sid": "ListBuckets", "Effect": "Allow", "Action": "s3:ListAllMyBuckets", "Resource": "*" },
+    { "Sid": "ReadRoute53", "Effect": "Allow", "Action": ["route53:ListHostedZonesByName", "route53:ListResourceRecordSets", "route53:GetChange"], "Resource": "*" },
+    { "Sid": "ChangeCnameRecords", "Effect": "Allow", "Action": "route53:ChangeResourceRecordSets", "Resource": "*", "Condition": { "ForAllValues:StringEquals": { "route53:ChangeResourceRecordSetsActions": "UPSERT", "route53:ChangeResourceRecordSetsRecordTypes": "CNAME" } } },
+    { "Sid": "ReadNetwork", "Effect": "Allow", "Action": ["elasticloadbalancing:DescribeLoadBalancers", "ec2:DescribeInstances", "ec2:DescribeSecurityGroups"], "Resource": "*" },
+    { "Sid": "ReadSsmCommandInvocation", "Effect": "Allow", "Action": "ssm:GetCommandInvocation", "Resource": "*" }
+  ]
+}
