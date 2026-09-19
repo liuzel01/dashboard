@@ -125,7 +125,7 @@ const DataQueryPage: React.FC = () => {
   const [redisMatchId, setRedisMatchId] = useState<string | null>(null);
   const [redisCreateForm] = Form.useForm();
   const [redisPage, setRedisPage] = useState(1);
-  const [redisPageSize, setRedisPageSize] = useState(10);
+  const [redisPageSize, setRedisPageSize] = useState(20);
   const storedTab = typeof window !== 'undefined' ? sessionStorage.getItem('dataQueryActiveTab') : null;
   const [activeTabKey, setActiveTabKey] = useState<string>(storedTab ?? '1');
 
