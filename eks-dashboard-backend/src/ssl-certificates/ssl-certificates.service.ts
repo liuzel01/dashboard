@@ -8,7 +8,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { verifySync } from 'otplib';
-import { fromTemporaryCredentials } from '@aws-sdk/credential-providers';
+import {
+  fromInstanceMetadata,
+  fromTemporaryCredentials,
+} from '@aws-sdk/credential-providers';
 import {
   ACMClient,
   DescribeCertificateCommand,
@@ -141,11 +144,16 @@ export class SslCertificatesService {
     const httpStatus = Number(err?.$metadata?.httpStatusCode || 0);
     const raw = `${name}: ${message}`;
 
-    if (/AccessDenied|Unauthorized/i.test(name) || httpStatus === 403) {
-      throw new ForbiddenException(`当前 AWS 凭证无权执行 ${action}：${raw}`);
-    }
     if (/ExpiredToken|InvalidClientTokenId|UnrecognizedClient|SignatureDoesNotMatch|AuthFailure/i.test(name)) {
       throw new UnauthorizedException(`当前 AWS 凭证不可用，无法执行 ${action}：${raw}`);
+    }
+    if (/EC2 metadata|Instance Metadata|fromInstanceMetadata/i.test(message)) {
+      throw new ServiceUnavailableException(
+        `当前运行环境无法获取 Dashboard EC2 实例角色，无法执行 ${action}。本地开发环境不支持 ACM 操作，请在部署到 Dashboard EC2 后验证。`,
+      );
+    }
+    if (/AccessDenied|Unauthorized/i.test(name) || httpStatus === 403) {
+      throw new ForbiddenException(`当前 AWS 凭证无权执行 ${action}：${raw}`);
     }
     if (/CredentialsProviderError|Credential/i.test(name) || /Could not load credentials|credential/i.test(message)) {
       throw new BadRequestException(`AWS 凭证配置无效或缺失，无法执行 ${action}：${raw}`);
@@ -172,7 +180,15 @@ export class SslCertificatesService {
       throw new BadRequestException(`环境 ${environmentId} 未配置 aws_region，且本次请求未指定 region`);
     }
 
-    const clientConfig: { region: string; credentials?: any } = { region: finalRegion };
+    const instanceCredentials = fromInstanceMetadata({
+      maxRetries: 1,
+      timeout: 1_000,
+    });
+    const clientConfig: { region: string; credentials?: any } = {
+      region: finalRegion,
+      // 禁止隐式使用开发机 Profile 或历史静态凭证；线上仅使用 EC2 实例角色。
+      credentials: instanceCredentials,
+    };
     let credentialSource = 'default-chain';
     const roleArn = String(env.aws_role_arn || '').trim();
     if (roleArn) {
@@ -183,6 +199,7 @@ export class SslCertificatesService {
         'ap-southeast-1';
       clientConfig.credentials = fromTemporaryCredentials({
         clientConfig: { region: stsRegion },
+        masterCredentials: instanceCredentials,
         params: {
           RoleArn: roleArn,
           RoleSessionName: `dashboard-acm-${environmentId}`.replace(/[^A-Za-z0-9_=,.@-]/g, '-'),

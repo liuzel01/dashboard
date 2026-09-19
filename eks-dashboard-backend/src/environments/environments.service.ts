@@ -6,7 +6,10 @@ import { SSMClient } from '@aws-sdk/client-ssm';
 import { ElasticLoadBalancingV2Client } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { S3Client } from '@aws-sdk/client-s3';
 import { Route53Client } from '@aws-sdk/client-route-53';
-import { fromTemporaryCredentials } from '@aws-sdk/credential-providers';
+import {
+  fromInstanceMetadata,
+  fromTemporaryCredentials,
+} from '@aws-sdk/credential-providers';
 import { EnvironmentsDbService } from './environments.db.service';
 import type { Environment, Platform } from './environment.types';
 
@@ -119,8 +122,14 @@ export class EnvironmentsService implements OnModuleInit {
       throw new Error(`Environment with id "${environmentId}" not found.`);
     }
 
+    const instanceCredentials = fromInstanceMetadata({
+      maxRetries: 1,
+      timeout: 1_000,
+    });
     const clientConfig: { region: string; credentials?: any } = {
       region: env.aws_region,
+      // Dashboard 仅信任运行 EC2 的实例角色，禁止回退到本机 Profile 或静态环境变量。
+      credentials: instanceCredentials,
     };
 
     const roleArn = String(env.aws_role_arn || '').trim();
@@ -135,6 +144,7 @@ export class EnvironmentsService implements OnModuleInit {
       );
       clientConfig.credentials = fromTemporaryCredentials({
         clientConfig: { region: stsRegion },
+        masterCredentials: instanceCredentials,
         params: {
           RoleArn: roleArn,
           RoleSessionName: `dashboard-${environmentId}`.replace(/[^A-Za-z0-9_=,.@-]/g, '-'),
