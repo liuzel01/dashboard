@@ -315,6 +315,11 @@ const SslCertificateExportPage: React.FC = () => {
             placeholder="选择 AWS 环境 / 账号"
             style={{ width: 260 }}
             value={environmentId || undefined}
+            showSearch
+            optionFilterProp="label"
+            filterOption={(input, option) =>
+              String(option?.label || '').toLowerCase().includes(input.toLowerCase())
+            }
             onChange={(value) => {
               setEnvironmentId(value);
               const env = envOptions.find((item) => item.id === value);
