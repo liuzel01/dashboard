@@ -18,8 +18,10 @@ import {
   Dropdown,
   Tag,
   Menu,
+  Table,
 } from 'antd';
 import { DownOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import {
   aggregateQuery,
   createRedisKey,
@@ -590,6 +592,68 @@ const DataQueryPage: React.FC = () => {
     }
   };
 
+  const renderRedisValue = (value: RedisData['value']) => {
+    if (value == null) return <span style={{ color: '#888' }}>（空）</span>;
+    if (typeof value === 'object') {
+      return (
+        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto', fontSize: 12 }}>
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      );
+    }
+    return (
+      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto', fontSize: 12 }}>
+        {String(value)}
+      </pre>
+    );
+  };
+
+  const redisColumns: ColumnsType<RedisData> = [
+    {
+      title: 'Redis Key',
+      dataIndex: 'key',
+      key: 'key',
+      width: 420,
+      ellipsis: true,
+      render: (key: string) => <code style={{ fontSize: 12 }}>{key}</code>,
+    },
+    {
+      title: '值预览',
+      dataIndex: 'value',
+      key: 'value',
+      render: (value: RedisData['value']) => renderRedisValue(value),
+    },
+    {
+      title: 'TTL',
+      key: 'ttl',
+      width: 180,
+      render: (_value: unknown, item: RedisData) => (
+        <Space direction="vertical" size={2}>
+          <Tag color={item.ttl > 0 ? 'blue' : item.ttl === -1 ? 'green' : 'default'}>
+            {ttlDisplay(item).text}
+          </Tag>
+          <span style={{ color: '#666', fontSize: 12 }}>{item.ttl} 秒</span>
+        </Space>
+      ),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 100,
+      fixed: 'right',
+      render: (_value: unknown, item: RedisData) => (
+        <Button
+          type="link"
+          danger
+          onClick={() => handleDeleteRedisKey(item.key)}
+          loading={deletingKey === item.key}
+        >
+          删除
+        </Button>
+      ),
+    },
+  ];
+
   const renderResults = () => {
     if (loading) {
       return <div style={{ textAlign: 'center', marginTop: 50 }}><Spin size="large" tip="正在聚合查询..." /></div>;
@@ -823,54 +887,14 @@ const DataQueryPage: React.FC = () => {
             }
           >
             {redisData && redisData.length > 0 ? (
-              <Descriptions bordered column={1} size="small">
-                {redisData.map((item) => (
-                  <Descriptions.Item key={item.key} label={item.key}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ flex: 1, marginRight: 12 }}>
-                        {item.value == null ? (
-                          <span style={{ color: '#888' }}>（空）</span>
-                        ) : Array.isArray(item.value) ? (
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
-                            {JSON.stringify(item.value, null, 2)}
-                          </pre>
-                        ) : typeof item.value === 'object' ? (
-                          // If object has few keys, render inline, else pretty-print JSON
-                          Object.keys(item.value).length <= 5 ? (
-                            <span>
-                              {Object.entries(item.value)
-                                .map(([k, v]) => `${k}: ${String(v)}`)
-                                .join(' | ')}
-                            </span>
-                          ) : (
-                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>
-                              {JSON.stringify(item.value, null, 2)}
-                            </pre>
-                          )
-                        ) : (
-                          <span>{String(item.value)}</span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Tag color={item.ttl > 0 ? 'blue' : item.ttl === -1 ? 'green' : 'default'}>
-                            {ttlDisplay(item).label}: {ttlDisplay(item).text}
-                          </Tag>
-                          <span style={{ color: '#666', fontSize: 12 }}>({item.ttl} 秒)</span>
-                        </div>
-                        <Button
-                          type="link"
-                          danger
-                          onClick={() => handleDeleteRedisKey(item.key)}
-                          loading={deletingKey === item.key}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </div>
-                  </Descriptions.Item>
-                ))}
-              </Descriptions>
+              <Table<RedisData>
+                rowKey="key"
+                columns={redisColumns}
+                dataSource={redisData}
+                size="middle"
+                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+                scroll={{ x: 900 }}
+              />
             ) : (
               <Empty description="无缓存数据" />
             )}
