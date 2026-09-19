@@ -62,8 +62,6 @@ interface RedisData {
   key: string; // The key name
   ttl: number; // The TTL in seconds
   value?: string | object | null;
-  sourceOrderNo?: string;
-  redisLookupTruncated?: boolean;
 }
 
 type AggregateResult = {
@@ -126,6 +124,8 @@ const DataQueryPage: React.FC = () => {
   const [creatingRedisKey, setCreatingRedisKey] = useState(false);
   const [redisMatchId, setRedisMatchId] = useState<string | null>(null);
   const [redisCreateForm] = Form.useForm();
+  const [redisPage, setRedisPage] = useState(1);
+  const [redisPageSize, setRedisPageSize] = useState(10);
   const storedTab = typeof window !== 'undefined' ? sessionStorage.getItem('dataQueryActiveTab') : null;
   const [activeTabKey, setActiveTabKey] = useState<string>(storedTab ?? '1');
 
@@ -175,6 +175,7 @@ const DataQueryPage: React.FC = () => {
 
     setLastSearchTerm(value);
     setActiveTabKey('1');
+    setRedisPage(1);
     setLoading(true);
     setSearched(true);
     setError(null);
@@ -318,8 +319,6 @@ const DataQueryPage: React.FC = () => {
             key: item.key,
             ttl: item.ttlSeconds,
             value: item.value ?? null,
-            sourceOrderNo: String(order.order_no),
-            redisLookupTruncated: order.redisLookupTruncated,
           })),
         ) ?? [];
         const combinedRedisItems = [
@@ -565,6 +564,7 @@ const DataQueryPage: React.FC = () => {
           // The delete endpoint is authoritative; update only the affected local
           // list instead of rerunning the whole aggregate query (which resets tabs).
           setRedisData((current) => current?.filter((item) => item.key !== key) ?? []);
+          setRedisPage(1);
           message.success(`键 "${key}" 已成功删除！`);
         } catch (err) {
           const errObj = err as { response?: { data?: { message?: string } }; message?: string };
@@ -589,10 +589,12 @@ const DataQueryPage: React.FC = () => {
       message.success(`键 "${key}" 创建成功`);
       setIsCreateRedisModalVisible(false);
       redisCreateForm.resetFields();
-      if (lastSearchTerm.trim()) {
-        await onSearch(lastSearchTerm);
-        setActiveTabKey('2');
-      }
+      setRedisData((current) => [
+        { key, value: values.value, ttl: values.ttlSeconds ?? -1 },
+        ...(current || []).filter((item) => item.key !== key),
+      ]);
+      setRedisPage(1);
+      setActiveTabKey('2');
     } catch (err) {
       const errObj = err as { response?: { data?: { message?: string } }; message?: string };
       const errorMessage = errObj?.response?.data?.message || errObj?.message || String(err);
@@ -632,17 +634,6 @@ const DataQueryPage: React.FC = () => {
       dataIndex: 'value',
       key: 'value',
       render: (value: RedisData['value']) => renderRedisValue(value),
-    },
-    {
-      title: '来源订单',
-      key: 'sourceOrder',
-      width: 230,
-      render: (_value: unknown, item: RedisData) => item.sourceOrderNo ? (
-        <Space direction="vertical" size={2}>
-          <code style={{ fontSize: 12 }}>{item.sourceOrderNo}</code>
-          {item.redisLookupTruncated && <Tag color="gold">前 19 位匹配</Tag>}
-        </Space>
-      ) : <span style={{ color: '#888' }}>-</span>,
     },
     {
       title: 'TTL',
@@ -943,8 +934,17 @@ const DataQueryPage: React.FC = () => {
                 columns={redisColumns}
                 dataSource={redisData}
                 size="middle"
-                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
-                scroll={{ x: 1100 }}
+                pagination={{
+                  current: redisPage,
+                  pageSize: redisPageSize,
+                  showSizeChanger: true,
+                  showTotal: (total) => `共 ${total} 条`,
+                  onChange: (page, pageSize) => {
+                    setRedisPage(page);
+                    setRedisPageSize(pageSize);
+                  },
+                }}
+                scroll={{ x: 900 }}
               />
             ) : (
               <Empty description="无缓存数据" />
