@@ -180,6 +180,13 @@ export class SslCertificatesService {
       throw new BadRequestException(`环境 ${environmentId} 未配置 aws_region，且本次请求未指定 region`);
     }
 
+    const roleArn = String(env.aws_role_arn || '').trim();
+    if (!roleArn) {
+      throw new BadRequestException(
+        `环境“${env.name || environmentId}”（${environmentId}）尚未配置目标 AWS Role ARN（aws_role_arn），因此尚未启用 ACM 功能。请在“账号与权限 → 环境配置”中配置可由 Dashboard EC2 实例角色 AssumeRole 的目标角色后重试。`,
+      );
+    }
+
     const instanceCredentials = fromInstanceMetadata({
       maxRetries: 1,
       timeout: 1_000,
@@ -189,24 +196,20 @@ export class SslCertificatesService {
       // 禁止隐式使用开发机 Profile 或历史静态凭证；线上仅使用 EC2 实例角色。
       credentials: instanceCredentials,
     };
-    let credentialSource = 'default-chain';
-    const roleArn = String(env.aws_role_arn || '').trim();
-    if (roleArn) {
-      const stsRegion =
-        process.env.AWS_STS_REGION ||
-        process.env.AWS_REGION ||
-        process.env.AWS_DEFAULT_REGION ||
-        'ap-southeast-1';
-      clientConfig.credentials = fromTemporaryCredentials({
-        clientConfig: { region: stsRegion },
-        masterCredentials: instanceCredentials,
-        params: {
-          RoleArn: roleArn,
-          RoleSessionName: `dashboard-acm-${environmentId}`.replace(/[^A-Za-z0-9_=,.@-]/g, '-'),
-        },
-      });
-      credentialSource = `assume-role:${roleArn}`;
-    }
+    const stsRegion =
+      process.env.AWS_STS_REGION ||
+      process.env.AWS_REGION ||
+      process.env.AWS_DEFAULT_REGION ||
+      'ap-southeast-1';
+    clientConfig.credentials = fromTemporaryCredentials({
+      clientConfig: { region: stsRegion },
+      masterCredentials: instanceCredentials,
+      params: {
+        RoleArn: roleArn,
+        RoleSessionName: `dashboard-acm-${environmentId}`.replace(/[^A-Za-z0-9_=,.@-]/g, '-'),
+      },
+    });
+    const credentialSource = `assume-role:${roleArn}`;
 
     const client = new ACMClient(clientConfig);
     const stsClient = new STSClient(clientConfig);
@@ -543,16 +546,11 @@ export class SslCertificatesService {
     });
 
     return {
-      certificateArn,
-      domain,
-      sans,
-      status: String(detail?.Status || 'PENDING_VALIDATION'),
-      certificateType: 'AMAZON_ISSUED_PUBLIC',
+      ...this.buildListItem(detail, { environmentId, region }),
       validationMethod: 'DNS',
       keyAlgorithm: String(detail?.KeyAlgorithm || 'RSA_2048'),
       exportOption: String(detail?.Options?.Export || 'ENABLED'),
       transparencyLogging: String(detail?.Options?.CertificateTransparencyLoggingPreference || 'ENABLED'),
-      tags: [],
       validationOptions,
       source: { provider: 'aws-acm', environmentId, region },
     };

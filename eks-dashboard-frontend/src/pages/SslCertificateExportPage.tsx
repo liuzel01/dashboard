@@ -125,6 +125,7 @@ const SslCertificateExportPage: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [detail, setDetail] = useState<SslCertificateItem | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [detailJustRequested, setDetailJustRequested] = useState(false);
   const [actionTarget, setActionTarget] = useState<SslCertificateItem | null>(null);
   const [actionMode, setActionMode] = useState<'decrypt' | null>(null);
   const [actionOpen, setActionOpen] = useState(false);
@@ -201,6 +202,7 @@ const SslCertificateExportPage: React.FC = () => {
       const resp = await fetchCertificateDetail(row.certificateArn);
       if (!resp) return;
       setDetail(resp);
+      setDetailJustRequested(false);
       setDetailOpen(true);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
@@ -217,6 +219,7 @@ const SslCertificateExportPage: React.FC = () => {
       const resp = await fetchCertificateDetail(detail.certificateArn);
       if (!resp) return;
       setDetail(resp);
+      setDetailJustRequested(false);
       setItems((prev) => prev.map((item) => item.certificateArn === resp.certificateArn ? { ...item, ...resp } : item));
       message.success('证书详情已刷新');
     } catch (error) {
@@ -360,15 +363,26 @@ const SslCertificateExportPage: React.FC = () => {
       <Modal
         title="证书详情"
         open={detailOpen}
-        onCancel={() => setDetailOpen(false)}
+        onCancel={() => {
+          setDetailOpen(false);
+          setDetailJustRequested(false);
+        }}
         footer={detail ? [
           <Button key="refresh" icon={<ReloadOutlined />} onClick={refreshDetail} loading={loading}>刷新状态</Button>,
-          <Button key="close" onClick={() => setDetailOpen(false)}>关闭</Button>,
+          <Button key="close" onClick={() => { setDetailOpen(false); setDetailJustRequested(false); }}>关闭</Button>,
         ] : null}
         width={980}
       >
         {detail && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {detailJustRequested && (
+              <Alert
+                type="success"
+                showIcon
+                message="AWS ACM 已受理申请"
+                description="请配置下方 DNS 验证记录；配置后可直接点击“刷新状态”查看验证进度。"
+              />
+            )}
             <Descriptions bordered size="small" column={1}>
               <Descriptions.Item label="AWS 环境">{detail.sourceEnvironmentId || queriedEnvironmentId || environmentId}</Descriptions.Item>
               <Descriptions.Item label="Region">{detail.sourceRegion || queriedRegion || region || '-'}</Descriptions.Item>
@@ -386,6 +400,7 @@ const SslCertificateExportPage: React.FC = () => {
               <Space style={{ marginBottom: 8 }}>
                 <Text strong>DNS 验证记录</Text>
                 <Text type="secondary">共 {Array.isArray(detail.validationOptions) ? detail.validationOptions.length : 0} 条</Text>
+                <Button size="small" onClick={() => copyDnsRecords(Array.isArray(detail.validationOptions) ? detail.validationOptions : [])}>复制全部</Button>
               </Space>
               <Table<ValidationRecord>
                 size="small"
@@ -451,73 +466,12 @@ const SslCertificateExportPage: React.FC = () => {
             });
             setRequestOpen(false);
             requestForm.resetFields();
-            Modal.info({
-              title: '证书申请已提交',
-              width: 960,
-              content: (
-                <div>
-                  <Alert type="success" showIcon message="AWS ACM 已受理申请。请把下方 DNS 验证记录加到你的域名 DNS 配置中。" style={{ marginBottom: 12 }} />
-                  <Descriptions bordered size="small" column={1}>
-                    <Descriptions.Item label="CertificateArn">{resp?.certificateArn || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="证书类型">公有证书（AWS ACM）</Descriptions.Item>
-                    <Descriptions.Item label="主域名">{resp?.domain || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="SAN 列表">{Array.isArray(resp?.sans) && resp.sans.length ? resp.sans.join(', ') : '-'}</Descriptions.Item>
-                    <Descriptions.Item label="验证方法">{resp?.validationMethod || 'DNS'}</Descriptions.Item>
-                    <Descriptions.Item label="允许导出">{resp?.exportOption === 'ENABLED' ? '是' : resp?.exportOption || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="密钥算法">{resp?.keyAlgorithm || 'RSA_2048'}</Descriptions.Item>
-                    <Descriptions.Item label="标签">默认无</Descriptions.Item>
-                    <Descriptions.Item label="状态">{resp?.status || '-'}</Descriptions.Item>
-                  </Descriptions>
-                  <div style={{ marginTop: 12 }}>
-                    <Space style={{ marginBottom: 8 }}>
-                      <Text strong>需要配置的 DNS 验证记录</Text>
-                      <Text type="secondary">共 {Array.isArray(resp?.validationOptions) ? resp.validationOptions.length : 0} 条</Text>
-                      <Button size="small" onClick={() => copyDnsRecords(Array.isArray(resp?.validationOptions) ? resp.validationOptions : [])}>复制全部</Button>
-                    </Space>
-                    <Table<ValidationRecord>
-                      style={{ marginTop: 8 }}
-                      size="small"
-                      pagination={false}
-                      rowKey={(row, index) => `${row.domainName}-${row.recordName}-${row.recordValue}-${index}`}
-                      dataSource={Array.isArray(resp?.validationOptions) ? resp.validationOptions : []}
-                      columns={[
-                        { title: '域名', dataIndex: 'domainName', width: 180 },
-                        { title: '状态', dataIndex: 'validationStatus', width: 140 },
-                        { title: '记录类型', dataIndex: 'recordType', width: 120 },
-                        {
-                          title: '记录名',
-                          dataIndex: 'recordName',
-                          render: (value) => (
-                            <Space size={6}>
-                              <Text code>{value || '-'}</Text>
-                              <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyText(String(value || ''), '记录名已复制')} />
-                            </Space>
-                          ),
-                        },
-                        {
-                          title: '记录值',
-                          dataIndex: 'recordValue',
-                          render: (value) => (
-                            <Space size={6}>
-                              <Text code>{value || '-'}</Text>
-                              <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => copyText(String(value || ''), '记录值已复制')} />
-                            </Space>
-                          ),
-                        },
-                        {
-                          title: '操作',
-                          width: 110,
-                          fixed: 'right',
-                          render: (_, row) => <Button size="small" onClick={() => copyDnsRecord(row)}>复制</Button>,
-                        },
-                      ]}
-                      locale={{ emptyText: '当前没有 DNS 验证记录' }}
-                      scroll={{ x: 1040 }}
-                    />
-                  </div>
-                </div>
-              ),
-            });
+            setQueriedEnvironmentId(environmentId);
+            setQueriedRegion(region || '');
+            setDetail(resp as SslCertificateItem);
+            setDetailJustRequested(true);
+            setDetailOpen(true);
+            message.success('证书申请已提交；请配置 DNS 验证记录后刷新状态');
             await load(keyword, environmentId, region);
           } catch (error) {
             const err = error as { errorFields?: Array<{ errors?: string[] }>; response?: { data?: { message?: string } }; message?: string };
