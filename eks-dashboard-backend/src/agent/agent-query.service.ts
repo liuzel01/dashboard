@@ -304,17 +304,30 @@ export class AgentQueryService implements OnModuleDestroy {
         ttlSeconds: number;
       }>;
       redisKeySearchTruncated: boolean;
+      redisLookupOrderNo: string;
+      redisLookupTruncated: boolean;
     }> = [];
     for (const order of orders) {
       if (remainingKeys <= 0) {
-        ordersWithRedis.push({ ...order, redisKeys: [], redisKeySearchTruncated: true });
+        const orderNo = String(order.order_no);
+        const redisLookupTruncated = orderNo.length > 19;
+        ordersWithRedis.push({
+          ...order,
+          redisKeys: [],
+          redisKeySearchTruncated: true,
+          redisLookupOrderNo: redisLookupTruncated ? orderNo.slice(0, 19) : orderNo,
+          redisLookupTruncated,
+        });
         continue;
       }
       const orderNo = String(order.order_no);
+      const redisLookupTruncated = orderNo.length > 19;
+      const redisLookupOrderNo = redisLookupTruncated ? orderNo.slice(0, 19) : orderNo;
       const limit = Math.min(AgentQueryService.MAX_REDIS_KEYS_PER_ORDER, remainingKeys);
-      const keys = await this.scanRedisKeys(
+      const keys = await this.scanRedisKeysForOrder(
         client,
-        `BALANCE_EXCHANGE_BIZ:${orderNo}:*`,
+        redisLookupOrderNo,
+        redisLookupTruncated,
         limit,
       );
       remainingKeys -= keys.length;
@@ -332,6 +345,8 @@ export class AgentQueryService implements OnModuleDestroy {
         ...order,
         redisKeys,
         redisKeySearchTruncated: keys.length === limit,
+        redisLookupOrderNo,
+        redisLookupTruncated,
       });
     }
 
@@ -544,6 +559,31 @@ export class AgentQueryService implements OnModuleDestroy {
       }
     } while (cursor !== '0');
     return keys;
+  }
+
+  private async scanRedisKeysForOrder(
+    client: RedisClient,
+    lookupOrderNo: string,
+    isTruncated: boolean,
+    limit: number,
+  ) {
+    const keyPrefix = `BALANCE_EXCHANGE_BIZ:${lookupOrderNo}`;
+    if (isTruncated) {
+      // Historical Redis blob keys omit the long-order suffix, so prefix matching
+      // is required only when the database order number was truncated to 19 chars.
+      return this.scanRedisKeys(client, `${keyPrefix}*`, limit);
+    }
+
+    // Short order numbers retain exact semantics while accepting either a bare key
+    // or the normal colon-delimited suffix form.
+    const exactKeys = await this.scanRedisKeys(client, keyPrefix, limit);
+    if (exactKeys.length >= limit) return exactKeys;
+    const suffixedKeys = await this.scanRedisKeys(
+      client,
+      `${keyPrefix}:*`,
+      limit - exactKeys.length,
+    );
+    return [...new Set([...exactKeys, ...suffixedKeys])];
   }
 
   private truncateRedisValue(value: string | object | null) {

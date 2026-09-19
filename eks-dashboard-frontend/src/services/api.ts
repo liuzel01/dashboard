@@ -216,6 +216,8 @@ export type SystemErrorWithdrawOrderRedisResult = {
   redisKeyLimit: number;
   orders: Array<Record<string, unknown> & {
     order_no: string;
+    redisLookupOrderNo: string;
+    redisLookupTruncated: boolean;
     redisKeys: Array<{
       key: string;
       value?: string | object | null;

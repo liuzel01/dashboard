@@ -62,6 +62,8 @@ interface RedisData {
   key: string; // The key name
   ttl: number; // The TTL in seconds
   value?: string | object | null;
+  sourceOrderNo?: string;
+  redisLookupTruncated?: boolean;
 }
 
 type AggregateResult = {
@@ -316,6 +318,8 @@ const DataQueryPage: React.FC = () => {
             key: item.key,
             ttl: item.ttlSeconds,
             value: item.value ?? null,
+            sourceOrderNo: String(order.order_no),
+            redisLookupTruncated: order.redisLookupTruncated,
           })),
         ) ?? [];
         const combinedRedisItems = [
@@ -630,6 +634,17 @@ const DataQueryPage: React.FC = () => {
       render: (value: RedisData['value']) => renderRedisValue(value),
     },
     {
+      title: '来源订单',
+      key: 'sourceOrder',
+      width: 230,
+      render: (_value: unknown, item: RedisData) => item.sourceOrderNo ? (
+        <Space direction="vertical" size={2}>
+          <code style={{ fontSize: 12 }}>{item.sourceOrderNo}</code>
+          {item.redisLookupTruncated && <Tag color="gold">前 19 位匹配</Tag>}
+        </Space>
+      ) : <span style={{ color: '#888' }}>-</span>,
+    },
+    {
       title: 'TTL',
       key: 'ttl',
       width: 180,
@@ -929,7 +944,7 @@ const DataQueryPage: React.FC = () => {
                 dataSource={redisData}
                 size="middle"
                 pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
-                scroll={{ x: 900 }}
+                scroll={{ x: 1100 }}
               />
             ) : (
               <Empty description="无缓存数据" />
