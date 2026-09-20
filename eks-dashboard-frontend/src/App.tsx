@@ -1,8 +1,8 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -87,6 +87,22 @@ const AppLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { me, permissions, loading: authLoading, error: authError, isAuthenticated, logout } = useContext(AuthContext);
+  const [siderCollapsed, setSiderCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('dashboard.sider.collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleSiderCollapse = (collapsed: boolean) => {
+    setSiderCollapsed(collapsed);
+    try {
+      window.localStorage.setItem('dashboard.sider.collapsed', String(collapsed));
+    } catch {
+      // Ignore unavailable localStorage (for example, private browsing restrictions).
+    }
+  };
 
   const hasPermission = (key?: string | string[]) => {
     if (!key) return true;
@@ -285,8 +301,23 @@ const AppLayout: React.FC = () => {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider breakpoint="lg" collapsedWidth="0">
-        <div className="logo">运维支持系统</div>
+      <Sider
+        breakpoint="lg"
+        collapsed={siderCollapsed}
+        collapsedWidth={64}
+        trigger={null}
+        onCollapse={handleSiderCollapse}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', minHeight: 64, padding: '0 12px' }}>
+          {!siderCollapsed && <div className="logo" style={{ flex: 1, margin: 0 }}>运维支持系统</div>}
+          <Button
+            type="text"
+            aria-label={siderCollapsed ? '展开侧边栏' : '收起侧边栏'}
+            icon={siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => handleSiderCollapse(!siderCollapsed)}
+            style={{ color: '#fff', flexShrink: 0, marginLeft: siderCollapsed ? 0 : 8 }}
+          />
+        </div>
         <Menu
           theme="dark"
           mode="inline"
