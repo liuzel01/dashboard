@@ -7,6 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "init-admin": "node scripts/init-admin.js",
+    "verify:kms-values": "node scripts/verify-kms-value-role.js",
     "build": "nest build",
     "build:agent": "tsc -p tsconfig.build.json --outDir dist-agent",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

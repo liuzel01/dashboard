@@ -1521,6 +1521,10 @@ export const requestSslCertificate = async (data: { environmentId: string; regio
 
 export const encryptKmsValue = async (data: { environmentId: string; value: string }) => (await api.post('/kms-values/encrypt', data)).data;
 export const decryptKmsValue = async (data: { environmentId: string; value: string; otpCode: string }) => (await api.post('/kms-values/decrypt', data)).data;
+export const getKmsValueConfiguration = async (environmentId: string) => (await api.get('/kms-values/config', { params: { environmentId } })).data as {
+  supported: boolean; environmentId: string; reason?: string; keyAlias?: string; keyArn?: string; region?: string;
+  encryptionContext?: Record<string, string>; ciphertextPrefix?: string; targetRoleConfigured?: boolean;
+};
 
 export const getSslCertificateDetail = async (params: { environmentId: string; region?: string; certificateArn: string }) => {
   const response = await api.get('/ssl-certificates/detail', { params });

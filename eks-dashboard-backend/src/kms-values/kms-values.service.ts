@@ -12,6 +12,7 @@ import { PlatformDatabaseService } from '../access-control/platform-database.ser
 const MENU_PERMISSION = 'menu:kms-values';
 const PREFIX = '{kms-app}';
 const HASH_KMS = {
+  keyAlias: 'alias/kms-eks-hash',
   keyId: 'arn:aws:kms:ap-east-1:290368114919:key/83e9cdb2-a10e-49f3-9998-74c1f0a6bc9a',
   region: 'ap-east-1',
   context: { Environment: 'hash', Source: 'backend', DataType: 'config-password' },
@@ -33,6 +34,23 @@ export class KmsValuesService {
     const actor: Actor = { userId: Number(me.id), username: String(me.username || payload.username || ''), displayName: String(user.display_name || me.display_name || me.username || ''), permissions: Array.isArray(me.permissions) ? me.permissions.map(String) : [], mfaEnabled: Number(user.mfa_enabled || 0) === 1 && !!user.mfa_secret, mfaSecret: user.mfa_secret ? String(user.mfa_secret) : null };
     if (!actor.permissions.includes(MENU_PERMISSION)) throw new ForbiddenException(`Missing permissions: ${MENU_PERMISSION}`);
     return actor;
+  }
+  async getConfiguration(environmentId: string) {
+    if (environmentId !== 'hashex') {
+      return { supported: false, environmentId, reason: '当前仅支持 hashex 环境的 KMS 配置加解密。' };
+    }
+    const env = await this.environments.getEnvironmentConfigById(environmentId);
+    if (!env) throw new NotFoundException(`Environment "${environmentId}" not found`);
+    return {
+      supported: true,
+      environmentId,
+      keyAlias: HASH_KMS.keyAlias,
+      keyArn: HASH_KMS.keyId,
+      region: HASH_KMS.region,
+      encryptionContext: HASH_KMS.context,
+      ciphertextPrefix: PREFIX,
+      targetRoleConfigured: !!String(env.aws_role_arn || '').trim(),
+    };
   }
   private async client(environmentId: string) {
     if (environmentId !== 'hashex') throw new BadRequestException('当前仅支持 hashex 环境的 KMS 配置加解密。');

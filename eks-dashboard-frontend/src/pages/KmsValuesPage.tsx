@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, App, Button, Card, Col, Form, Input, Row, Select, Space, Typography } from 'antd';
+import { Alert, App, Button, Card, Col, Descriptions, Form, Input, Row, Select, Space, Typography } from 'antd';
 import { CopyOutlined, LockOutlined, UnlockOutlined } from '@ant-design/icons';
-import { decryptKmsValue, encryptKmsValue, getEnvironmentConfigs } from '../services/api';
+import { decryptKmsValue, encryptKmsValue, getEnvironmentConfigs, getKmsValueConfiguration } from '../services/api';
 
 const { Text } = Typography;
 type Env = { id: string; name: string; aws_region?: string };
@@ -14,13 +14,26 @@ const KmsValuesPage: React.FC = () => {
   const [decrypting, setDecrypting] = useState(false);
   const [encrypted, setEncrypted] = useState('');
   const [decrypted, setDecrypted] = useState('');
+  const [kmsConfiguration, setKmsConfiguration] = useState<Awaited<ReturnType<typeof getKmsValueConfiguration>> | null>(null);
   const [encryptForm] = Form.useForm();
   const [decryptForm] = Form.useForm();
   useEffect(() => { getEnvironmentConfigs().then((x) => setEnvs(Array.isArray(x) ? x : [])).catch(() => message.error('环境列表加载失败')); }, [message]);
+  useEffect(() => {
+    setKmsConfiguration(null);
+    getKmsValueConfiguration(environmentId).then(setKmsConfiguration).catch((e: any) => message.error(e?.response?.data?.message || 'KMS 配置加载失败'));
+  }, [environmentId, message]);
   const copy = async (value: string) => { try { await navigator.clipboard.writeText(value); message.success('已复制'); } catch { message.error('复制失败，请手动复制'); } };
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
-    <Alert type="warning" showIcon message="仅处理单个变量值" description="当前仅支持 hashex 的 alias/kms-eks-hash。输入不会保存，审计日志仅记录输入摘要；解密必须验证 Google Authenticator MFA。" />
-    <Space><Text strong>AWS 环境</Text><Select value={environmentId} onChange={setEnvironmentId} style={{ width: 260 }} options={envs.map((e) => ({ value: e.id, label: `${e.name} (${e.id})` }))} /></Space>
+    <Alert type="warning" showIcon message="仅处理单个变量值" description="输入不会保存，审计日志仅记录输入摘要；解密必须验证 Google Authenticator MFA。" />
+    <Space><Text strong>AWS 环境</Text><Select showSearch optionFilterProp="label" value={environmentId} onChange={(value) => { setEnvironmentId(value); setEncrypted(''); setDecrypted(''); }} style={{ width: 300 }} placeholder="输入环境名称或 ID 匹配" options={envs.map((e) => ({ value: e.id, label: `${e.name} (${e.id})` }))} /></Space>
+    {kmsConfiguration && (kmsConfiguration.supported ? <Card size="small" title="当前 KMS 配置（只读）"><Descriptions size="small" column={{ xs: 1, md: 2 }} items={[
+      { key: 'alias', label: 'KMS_KEY_ALIAS', children: kmsConfiguration.keyAlias },
+      { key: 'region', label: 'AWS_REGION', children: kmsConfiguration.region },
+      { key: 'arn', label: 'KMS_KEY_ARN', children: <Text code>{kmsConfiguration.keyArn}</Text> },
+      { key: 'prefix', label: '密文前缀', children: kmsConfiguration.ciphertextPrefix },
+      { key: 'context', label: 'KMS_CONTEXT', children: <Text code>{JSON.stringify(kmsConfiguration.encryptionContext)}</Text> },
+      { key: 'role', label: 'Target Role', children: kmsConfiguration.targetRoleConfigured ? '已配置' : '未配置' },
+    ]} /></Card> : <Alert type="info" showIcon message="此环境暂未启用 KMS 变量值加解密" description={kmsConfiguration.reason} />)}
     <Row gutter={16}>
       <Col xs={24} lg={12}><Card title="加密变量值" extra={<LockOutlined />}>
         <Form form={encryptForm} layout="vertical" onFinish={async (v) => { setEncrypting(true); try { const r = await encryptKmsValue({ environmentId, value: v.value }); setEncrypted(r.value); message.success('KMS 加密成功'); } catch (e: any) { message.error(e?.response?.data?.message || e?.message || '加密失败'); } finally { setEncrypting(false); } }}>
