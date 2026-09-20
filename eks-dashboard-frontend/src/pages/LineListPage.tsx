@@ -86,6 +86,7 @@ const LineListPage: React.FC = () => {
   const [size, setSize] = useState(20);
   const [total, setTotal] = useState(0);
   const { currentEnvironment } = useContext(EnvironmentContext);
+  const autoLoadedEnvironmentRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     const envId = currentEnvironment?.id;
@@ -100,6 +101,7 @@ const LineListPage: React.FC = () => {
       setPage(1);
       setSize(20);
       setTotal(0);
+      autoLoadedEnvironmentRef.current = null;
       form.resetFields();
       return;
     }
@@ -108,6 +110,7 @@ const LineListPage: React.FC = () => {
     const loadTenants = async () => {
       setTenantLoading(true);
       setTenantLoadError(null);
+      setTenants([]);
       try {
         const data = (await getTenantsForEnvironment()) as TenantOption[];
         if (cancelled) return;
@@ -120,6 +123,16 @@ const LineListPage: React.FC = () => {
               .filter((item) => Number.isInteger(item.id) && item.id > 0)
           : [];
         setTenants(normalized);
+        autoLoadedEnvironmentRef.current = envId;
+        const defaultTenant = normalized.find((tenant) => tenant.id === 1);
+        if (defaultTenant) {
+          const nextQuery: InventoryQuery = { tenantId: 1, status: true, lineUrl: '' };
+          form.setFieldsValue({ tenantId: defaultTenant.id, status: true });
+          setQuery(nextQuery);
+          setSearched(true);
+          setPage(1);
+          void loadInventory(1, size, nextQuery, false);
+        }
       } catch (error: any) {
         if (cancelled) return;
         setTenants([]);
@@ -398,7 +411,7 @@ const LineListPage: React.FC = () => {
 
       {!searched ? (
         <Space direction="vertical" size={4}>
-          <Text type="secondary">请选择筛选条件并点击“查询”查看线路总览。</Text>
+          <Text type="secondary">系统会优先自动加载当前环境的租户 ID=1；也可以手动调整筛选条件后查询。</Text>
         </Space>
       ) : (
         <>
