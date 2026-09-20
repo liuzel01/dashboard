@@ -27,6 +27,7 @@ import AssetManagementPage from './pages/AssetManagementPage';
 import SiteConfPage from './pages/SiteConfPage';
 import SslCertificateExportPage from './pages/SslCertificateExportPage';
 import MonitoringRequestsPage from './pages/MonitoringRequestsPage';
+import KmsValuesPage from './pages/KmsValuesPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -107,6 +108,7 @@ const AppLayout: React.FC = () => {
     monitoringRequests: { key: '/monitoring-requests', label: '监控资源申请', icon: <FileProtectOutlined />, permission: 'menu:monitoring-requests' },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
+    kmsValues: { key: '/kms-values', label: 'KMS 配置加解密', icon: <SafetyCertificateOutlined />, permission: 'menu:kms-values' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
   };
@@ -211,7 +213,7 @@ const AppLayout: React.FC = () => {
     '/ops-tools',
     '运维工具',
     <RobotOutlined />,
-    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates],
+    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues],
   );
 
   const systemManagementChildren: NonNullable<MenuProps['items']> = [
@@ -343,6 +345,7 @@ const AppLayout: React.FC = () => {
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
               <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
+              <Route path="/kms-values" element={<ProtectedRoute required={['menu:kms-values']}><KmsValuesPage /></ProtectedRoute>} />
               <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
               <Route
                 path="/cert-study/sap-c02"

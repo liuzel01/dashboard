@@ -24,6 +24,7 @@ import { AssetsModule } from './assets/assets.module';
 import { SiteConfModule } from './site-conf/site-conf.module';
 import { SslCertificatesModule } from './ssl-certificates/ssl-certificates.module';
 import { MonitoringRequestsModule } from './monitoring-requests/monitoring-requests.module';
+import { KmsValuesModule } from './kms-values/kms-values.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { MonitoringRequestsModule } from './monitoring-requests/monitoring-reque
     SiteConfModule,
     SslCertificatesModule,
     MonitoringRequestsModule,
+    KmsValuesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
