@@ -23,7 +23,18 @@ const KmsValuesPage: React.FC = () => {
     setKmsConfiguration(null);
     getKmsValueConfiguration(environmentId).then(setKmsConfiguration).catch((e: any) => message.error(e?.response?.data?.message || 'KMS 配置加载失败'));
   }, [environmentId, message]);
-  const copy = async (value: string) => { try { await navigator.clipboard.writeText(value); message.success('已复制'); } catch { message.error('复制失败，请手动复制'); } };
+  const copy = async (value: string) => {
+    if (!window.isSecureContext || !navigator.clipboard?.writeText) {
+      message.warning('复制功能仅支持 HTTPS 页面，请通过 HTTPS 访问后重试。');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      message.success('已复制');
+    } catch {
+      message.error('复制失败，请检查浏览器的剪贴板权限。');
+    }
+  };
   const kmsConfigColumns = [
     { title: '字段', dataIndex: 'field', key: 'field', width: 240 },
     {
