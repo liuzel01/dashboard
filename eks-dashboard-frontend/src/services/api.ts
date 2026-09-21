@@ -321,9 +321,21 @@ export const getTenantsForEnvironment = async (environmentId?: string) => {
 };
 
 // 环境管理（配置）
+let environmentConfigsCache: any[] | null = null;
+let environmentConfigsRequest: Promise<any[]> | null = null;
 export const getEnvironmentConfigs = async () => {
-  const response = await api.get('/environments/config');
-  return response.data;
+  if (environmentConfigsCache) return environmentConfigsCache;
+  if (environmentConfigsRequest) return environmentConfigsRequest;
+  environmentConfigsRequest = api.get('/environments/config').then((response) => {
+    const data = Array.isArray(response.data) ? response.data : [];
+    environmentConfigsCache = data;
+    return data;
+  });
+  try {
+    return await environmentConfigsRequest;
+  } finally {
+    environmentConfigsRequest = null;
+  }
 };
 
 export const getEnvironmentConfig = async (id: string) => {
@@ -1521,9 +1533,30 @@ export const requestSslCertificate = async (data: { environmentId: string; regio
 
 export const encryptKmsValue = async (data: { environmentId: string; value: string }) => (await api.post('/kms-values/encrypt', data)).data;
 export const decryptKmsValue = async (data: { environmentId: string; value: string; otpCode: string }) => (await api.post('/kms-values/decrypt', data)).data;
-export const getKmsValueConfiguration = async (environmentId: string) => (await api.get('/kms-values/config', { params: { environmentId } })).data as {
+type KmsValueConfiguration = {
   supported: boolean; environmentId: string; reason?: string; keyAlias?: string; keyArn?: string; region?: string;
   encryptionContext?: Record<string, string>; ciphertextPrefix?: string; targetRoleConfigured?: boolean;
+};
+const kmsValueConfigurationCache = new Map<string, KmsValueConfiguration>();
+const kmsValueConfigurationRequests = new Map<string, Promise<KmsValueConfiguration>>();
+export const getKmsValueConfiguration = async (environmentId: string): Promise<KmsValueConfiguration> => {
+  const cached = kmsValueConfigurationCache.get(environmentId);
+  if (cached) return cached;
+  const existing = kmsValueConfigurationRequests.get(environmentId);
+  if (existing) return existing;
+  const request = api
+    .get('/kms-values/config', { params: { environmentId } })
+    .then((response) => {
+      const data = response.data as KmsValueConfiguration;
+      kmsValueConfigurationCache.set(environmentId, data);
+      return data;
+    });
+  kmsValueConfigurationRequests.set(environmentId, request);
+  try {
+    return await request;
+  } finally {
+    kmsValueConfigurationRequests.delete(environmentId);
+  }
 };
 
 export const getSslCertificateDetail = async (params: { environmentId: string; region?: string; certificateArn: string }) => {
