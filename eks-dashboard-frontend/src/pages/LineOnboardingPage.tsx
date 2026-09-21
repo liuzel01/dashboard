@@ -193,7 +193,6 @@ type ResolvedIngressSource = {
 };
 
 const DOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
-const SUBDOMAIN_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
 const normalizeDomain = (value: string) => value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
 const K8S_RESOURCE_NAME_REGEX = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
@@ -1637,10 +1636,10 @@ const LineOnboardingPage: React.FC = () => {
         </Space>
       </Card>
 
-      <Card title="步骤2：线路域名" style={{ marginBottom: 12 }}>
+      <Card title="步骤2：目标域名" style={{ marginBottom: 12 }}>
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Text>推荐命令：<Text code>openssl rand -hex 16</Text></Text>
-          <Text type="secondary">系统将生成随机前缀（12~20位十六进制）并与步骤1域名拼接，示例：f0c15ebd6dc50f8.sample.com</Text>
+          <Text type="secondary">可使用根域名或子域名；也可以生成随机前缀（12~20位十六进制）并与步骤1域名拼接，示例：f0c15ebd6dc50f8.sample.com</Text>
           <Space>
             <Button onClick={handleGenerateSubdomain} disabled={!confirmedRootDomain}>
               生成子域名
@@ -1652,7 +1651,7 @@ const LineOnboardingPage: React.FC = () => {
               const value = e.target.value.trim().toLowerCase();
               setGeneratedSubdomain(value);
               const candidate = normalizeDomain(value);
-              if (SUBDOMAIN_REGEX.test(candidate)) {
+              if (DOMAIN_REGEX.test(candidate)) {
                 if (candidate !== confirmedSubdomain) {
                   resetFromStep3();
                 }
