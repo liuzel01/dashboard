@@ -539,6 +539,20 @@ export class AgentIngressService {
     if (manifest.status !== undefined) {
       throw new BadRequestException('Ingress YAML must not include status');
     }
+    const annotations = manifest.metadata.annotations;
+    if (annotations !== undefined) {
+      if (!annotations || typeof annotations !== 'object' || Array.isArray(annotations)) {
+        throw new BadRequestException('Ingress metadata.annotations must be an object whose values are strings');
+      }
+      const invalidAnnotationValues = Object.entries(annotations)
+        .filter(([, value]) => typeof value !== 'string')
+        .map(([key]) => key);
+      if (invalidAnnotationValues.length > 0) {
+        throw new BadRequestException(
+          `Ingress metadata.annotations values must be strings; quote these values: ${invalidAnnotationValues.join(', ')}`,
+        );
+      }
+    }
     const serverManagedFields = ['uid', 'resourceVersion', 'generation', 'creationTimestamp', 'managedFields', 'selfLink'];
     const presentManagedFields = serverManagedFields.filter((key) => manifest.metadata[key] !== undefined);
     if (presentManagedFields.length > 0) {
@@ -643,6 +657,12 @@ export class AgentIngressService {
     if (typeof value === 'number' || typeof value === 'boolean') return String(value);
     const text = String(value);
     if (!text) return "''";
+    // YAML parses these plain strings as non-string scalars. Quote them so
+    // Kubernetes annotations remain string-valued after the preview is edited
+    // and parsed again by js-yaml.
+    if (/^(?:null|true|false|yes|no|on|off|~)$/i.test(text) || /^[-+]?\d+(?:\.\d+)?$/.test(text)) {
+      return JSON.stringify(text);
+    }
     if (/^[a-zA-Z0-9._/-]+$/.test(text)) return text;
     return JSON.stringify(text);
   }

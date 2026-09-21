@@ -42,4 +42,19 @@ spec:
     )))
       .toThrow('server-managed metadata');
   });
+
+  it('rejects non-string annotation values with an actionable message', () => {
+    expect(() => (service as any).parseIngressManifest(validManifest.replace(
+      '  namespace: default\n',
+      '  namespace: default\n  annotations:\n    nginx.ingress.kubernetes.io/ssl-redirect: true\n',
+    ))).toThrow('metadata.annotations values must be strings');
+  });
+
+  it('quotes ambiguous string scalars when generating preview YAML', () => {
+    const yaml = (service as any).toYaml({
+      metadata: { annotations: { 'example.com/enabled': 'true', 'example.com/port': '443' } },
+    });
+    expect(yaml).toContain('example.com/enabled: "true"');
+    expect(yaml).toContain('example.com/port: "443"');
+  });
 });
