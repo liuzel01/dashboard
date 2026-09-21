@@ -34,6 +34,7 @@ type RolloutOperationState = {
   previousImages?: DeploymentImage[];
 };
 type RecoveryRequest = {
+  environmentId: string;
   deploymentName: string;
   previousImages: DeploymentImage[];
   targetGeneration?: number | null;
@@ -96,6 +97,7 @@ const DeploymentListPage: React.FC = () => {
   const { modal, message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
   const requestSeqRef = useRef(0);
+  const currentEnvironmentIdRef = useRef<string | null>(null);
   const blockedPromptedRef = useRef(new Set<string>());
 
   const [allDeployments, setAllDeployments] = useState<Deployment[]>([]);
@@ -116,6 +118,17 @@ const DeploymentListPage: React.FC = () => {
   // 日志查看器弹窗的状态
   const [logViewerVisible, setLogViewerVisible] = useState(false);
   const [logTarget, setLogTarget] = useState<string | null>(null);
+
+  const rolloutOperationKey = (environmentId: string, deploymentName: string) =>
+    `${environmentId}:${deploymentName}`;
+
+  useEffect(() => {
+    currentEnvironmentIdRef.current = currentEnvironment?.id || null;
+    requestSeqRef.current += 1;
+    setRolloutOperations({});
+    blockedPromptedRef.current.clear();
+    setRestarting(null);
+  }, [currentEnvironment?.id]);
 
   const fetchDeployments = useCallback((name: string) => {
     if (!currentEnvironment) {
@@ -181,16 +194,21 @@ const DeploymentListPage: React.FC = () => {
       previousImages?: DeploymentImage[],
       offerRecovery = false,
     ) => {
+      const environmentId = currentEnvironment?.id;
+      if (!environmentId) return;
       let finalDeployment: Deployment | undefined;
       let finalPhase: 'completed' | 'progressing' | 'blocked' | 'failed' = 'progressing';
       let failureMessage = '';
       const intervalMs = 3000;
       let maxAttempts = 40;
-      const operationKey = `${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
+      const operationKey = `${environmentId}:${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
+      const stateKey = rolloutOperationKey(environmentId, deploymentName);
       blockedPromptedRef.current.delete(operationKey);
 
       for (let i = 0; i < maxAttempts; i += 1) {
+        if (currentEnvironmentIdRef.current !== environmentId) return;
         const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration);
+        if (currentEnvironmentIdRef.current !== environmentId) return;
         maxAttempts = Math.max(
           maxAttempts,
           Math.ceil((status.progressDeadlineSeconds * 1000) / intervalMs) + 1,
@@ -207,7 +225,7 @@ const DeploymentListPage: React.FC = () => {
           failureMessage = status.diagnostics[0]?.message || status.diagnostics[0]?.reason || '';
           setRolloutOperations((prev) => ({
             ...prev,
-            [deploymentName]: {
+            [stateKey]: {
               phase: status.phase,
               operationName,
               diagnostics: status.diagnostics,
@@ -238,6 +256,7 @@ const DeploymentListPage: React.FC = () => {
               cancelText: '继续等待',
               okButtonProps: { danger: true },
               onOk: () => setRecoveryRequest({
+                environmentId,
                 deploymentName,
                 previousImages,
                 targetGeneration: status.targetGeneration,
@@ -270,7 +289,7 @@ const DeploymentListPage: React.FC = () => {
             okText: '回退到发布前镜像',
             cancelText: '暂不处理',
             okButtonProps: { danger: true },
-            onOk: () => setRecoveryRequest({ deploymentName, previousImages }),
+            onOk: () => setRecoveryRequest({ environmentId, deploymentName, previousImages }),
           });
         }
       } else {
@@ -279,11 +298,15 @@ const DeploymentListPage: React.FC = () => {
         );
       }
     },
-    [message, modal],
+    [currentEnvironment?.id, message, modal],
   );
 
   useEffect(() => {
     if (!recoveryRequest) return;
+    if (recoveryRequest.environmentId !== currentEnvironmentIdRef.current) {
+      setRecoveryRequest(null);
+      return;
+    }
     let cancelled = false;
     const recover = async () => {
       try {
@@ -291,13 +314,14 @@ const DeploymentListPage: React.FC = () => {
           recoveryRequest.deploymentName,
           recoveryRequest.targetGeneration,
         );
+        if (recoveryRequest.environmentId !== currentEnvironmentIdRef.current) return;
         if (current.phase === 'completed') {
           message.success(`应用 "${recoveryRequest.deploymentName}" 已自行恢复，无需回退镜像。`);
           return;
         }
         setRolloutOperations((prev) => ({
           ...prev,
-          [recoveryRequest.deploymentName]: {
+          [rolloutOperationKey(recoveryRequest.environmentId, recoveryRequest.deploymentName)]: {
             phase: 'progressing',
             operationName: '故障回退',
             diagnostics: [],
@@ -436,7 +460,9 @@ const DeploymentListPage: React.FC = () => {
       key: 'status',
       width: 190,
       render: (_: any, record: Deployment) => {
-        const operation = record.name ? rolloutOperations[record.name] : undefined;
+        const operation = record.name && currentEnvironment?.id
+          ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, record.name)]
+          : undefined;
         if (operation?.phase === 'failed') {
           const diagnostic = operation.diagnostics[0];
           const detail = diagnostic
