@@ -28,6 +28,7 @@ export default defineConfig({
   },
   preview: {
     host: '0.0.0.0',
+    allowedHosts: ['www.pree.mg56.net'],
     proxy,
   },
 });
