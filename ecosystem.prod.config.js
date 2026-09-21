@@ -29,6 +29,7 @@ module.exports = {
       merge_logs: true,
       env: {
         NODE_ENV: 'production',
+        VITE_PREVIEW_ALLOWED_HOSTS: process.env.VITE_PREVIEW_ALLOWED_HOSTS || 'www.pree.mg56.net',
       },
       error_file: 'logs/pm2-err.log',
       out_file: 'logs/pm2-out.log',

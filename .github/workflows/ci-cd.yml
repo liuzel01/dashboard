@@ -24,6 +24,8 @@ jobs:
     name: Test and build
     runs-on: ubuntu-latest
     environment: production
+    env:
+      PREVIEW_ALLOWED_HOSTS: ${{ vars.VITE_PREVIEW_ALLOWED_HOSTS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -110,10 +112,16 @@ jobs:
           SCRIPT_SHA256: ${{ steps.package.outputs.script_sha256 }}
         run: |
           set -euo pipefail
+          PREVIEW_ALLOWED_HOSTS="${PREVIEW_ALLOWED_HOSTS:-www.pree.mg56.net}"
+          [[ "$PREVIEW_ALLOWED_HOSTS" =~ ^[A-Za-z0-9._,-]+$ ]] || {
+            echo "VITE_PREVIEW_ALLOWED_HOSTS contains unsupported characters" >&2
+            exit 1
+          }
           S3_BASE="s3://${DEPLOY_BUCKET}/${DEPLOY_PREFIX%/}/${RELEASE_ID}"
           SCRIPT_URI="$S3_BASE/deploy-release.sh"
           ARTIFACT_URI="$S3_BASE/$ARCHIVE"
           SSM_COMMAND="set -e
+          export VITE_PREVIEW_ALLOWED_HOSTS='$PREVIEW_ALLOWED_HOSTS'
           install -d -m 0755 /opt/dashboard/scripts
           aws s3 cp '$SCRIPT_URI' /opt/dashboard/scripts/deploy-release.sh --only-show-errors
           echo '$SCRIPT_SHA256  /opt/dashboard/scripts/deploy-release.sh' | sha256sum -c -

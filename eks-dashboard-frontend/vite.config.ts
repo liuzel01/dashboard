@@ -1,6 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+declare const process: { env: Record<string, string | undefined> };
+
+const previewAllowedHosts = (process.env.VITE_PREVIEW_ALLOWED_HOSTS || 'www.pree.mg56.net')
+  .split(',')
+  .map((host: string) => host.trim())
+  .filter(Boolean);
+
 const proxy = {
   // Signal Monitor（price-alert）接口走独立后端
   '/api/signal-monitor': {
@@ -28,7 +35,7 @@ export default defineConfig({
   },
   preview: {
     host: '0.0.0.0',
-    allowedHosts: ['www.pree.mg56.net'],
+    allowedHosts: previewAllowedHosts,
     proxy,
   },
 });
