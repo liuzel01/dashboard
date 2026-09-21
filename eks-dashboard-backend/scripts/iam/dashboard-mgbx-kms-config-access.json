@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DescribeDashboardKmsConfigKey",
+      "Effect": "Allow",
+      "Action": "kms:DescribeKey",
+      "Resource": "arn:aws:kms:ap-southeast-1:931324892624:key/7dc0ce50-e5a3-40a8-8ba3-cba434cc3ef7"
+    },
+    {
+      "Sid": "EncryptDecryptDashboardKmsConfigValueWithExactContext",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt"
+      ],
+      "Resource": "arn:aws:kms:ap-southeast-1:931324892624:key/7dc0ce50-e5a3-40a8-8ba3-cba434cc3ef7",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:Environment": "mega",
+          "kms:EncryptionContext:Source": "backend",
+          "kms:EncryptionContext:DataType": "config-password"
+        }
+      }
+    }
+  ]
+}

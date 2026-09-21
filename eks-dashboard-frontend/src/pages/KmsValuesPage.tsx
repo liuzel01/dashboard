@@ -63,7 +63,7 @@ const KmsValuesPage: React.FC = () => {
         dataSource={[
           { key: 'alias', field: 'KMS_KEY_ALIAS', value: String(kmsConfiguration.keyAlias || '') },
           { key: 'region', field: 'AWS_REGION', value: String(kmsConfiguration.region || '') },
-          { key: 'arn', field: 'KMS_KEY_ARN', value: String(kmsConfiguration.keyArn || '') },
+          { key: 'id', field: 'KMS_KEY_ID', value: String(kmsConfiguration.keyId || '') },
           { key: 'prefix', field: '密文前缀', value: String(kmsConfiguration.ciphertextPrefix || '') },
           { key: 'context', field: 'KMS_CONTEXT', value: JSON.stringify(kmsConfiguration.encryptionContext) },
           { key: 'role', field: 'Target Role', value: kmsConfiguration.targetRoleConfigured ? '已配置' : '未配置' },

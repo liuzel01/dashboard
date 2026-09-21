@@ -1534,7 +1534,7 @@ export const requestSslCertificate = async (data: { environmentId: string; regio
 export const encryptKmsValue = async (data: { environmentId: string; value: string }) => (await api.post('/kms-values/encrypt', data)).data;
 export const decryptKmsValue = async (data: { environmentId: string; value: string; otpCode: string }) => (await api.post('/kms-values/decrypt', data)).data;
 type KmsValueConfiguration = {
-  supported: boolean; environmentId: string; reason?: string; keyAlias?: string; keyArn?: string; region?: string;
+  supported: boolean; environmentId: string; reason?: string; keyAlias?: string; keyId?: string; region?: string;
   encryptionContext?: Record<string, string>; ciphertextPrefix?: string; targetRoleConfigured?: boolean;
 };
 const kmsValueConfigurationCache = new Map<string, KmsValueConfiguration>();
