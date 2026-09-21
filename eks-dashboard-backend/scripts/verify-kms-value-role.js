@@ -15,8 +15,8 @@ const { fromInstanceMetadata, fromTemporaryCredentials } = require('@aws-sdk/cre
 const KMS_CONFIGURATIONS = {
   hashex: { keyAlias: 'alias/kms-eks-hash', keyId: 'arn:aws:kms:ap-east-1:290368114919:key/83e9cdb2-a10e-49f3-9998-74c1f0a6bc9a', context: { Environment: 'hash', Source: 'backend', DataType: 'config-password' } },
   mgbx: { keyAlias: 'alias/kms-eks-mgbx', keyId: 'arn:aws:kms:ap-southeast-1:931324892624:key/7dc0ce50-e5a3-40a8-8ba3-cba434cc3ef7', context: { Environment: 'mega', Source: 'backend', DataType: 'config-password' } },
-  icoin: { keyAlias: 'alias/kms-eks-newicoin', keyId: 'alias/kms-eks-newicoin', context: { Environment: 'icoin', Source: 'backend', DataType: 'config-password' } },
-  tb: { keyAlias: 'alias/kms-eks-vlink', keyId: 'alias/kms-eks-vlink', context: { Environment: 'vlink', Source: 'backend', DataType: 'config-password' } },
+  icoin: { keyAlias: 'alias/kms-eks-newicoin', keyId: 'arn:aws:kms:ap-southeast-1:412235698072:key/27d8eb92-0774-4014-8b6d-8c3818c262f1', context: { Environment: 'icoin', Source: 'backend', DataType: 'config-password' } },
+  tb: { keyAlias: 'alias/kms-eks-vlink', keyId: 'arn:aws:kms:ap-southeast-1:249563934516:key/fd39ad0b-0fff-48ac-ab9c-38a1a431ca5d', context: { Environment: 'vlink', Source: 'backend', DataType: 'config-password' } },
 };
 
 function environmentIdFromArgs() {

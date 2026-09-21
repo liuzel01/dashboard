@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DescribeDashboardKmsConfigKey",
+      "Effect": "Allow",
+      "Action": "kms:DescribeKey",
+      "Resource": "arn:aws:kms:ap-southeast-1:249563934516:key/fd39ad0b-0fff-48ac-ab9c-38a1a431ca5d"
+    },
+    {
+      "Sid": "EncryptDecryptDashboardKmsConfigValueWithExactContext",
+      "Effect": "Allow",
+      "Action": ["kms:Encrypt", "kms:Decrypt"],
+      "Resource": "arn:aws:kms:ap-southeast-1:249563934516:key/fd39ad0b-0fff-48ac-ab9c-38a1a431ca5d",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:Environment": "vlink",
+          "kms:EncryptionContext:Source": "backend",
+          "kms:EncryptionContext:DataType": "config-password"
+        }
+      }
+    }
+  ]
+}
