@@ -58,3 +58,30 @@ spec:
     expect(yaml).toContain('example.com/port: "443"');
   });
 });
+
+describe('AgentIngressService TLS Secret naming', () => {
+  it('derives the new Secret from the new host even when a stale name is supplied', () => {
+    const resolveTlsSecretName = (service as any).resolveTlsSecretName.bind(service);
+
+    expect(
+      resolveTlsSecretName('line-c-tls', {
+        newHost: '24e1b9eef5430ffd.line-c.ekb26app.cfd',
+        tlsSecretMode: 'new',
+        tlsSecretName: 'line-c-tls',
+      }),
+    ).toBe('24e1b9eef5430ffd-tls');
+  });
+
+  it('keeps explicit reuse and custom strategies unchanged', () => {
+    const resolveTlsSecretName = (service as any).resolveTlsSecretName.bind(service);
+
+    expect(resolveTlsSecretName('source-tls', { newHost: 'new.example.com', tlsSecretMode: 'reuse' })).toBe('source-tls');
+    expect(
+      resolveTlsSecretName('source-tls', {
+        newHost: 'new.example.com',
+        tlsSecretMode: 'custom',
+        tlsSecretName: 'my-custom-tls',
+      }),
+    ).toBe('my-custom-tls');
+  });
+});

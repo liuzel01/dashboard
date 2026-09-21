@@ -600,7 +600,10 @@ export class AgentIngressService {
   ) {
     if (input.tlsSecretMode === 'reuse') return sourceSecretName;
     if (input.tlsSecretMode === 'custom') return input.tlsSecretName;
-    return input.tlsSecretName || `${input.newHost.split('.')[0]}-tls`;
+    // The `new` strategy must never inherit a source/previously generated name.
+    // The frontend may keep a returned name in state, and accepting it here can
+    // silently bind the new host to a Secret named after the old root domain.
+    return `${input.newHost.split('.')[0]}-tls`;
   }
 
   private buildIngressPreview(input: {
