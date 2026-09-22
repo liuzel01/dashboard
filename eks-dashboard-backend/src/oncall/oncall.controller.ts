@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { OncallService } from './oncall.service';
+import type { AlertmanagerPayload } from './oncall.types';
 
 const validation = new ValidationPipe({ transform: true, whitelist: true });
 
@@ -20,6 +21,28 @@ class AcknowledgeAlertDto {
 @Controller('oncall')
 export class OncallController {
   constructor(private readonly service: OncallService) {}
+
+  /** Used exclusively as the Internal ALB target-group health check. */
+  @Get('health')
+  health() {
+    return { status: 'ok', service: 'dashboard-oncall' };
+  }
+
+  @Post('alertmanager')
+  async receiveAlertmanager(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers() headers: Record<string, unknown>,
+    @Body() body: AlertmanagerPayload,
+  ) {
+    this.service.assertWebhookAuthorization(authorization);
+    const forwarded = headers['x-forwarded-for'];
+    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null;
+    return this.service.receiveAlertmanagerWebhook(body, {
+      ip,
+      userAgent: typeof headers['user-agent'] === 'string' ? headers['user-agent'] : null,
+      traceId: typeof headers['x-request-id'] === 'string' ? headers['x-request-id'] : null,
+    });
+  }
 
   @Get('alerts')
   async list(@Headers('authorization') authorization: string | undefined, @Query(validation) query: ListAlertsDto) {

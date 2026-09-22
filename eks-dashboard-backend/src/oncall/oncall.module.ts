@@ -11,10 +11,10 @@ import { OncallService } from './oncall.service';
   providers: [OncallService, OncallNotificationService],
   exports: [OncallService],
 })
-export class OncallCoreModule {}
-
 @Module({
-  imports: [OncallCoreModule],
+  imports: [AccessControlModule, AuditModule, AuthModule],
   controllers: [OncallController],
+  providers: [OncallService, OncallNotificationService],
+  exports: [OncallService],
 })
 export class OncallModule {}
