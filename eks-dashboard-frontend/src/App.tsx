@@ -2,7 +2,7 @@ import React, { useContext, useState } from 'react';
 import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, MenuFoldOutlined, MenuUnfoldOutlined, AlertOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -28,6 +28,7 @@ import SiteConfPage from './pages/SiteConfPage';
 import SslCertificateExportPage from './pages/SslCertificateExportPage';
 import MonitoringRequestsPage from './pages/MonitoringRequestsPage';
 import KmsValuesPage from './pages/KmsValuesPage';
+import OncallPage from './pages/OncallPage';
 import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentContext';
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
@@ -125,6 +126,7 @@ const AppLayout: React.FC = () => {
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
     kmsValues: { key: '/kms-values', label: 'KMS 配置加解密', icon: <SafetyCertificateOutlined />, permission: 'menu:kms-values' },
+    oncall: { key: '/oncall', label: 'Oncall 告警', icon: <AlertOutlined />, permission: 'menu:oncall' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
   };
@@ -222,7 +224,7 @@ const AppLayout: React.FC = () => {
     '/monitoring',
     '监控与告警',
     <AimOutlined />,
-    [menuItems.siteMonitors, menuItems.monitoringRequests],
+    [menuItems.siteMonitors, menuItems.monitoringRequests, menuItems.oncall],
   );
 
   const opsToolsGroup = createMenuGroup(
@@ -291,7 +293,7 @@ const AppLayout: React.FC = () => {
     ...(['/deployments', '/jump-servers', '/security-groups', '/s3-upload'].some((path) => location.pathname.startsWith(path)) ? ['/cloud-resources'] : []),
     ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
     ...(['/lines', '/line-onboarding'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
-    ...(['/site-monitors', '/monitoring-requests'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
+    ...(['/site-monitors', '/monitoring-requests', '/oncall'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
     ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
     ...(['/environments', '/site-conf', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
@@ -368,6 +370,7 @@ const AppLayout: React.FC = () => {
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/monitoring-requests" element={<ProtectedRoute required={['menu:monitoring-requests']}><MonitoringRequestsPage /></ProtectedRoute>} />
+              <Route path="/oncall" element={<ProtectedRoute required={['menu:oncall']}><OncallPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
               <Route path="/site-conf" element={<ProtectedRoute required={['menu:site-conf']}><SiteConfPage /></ProtectedRoute>} />
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
