@@ -8,8 +8,13 @@ import { OncallService } from './oncall.service';
 
 @Module({
   imports: [AccessControlModule, AuditModule, AuthModule],
-  controllers: [OncallController],
   providers: [OncallService, OncallNotificationService],
   exports: [OncallService],
+})
+export class OncallCoreModule {}
+
+@Module({
+  imports: [OncallCoreModule],
+  controllers: [OncallController],
 })
 export class OncallModule {}

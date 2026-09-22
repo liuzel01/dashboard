@@ -14,6 +14,10 @@ module.exports = {
         AWS_STS_REGION: 'ap-southeast-1',
         KUBECONFIG: '/root/.kube/config',
         HOME: '/root',
+        // The listener remains in this backend Node process. Inject the bearer token
+        // through the host secret mechanism; never add its plaintext to this file.
+        ONCALL_WEBHOOK_LISTENER_ENABLED: process.env.ONCALL_WEBHOOK_LISTENER_ENABLED || 'false',
+        ONCALL_WEBHOOK_PORT: process.env.ONCALL_WEBHOOK_PORT || '62233',
       },
       error_file: 'logs/pm2-err.log',
       out_file: 'logs/pm2-out.log',
