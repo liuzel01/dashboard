@@ -5,10 +5,12 @@ import { AuthModule } from '../auth/auth.module';
 import { OncallController } from './oncall.controller';
 import { OncallNotificationService } from './oncall-notification.service';
 import { OncallService } from './oncall.service';
+import { OncallEscalationService } from './oncall-escalation.service';
+import { HotlineService } from './hotline.service';
 
 @Module({
   imports: [AccessControlModule, AuditModule, AuthModule],
-  providers: [OncallService, OncallNotificationService],
+  providers: [OncallService, OncallNotificationService, OncallEscalationService, HotlineService],
   exports: [OncallService],
 })
 @Module({
