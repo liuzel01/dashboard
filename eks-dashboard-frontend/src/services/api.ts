@@ -1595,6 +1595,14 @@ export const getOncallAlert = async (id: number) =>
   (await api.get(`/oncall/alerts/${id}`)).data as OncallAlert;
 export const acknowledgeOncallAlert = async (id: number, comment?: string) =>
   (await api.post(`/oncall/alerts/${id}/ack`, { comment })).data as { acknowledged: boolean; status: OncallAlertStatus; result: string };
+export type OncallRosterLevel = 'L1' | 'L2' | 'OWNER';
+export type OncallRosterBinding = { id: number; environment_id: string; level: OncallRosterLevel; email: string; display_name: string | null; active_from: string | null; active_until: string | null; enabled: number };
+export const listOncallRoster = async (environmentId?: string) =>
+  (await api.get('/oncall/roster', { params: environmentId ? { environmentId } : undefined })).data as OncallRosterBinding[];
+export const saveOncallRoster = async (data: { environmentId: string; level: OncallRosterLevel; email: string; displayName?: string; enabled?: boolean }) =>
+  (await api.post('/oncall/roster', data)).data as { ok: boolean; environmentId: string; level: OncallRosterLevel; email: string };
+export const deleteOncallRoster = async (id: number) =>
+  (await api.delete(`/oncall/roster/${id}`)).data as { ok: boolean; deleted: number };
 
 export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
 export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';

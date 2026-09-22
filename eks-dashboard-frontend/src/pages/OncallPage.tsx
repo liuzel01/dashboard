@@ -1,9 +1,9 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, App, Button, Descriptions, Drawer, Form, Input, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
+import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
-import { acknowledgeOncallAlert, getOncallAlert, listOncallAlerts, type OncallAlert, type OncallAlertStatus } from '../services/api';
+import { acknowledgeOncallAlert, deleteOncallRoster, getOncallAlert, listOncallAlerts, listOncallRoster, saveOncallRoster, type OncallAlert, type OncallAlertStatus, type OncallRosterBinding, type OncallRosterLevel } from '../services/api';
 
 const { Text } = Typography;
 
@@ -28,6 +28,10 @@ const OncallPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const [ackForm] = Form.useForm();
+  const [roster, setRoster] = useState<OncallRosterBinding[]>([]);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterSaving, setRosterSaving] = useState(false);
+  const [rosterForm] = Form.useForm();
 
   const load = async () => {
     setLoading(true);
@@ -43,6 +47,28 @@ const OncallPage: React.FC = () => {
   };
 
   useEffect(() => { void load(); }, [status, environmentId]); // intentional: text search requires an explicit click
+
+  const loadRoster = async () => {
+    setRosterLoading(true);
+    try { setRoster(await listOncallRoster(environmentId)); }
+    catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置加载失败'); }
+    finally { setRosterLoading(false); }
+  };
+  useEffect(() => { void loadRoster(); }, [environmentId]);
+
+  const saveRoster = async (values: { level: OncallRosterLevel; email: string; displayName?: string }) => {
+    setRosterSaving(true);
+    try {
+      await saveOncallRoster({ environmentId: environmentId || currentEnvironment?.id || 'mgbx', ...values });
+      message.success('值班配置已保存'); rosterForm.resetFields(); await loadRoster();
+    } catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置保存失败'); }
+    finally { setRosterSaving(false); }
+  };
+
+  const removeRoster = async (id: number) => {
+    try { await deleteOncallRoster(id); message.success('值班配置已删除'); await loadRoster(); }
+    catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置删除失败'); }
+  };
 
   const openDetail = async (alert: OncallAlert) => {
     setSelected(alert);
@@ -89,6 +115,19 @@ const OncallPage: React.FC = () => {
       message="Oncall 告警"
       description="仅接收经 Alertmanager 专用 Webhook 认证的告警。普通告警现有链路不受影响；Lark 和 Hotline 的实际发送状态可在详情中核对。"
     />
+    <Card title={`值班升级配置${environmentId ? `（${environmentId}）` : ''}`} size="small" extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRoster()} loading={rosterLoading}>刷新</Button>}>
+      <Form form={rosterForm} layout="inline" onFinish={saveRoster} style={{ marginBottom: 12 }}>
+        <Form.Item name="level" rules={[{ required: true, message: '请选择级别' }]}><Select placeholder="升级级别" style={{ width: 130 }} options={[{ value: 'L1', label: 'L1' }, { value: 'L2', label: 'L2' }, { value: 'OWNER', label: '负责人' }]} /></Form.Item>
+        <Form.Item name="email" rules={[{ required: true, type: 'email', message: '请输入邮箱' }]}><Input placeholder="值班邮箱" style={{ width: 260 }} /></Form.Item>
+        <Form.Item name="displayName"><Input placeholder="显示名称（可选）" style={{ width: 180 }} /></Form.Item>
+        <Button type="primary" htmlType="submit" loading={rosterSaving}>添加 / 保存</Button>
+      </Form>
+      <Table size="small" rowKey="id" loading={rosterLoading} pagination={false} dataSource={roster} columns={[
+        { title: '级别', dataIndex: 'level', width: 100 }, { title: '邮箱', dataIndex: 'email' }, { title: '名称', dataIndex: 'display_name', render: (value: string | null) => value || '-' },
+        { title: '状态', dataIndex: 'enabled', width: 90, render: (value: number) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> },
+        { title: '操作', width: 90, render: (_: unknown, row: OncallRosterBinding) => <Popconfirm title="确认删除这条值班配置？" onConfirm={() => void removeRoster(row.id)}><Button danger type="link">删除</Button></Popconfirm> },
+      ]} />
+    </Card>
     <Space wrap>
       <Select allowClear placeholder="状态" value={status} onChange={setStatus} style={{ width: 140 }} options={['FIRING', 'ACKED', 'RESOLVED'].map((value) => ({ value, label: value }))} />
       <Select allowClear showSearch optionFilterProp="label" placeholder="环境" value={environmentId} onChange={setEnvironmentId} style={{ width: 220 }} options={environments.map((env) => ({ value: env.id, label: `${env.name} (${env.id})` }))} />

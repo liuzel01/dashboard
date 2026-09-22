@@ -263,4 +263,40 @@ export class OncallService {
     });
     return result;
   }
+
+  async listRoster(actor: OncallActor, environmentId?: string) {
+    const env = asText(environmentId, 64);
+    const rows = await this.db.query<any[]>(
+      `SELECT id, environment_id, level, email, display_name, active_from, active_until, enabled, created_at, updated_at
+       FROM oncall_identity_bindings ${env ? 'WHERE environment_id=?' : ''}
+       ORDER BY environment_id, FIELD(level, 'L1', 'L2', 'OWNER'), email`, env ? [env] : [],
+    );
+    await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'GET', path: '/oncall/roster', menuKey: MENU_PERMISSION, action: 'oncall.roster.list', actionName: '查看 Oncall 值班配置', targetType: 'oncall_roster', requestSummary: { environmentId: env || undefined }, responseSummary: { count: rows.length }, status: 'success', statusCode: 200 });
+    return rows;
+  }
+
+  async upsertRoster(actor: OncallActor, input: { environmentId: string; level: string; email: string; displayName?: string; activeFrom?: string; activeUntil?: string; enabled?: boolean }) {
+    const environmentId = asText(input.environmentId, 64);
+    const level = asText(input.level, 16).toUpperCase();
+    const email = asText(input.email, 320).toLowerCase();
+    if (!environmentId || !['L1', 'L2', 'OWNER'].includes(level) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('Invalid Oncall roster environment, level, or email');
+    const displayName = asText(input.displayName, 255) || null;
+    const activeFrom = parseTime(input.activeFrom) || null;
+    const activeUntil = parseTime(input.activeUntil) || null;
+    const enabled = input.enabled === false ? 0 : 1;
+    await this.db.query(
+      `INSERT INTO oncall_identity_bindings (environment_id, level, email, lark_open_id, display_name, active_from, active_until, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, '', ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+       ON DUPLICATE KEY UPDATE lark_open_id='', display_name=VALUES(display_name), active_from=VALUES(active_from), active_until=VALUES(active_until), enabled=VALUES(enabled), updated_at=UTC_TIMESTAMP()`,
+      [environmentId, level, email, displayName, activeFrom, activeUntil, enabled],
+    );
+    await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'POST', path: '/oncall/roster', menuKey: MENU_PERMISSION, action: 'oncall.roster.upsert', actionName: '保存 Oncall 值班配置', targetType: 'oncall_roster', requestSummary: { environmentId, level, email, displayName, enabled }, status: 'success', statusCode: 200 });
+    return { ok: true, environmentId, level, email };
+  }
+
+  async deleteRoster(actor: OncallActor, id: number) {
+    const result = await this.db.query<any>('DELETE FROM oncall_identity_bindings WHERE id=?', [id]);
+    await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'DELETE', path: `/oncall/roster/${id}`, menuKey: MENU_PERMISSION, action: 'oncall.roster.delete', actionName: '删除 Oncall 值班配置', targetType: 'oncall_roster', targetId: String(id), responseSummary: { deleted: Number(result.affectedRows || 0) }, status: 'success', statusCode: 200 });
+    return { ok: true, deleted: Number(result.affectedRows || 0) };
+  }
 }

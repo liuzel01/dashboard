@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Post, Query, ValidationPipe } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { OncallService } from './oncall.service';
 import type { AlertmanagerPayload } from './oncall.types';
 
@@ -16,6 +16,20 @@ class ListAlertsDto {
 
 class AcknowledgeAlertDto {
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
+}
+
+class ListRosterDto {
+  @IsOptional() @IsString() @MaxLength(64) environmentId?: string;
+}
+
+class UpsertRosterDto {
+  @IsString() @MaxLength(64) environmentId!: string;
+  @IsIn(['L1', 'L2', 'OWNER']) level!: string;
+  @IsEmail() @MaxLength(320) email!: string;
+  @IsOptional() @IsString() @MaxLength(255) displayName?: string;
+  @IsOptional() @IsString() @MaxLength(80) activeFrom?: string;
+  @IsOptional() @IsString() @MaxLength(80) activeUntil?: string;
+  @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
 @Controller('oncall')
@@ -65,5 +79,22 @@ export class OncallController {
     const numericId = Number(id);
     if (!Number.isInteger(numericId) || numericId < 1) throw new BadRequestException('Invalid oncall alert id');
     return this.service.acknowledgeAlert(await this.service.resolveActor(authorization), numericId, body.comment);
+  }
+
+  @Get('roster')
+  async roster(@Headers('authorization') authorization: string | undefined, @Query(validation) query: ListRosterDto) {
+    return this.service.listRoster(await this.service.resolveActor(authorization), query.environmentId);
+  }
+
+  @Post('roster')
+  async saveRoster(@Headers('authorization') authorization: string | undefined, @Body(validation) body: UpsertRosterDto) {
+    return this.service.upsertRoster(await this.service.resolveActor(authorization), body);
+  }
+
+  @Delete('roster/:id')
+  async removeRoster(@Headers('authorization') authorization: string | undefined, @Param('id') id: string) {
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1) throw new BadRequestException('Invalid Oncall roster id');
+    return this.service.deleteRoster(await this.service.resolveActor(authorization), numericId);
   }
 }
