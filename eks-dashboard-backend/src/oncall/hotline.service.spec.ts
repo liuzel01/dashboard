@@ -21,4 +21,15 @@ describe('HotlineService', () => {
     expect(post.mock.calls[1][0]).toContain('user_id_type=open_id');
     post.mockRestore();
   });
+
+  it('accepts a successful empty response from the urgent-phone endpoint', async () => {
+    process.env.HOTLINE_ENABLED = 'true';
+    process.env.HOTLINE_LARK_APP_ID = 'app';
+    process.env.HOTLINE_LARK_APP_SECRET = 'secret';
+    const post = jest.spyOn(axios, 'post')
+      .mockResolvedValueOnce({ data: { code: 0, tenant_access_token: 'token' } } as any)
+      .mockResolvedValueOnce({ status: 200, data: '' } as any);
+    await expect(new HotlineService().requestUrgentPhone('message', ['ou_app_specific'])).resolves.toEqual({ status: 'SENT' });
+    post.mockRestore();
+  });
 });

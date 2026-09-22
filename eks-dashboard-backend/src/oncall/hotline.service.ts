@@ -19,7 +19,10 @@ export class HotlineService {
       const response = await axios.post(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/urgent_phone`, {
         user_id_type: 'open_id', user_id_list: openIds,
       }, { headers: { Authorization: `Bearer ${token}` }, timeout: 10_000, validateStatus: () => true });
-      if (response.status < 200 || response.status >= 300 || Number(response.data?.code) !== 0) throw new Error(`urgent_phone failed: HTTP ${response.status}, code ${String(response.data?.code ?? 'unknown')}`);
+      const businessCode = response.data?.code;
+      if (response.status < 200 || response.status >= 300 || (businessCode !== undefined && Number(businessCode) !== 0)) {
+        throw new Error(`urgent_phone failed: HTTP ${response.status}, code ${String(businessCode ?? 'unknown')}`);
+      }
       return { status: 'SENT' };
     } catch (error: any) {
       const detail = String(error?.message || error).slice(0, 1000);
