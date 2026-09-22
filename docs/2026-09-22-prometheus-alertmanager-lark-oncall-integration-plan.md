@@ -177,7 +177,16 @@ eks-dashboard-backend/src/oncall/
 
 **验收目标：** 形成 `mgbx` 接入清单、高危告警清单、Lark 权限清单、运行模式/队列决策和链路测试方案；不修改生产配置。
 
-**当前只读核查记录（2026-09-22）：** 已通过 macmini → SSM 到达 Dashboard EC2；但 EC2 `/root/.kube/config` 没有可用 contexts，`current-context` 指向 `vlink`，因此 `kubectl --context mgbx` 未能读取 Prometheus、Alertmanager 或 PrometheusRule 清单。需要先修复或明确生产 kubeconfig/运行时 context，再完成集群侧清单核对；本次未执行任何 Kubernetes 写操作。
+**当前只读核查记录（2026-09-22）：**
+
+- 已通过 macmini 的 `macmini-mgbx-operator` profile 使用临时 kubeconfig 直连 `mgbx`，集群状态为 `ACTIVE`，EKS 版本为 `1.34`；未修改集群资源。
+- `monitoring/Prometheus/k8s` 与 `monitoring/Alertmanager/main` 已运行；Alertmanager 为 3 副本，Prometheus 通过 `monitoring/alertmanager-main:9093` 投递告警。
+- 当前生效配置引用 `alertmanager-main-mgbx-lark` Secret；配置摘要显示默认 receiver 为现有 `prometheus-alert-center-lark`，仅对 `Watchdog`、`InfoInhibitor` 做忽略路由，没有 Dashboard Oncall receiver 或高危专用 route。
+- 现有 `PrometheusRule` 均带有 `role: alert-rules` 等发现标签，但本次清单中没有发现统一的 `risk_level` 标签；需要先确定高危规则清单和标签补充方式。
+- 现有 `monitoring/prometheus-alert-center` 为单副本部署，镜像为 `feiyu563/prometheus-alert:v4.9.1`，普通告警链路仍在运行。
+- 从 `monitoring/alertmanager-main-0` 只读测试访问 Dashboard EC2 `10.100.166.109` 的 3000/5173 端口均超时；EC2 安全组当前仅允许已有来源安全组访问 5173，以及 `172.32.1.15/32` 的全端口访问，未包含 EKS 节点来源。因此 Webhook 网络入口尚未具备，需单独设计并审批安全组/入口规则。
+
+上述检查未执行任何 Kubernetes `apply`、`patch`、删除、重启或 Alertmanager 配置变更；Phase 0 仍未完成，当前阻塞项为 Webhook 网络可达性、高危标签/路由定义和 Hotline API 能力确认。
 
 ### Phase 1：Oncall 数据与接收能力
 
