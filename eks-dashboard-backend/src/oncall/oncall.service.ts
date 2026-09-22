@@ -11,6 +11,7 @@ import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
+import { OncallNotificationService } from './oncall-notification.service';
 import type { AlertmanagerAlert, AlertmanagerPayload, OncallActor } from './oncall.types';
 
 const MENU_PERMISSION = 'menu:oncall';
@@ -38,6 +39,7 @@ export class OncallService {
     private readonly access: AccessControlService,
     private readonly db: PlatformDatabaseService,
     private readonly audit: AuditService,
+    private readonly notifications: OncallNotificationService,
   ) {}
 
   async resolveActor(authorization?: string): Promise<OncallActor> {
@@ -122,6 +124,7 @@ export class OncallService {
       if (outcome.updated) result.updated += 1;
       if (outcome.resolved) result.resolved += 1;
       if (outcome.duplicate) result.duplicateEvents += 1;
+      if (outcome.shouldNotify) await this.notifications.enqueueFiringAlert(outcome.alertId, outcome.firedAt);
     }
     return result;
   }
@@ -164,8 +167,8 @@ export class OncallService {
       } else {
         alertId = Number(existing.id);
         const wasResolved = existing.status === 'RESOLVED';
-        duplicate = existing.status === status && status === 'FIRING' && !wasResolved;
-        const nextStatus = status === 'RESOLVED' ? 'RESOLVED' : 'FIRING';
+        duplicate = status === 'FIRING' && (existing.status === 'FIRING' || existing.status === 'ACKED');
+        const nextStatus = status === 'RESOLVED' ? 'RESOLVED' : existing.status === 'ACKED' ? 'ACKED' : 'FIRING';
         await conn.execute(
           `UPDATE oncall_alerts SET environment_id=?, alert_name=?, namespace=?, severity=?, risk_level=?, status=?,
             last_fired_at=IF(? = 'FIRING', ?, last_fired_at), resolved_at=?, labels_json=?, annotations_json=?, raw_payload_json=?,
@@ -181,7 +184,7 @@ export class OncallService {
          VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
         [alertId, eventType, asText(alert.status || payload.status, 32) || null, json(rawPayload), meta.ip || null, meta.userAgent || null, meta.traceId || null],
       );
-      return { alertId, created, updated, resolved: status === 'RESOLVED', duplicate };
+      return { alertId, created, updated, resolved: status === 'RESOLVED', duplicate, shouldNotify: status === 'FIRING' && !duplicate, firedAt };
     });
   }
 
@@ -220,5 +223,44 @@ export class OncallService {
     ]);
     await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'GET', path: `/oncall/alerts/${id}`, menuKey: MENU_PERMISSION, action: 'oncall.alerts.get', actionName: '查看 Oncall 告警详情', targetType: 'oncall_alert', targetId: String(id), status: 'success', statusCode: 200 });
     return { ...alert, events, acknowledgements, notifications };
+  }
+
+  async acknowledgeAlert(actor: OncallActor, id: number, comment?: string) {
+    const normalizedComment = asText(comment, 1000) || null;
+    const result = await this.db.withTransaction(async (conn) => {
+      const [rows] = await conn.execute<any[]>('SELECT id, status FROM oncall_alerts WHERE id=? LIMIT 1 FOR UPDATE', [id]);
+      const alert = rows[0];
+      if (!alert) throw new NotFoundException('Oncall alert not found');
+      const status = String(alert.status);
+      const acknowledged = status === 'FIRING';
+      const recordResult = acknowledged ? 'ACKED' : status === 'ACKED' ? 'DUPLICATE' : 'IGNORED_RESOLVED';
+      if (acknowledged) {
+        await conn.execute('UPDATE oncall_alerts SET status=\'ACKED\', updated_at=UTC_TIMESTAMP() WHERE id=?', [id]);
+      }
+      await conn.execute(
+        `INSERT INTO oncall_ack_records
+         (alert_id, actor_user_id, actor_username, source, result, comment, acknowledged_at, created_at)
+         VALUES (?, ?, ?, 'dashboard', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [id, actor.userId, actor.username, recordResult, normalizedComment],
+      );
+      return { acknowledged, status: acknowledged ? 'ACKED' : status, result: recordResult };
+    });
+    await this.audit.record({
+      actorUserId: actor.userId,
+      actorUsername: actor.username,
+      actorDisplayName: actor.displayName,
+      method: 'POST',
+      path: `/oncall/alerts/${id}/ack`,
+      menuKey: MENU_PERMISSION,
+      action: 'oncall.alerts.ack',
+      actionName: '确认 Oncall 告警',
+      targetType: 'oncall_alert',
+      targetId: String(id),
+      requestSummary: { comment: normalizedComment },
+      responseSummary: result,
+      status: 'success',
+      statusCode: 200,
+    });
+    return result;
   }
 }

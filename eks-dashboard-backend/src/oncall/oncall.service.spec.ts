@@ -24,8 +24,9 @@ const makeService = (existing: any = null) => {
     withTransaction: jest.fn(async (callback: any) => callback({ execute })),
     query: jest.fn(),
   };
-  const service = new OncallService({} as any, {} as any, db as any, { record: jest.fn() } as any);
-  return { service, db, execute };
+  const notifications = { enqueueFiringAlert: jest.fn() };
+  const service = new OncallService({} as any, {} as any, db as any, { record: jest.fn() } as any, notifications as any);
+  return { service, db, execute, notifications };
 };
 
 describe('OncallService Alertmanager webhook', () => {
@@ -52,12 +53,13 @@ describe('OncallService Alertmanager webhook', () => {
   });
 
   it('creates one firing alert and records a firing event', async () => {
-    const { service, execute } = makeService();
+    const { service, execute, notifications } = makeService();
     const result = await service.receiveAlertmanagerWebhook(payload(), {});
     expect(result).toMatchObject({ received: 1, created: 1, updated: 0, resolved: 0, duplicateEvents: 0, alertIds: [42] });
     expect(execute.mock.calls[1][0]).toContain('INSERT INTO oncall_alerts');
     expect(execute.mock.calls[2][0]).toContain('INSERT INTO oncall_alert_events');
     expect(execute.mock.calls[2][1][1]).toBe('FIRING');
+    expect(notifications.enqueueFiringAlert).toHaveBeenCalledWith(42, '2026-09-22 00:00:00');
   });
 
   it('records duplicate firing events without creating a second alert', async () => {
@@ -75,5 +77,20 @@ describe('OncallService Alertmanager webhook', () => {
     const result = await service.receiveAlertmanagerWebhook(payload('resolved'), {});
     expect(result).toMatchObject({ created: 0, updated: 1, resolved: 1, duplicateEvents: 0, alertIds: [9] });
     expect(execute.mock.calls[2][1][1]).toBe('RESOLVED');
+  });
+
+  it('acknowledges a firing alert once and preserves an audit-ready acknowledgement record', async () => {
+    const execute = jest.fn()
+      .mockResolvedValueOnce([[{ id: 8, status: 'FIRING' }], []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([{ insertId: 1 }, []]);
+    const audit = { record: jest.fn() };
+    const db = { withTransaction: jest.fn(async (callback: any) => callback({ execute })), query: jest.fn() };
+    const service = new OncallService({} as any, {} as any, db as any, audit as any, { enqueueFiringAlert: jest.fn() } as any);
+    const result = await service.acknowledgeAlert({ userId: 1, username: 'operator', displayName: 'Operator', permissions: ['menu:oncall'] }, 8, 'investigating');
+    expect(result).toEqual({ acknowledged: true, status: 'ACKED', result: 'ACKED' });
+    expect(execute.mock.calls[1][0]).toContain("status='ACKED'");
+    expect(execute.mock.calls[2][0]).toContain('INSERT INTO oncall_ack_records');
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'oncall.alerts.ack', status: 'success' }));
   });
 });
