@@ -28,6 +28,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:ai-ops', name: 'AI 运维' },
   { key: 'menu:ssl-certificates', name: 'SSL证书申请' },
   { key: 'menu:kms-values', name: 'KMS 配置加解密' },
+  { key: 'menu:oncall', name: 'Oncall 告警' },
   { key: 'menu:signal-monitor', name: 'Signal Monitor' },
   { key: 'aiops:qa', name: 'AI 问答' },
   { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
