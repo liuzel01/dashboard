@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS `oncall_identity_bindings` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `environment_id` VARCHAR(64) NOT NULL,
   `level` VARCHAR(32) NOT NULL,
-  `email` VARCHAR(320) NOT NULL,
   `lark_open_id` VARCHAR(128) NOT NULL,
   `display_name` VARCHAR(255) DEFAULT NULL,
   `active_from` DATETIME DEFAULT NULL,
@@ -30,6 +29,6 @@ CREATE TABLE IF NOT EXISTS `oncall_identity_bindings` (
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uniq_oncall_identity_binding` (`environment_id`, `level`, `email`),
+  UNIQUE KEY `uniq_oncall_identity_binding` (`environment_id`, `level`, `lark_open_id`),
   KEY `idx_oncall_identity_active` (`environment_id`, `level`, `enabled`, `active_from`, `active_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
