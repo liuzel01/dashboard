@@ -219,7 +219,7 @@ export class OncallService {
     const [events, acknowledgements, notifications] = await Promise.all([
       this.db.query<any[]>('SELECT id, event_type, source_status, source_ip, trace_id, occurred_at, created_at FROM oncall_alert_events WHERE alert_id=? ORDER BY id DESC', [id]),
       this.db.query<any[]>('SELECT id, actor_user_id, actor_username, source, result, comment, acknowledged_at, created_at FROM oncall_ack_records WHERE alert_id=? ORDER BY id DESC', [id]),
-      this.db.query<any[]>('SELECT id, channel, status, idempotency_key, error_message, sent_at, created_at FROM oncall_notification_records WHERE alert_id=? ORDER BY id DESC', [id]),
+      this.db.query<any[]>('SELECT id, channel, status, idempotency_key, provider_message_id, error_message, sent_at, created_at FROM oncall_notification_records WHERE alert_id=? ORDER BY id DESC', [id]),
     ]);
     await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'GET', path: `/oncall/alerts/${id}`, menuKey: MENU_PERMISSION, action: 'oncall.alerts.get', actionName: '查看 Oncall 告警详情', targetType: 'oncall_alert', targetId: String(id), status: 'success', statusCode: 200 });
     return { ...alert, events, acknowledgements, notifications };

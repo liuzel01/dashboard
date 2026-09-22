@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import axios from 'axios';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
+import { HotlineService } from './hotline.service';
 
 type NotificationRow = Record<string, any>;
 
@@ -10,7 +11,7 @@ export class OncallNotificationService {
   private readonly logger = new Logger(OncallNotificationService.name);
   private running = false;
 
-  constructor(private readonly db: PlatformDatabaseService) {}
+  constructor(private readonly db: PlatformDatabaseService, private readonly hotline: HotlineService) {}
 
   async enqueueFiringAlert(alertId: number, firedAt: string) {
     const idempotencyKey = `lark:oncall-alert:${alertId}:firing:${firedAt}`;
@@ -51,12 +52,18 @@ export class OncallNotificationService {
     });
     if (!claimed) return;
 
-    const webhookUrl = String(process.env.ONCALL_LARK_WEBHOOK_URL || '').trim();
-    if (!webhookUrl) {
-      await this.finish(notification.id, 'SKIPPED', 'ONCALL_LARK_WEBHOOK_URL is not configured');
+    const result = await this.hotline.sendGroupMessage(this.message(notification));
+    if (result.status === 'SENT') {
+      await this.finish(notification.id, 'SENT', undefined, result.messageId);
+      return;
+    }
+    if (result.status === 'SKIPPED') {
+      await this.finish(notification.id, 'SKIPPED', result.detail);
       return;
     }
     try {
+      const webhookUrl = String(process.env.ONCALL_LARK_WEBHOOK_URL || '').trim();
+      if (!webhookUrl) throw new Error(result.detail || 'Hotline App group message failed');
       const response = await axios.post(webhookUrl, {
         msg_type: 'text',
         content: { text: this.message(notification) },
@@ -65,7 +72,7 @@ export class OncallNotificationService {
       if (response.status < 200 || response.status >= 300 || code !== 0) {
         throw new Error(`Lark webhook response HTTP ${response.status}, code ${Number.isFinite(code) ? code : 'unknown'}`);
       }
-      await this.finish(notification.id, 'SENT');
+      await this.finish(notification.id, 'SENT', `Hotline App failed; delivered by legacy webhook: ${result.detail || 'unknown error'}`);
     } catch (error: any) {
       const message = String(error?.message || error).slice(0, 1000);
       this.logger.warn(`Oncall Lark notification ${notification.id} failed: ${message}`);
@@ -96,10 +103,10 @@ export class OncallNotificationService {
     try { return JSON.parse(String(value || '{}')) as Record<string, unknown>; } catch { return {}; }
   }
 
-  private async finish(id: number, status: 'SENT' | 'SKIPPED' | 'FAILED', errorMessage?: string) {
+  private async finish(id: number, status: 'SENT' | 'SKIPPED' | 'FAILED', errorMessage?: string, providerMessageId?: string) {
     await this.db.query(
-      `UPDATE oncall_notification_records SET status=?, error_message=?, sent_at=IF(?='SENT', UTC_TIMESTAMP(), NULL) WHERE id=?`,
-      [status, errorMessage || null, status, id],
+      `UPDATE oncall_notification_records SET status=?, error_message=?, provider_message_id=?, sent_at=IF(?='SENT', UTC_TIMESTAMP(), NULL) WHERE id=?`,
+      [status, errorMessage || null, providerMessageId || null, status, id],
     );
   }
 }

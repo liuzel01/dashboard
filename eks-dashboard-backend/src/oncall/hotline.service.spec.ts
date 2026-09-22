@@ -1,4 +1,5 @@
 import { HotlineService } from './hotline.service';
+import axios from 'axios';
 
 describe('HotlineService', () => {
   const previous = process.env.HOTLINE_ENABLED;
@@ -8,5 +9,16 @@ describe('HotlineService', () => {
     process.env.HOTLINE_ENABLED = 'false';
     await expect(new HotlineService().requestUrgentPhone('message-id', ['ou_test']))
       .resolves.toEqual({ status: 'SKIPPED', detail: 'HOTLINE_ENABLED is not true' });
+  });
+
+  it('uses the Hotline App open_id when resolving an email', async () => {
+    process.env.HOTLINE_LARK_APP_ID = 'app';
+    process.env.HOTLINE_LARK_APP_SECRET = 'secret';
+    const post = jest.spyOn(axios, 'post')
+      .mockResolvedValueOnce({ data: { code: 0, tenant_access_token: 'token' } } as any)
+      .mockResolvedValueOnce({ status: 200, data: { code: 0, data: { user_list: [{ user_id: 'ou_app_specific' }] } } } as any);
+    await expect(new HotlineService().resolveOpenIds(['person@example.com'])).resolves.toEqual(['ou_app_specific']);
+    expect(post.mock.calls[1][0]).toContain('user_id_type=open_id');
+    post.mockRestore();
   });
 });
