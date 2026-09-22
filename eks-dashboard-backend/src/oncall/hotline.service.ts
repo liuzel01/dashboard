@@ -16,8 +16,8 @@ export class HotlineService {
     if (!messageId || openIds.length === 0) return { status: 'SKIPPED', detail: 'messageId and recipient open_ids are required' };
     try {
       const token = await this.tenantToken();
-      const response = await axios.post(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/urgent_phone`, {
-        user_id_type: 'open_id', user_id_list: openIds,
+      const response = await axios.patch(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/urgent_phone?user_id_type=open_id`, {
+        user_id_list: openIds,
       }, { headers: { Authorization: `Bearer ${token}` }, timeout: 10_000, validateStatus: () => true });
       const businessCode = response.data?.code;
       if (response.status < 200 || response.status >= 300 || (businessCode !== undefined && Number(businessCode) !== 0)) {
