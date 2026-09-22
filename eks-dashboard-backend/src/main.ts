@@ -16,6 +16,6 @@ async function bootstrap() {
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Target-Environment', 'X-User-Id', 'X-Username', 'X-Dashboard-Approval-Token'],
   });
-  await app.listen(3000, '0.0.0.0');
+  await app.listen(Number(process.env.PORT || 3000), '0.0.0.0');
 }
 bootstrap();

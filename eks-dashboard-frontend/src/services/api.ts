@@ -1569,6 +1569,33 @@ export const createSslCertificateDecryptedDownload = async (data: { environmentI
   return response;
 };
 
+export type OncallAlertStatus = 'FIRING' | 'ACKED' | 'RESOLVED';
+export type OncallAlert = {
+  id: number;
+  fingerprint: string;
+  environment_id: string;
+  alert_name: string;
+  namespace?: string | null;
+  severity?: string | null;
+  risk_level?: string | null;
+  status: OncallAlertStatus;
+  first_fired_at?: string | null;
+  last_fired_at?: string | null;
+  resolved_at?: string | null;
+  labels_json?: Record<string, unknown> | string;
+  annotations_json?: Record<string, unknown> | string;
+  events?: Array<{ id: number; event_type: string; source_status?: string | null; occurred_at: string }>;
+  acknowledgements?: Array<{ id: number; actor_username?: string | null; source: string; result: string; comment?: string | null; acknowledged_at: string }>;
+  notifications?: Array<{ id: number; channel: string; status: string; error_message?: string | null; sent_at?: string | null; created_at: string }>;
+};
+export type OncallAlertList = { items: OncallAlert[]; total: number; page: number; pageSize: number };
+export const listOncallAlerts = async (params: { page?: number; pageSize?: number; status?: OncallAlertStatus; environmentId?: string; keyword?: string } = {}) =>
+  (await api.get('/oncall/alerts', { params })).data as OncallAlertList;
+export const getOncallAlert = async (id: number) =>
+  (await api.get(`/oncall/alerts/${id}`)).data as OncallAlert;
+export const acknowledgeOncallAlert = async (id: number, comment?: string) =>
+  (await api.post(`/oncall/alerts/${id}/ack`, { comment })).data as { acknowledged: boolean; status: OncallAlertStatus; result: string };
+
 export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
 export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
 export type MonitoringPrometheusRuleFields = {
