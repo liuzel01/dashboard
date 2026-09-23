@@ -69,7 +69,15 @@ describe('AgentIngressService TLS Secret naming', () => {
         tlsSecretMode: 'new',
         tlsSecretName: 'line-c-tls',
       }),
-    ).toBe('24e1b9eef5430ffd-tls');
+    ).toBe('24e1b9eef5430ffd-line-c-ekb26app-cfd-tls');
+
+    expect(
+      resolveTlsSecretName('bk-tls', {
+        newHost: 'bk.vlink2tenant.shop',
+        tlsSecretMode: 'new',
+        tlsSecretName: 'bk-tls',
+      }),
+    ).toBe('bk-vlink2tenant-shop-tls');
   });
 
   it('keeps explicit reuse and custom strategies unchanged', () => {

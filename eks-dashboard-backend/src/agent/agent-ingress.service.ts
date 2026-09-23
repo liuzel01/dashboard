@@ -603,7 +603,15 @@ export class AgentIngressService {
     // The `new` strategy must never inherit a source/previously generated name.
     // The frontend may keep a returned name in state, and accepting it here can
     // silently bind the new host to a Secret named after the old root domain.
-    return `${input.newHost.split('.')[0]}-tls`;
+    const normalizedHost = input.newHost
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const suffix = '-tls';
+    const maxBaseLength = 253 - suffix.length;
+    const base = (normalizedHost || 'ingress-secret').slice(0, maxBaseLength).replace(/-+$/g, '');
+    return `${base}${suffix}`;
   }
 
   private buildIngressPreview(input: {

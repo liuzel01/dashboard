@@ -1723,7 +1723,7 @@ const LineOnboardingPage: React.FC = () => {
 
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text>TLS Secret 策略：<Tag color="green">为新域名生成新 TLS Secret（推荐）</Tag></Text>
-            <Text type="secondary">预览会默认使用新子域名前缀拼接 <Text code>-tls</Text>；如需覆盖，可在预览输出下方手动输入 TLS Secret 名称后再确认创建。</Text>
+            <Text type="secondary">预览会默认将完整域名中的点替换为中划线并拼接 <Text code>-tls</Text>（例如 <Text code>bk.vlink2tenant.shop</Text> → <Text code>bk-vlink2tenant-shop-tls</Text>）；如需覆盖，可在预览输出下方手动输入 TLS Secret 名称后再确认创建。</Text>
           </Space>
 
           {sourceIngressError ? <Alert type="error" showIcon message={sourceIngressError} /> : null}
