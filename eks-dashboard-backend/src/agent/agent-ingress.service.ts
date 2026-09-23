@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import * as k8s from '@kubernetes/client-node';
 import { loadAll, YAMLException } from 'js-yaml';
 
@@ -610,7 +611,11 @@ export class AgentIngressService {
       .replace(/^-+|-+$/g, '');
     const suffix = '-tls';
     const maxBaseLength = 253 - suffix.length;
-    const base = (normalizedHost || 'ingress-secret').slice(0, maxBaseLength).replace(/-+$/g, '');
+    if (normalizedHost.length + suffix.length <= 253) return `${normalizedHost || 'ingress-secret'}${suffix}`;
+    const digest = createHash('sha256').update(normalizedHost).digest('hex').slice(0, 10);
+    const prefixLength = maxBaseLength - digest.length - 1;
+    const prefix = normalizedHost.slice(0, prefixLength).replace(/-+$/g, '');
+    const base = `${prefix}-${digest}`;
     return `${base}${suffix}`;
   }
 
