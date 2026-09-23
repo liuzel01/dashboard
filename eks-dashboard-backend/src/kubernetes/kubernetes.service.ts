@@ -251,7 +251,7 @@ export class KubernetesService {
       deployment.spec.template.metadata.annotations[RESTART_ANNOTATION] =
         new Date().toISOString();
 
-      await k8sAppsV1Api.replaceNamespacedDeployment(
+      const { body: updatedDeployment } = await k8sAppsV1Api.replaceNamespacedDeployment(
         name,
         namespace,
         deployment,
@@ -259,7 +259,10 @@ export class KubernetesService {
       this.logger.log(
         `Deployment ${name} in namespace ${namespace} restarted.`,
       );
-      return { message: `Deployment ${name} restarted successfully.` };
+      return {
+        message: `Deployment ${name} restarted successfully.`,
+        targetGeneration: Number(updatedDeployment.metadata?.generation || 0) || null,
+      };
     } catch (e) {
       const errorDetails = e.response ? e.response.body : e.body || e;
       this.logger.error(`Error restarting deployment ${name}:`, errorDetails);
@@ -391,14 +394,33 @@ export class KubernetesService {
     const labelSelector = Object.entries(selector)
       .map(([key, value]) => `${key}=${value}`)
       .join(',');
-    const { body: podList } = await k8sCoreV1Api.listNamespacedPod(
-      namespace,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      labelSelector,
-    );
+    const [{ body: replicaSetList }, { body: podList }] = await Promise.all([
+      k8sAppsV1Api.listNamespacedReplicaSet(namespace),
+      k8sCoreV1Api.listNamespacedPod(
+        namespace,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        labelSelector,
+      ),
+    ]);
+
+    // A rolling restart leaves the old ReplicaSet around while its Pods are
+    // terminating. Select only the newest ReplicaSet owned by this
+    // Deployment; otherwise its normally expected SIGTERM (exit 143) can be
+    // reported as a rollout failure even after the new Pod is healthy.
+    const deploymentUid = deployment.metadata?.uid;
+    const currentReplicaSet = replicaSetList.items
+      .filter((replicaSet) => replicaSet.metadata?.ownerReferences?.some(
+        (owner) => owner.kind === 'Deployment' && owner.uid === deploymentUid,
+      ))
+      .sort((left, right) => {
+        const leftTime = left.metadata?.creationTimestamp?.getTime() || 0;
+        const rightTime = right.metadata?.creationTimestamp?.getTime() || 0;
+        return rightTime - leftTime;
+      })[0];
+    const currentReplicaSetName = currentReplicaSet?.metadata?.name;
 
     const targetImages = new Map(
       (deployment.spec?.template?.spec?.containers || []).map((container) => [
@@ -407,6 +429,13 @@ export class KubernetesService {
       ]),
     );
     const rolloutPods = podList.items.filter((pod) => {
+      if (currentReplicaSetName) {
+        const owner = pod.metadata?.ownerReferences?.find((item) => item.kind === 'ReplicaSet');
+        if (owner?.name !== currentReplicaSetName) return false;
+      }
+      // A terminating old Pod can still be returned by the API briefly. It is
+      // not part of the new rollout and its SIGTERM commonly exits as 143.
+      if (pod.metadata?.deletionTimestamp) return false;
       const containers = pod.spec?.containers || [];
       return containers.length === targetImages.size && containers.every(
         (container) => targetImages.get(container.name) === (container.image || ''),

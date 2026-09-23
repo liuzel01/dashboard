@@ -372,12 +372,12 @@ const DeploymentListPage: React.FC = () => {
         console.log(`[Restart] User confirmed. Restarting ${deploymentName}...`);
         setRestarting(deploymentName);
         try {
-          await restartDeployment(deploymentName);
+          const result = await restartDeployment(deploymentName);
           message.loading({
             content: `应用 "${deploymentName}" 已发送重启指令，正在后台跟踪重启进度...`,
             duration: 2,
           });
-          void trackRolloutProgress(deploymentName, '重启');
+          void trackRolloutProgress(deploymentName, '重启', result.targetGeneration);
         } catch (error: any) {
           console.error('[Restart] Caught an error:', error);
           const errorMessage = error.response?.data?.message || error.message;

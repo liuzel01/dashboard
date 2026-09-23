@@ -46,7 +46,7 @@ export const getDeployments = async (params: { name?: string } = {}) => {
  * 重启一个应用
  * @param name - 需要重启的应用名称
  */
-export const restartDeployment = async (name: string) => {
+export const restartDeployment = async (name: string): Promise<{ targetGeneration?: number | null }> => {
   if (!_environmentId) {
     throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   }
