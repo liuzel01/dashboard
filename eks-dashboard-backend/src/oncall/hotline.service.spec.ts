@@ -3,12 +3,26 @@ import axios from 'axios';
 
 describe('HotlineService', () => {
   const previous = process.env.HOTLINE_ENABLED;
-  afterEach(() => { if (previous === undefined) delete process.env.HOTLINE_ENABLED; else process.env.HOTLINE_ENABLED = previous; });
+  const previousSupport = process.env.HOTLINE_URGENT_PHONE_SUPPORTED;
+  afterEach(() => {
+    if (previous === undefined) delete process.env.HOTLINE_ENABLED; else process.env.HOTLINE_ENABLED = previous;
+    if (previousSupport === undefined) delete process.env.HOTLINE_URGENT_PHONE_SUPPORTED; else process.env.HOTLINE_URGENT_PHONE_SUPPORTED = previousSupport;
+  });
 
   it('is fail-closed when outbound hotline is not explicitly enabled', async () => {
+    process.env.HOTLINE_URGENT_PHONE_SUPPORTED = 'true';
     process.env.HOTLINE_ENABLED = 'false';
     await expect(new HotlineService().requestUrgentPhone('message-id', ['ou_test']))
       .resolves.toEqual({ status: 'SKIPPED', detail: 'HOTLINE_ENABLED is not true' });
+  });
+
+  it('records the documented Lark capability limitation without calling its API', async () => {
+    process.env.HOTLINE_URGENT_PHONE_SUPPORTED = 'false';
+    const post = jest.spyOn(axios, 'post');
+    await expect(new HotlineService().requestUrgentPhone('message-id', ['ou_test']))
+      .resolves.toEqual({ status: 'UNSUPPORTED', detail: 'Lark tenant does not support application urgent-phone oncall' });
+    expect(post).not.toHaveBeenCalled();
+    post.mockRestore();
   });
 
   it('uses the Hotline App open_id when resolving an email', async () => {
@@ -23,6 +37,7 @@ describe('HotlineService', () => {
   });
 
   it('accepts a successful empty response from the urgent-phone endpoint', async () => {
+    process.env.HOTLINE_URGENT_PHONE_SUPPORTED = 'true';
     process.env.HOTLINE_ENABLED = 'true';
     process.env.HOTLINE_LARK_APP_ID = 'app';
     process.env.HOTLINE_LARK_APP_SECRET = 'secret';

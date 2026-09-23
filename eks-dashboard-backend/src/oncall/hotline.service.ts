@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
-export type HotlineResult = { status: 'SENT' | 'SKIPPED' | 'FAILED'; detail?: string; messageId?: string };
+export type HotlineResult = { status: 'SENT' | 'SKIPPED' | 'UNSUPPORTED' | 'FAILED'; detail?: string; messageId?: string };
 
 /**
  * Lark's urgent-phone endpoint operates on a message produced by the Lark app.
@@ -12,6 +12,9 @@ export class HotlineService {
   private readonly logger = new Logger(HotlineService.name);
 
   async requestUrgentPhone(messageId: string, openIds: string[]): Promise<HotlineResult> {
+    if (process.env.HOTLINE_URGENT_PHONE_SUPPORTED !== 'true') {
+      return { status: 'UNSUPPORTED', detail: 'Lark tenant does not support application urgent-phone oncall' };
+    }
     if (process.env.HOTLINE_ENABLED !== 'true') return { status: 'SKIPPED', detail: 'HOTLINE_ENABLED is not true' };
     if (!messageId || openIds.length === 0) return { status: 'SKIPPED', detail: 'messageId and recipient open_ids are required' };
     try {

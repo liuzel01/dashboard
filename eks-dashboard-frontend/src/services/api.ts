@@ -1587,6 +1587,7 @@ export type OncallAlert = {
   events?: Array<{ id: number; event_type: string; source_status?: string | null; occurred_at: string }>;
   acknowledgements?: Array<{ id: number; actor_username?: string | null; source: string; result: string; comment?: string | null; acknowledged_at: string }>;
   notifications?: Array<{ id: number; channel: string; status: string; error_message?: string | null; sent_at?: string | null; created_at: string }>;
+  escalations?: Array<{ id: number; level: string; status: 'SENT' | 'SKIPPED' | 'UNSUPPORTED' | 'FAILED' | 'PENDING' | 'SENDING' | 'CANCELLED'; scheduled_at: string; executed_at?: string | null; attempt_count: number; error_message?: string | null; created_at: string }>;
 };
 export type OncallAlertList = { items: OncallAlert[]; total: number; page: number; pageSize: number };
 export const listOncallAlerts = async (params: { page?: number; pageSize?: number; status?: OncallAlertStatus; environmentId?: string; keyword?: string } = {}) =>

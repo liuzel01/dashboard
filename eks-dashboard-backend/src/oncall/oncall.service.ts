@@ -216,13 +216,14 @@ export class OncallService {
     const rows = await this.db.query<any[]>('SELECT * FROM oncall_alerts WHERE id = ? LIMIT 1', [id]);
     const alert = rows[0];
     if (!alert) throw new NotFoundException('Oncall alert not found');
-    const [events, acknowledgements, notifications] = await Promise.all([
+    const [events, acknowledgements, notifications, escalations] = await Promise.all([
       this.db.query<any[]>('SELECT id, event_type, source_status, source_ip, trace_id, occurred_at, created_at FROM oncall_alert_events WHERE alert_id=? ORDER BY id DESC', [id]),
       this.db.query<any[]>('SELECT id, actor_user_id, actor_username, source, result, comment, acknowledged_at, created_at FROM oncall_ack_records WHERE alert_id=? ORDER BY id DESC', [id]),
       this.db.query<any[]>('SELECT id, channel, status, idempotency_key, provider_message_id, error_message, sent_at, created_at FROM oncall_notification_records WHERE alert_id=? ORDER BY id DESC', [id]),
+      this.db.query<any[]>('SELECT id, level, status, scheduled_at, executed_at, attempt_count, error_message, created_at, updated_at FROM oncall_escalation_records WHERE alert_id=? ORDER BY id ASC', [id]),
     ]);
     await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'GET', path: `/oncall/alerts/${id}`, menuKey: MENU_PERMISSION, action: 'oncall.alerts.get', actionName: '查看 Oncall 告警详情', targetType: 'oncall_alert', targetId: String(id), status: 'success', statusCode: 200 });
-    return { ...alert, events, acknowledgements, notifications };
+    return { ...alert, events, acknowledgements, notifications, escalations };
   }
 
   async acknowledgeAlert(actor: OncallActor, id: number, comment?: string) {

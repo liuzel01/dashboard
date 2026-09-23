@@ -73,7 +73,7 @@ export class OncallEscalationService {
     } catch (error: any) { return this.finish(record.id, 'FAILED', String(error?.message || error).slice(0, 1000)); }
   }
 
-  private async finish(id: number, status: 'SENT' | 'SKIPPED' | 'FAILED', errorMessage?: string) {
+  private async finish(id: number, status: 'SENT' | 'SKIPPED' | 'UNSUPPORTED' | 'FAILED', errorMessage?: string) {
     await this.db.query(`UPDATE oncall_escalation_records SET status=?, error_message=?, executed_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP() WHERE id=?`, [status, errorMessage || null, id]);
   }
 

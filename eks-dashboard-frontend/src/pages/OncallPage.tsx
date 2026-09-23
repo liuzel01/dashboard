@@ -153,6 +153,7 @@ const OncallPage: React.FC = () => {
         <div><Text strong>事件时间线</Text><Timeline style={{ marginTop: 12 }} items={(selected.events || []).map((event) => ({ children: `${event.occurred_at}  ${event.event_type}${event.source_status ? ` (${event.source_status})` : ''}` }))} /></div>
         <div><Text strong>确认记录</Text><Timeline style={{ marginTop: 12 }} items={(selected.acknowledgements || []).map((ack) => ({ children: `${ack.acknowledged_at}  ${ack.actor_username || '-'}: ${ack.result}${ack.comment ? ` — ${ack.comment}` : ''}` }))} /></div>
         <div><Text strong>Lark 通知</Text><Timeline style={{ marginTop: 12 }} items={(selected.notifications || []).map((notification) => ({ color: notification.status === 'SENT' ? 'green' : notification.status === 'FAILED' ? 'red' : 'gray', children: `${notification.created_at}  ${notification.channel}: ${notification.status}${notification.error_message ? ` — ${notification.error_message}` : ''}` }))} /></div>
+        <div><Text strong>升级记录</Text><Timeline style={{ marginTop: 12 }} items={(selected.escalations || []).map((escalation) => ({ color: escalation.status === 'SENT' ? 'green' : escalation.status === 'UNSUPPORTED' ? 'gold' : escalation.status === 'FAILED' ? 'red' : 'gray', children: `${escalation.scheduled_at}  ${escalation.level}: ${escalation.status}${escalation.error_message ? ` — ${escalation.error_message}` : ''}` }))} /></div>
       </Space>}
     </Drawer>
   </Space>;
