@@ -276,7 +276,7 @@ export class OncallService {
     return rows;
   }
 
-  async upsertRoster(actor: OncallActor, input: { environmentId: string; level: string; email: string; displayName?: string; activeFrom?: string; activeUntil?: string; enabled?: boolean }) {
+  async upsertRoster(actor: OncallActor, input: { id?: number; environmentId: string; level: string; email: string; displayName?: string; activeFrom?: string; activeUntil?: string; enabled?: boolean }) {
     const environmentId = asText(input.environmentId, 64);
     const level = asText(input.level, 16).toUpperCase();
     const email = asText(input.email, 320).toLowerCase();
@@ -285,14 +285,22 @@ export class OncallService {
     const activeFrom = parseTime(input.activeFrom) || null;
     const activeUntil = parseTime(input.activeUntil) || null;
     const enabled = input.enabled === false ? 0 : 1;
-    await this.db.query(
-      `INSERT INTO oncall_identity_bindings (environment_id, level, email, lark_open_id, display_name, active_from, active_until, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, '', ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-       ON DUPLICATE KEY UPDATE lark_open_id='', display_name=VALUES(display_name), active_from=VALUES(active_from), active_until=VALUES(active_until), enabled=VALUES(enabled), updated_at=UTC_TIMESTAMP()`,
-      [environmentId, level, email, displayName, activeFrom, activeUntil, enabled],
-    );
+    if (input.id) {
+      const result = await this.db.query<any>(
+        `UPDATE oncall_identity_bindings SET environment_id=?, level=?, email=?, lark_open_id='', display_name=?, active_from=?, active_until=?, enabled=?, updated_at=UTC_TIMESTAMP() WHERE id=?`,
+        [environmentId, level, email, displayName, activeFrom, activeUntil, enabled, input.id],
+      );
+      if (!Number(result.affectedRows || 0)) throw new NotFoundException('Oncall roster binding not found');
+    } else {
+      await this.db.query(
+        `INSERT INTO oncall_identity_bindings (environment_id, level, email, lark_open_id, display_name, active_from, active_until, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, '', ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+         ON DUPLICATE KEY UPDATE lark_open_id='', display_name=VALUES(display_name), active_from=VALUES(active_from), active_until=VALUES(active_until), enabled=VALUES(enabled), updated_at=UTC_TIMESTAMP()`,
+        [environmentId, level, email, displayName, activeFrom, activeUntil, enabled],
+      );
+    }
     await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'POST', path: '/oncall/roster', menuKey: MENU_PERMISSION, action: 'oncall.roster.upsert', actionName: '保存 Oncall 值班配置', targetType: 'oncall_roster', requestSummary: { environmentId, level, email, displayName, enabled }, status: 'success', statusCode: 200 });
-    return { ok: true, environmentId, level, email };
+    return { ok: true, id: input.id || undefined, environmentId, level, email };
   }
 
   async deleteRoster(actor: OncallActor, id: number) {

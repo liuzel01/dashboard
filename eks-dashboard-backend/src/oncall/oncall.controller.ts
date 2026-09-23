@@ -23,6 +23,7 @@ class ListRosterDto {
 }
 
 class UpsertRosterDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) id?: number;
   @IsString() @MaxLength(64) environmentId!: string;
   @IsIn(['L1', 'L2', 'OWNER']) level!: string;
   @IsEmail() @MaxLength(320) email!: string;

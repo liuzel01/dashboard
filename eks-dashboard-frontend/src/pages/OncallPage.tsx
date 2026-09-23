@@ -32,6 +32,8 @@ const OncallPage: React.FC = () => {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterSaving, setRosterSaving] = useState(false);
   const [rosterForm] = Form.useForm();
+  const [rosterEnvironmentId, setRosterEnvironmentId] = useState<string | undefined>(currentEnvironment?.id);
+  const [editingRosterId, setEditingRosterId] = useState<number | undefined>();
 
   const load = async () => {
     setLoading(true);
@@ -56,11 +58,17 @@ const OncallPage: React.FC = () => {
   };
   useEffect(() => { void loadRoster(); }, [environmentId]);
 
+  const editRoster = (row: OncallRosterBinding) => {
+    setEditingRosterId(row.id);
+    setRosterEnvironmentId(row.environment_id);
+    rosterForm.setFieldsValue({ level: row.level, email: row.email, displayName: row.display_name || undefined });
+  };
+
   const saveRoster = async (values: { level: OncallRosterLevel; email: string; displayName?: string }) => {
     setRosterSaving(true);
     try {
-      await saveOncallRoster({ environmentId: environmentId || currentEnvironment?.id || 'mgbx', ...values });
-      message.success('值班配置已保存'); rosterForm.resetFields(); await loadRoster();
+      await saveOncallRoster({ id: editingRosterId, environmentId: rosterEnvironmentId || currentEnvironment?.id || 'mgbx', ...values });
+      message.success(editingRosterId ? '值班配置已更新' : '值班配置已保存'); rosterForm.resetFields(); setEditingRosterId(undefined); await loadRoster();
     } catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置保存失败'); }
     finally { setRosterSaving(false); }
   };
@@ -69,6 +77,8 @@ const OncallPage: React.FC = () => {
     try { await deleteOncallRoster(id); message.success('值班配置已删除'); await loadRoster(); }
     catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置删除失败'); }
   };
+
+  const cancelRosterEdit = () => { setEditingRosterId(undefined); rosterForm.resetFields(); };
 
   const openDetail = async (alert: OncallAlert) => {
     setSelected(alert);
@@ -115,17 +125,19 @@ const OncallPage: React.FC = () => {
       message="Oncall 告警"
       description="仅接收经 Alertmanager 专用 Webhook 认证的告警。普通告警现有链路不受影响；Lark 和 Hotline 的实际发送状态可在详情中核对。"
     />
-    <Card title={`值班升级配置${environmentId ? `（${environmentId}）` : ''}`} size="small" extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRoster()} loading={rosterLoading}>刷新</Button>}>
+    <Card title="值班升级配置" size="small" extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRoster()} loading={rosterLoading}>刷新</Button>}>
       <Form form={rosterForm} layout="inline" onFinish={saveRoster} style={{ marginBottom: 12 }}>
+        <Select value={rosterEnvironmentId} onChange={setRosterEnvironmentId} placeholder="配置环境" style={{ width: 220 }} options={environments.map((env) => ({ value: env.id, label: `${env.name} (${env.id})` }))} />
         <Form.Item name="level" rules={[{ required: true, message: '请选择级别' }]}><Select placeholder="升级级别" style={{ width: 130 }} options={[{ value: 'L1', label: 'L1' }, { value: 'L2', label: 'L2' }, { value: 'OWNER', label: '负责人' }]} /></Form.Item>
         <Form.Item name="email" rules={[{ required: true, type: 'email', message: '请输入邮箱' }]}><Input placeholder="值班邮箱" style={{ width: 260 }} /></Form.Item>
         <Form.Item name="displayName"><Input placeholder="显示名称（可选）" style={{ width: 180 }} /></Form.Item>
-        <Button type="primary" htmlType="submit" loading={rosterSaving}>添加 / 保存</Button>
+        <Button type="primary" htmlType="submit" loading={rosterSaving}>{editingRosterId ? '保存修改' : '添加配置'}</Button>
+        {editingRosterId && <Button onClick={cancelRosterEdit}>取消编辑</Button>}
       </Form>
       <Table size="small" rowKey="id" loading={rosterLoading} pagination={false} dataSource={roster} columns={[
-        { title: '级别', dataIndex: 'level', width: 100 }, { title: '邮箱', dataIndex: 'email' }, { title: '名称', dataIndex: 'display_name', render: (value: string | null) => value || '-' },
+        { title: '环境', dataIndex: 'environment_id', width: 160 }, { title: '级别', dataIndex: 'level', width: 100 }, { title: '邮箱', dataIndex: 'email' }, { title: '名称', dataIndex: 'display_name', render: (value: string | null) => value || '-' },
         { title: '状态', dataIndex: 'enabled', width: 90, render: (value: number) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-        { title: '操作', width: 90, render: (_: unknown, row: OncallRosterBinding) => <Popconfirm title="确认删除这条值班配置？" onConfirm={() => void removeRoster(row.id)}><Button danger type="link">删除</Button></Popconfirm> },
+        { title: '操作', width: 150, render: (_: unknown, row: OncallRosterBinding) => <Space size={0}><Button type="link" onClick={() => editRoster(row)}>编辑</Button><Popconfirm title="确认删除这条值班配置？" onConfirm={() => void removeRoster(row.id)}><Button danger type="link">删除</Button></Popconfirm></Space> },
       ]} />
     </Card>
     <Space wrap>
