@@ -43,7 +43,13 @@ export class SiteConfService implements OnModuleInit {
   constructor(private readonly db: CentralDatabaseService) {}
 
   async onModuleInit() {
-    await this.ensureTableAndDefaults().catch((e) => {
+    // Site-conf initialization contains DDL and seed writes. A metadata lock
+    // held by another dashboard/monitoring transaction must not prevent Nest
+    // from opening its HTTP listener (which would make every endpoint appear
+    // unavailable after a restart). Keep the existing fallback behavior, but
+    // let the application start while initialization completes in the
+    // background.
+    void this.ensureTableAndDefaults().catch((e) => {
       this.available = false;
       this.logger.warn(`dashboard_site_conf init failed: ${e?.message || e}. Falling back to env/defaults.`);
     });
