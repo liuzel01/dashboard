@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import axios from 'axios';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { HotlineService } from './hotline.service';
+import { OncallConfigService } from './oncall-config.service';
 
 type NotificationRow = Record<string, any>;
 
@@ -11,7 +12,11 @@ export class OncallNotificationService {
   private readonly logger = new Logger(OncallNotificationService.name);
   private running = false;
 
-  constructor(private readonly db: PlatformDatabaseService, private readonly hotline: HotlineService) {}
+  constructor(
+    private readonly db: PlatformDatabaseService,
+    private readonly hotline: HotlineService,
+    private readonly config: OncallConfigService,
+  ) {}
 
   async enqueueFiringAlert(alertId: number, firedAt: string) {
     const idempotencyKey = `lark:oncall-alert:${alertId}:firing:${firedAt}`;
@@ -58,7 +63,7 @@ export class OncallNotificationService {
       return;
     }
     try {
-      const webhookUrl = String(process.env.ONCALL_LARK_WEBHOOK_URL || '').trim();
+      const webhookUrl = (await this.config.getLarkWebhookUrl()).trim();
       if (!webhookUrl) {
         await this.finish(notification.id, result.status === 'SKIPPED' ? 'SKIPPED' : 'FAILED', result.detail || 'Hotline App group message failed');
         return;

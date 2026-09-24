@@ -12,6 +12,7 @@ import { PlatformDatabaseService } from '../access-control/platform-database.ser
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { OncallNotificationService } from './oncall-notification.service';
+import { OncallConfigService } from './oncall-config.service';
 import type { AlertmanagerAlert, AlertmanagerPayload, OncallActor } from './oncall.types';
 
 const MENU_PERMISSION = 'menu:oncall';
@@ -40,6 +41,7 @@ export class OncallService {
     private readonly db: PlatformDatabaseService,
     private readonly audit: AuditService,
     private readonly notifications: OncallNotificationService,
+    private readonly config: OncallConfigService,
   ) {}
 
   async resolveActor(authorization?: string): Promise<OncallActor> {
@@ -63,10 +65,10 @@ export class OncallService {
     };
   }
 
-  assertWebhookAuthorization(authorization?: string) {
-    const expected = String(process.env.ONCALL_ALERTMANAGER_BEARER_TOKEN || '').trim();
+  async assertWebhookAuthorization(authorization?: string) {
+    const expected = (await this.config.getAlertmanagerBearerToken()).trim();
     if (!expected) {
-      if (process.env.ONCALL_ALLOW_INSECURE_WEBHOOK === 'true') return;
+      if (await this.config.getAllowInsecureWebhook()) return;
       throw new UnauthorizedException('Oncall webhook authentication is not configured');
     }
     const received = String(authorization || '');
@@ -97,8 +99,9 @@ export class OncallService {
     return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
   }
 
-  private environmentId(labels: Record<string, unknown>) {
-    return asText(labels.environment || labels.env || process.env.ONCALL_DEFAULT_ENVIRONMENT || 'mgbx', 64);
+  private async environmentId(labels: Record<string, unknown>) {
+    const fallback = await this.config.getDefaultEnvironment();
+    return asText(labels.environment || labels.env || fallback || 'mgbx', 64);
   }
 
   private normalizePayload(payload: AlertmanagerPayload) {
@@ -135,7 +138,7 @@ export class OncallService {
     const annotations = this.annotationsFor(alert, payload);
     const fingerprint = this.fingerprint(alert, labels);
     const status = asText(alert.status || payload.status, 32).toLowerCase() === 'resolved' ? 'RESOLVED' : 'FIRING';
-    const environmentId = this.environmentId(labels);
+    const environmentId = await this.environmentId(labels);
     const alertName = asText(labels.alertname || 'UnknownAlert', 255) || 'UnknownAlert';
     const namespace = asText(labels.namespace, 255) || null;
     const severity = asText(labels.severity, 64) || null;

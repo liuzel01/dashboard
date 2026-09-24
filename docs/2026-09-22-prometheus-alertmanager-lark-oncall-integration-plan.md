@@ -83,14 +83,9 @@ Phase 1 的临时测试分流可以先匹配现有 `severity="critical"`，并�
 
 ### 3.2 Worker 运行方式
 
-首期继续保持现有 `backend + frontend` 两个 Node/PM2 进程，不额外启动一个后端服务。Oncall Webhook、状态机和定时升级作为 Dashboard backend 中的独立 Nest module/provider 运行，并由配置开关控制：
+首期继续保持现有 `backend + frontend` 两个 Node/PM2 进程，不额外启动一个后端服务。Oncall Webhook、状态机和定时升级作为 Dashboard backend 中的独立 Nest module/provider 运行。当前实现通过 `OncallConfigService` 读取 `siteconf` 的 `oncall.*` 配置；旧的 `ONCALL_*` / `HOTLINE_*` 环境变量仅作为兼容回退。首期默认关闭自动升级：`oncall.escalation.enabled=false`，L1/L2/负责人超时默认分别为 10/5/5 分钟。
 
-```text
-ONCALL_ENABLED=true
-ONCALL_SCHEDULER_ENABLED=true
-```
-
-这样可以减少部署组件，但必须满足以下条件：
+必须满足以下条件：
 
 - 所有升级动作使用 MySQL 唯一键、事务租约或等价分布式锁，保证重复 Webhook、backend 重启和未来多副本不会重复通知/拨号；
 - 定时任务不能依赖单进程内存状态，待处理事件和下一次执行时间必须持久化；

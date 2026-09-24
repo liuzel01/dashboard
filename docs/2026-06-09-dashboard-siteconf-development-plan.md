@@ -349,7 +349,11 @@ await this.siteConf.getJson('line.provider.rules_json', [])
 - 敏感值不要记录明文。
 - 可以记录 hash / 长度 / 是否变化。
 
-### 5.4 密钥配置迁移 —— 未完成，需单独设计
+### 5.4 密钥配置迁移 —— Oncall 已完成，其余模块仍需单独设计
+
+Oncall 配置已作为首个完整迁移的例外模块落地：`oncall.*` 由 `OncallConfigService` 统一读取，`dashboard_site_conf` 优先，旧的 `ONCALL_*` / `HOTLINE_*` 环境变量仅作为兼容回退。敏感字段在 siteconf 中标记为敏感配置，不能写入 GitHub Actions 环境配置或提交到仓库。
+
+已迁移的 Oncall 配置包括：Alertmanager Bearer Token、Lark Custom Bot Webhook、Hotline App ID/Secret、应急群 chat_id、默认环境、Webhook 安全开关、Hotline 开关、自动升级开关及 L1/L2/负责人超时。
 
 可迁但需要加安全设计的 key：
 

@@ -49,7 +49,7 @@ export class OncallController {
     @Headers() headers: Record<string, unknown>,
     @Body() body: AlertmanagerPayload,
   ) {
-    this.service.assertWebhookAuthorization(authorization);
+    await this.service.assertWebhookAuthorization(authorization);
     const forwarded = headers['x-forwarded-for'];
     const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : null;
     return this.service.receiveAlertmanagerWebhook(body, {

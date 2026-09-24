@@ -23,7 +23,9 @@ describe('OncallNotificationService', () => {
     };
     const hotline = { sendGroupMessage: jest.fn().mockResolvedValue({ status: 'SKIPPED', detail: 'ONCALL_LARK_CHAT_ID is not configured' }) };
     jest.spyOn(axios, 'post').mockResolvedValue({ status: 200, data: { code: 0 } } as any);
-    const service = new OncallNotificationService(db as any, hotline as any);
+    const service = new OncallNotificationService(db as any, hotline as any, {
+      getLarkWebhookUrl: jest.fn(async () => process.env.ONCALL_LARK_WEBHOOK_URL || ''),
+    } as any);
 
     await (service as any).dispatchOne({
       id: 1,

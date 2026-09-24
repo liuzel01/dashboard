@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { OncallConfigService } from './oncall-config.service';
 
 export type HotlineResult = { status: 'SENT' | 'SKIPPED' | 'UNSUPPORTED' | 'FAILED'; detail?: string; messageId?: string };
 
@@ -11,11 +12,13 @@ export type HotlineResult = { status: 'SENT' | 'SKIPPED' | 'UNSUPPORTED' | 'FAIL
 export class HotlineService {
   private readonly logger = new Logger(HotlineService.name);
 
+  constructor(private readonly config: OncallConfigService) {}
+
   async requestUrgentPhone(messageId: string, openIds: string[]): Promise<HotlineResult> {
-    if (process.env.HOTLINE_URGENT_PHONE_SUPPORTED !== 'true') {
+    if (!(await this.config.getUrgentPhoneSupported())) {
       return { status: 'UNSUPPORTED', detail: 'Lark tenant does not support application urgent-phone oncall' };
     }
-    if (process.env.HOTLINE_ENABLED !== 'true') return { status: 'SKIPPED', detail: 'HOTLINE_ENABLED is not true' };
+    if (!(await this.config.getHotlineEnabled())) return { status: 'SKIPPED', detail: 'HOTLINE_ENABLED is not true' };
     if (!messageId || openIds.length === 0) return { status: 'SKIPPED', detail: 'messageId and recipient open_ids are required' };
     try {
       const token = await this.tenantToken();
@@ -35,8 +38,8 @@ export class HotlineService {
   }
 
   private async tenantToken(): Promise<string> {
-    const appId = String(process.env.HOTLINE_LARK_APP_ID || '').trim();
-    const appSecret = String(process.env.HOTLINE_LARK_APP_SECRET || '').trim();
+    const appId = (await this.config.getHotlineAppId()).trim();
+    const appSecret = (await this.config.getHotlineAppSecret()).trim();
     if (!appId || !appSecret) throw new Error('Hotline credentials are not configured');
     const response = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', { app_id: appId, app_secret: appSecret }, { timeout: 10_000 });
     const token = String(response.data?.tenant_access_token || '');
@@ -57,7 +60,7 @@ export class HotlineService {
   }
 
   async sendGroupMessage(text: string): Promise<HotlineResult> {
-    const chatId = String(process.env.ONCALL_LARK_CHAT_ID || '').trim();
+    const chatId = (await this.config.getLarkChatId()).trim();
     if (!chatId) return { status: 'SKIPPED', detail: 'ONCALL_LARK_CHAT_ID is not configured' };
     try {
       const token = await this.tenantToken();

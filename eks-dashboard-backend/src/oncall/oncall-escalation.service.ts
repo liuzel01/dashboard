@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { HotlineService } from './hotline.service';
+import { OncallConfigService } from './oncall-config.service';
 
 type AlertRow = { id: number; first_fired_at: string; environment_id: string; status: string };
 type EscalationRow = { id: number; alert_id: number; level: string; status: string };
@@ -12,19 +13,28 @@ type EscalationLevel = typeof LEVELS[number];
 @Injectable()
 export class OncallEscalationService {
   private running = false;
-  constructor(private readonly db: PlatformDatabaseService, private readonly hotline: HotlineService) {}
+  constructor(
+    private readonly db: PlatformDatabaseService,
+    private readonly hotline: HotlineService,
+    private readonly config: OncallConfigService,
+  ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async run() {
-    if (this.running || process.env.ONCALL_ESCALATION_ENABLED !== 'true') return;
+    if (this.running || !(await this.config.getEscalationEnabled())) return;
     this.running = true;
     try { await this.createDueRecords(); await this.dispatchDueRecords(); } finally { this.running = false; }
   }
 
   private async createDueRecords() {
-    const l1 = this.positiveInt(process.env.ONCALL_L1_ACK_TIMEOUT_MINUTES, 10);
-    const l2 = this.positiveInt(process.env.ONCALL_L2_ACK_TIMEOUT_MINUTES, 5);
-    const owner = this.positiveInt(process.env.ONCALL_OWNER_ACK_TIMEOUT_MINUTES, 5);
+    const [l1Raw, l2Raw, ownerRaw] = await Promise.all([
+      this.config.getL1AckTimeoutMinutes(),
+      this.config.getL2AckTimeoutMinutes(),
+      this.config.getOwnerAckTimeoutMinutes(),
+    ]);
+    const l1 = this.positiveInt(l1Raw, 10);
+    const l2 = this.positiveInt(l2Raw, 5);
+    const owner = this.positiveInt(ownerRaw, 5);
     const alerts = await this.db.query<AlertRow[]>(`SELECT id, first_fired_at, environment_id, status FROM oncall_alerts WHERE status='FIRING' ORDER BY first_fired_at ASC LIMIT 100`);
     for (const alert of alerts) {
       const times: Record<EscalationLevel, number> = { L1: l1, L2: l1 + l2, OWNER: l1 + l2 + owner };
@@ -77,7 +87,7 @@ export class OncallEscalationService {
     await this.db.query(`UPDATE oncall_escalation_records SET status=?, error_message=?, executed_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP() WHERE id=?`, [status, errorMessage || null, id]);
   }
 
-  private positiveInt(value: string | undefined, fallback: number) {
+  private positiveInt(value: string | number | undefined, fallback: number) {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed > 0 && parsed <= 1440 ? parsed : fallback;
   }

@@ -25,8 +25,13 @@ const makeService = (existing: any = null) => {
     query: jest.fn(),
   };
   const notifications = { enqueueFiringAlert: jest.fn() };
-  const service = new OncallService({} as any, {} as any, db as any, { record: jest.fn() } as any, notifications as any);
-  return { service, db, execute, notifications };
+  const config = {
+    getAlertmanagerBearerToken: jest.fn(async () => process.env.ONCALL_ALERTMANAGER_BEARER_TOKEN || ''),
+    getAllowInsecureWebhook: jest.fn(async () => process.env.ONCALL_ALLOW_INSECURE_WEBHOOK === 'true'),
+    getDefaultEnvironment: jest.fn(async () => process.env.ONCALL_DEFAULT_ENVIRONMENT || 'mgbx'),
+  };
+  const service = new OncallService({} as any, {} as any, db as any, { record: jest.fn() } as any, notifications as any, config as any);
+  return { service, db, execute, notifications, config };
 };
 
 describe('OncallService Alertmanager webhook', () => {
@@ -38,18 +43,18 @@ describe('OncallService Alertmanager webhook', () => {
     process.env.ONCALL_ALLOW_INSECURE_WEBHOOK = previousInsecure;
   });
 
-  it('fails closed when a webhook token is not configured', () => {
+  it('fails closed when a webhook token is not configured', async () => {
     delete process.env.ONCALL_ALERTMANAGER_BEARER_TOKEN;
     delete process.env.ONCALL_ALLOW_INSECURE_WEBHOOK;
     const { service } = makeService();
-    expect(() => service.assertWebhookAuthorization('Bearer anything')).toThrow(UnauthorizedException);
+    await expect(service.assertWebhookAuthorization('Bearer anything')).rejects.toThrow(UnauthorizedException);
   });
 
-  it('accepts only the configured Bearer token', () => {
+  it('accepts only the configured Bearer token', async () => {
     process.env.ONCALL_ALERTMANAGER_BEARER_TOKEN = 'test-token';
     const { service } = makeService();
-    expect(() => service.assertWebhookAuthorization('Bearer test-token')).not.toThrow();
-    expect(() => service.assertWebhookAuthorization('Bearer wrong-token')).toThrow(UnauthorizedException);
+    await expect(service.assertWebhookAuthorization('Bearer test-token')).resolves.toBeUndefined();
+    await expect(service.assertWebhookAuthorization('Bearer wrong-token')).rejects.toThrow(UnauthorizedException);
   });
 
   it('creates one firing alert and records a firing event', async () => {
@@ -86,7 +91,9 @@ describe('OncallService Alertmanager webhook', () => {
       .mockResolvedValueOnce([{ insertId: 1 }, []]);
     const audit = { record: jest.fn() };
     const db = { withTransaction: jest.fn(async (callback: any) => callback({ execute })), query: jest.fn() };
-    const service = new OncallService({} as any, {} as any, db as any, audit as any, { enqueueFiringAlert: jest.fn() } as any);
+    const service = new OncallService({} as any, {} as any, db as any, audit as any, { enqueueFiringAlert: jest.fn() } as any, {
+      getDefaultEnvironment: jest.fn(async () => 'mgbx'),
+    } as any);
     const result = await service.acknowledgeAlert({ userId: 1, username: 'operator', displayName: 'Operator', permissions: ['menu:oncall'] }, 8, 'investigating');
     expect(result).toEqual({ acknowledged: true, status: 'ACKED', result: 'ACKED' });
     expect(execute.mock.calls[1][0]).toContain("status='ACKED'");
