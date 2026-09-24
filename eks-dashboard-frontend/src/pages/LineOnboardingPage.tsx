@@ -149,6 +149,15 @@ type Route53CnameResult = {
   message: string;
 };
 
+type IngressHostConflict = {
+  namespace: string;
+  name: string;
+  hosts: string[];
+  ingressClassName: string | null;
+  paths: string[];
+  overlappingPaths: string[];
+};
+
 type CasCertificateOption = {
   certificateId: number;
   certName: string;
@@ -313,6 +322,8 @@ const LineOnboardingPage: React.FC = () => {
     sourceIngressName: string;
     tlsSecretNames?: string[];
     yaml?: string;
+    hostConflicts?: IngressHostConflict[];
+    routeConflicts?: IngressHostConflict[];
   } | null>(null);
   const [ingressYamlInput, setIngressYamlInput] = useState('');
   const [superAdminRegistered, setSuperAdminRegistered] = useState(false);
@@ -1260,6 +1271,8 @@ const LineOnboardingPage: React.FC = () => {
           sourceIngressName: string;
           tlsSecretNames?: string[];
           yaml?: string;
+          hostConflicts?: IngressHostConflict[];
+          routeConflicts?: IngressHostConflict[];
         };
       };
 
@@ -1314,6 +1327,7 @@ const LineOnboardingPage: React.FC = () => {
           namespace: string;
           host: string;
           warnings?: Array<{ annotation: string; message: string }>;
+          hostConflicts?: IngressHostConflict[];
         };
       };
 
@@ -1322,8 +1336,9 @@ const LineOnboardingPage: React.FC = () => {
       }
 
       const warnings = preflight.data.warnings || [];
+      const hostConflicts = preflight.data.hostConflicts || [];
       Modal.confirm({
-        title: warnings.length > 0 ? '检测到高风险 Ingress 配置' : '确认创建 Ingress',
+        title: warnings.length > 0 || hostConflicts.length > 0 ? '检测到 Ingress 配置风险' : '确认创建 Ingress',
         width: 680,
         content: (
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -1335,6 +1350,18 @@ const LineOnboardingPage: React.FC = () => {
                 message="以下配置可能改变流量、认证或 Nginx 行为"
                 description={warnings.map((warning) => (
                   <div key={warning.annotation}><Text code>{warning.annotation}</Text>：{warning.message}</div>
+                ))}
+              />
+            ) : null}
+            {hostConflicts.length > 0 ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="目标 Host 已存在其他 Ingress"
+                description={hostConflicts.map((conflict) => (
+                  <div key={`${conflict.namespace}/${conflict.name}`}>
+                    <Text code>{conflict.namespace}/{conflict.name}</Text> · 路径：{conflict.paths.join(', ') || '默认路由'}
+                  </div>
                 ))}
               />
             ) : null}
@@ -1771,6 +1798,18 @@ const LineOnboardingPage: React.FC = () => {
                 <Space direction="vertical" size={2} style={{ width: '100%' }}>
                   <Text>模板来源：<Text code>{ingressPreviewResult.namespace}/{ingressPreviewResult.sourceIngressName}</Text></Text>
                   <Text type="secondary">以下 YAML 是唯一创建来源；可直接修改或补充 Ingress 配置。</Text>
+                  {ingressPreviewResult.hostConflicts?.length ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={ingressPreviewResult.routeConflicts?.length ? '目标 Host 存在可能的路由重叠，确认创建前会再次校验' : '目标 Host 已存在其他 Ingress，当前仅作为提示'}
+                      description={ingressPreviewResult.hostConflicts.map((conflict) => (
+                        <div key={`${conflict.namespace}/${conflict.name}`}>
+                          <Text code>{conflict.namespace}/{conflict.name}</Text> · 路径：{conflict.paths.join(', ') || '默认路由'}
+                        </div>
+                      ))}
+                    />
+                  ) : null}
                   <Input.TextArea
                     aria-label="Ingress YAML 编辑器"
                     value={ingressYamlInput}

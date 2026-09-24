@@ -281,15 +281,6 @@ export class AgentIngressService {
       throw new NotFoundException(`source ingress not found: ${namespace}/${sourceIngressName}`);
     }
 
-    const hostConflict = await this.findIngressByHost(newHost);
-    if (hostConflict) {
-      throw new ConflictException({
-        message: `host already exists: ${newHost}`,
-        conflictType: 'host',
-        conflictIngress: hostConflict,
-      });
-    }
-
     const newIngressName = requestedIngressName || `${sourceIngressName}-${this.formatTimestamp(new Date())}`;
     const nameConflict = await this.getIngress(namespace, newIngressName);
     if (nameConflict) {
@@ -305,13 +296,21 @@ export class AgentIngressService {
       tlsSecretMode,
       tlsSecretName: requestedTlsSecretName || undefined,
     });
+    const conflictReport = await this.findIngressConflicts(cloned);
+    if (input.confirmed && conflictReport.routeConflicts.length > 0) {
+      throw this.routeConflictException(conflictReport.routeConflicts);
+    }
     const preview = this.buildIngressPreview({ namespace, sourceIngressName, newIngressName, newHost, cloned });
 
     if (!input.confirmed) {
       return {
         success: true,
         preview: true,
-        data: preview,
+        data: {
+          ...preview,
+          hostConflicts: conflictReport.hostConflicts,
+          routeConflicts: conflictReport.routeConflicts,
+        },
       };
     }
 
@@ -344,6 +343,10 @@ export class AgentIngressService {
     const namespace = String(manifest.metadata?.namespace || '').trim();
     const name = String(manifest.metadata?.name || '').trim();
     const warnings = this.getManifestWarnings(manifest);
+    const conflictReport = await this.findIngressConflicts(manifest);
+    if (conflictReport.routeConflicts.length > 0) {
+      throw this.routeConflictException(conflictReport.routeConflicts);
+    }
 
     this.logger.log(
       `[AgentIngressManifest] ${input.confirmed ? 'create' : 'dry-run'} env=${input.environmentId || 'none'} requestId=${input.requestId || 'none'} userId=${input.userId || 'none'} username=${input.username || 'none'} source=${input.sourceIngressName || 'none'} target=${namespace}/${name}`,
@@ -356,6 +359,7 @@ export class AgentIngressService {
       namespace,
       host,
       warnings,
+      hostConflicts: conflictReport.hostConflicts,
       dryRun: true,
       yaml: this.toYaml(manifest),
       dryRunCreationTimestamp: dryRunResult?.metadata?.creationTimestamp || null,
@@ -442,22 +446,114 @@ export class AgentIngressService {
     }
   }
 
-  private async findIngressByHost(host: string) {
+  private async findIngressConflicts(manifest: any) {
     const { body } = await this.networkingV1Api.listIngressForAllNamespaces();
     const items = Array.isArray(body?.items) ? body.items : [];
-    const target = host.trim().toLowerCase();
+    const targetRules = Array.isArray(manifest?.spec?.rules) ? manifest.spec.rules : [];
+    const targetClass = this.ingressClass(manifest);
+    const hostConflicts: Array<{
+      namespace: string;
+      name: string;
+      hosts: string[];
+      ingressClassName: string | null;
+      paths: string[];
+      overlappingPaths: string[];
+    }> = [];
+    const routeConflicts: typeof hostConflicts = [];
+
     for (const item of items) {
       const rules = Array.isArray(item?.spec?.rules) ? item.spec.rules : [];
-      const matchedRule = rules.find((rule: any) => String(rule?.host || '').trim().toLowerCase() === target);
-      if (matchedRule) {
-        return {
-          namespace: String(item?.metadata?.namespace || 'default'),
-          name: String(item?.metadata?.name || ''),
-          host: target,
-        };
+      const existingClass = this.ingressClass(item);
+      const matchedRulePairs = rules.flatMap((rule: any) => targetRules
+        .filter((targetRule: any) => this.hostsOverlap(
+          String(targetRule?.host || '').trim().toLowerCase(),
+          String(rule?.host || '').trim().toLowerCase(),
+        ))
+        .map((targetRule: any) => ({ targetRule, rule })));
+      if (!matchedRulePairs.length) continue;
+
+      const matchedRules = matchedRulePairs.map(({ rule }: { rule: any }) => rule);
+      const targetPaths = matchedRulePairs.flatMap(({ targetRule }: { targetRule: any }) => this.rulePathsForHost(targetRule));
+      const existingPaths = matchedRules.flatMap((rule: any) => this.rulePathsForHost(rule));
+      const overlappingPaths = targetPaths
+        .filter((targetPath: any) => existingPaths.some((existingPath: any) => this.pathsOverlap(targetPath, existingPath)))
+        .map((path: any) => path.path)
+        .filter((path: string, index: number, values: string[]) => values.indexOf(path) === index);
+      const conflict = {
+        namespace: String(item?.metadata?.namespace || 'default'),
+        name: String(item?.metadata?.name || ''),
+        hosts: matchedRules.map((rule: any) => String(rule?.host || '').trim().toLowerCase() || '*'),
+        ingressClassName: existingClass,
+        paths: existingPaths.map((path: any) => path.path).filter((path: string, index: number, values: string[]) => values.indexOf(path) === index),
+        overlappingPaths,
+      };
+      hostConflicts.push(conflict);
+      if (this.ingressClassesMayOverlap(targetClass, existingClass) && overlappingPaths.length > 0) {
+        routeConflicts.push(conflict);
       }
     }
-    return null;
+
+    return { hostConflicts, routeConflicts };
+  }
+
+  private routeConflictException(conflicts: Array<{ namespace: string; name: string; hosts: string[]; paths: string[]; overlappingPaths: string[] }>) {
+    const details = conflicts
+      .map((conflict) => `${conflict.namespace}/${conflict.name}（路径：${conflict.overlappingPaths.join(', ') || '默认路由'}）`)
+      .join('；');
+    return new ConflictException({
+      message: `Ingress 路由冲突：目标 Host 与现有 Ingress 的路径规则重叠，请调整路径或选择其他 source。冲突资源：${details}`,
+      conflictType: 'route',
+      conflicts,
+    });
+  }
+
+  private ingressClass(ingress: any) {
+    const className = String(ingress?.spec?.ingressClassName || '').trim();
+    if (className) return className;
+    const annotation = String(ingress?.metadata?.annotations?.['kubernetes.io/ingress.class'] || '').trim();
+    return annotation || null;
+  }
+
+  private ingressClassesMayOverlap(left: string | null, right: string | null) {
+    // An omitted class may resolve to the cluster default, so treat it as
+    // potentially overlapping with an explicitly named class.
+    return !left || !right || left === right;
+  }
+
+  private hostsOverlap(left: string, right: string) {
+    if (!left || !right) return true;
+    if (left === right) return true;
+    const wildcardMatch = (pattern: string, host: string) => {
+      if (!pattern.startsWith('*.')) return false;
+      const suffix = pattern.slice(1);
+      return host.endsWith(suffix) && host.split('.').length === pattern.split('.').length;
+    };
+    return wildcardMatch(left, right) || wildcardMatch(right, left)
+      || (left.startsWith('*.') && right.startsWith('*.') && left.slice(1) === right.slice(1));
+  }
+
+  private rulePathsForHost(rule: any) {
+    const paths = Array.isArray(rule?.http?.paths) ? rule.http.paths : [];
+    if (!paths.length) return [{ path: '/', pathType: 'Prefix' }];
+    return paths.map((path: any) => ({
+      path: String(path?.path || '/').trim() || '/',
+      pathType: String(path?.pathType || 'ImplementationSpecific'),
+    }));
+  }
+
+  private pathsOverlap(left: { path: string; pathType: string }, right: { path: string; pathType: string }) {
+    const normalize = (path: string) => {
+      const value = path.trim() || '/';
+      if (value === '/') return value;
+      return value.replace(/\/+$/, '');
+    };
+    const l = normalize(left.path);
+    const r = normalize(right.path);
+    if (left.pathType === 'Exact' && right.pathType === 'Exact') return l === r;
+    const prefixMatches = (prefix: string, candidate: string) => prefix === '/' || candidate === prefix || candidate.startsWith(`${prefix}/`);
+    if (left.pathType === 'Exact') return prefixMatches(r, l);
+    if (right.pathType === 'Exact') return prefixMatches(l, r);
+    return prefixMatches(l, r) || prefixMatches(r, l);
   }
 
   private formatTimestamp(now: Date) {

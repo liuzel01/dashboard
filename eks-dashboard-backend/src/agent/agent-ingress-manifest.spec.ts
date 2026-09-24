@@ -93,3 +93,64 @@ describe('AgentIngressService TLS Secret naming', () => {
     ).toBe('my-custom-tls');
   });
 });
+
+describe('AgentIngressService Ingress route conflict helpers', () => {
+  it('treats exact hosts and matching wildcard hosts as overlapping', () => {
+    const hostsOverlap = (service as any).hostsOverlap.bind(service);
+
+    expect(hostsOverlap('bk.example.com', 'bk.example.com')).toBe(true);
+    expect(hostsOverlap('*.example.com', 'bk.example.com')).toBe(true);
+    expect(hostsOverlap('*.example.com', 'deep.bk.example.com')).toBe(false);
+    expect(hostsOverlap('bk.example.com', 'other.example.com')).toBe(false);
+  });
+
+  it('allows disjoint paths but detects overlapping prefix and exact routes', () => {
+    const pathsOverlap = (service as any).pathsOverlap.bind(service);
+
+    expect(pathsOverlap({ path: '/api', pathType: 'Prefix' }, { path: '/web', pathType: 'Prefix' })).toBe(false);
+    expect(pathsOverlap({ path: '/api', pathType: 'Prefix' }, { path: '/api/orders', pathType: 'Prefix' })).toBe(true);
+    expect(pathsOverlap({ path: '/api', pathType: 'Exact' }, { path: '/api', pathType: 'Prefix' })).toBe(true);
+    expect(pathsOverlap({ path: '/api', pathType: 'Exact' }, { path: '/api/orders', pathType: 'Prefix' })).toBe(false);
+  });
+
+  it('reports same-host ingresses without blocking disjoint routes', async () => {
+    (service as any).networkingV1Api = {
+      listIngressForAllNamespaces: jest.fn().mockResolvedValue({ body: { items: [
+        {
+          metadata: { namespace: 'default', name: 'existing-api' },
+          spec: { ingressClassName: 'nginx', rules: [{ host: 'bk.example.com', http: { paths: [{ path: '/api', pathType: 'Prefix' }] } }] },
+        },
+        {
+          metadata: { namespace: 'default', name: 'existing-web' },
+          spec: { ingressClassName: 'nginx', rules: [{ host: 'bk.example.com', http: { paths: [{ path: '/web', pathType: 'Prefix' }] } }] },
+        },
+      ] } }),
+    };
+
+    const report = await (service as any).findIngressConflicts({
+      spec: { ingressClassName: 'nginx', rules: [{ host: 'bk.example.com', http: { paths: [{ path: '/shop', pathType: 'Prefix' }] } }] },
+    });
+
+    expect(report.hostConflicts).toHaveLength(2);
+    expect(report.routeConflicts).toHaveLength(0);
+  });
+
+  it('blocks a same-host route that overlaps an existing prefix', async () => {
+    (service as any).networkingV1Api = {
+      listIngressForAllNamespaces: jest.fn().mockResolvedValue({ body: { items: [
+        {
+          metadata: { namespace: 'default', name: 'existing-api' },
+          spec: { ingressClassName: 'nginx', rules: [{ host: 'bk.example.com', http: { paths: [{ path: '/api', pathType: 'Prefix' }] } }] },
+        },
+      ] } }),
+    };
+
+    const report = await (service as any).findIngressConflicts({
+      spec: { ingressClassName: 'nginx', rules: [{ host: 'bk.example.com', http: { paths: [{ path: '/api/orders', pathType: 'Prefix' }] } }] },
+    });
+
+    expect(report.hostConflicts).toHaveLength(1);
+    expect(report.routeConflicts).toHaveLength(1);
+    expect(report.routeConflicts[0].overlappingPaths).toEqual(['/api/orders']);
+  });
+});
