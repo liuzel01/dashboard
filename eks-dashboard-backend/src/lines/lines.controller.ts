@@ -201,6 +201,7 @@ export class LinesController {
       throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
     }
     const actor = await this.assertIngressProvisioningAccess(authorization);
+    await this.authService.verifyMfaForUser(Number(actor.userId), body.otpCode);
     return this.linesService.applyTenantDomain(environmentId, {
       tenantId: body.tenantId,
       domain: body.domain,

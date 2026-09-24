@@ -1524,7 +1524,7 @@ const LineOnboardingPage: React.FC = () => {
     }
   };
 
-  const handleApplyTenantDomain = async () => {
+  const handleApplyTenantDomain = () => {
     if (!selectedTenantId) {
       message.error('请先选择目标租户');
       return;
@@ -1533,34 +1533,49 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先完成步骤2');
       return;
     }
-    setTenantDomainApplying(true);
-    setTenantDomainApplyError(null);
-    setTenantDomainApplyResult(null);
-    try {
-      const resp = (await applyTenantDomainForLineOnboarding({
-        environmentId: currentEnvironment?.id || '',
-        tenantId: selectedTenantId,
-        domain: confirmedSubdomain,
-      })) as { success?: boolean; data?: TenantDomainApplyResult };
-      if (!resp?.success || !resp?.data) {
-        throw new Error('tenant_domain 写入未返回成功结果');
-      }
-      setTenantDomainApplyResult(resp.data);
-      setSqlConfirmed(true);
-      setVerifyResult(null);
-      setVerifyError(null);
-      message.success(resp.data.action === 'created' ? 'tenant_domain 已自动写入' : 'tenant_domain 已存在，无需重复写入');
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
-      const msg = Array.isArray(backendMsg)
-        ? backendMsg.join('; ')
-        : backendMsg || error?.message || '自动写入 tenant_domain 失败';
-      setTenantDomainApplyError(msg);
-      message.error(msg);
-      return false;
-    } finally {
-      setTenantDomainApplying(false);
-    }
+    let otpCode = '';
+    Modal.confirm({
+      title: '验证 MFA 并写入 tenant_domain',
+      width: 620,
+      content: <Space direction="vertical" size={8} style={{ width: '100%' }}><Text>将为租户 <Text code>{selectedTenantId}</Text> 写入域名：</Text><Text code>{confirmedSubdomain}</Text><Text type="secondary">以下 SQL 仅供本次确认核对，实际写入使用参数化 SQL：</Text><Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { otpCode = event.target.value.replace(/\s+/g, ''); }} /></Space>,
+      okText: '验证并写入',
+      cancelText: '返回检查',
+      onOk: async () => {
+        if (!/^\d{6}$/.test(otpCode)) {
+          message.error('请输入当前有效的 6 位 Google Authenticator 验证码');
+          throw new Error('MFA_REQUIRED');
+        }
+        setTenantDomainApplying(true);
+        setTenantDomainApplyError(null);
+        setTenantDomainApplyResult(null);
+        try {
+          const resp = (await applyTenantDomainForLineOnboarding({
+            environmentId: currentEnvironment?.id || '',
+            tenantId: selectedTenantId,
+            domain: confirmedSubdomain,
+            otpCode,
+          })) as { success?: boolean; data?: TenantDomainApplyResult };
+          if (!resp?.success || !resp?.data) {
+            throw new Error('tenant_domain 写入未返回成功结果');
+          }
+          setTenantDomainApplyResult(resp.data);
+          setSqlConfirmed(true);
+          setVerifyResult(null);
+          setVerifyError(null);
+          message.success(resp.data.action === 'created' ? 'tenant_domain 已自动写入' : 'tenant_domain 已存在，无需重复写入');
+        } catch (error: any) {
+          const backendMsg = error?.response?.data?.message;
+          const msg = Array.isArray(backendMsg)
+            ? backendMsg.join('; ')
+            : backendMsg || error?.message || '自动写入 tenant_domain 失败';
+          setTenantDomainApplyError(msg);
+          message.error(msg);
+          throw error;
+        } finally {
+          setTenantDomainApplying(false);
+        }
+      },
+    });
   };
 
   const handleVerifyExternal = async () => {

@@ -653,6 +653,7 @@ export const applyTenantDomainForLineOnboarding = async (data: {
   environmentId: string;
   tenantId: number;
   domain: string;
+  otpCode: string;
 }) => {
   const response = await api.post('/lines/tenant-domain/apply', data);
   return response.data;

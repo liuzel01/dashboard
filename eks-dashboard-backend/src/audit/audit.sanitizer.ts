@@ -12,6 +12,9 @@ const SENSITIVE_KEYWORDS = [
   'private_key',
   'kubeconfig',
   'manifestyaml',
+  'otpcode',
+  'mfacode',
+  'totp',
   'cookie',
 ];
 

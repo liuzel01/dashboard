@@ -268,6 +268,20 @@ export class AuthService {
     return verifySync({ strategy: 'totp', secret, token });
   }
 
+  async verifyMfaForUser(userId: number, code?: string) {
+    const rows = await this.db.query<any[]>(
+      'SELECT mfa_enabled, mfa_secret FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    const user = rows[0];
+    if (Number(user?.mfa_enabled || 0) !== 1 || !user?.mfa_secret) {
+      throw new BadRequestException('当前账号未启用 Google Authenticator MFA');
+    }
+    if (!this.verifyMfaCode(String(user.mfa_secret), code)) {
+      throw new UnauthorizedException('Google 验证码错误');
+    }
+  }
+
   private buildFallbackUser(user: {
     id: number;
     username: string;

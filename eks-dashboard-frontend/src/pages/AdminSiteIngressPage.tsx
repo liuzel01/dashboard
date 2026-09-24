@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, App, Button, Card, Collapse, Descriptions, Input, Modal, Select, Space, Steps, Typography } from 'antd';
+import { Alert, App, Button, Card, Descriptions, Input, Modal, Select, Space, Steps, Typography } from 'antd';
 import { CheckCircleOutlined, CloudUploadOutlined, FileSearchOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { applyIngressManifestForLineOnboarding, applyTenantDomainForLineOnboarding, getIngressSourceCandidatesForLineOnboarding, getTenantsForEnvironment, previewCloneIngressForLineOnboarding } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
@@ -92,10 +92,15 @@ const AdminSiteIngressPage: React.FC = () => {
   };
   const writeTenantDomain = () => {
     if (!currentEnvironment?.id || !tenantId || !dryRun) return message.warning('请先选择租户并通过 dry-run');
-    Modal.confirm({ title: '确认写入 tenant_domain', content: <Space direction="vertical"><Text>将向当前环境的 tenant_domain 写入管理端域名：</Text><Text code>{normalizedDomain}</Text><Text type="secondary">写入使用参数化 SQL；下方 SQL 仅供核对。</Text></Space>, okText: '确认写入', cancelText: '返回检查', onOk: async () => {
+    let otpCode = '';
+    Modal.confirm({ title: '验证 MFA 并确认写入 tenant_domain', width: 620, content: <Space direction="vertical" size={8} style={{ width: '100%' }}><Text>将向当前环境的 tenant_domain 写入管理端域名：</Text><Text code>{normalizedDomain}</Text><Text type="secondary">实际写入使用参数化 SQL，以下内容仅供本次确认核对：</Text><Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{tenantDomainSql}</Paragraph><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { otpCode = event.target.value.replace(/\s+/g, ''); }} /></Space>, okText: '验证并写入', cancelText: '返回检查', onOk: async () => {
+      if (!/^\d{6}$/.test(otpCode)) {
+        message.error('请输入当前有效的 6 位 Google Authenticator 验证码');
+        throw new Error('MFA_REQUIRED');
+      }
       setWritingTenantDomain(true);
       try {
-        const response = await applyTenantDomainForLineOnboarding({ environmentId: currentEnvironment.id, tenantId, domain: normalizedDomain }) as { success?: boolean; data?: TenantDomainResult };
+        const response = await applyTenantDomainForLineOnboarding({ environmentId: currentEnvironment.id, tenantId, domain: normalizedDomain, otpCode }) as { success?: boolean; data?: TenantDomainResult };
         if (!response.success || !response.data) throw new Error('tenant_domain 写入未返回成功结果');
         setTenantDomain(response.data); message.success(response.data.action === 'created' ? 'tenant_domain 已写入' : 'tenant_domain 已存在，无需重复写入');
       } catch (error) { message.error(readableError(error, 'tenant_domain 写入失败')); throw error; } finally { setWritingTenantDomain(false); }
@@ -135,7 +140,6 @@ const AdminSiteIngressPage: React.FC = () => {
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Button icon={<SafetyCertificateOutlined />} loading={dryRunning} disabled={!preview || !manifestYaml.trim()} onClick={() => void executeDryRun()}>执行 Kubernetes dry-run</Button>
         {dryRun ? <Alert type={dryRun.warnings?.length ? 'warning' : 'success'} showIcon message={dryRun.warnings?.length ? 'dry-run 通过，但检测到高风险字段' : 'dry-run 校验通过'} description={<Space direction="vertical"><Text>目标：<Text code>{dryRun.namespace}/{dryRun.newIngressName}</Text></Text>{dryRun.warnings?.map((warning) => <Text key={warning.annotation}><Text code>{warning.annotation}</Text>：{warning.message}</Text>)}</Space>} /> : null}
-        <Collapse size="small" items={[{ key: 'sql', label: '查看 tenant_domain SQL（仅供核对）', children: <Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{tenantDomainSql}</Paragraph> }]} />
         <Space wrap><Button loading={writingTenantDomain} disabled={!dryRun || !tenantId} onClick={writeTenantDomain}>确认写入 tenant_domain</Button><Button type="primary" danger icon={<CheckCircleOutlined />} loading={creating} disabled={!tenantDomain || !dryRun} onClick={createIngress}>最终确认并创建 Ingress</Button></Space>
         {tenantDomain ? <Alert type="success" showIcon message={tenantDomain.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在'} description={`Tenant ID: ${tenantDomain.tenantId}；Domain: ${tenantDomain.domain}；记录 ID: ${tenantDomain.id || '-'}`} /> : null}
         {created ? <Alert type="success" showIcon message="管理端网站 Ingress 已创建" description={<Text><Text code>{created.namespace}/{created.newIngressName}</Text> · {created.host}</Text>} /> : null}

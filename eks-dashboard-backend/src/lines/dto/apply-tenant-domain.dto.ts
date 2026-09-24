@@ -17,4 +17,8 @@ export class ApplyTenantDomainDto {
   @IsNotEmpty()
   @Matches(DOMAIN_REGEX, { message: 'domain format is invalid' })
   domain!: string;
+
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'otpCode must be a 6-digit Google Authenticator code' })
+  otpCode!: string;
 }
