@@ -41,6 +41,20 @@ import { buildProbeDetailUrl, getProbeDetailBaseUrl } from '../utils/probeDashbo
 
 const { Text, Paragraph, Link } = Typography;
 
+function CollapsibleInfo({ itemKey, title, children }: { itemKey: string; title: string; children: React.ReactNode }) {
+  return (
+    <Collapse
+      ghost
+      size="small"
+      items={[{
+        key: itemKey,
+        label: title,
+        children: <Alert type="info" showIcon description={children} />,
+      }]}
+    />
+  );
+}
+
 type VerifyResult = {
   targetHost: string;
   exists: boolean;
@@ -1931,18 +1945,13 @@ const LineOnboardingPage: React.FC = () => {
           </Radio.Group>
 
           {certSource === 'k8s-secret' ? (
-            <Alert
-              type="info"
-              showIcon
-              message="将同步 K8s TLS Secret 到 DCDN"
-              description={
-                <Space direction="vertical" size={2}>
-                  <Text>TLS Secret：<Text code>{dcdnTlsSecretName || '(待生成)'}</Text></Text>
-                  <Text>Namespace：<Text code>default</Text></Text>
-                  <Text type="secondary">点击应用时，后端会读取该 Secret 的 tls.crt/tls.key，上传到 CAS，并绑定到当前 DCDN 域名。</Text>
-                </Space>
-              }
-            />
+            <CollapsibleInfo itemKey="dcdn-tls-secret" title="将同步 K8s TLS Secret 到 DCDN">
+              <Space direction="vertical" size={2}>
+                <Text>TLS Secret：<Text code>{dcdnTlsSecretName || '(待生成)'}</Text></Text>
+                <Text>Namespace：<Text code>default</Text></Text>
+                <Text type="secondary">点击应用时，后端会读取该 Secret 的 tls.crt/tls.key，上传到 CAS，并绑定到当前 DCDN 域名。</Text>
+              </Space>
+            </CollapsibleInfo>
           ) : null}
 
           {certSource === 'cas' ? (
@@ -2070,37 +2079,20 @@ const LineOnboardingPage: React.FC = () => {
             <Switch checked={enableCache} onChange={setEnableCache} disabled={!dcdnAutoResult?.domainName} />
             <Tag color={enableCache ? 'green' : 'default'}>{enableCache ? '默认开启' : '已关闭'}</Tag>
           </Space>
-          <Alert
-            type="info"
-            showIcon
-            message="默认缓存规则：目录 /img 缓存 1 年"
-            description={
-              <Space direction="vertical" size={2}>
-                <Text>类型：<Text code>目录</Text></Text>
-                <Text>内容：<Text code>/img</Text></Text>
-                <Text>过期时间：<Text code>1 年</Text> / <Text code>31536000 秒</Text></Text>
-                <Text>规则条件：<Text code>不使用</Text></Text>
-                <Collapse
-                  ghost
-                  size="small"
-                  items={[{
-                    key: 'dcdn-cache-detail',
-                    label: '展开查看完整缓存配置',
-                    children: (
-                      <Space direction="vertical" size={2}>
-                        <Text>有限遵循源站缓存策略：关闭</Text>
-                        <Text>忽略源站不缓存标头：关闭</Text>
-                        <Text>客户端跟随 DCDN 缓存策略：关闭</Text>
-                        <Text>强制内容重新验证：关闭（等同于缓存策略 no-store）</Text>
-                        <Text>权重：1</Text>
-                        <Text>API Function：<Text code>path_based_ttl_set</Text></Text>
-                      </Space>
-                    ),
-                  }]}
-                />
-              </Space>
-            }
-          />
+          <CollapsibleInfo itemKey="dcdn-cache-rule" title="默认缓存规则：目录 /img 缓存 1 年">
+            <Space direction="vertical" size={2}>
+              <Text>类型：<Text code>目录</Text></Text>
+              <Text>内容：<Text code>/img</Text></Text>
+              <Text>过期时间：<Text code>1 年</Text> / <Text code>31536000 秒</Text></Text>
+              <Text>规则条件：<Text code>不使用</Text></Text>
+              <Text>有限遵循源站缓存策略：关闭</Text>
+              <Text>忽略源站不缓存标头：关闭</Text>
+              <Text>客户端跟随 DCDN 缓存策略：关闭</Text>
+              <Text>强制内容重新验证：关闭（等同于缓存策略 no-store）</Text>
+              <Text>权重：1</Text>
+              <Text>API Function：<Text code>path_based_ttl_set</Text></Text>
+            </Space>
+          </CollapsibleInfo>
           <Button
             type="primary"
             loading={dcdnSecurityApplying}
@@ -2141,19 +2133,14 @@ const LineOnboardingPage: React.FC = () => {
 
           <Divider style={{ margin: '8px 0' }} />
           <Text strong>3) 同步 AWS Route53 CNAME</Text>
-          <Alert
-            type="info"
-            showIcon
-            message="将 DCDN CNAME 写入步骤1一级域名对应的 Route53 Hosted Zone"
-            description={
-              <Space direction="vertical" size={2}>
-                <Text>记录名称：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
-                <Text>记录类型：<Text code>CNAME</Text></Text>
-                <Text>记录值：<Text code>{dcdnCname || dcdnAutoResult?.cname || '(等待 DCDN 返回 CNAME)'}</Text></Text>
-                <Text>查找 Zone：<Text code>{confirmedRootDomain || '(步骤1一级域名)'}</Text></Text>
-              </Space>
-            }
-          />
+          <CollapsibleInfo itemKey="route53-cname-sync" title="将 DCDN CNAME 写入步骤1一级域名对应的 Route53 Hosted Zone">
+            <Space direction="vertical" size={2}>
+              <Text>记录名称：<Text code>{confirmedSubdomain || '(待生成)'}</Text></Text>
+              <Text>记录类型：<Text code>CNAME</Text></Text>
+              <Text>记录值：<Text code>{dcdnCname || dcdnAutoResult?.cname || '(等待 DCDN 返回 CNAME)'}</Text></Text>
+              <Text>查找 Zone：<Text code>{confirmedRootDomain || '(步骤1一级域名)'}</Text></Text>
+            </Space>
+          </CollapsibleInfo>
           <Space>
             <Button
               loading={route53Previewing}
@@ -2309,7 +2296,9 @@ const LineOnboardingPage: React.FC = () => {
             placeholder="线路英文名（en），例如：l01"
             disabled={!dcdnConfirmed}
           />
-          <Alert type="info" showIcon message="平台登记默认停用" description="新线路先以停用状态登记；步骤6 连通性验证通过后再启用。" />
+          <CollapsibleInfo itemKey="platform-registration-default" title="平台登记默认停用">
+            <Text>新线路先以停用状态登记；步骤6 连通性验证通过后再启用。</Text>
+          </CollapsibleInfo>
           <Space>
             <Text>状态（status）</Text>
             <Switch
