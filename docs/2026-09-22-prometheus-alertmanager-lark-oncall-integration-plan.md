@@ -1,6 +1,6 @@
 # Prometheus / Alertmanager / Lark Oncall 接入方案
 
-> 状态：Alertmanager 接收、状态同步、ACK、审计和页面能力已完成；Hotline 电话能力暂停，生产接入前仍需完成 Alertmanager 双路由和 Webhook 验证
+> 状态：Alertmanager 接收、状态同步、ACK、审计和页面能力已完成；`mgbx` 已配置双路由和 Bearer Secret，Hotline 电话能力暂停，真实 firing/resolved 投递仍需单独验证
 > 更新时间：2026-09-24
 > 适用范围：`dashboard`、目标 EKS 集群 `mgbx`、Prometheus、Alertmanager、Lark 技术告警群与 Hotline Bot
 
@@ -130,7 +130,7 @@ Alertmanager Pod
 - Alertmanager 使用 Secret 注入的 Bearer Token 或 mTLS，不能把 Secret 写入普通 ConfigMap；
 - NLB 只有在后续明确需要 TCP/TLS 透传、固定 IP 或源 IP 保留时再评估。
 
-ALB、安全组、证书和 DNS 已于 2026-09-22 创建：`oncaaa.pree.mg56.net` → Internal ALB，HTTPS 仅允许 `mgbx` EKS 受管工作负载安全组进入，ALB 再访问 Dashboard EC2 `:3000`。在完成健康检查和从 Alertmanager Pod 到 ALB 的连通性验证前，不切换生产 Alertmanager route。
+ALB、安全组、证书和 DNS 已于 2026-09-22 创建：`oncaaa.pree.mg56.net` → Internal ALB，HTTPS 仅允许 `mgbx` EKS 受管工作负载安全组进入，ALB 再访问 Dashboard EC2 `:3000`。Alertmanager 路由切换前后均应保留配置回滚手册，并通过实际测试告警验证从 Pod 到 ALB 的投递结果。
 
 ## 4. Hotline Bot 可行性与前置条件
 
@@ -194,10 +194,10 @@ eks-dashboard-backend/src/oncall/
 
 - [ ] 梳理 `mgbx` PrometheusRule、Alertmanager route/receiver 和现有告警链路；
 - [ ] 确认普通告警、高危告警的标签和路由规则；
-- [ ] 确认 Dashboard 能访问 Alertmanager Webhook 所需入口；
+- [x] 确认 Dashboard 能访问 Alertmanager Webhook 所需入口；
 - [ ] 验证 Hotline Bot 权限、调用方式、回执、额度和身份映射；
 - [ ] 确认应急群、技术群和机器人归属；
-- [ ] 确认 Secret 注入与网络访问策略。
+- [x] 确认 Secret 注入与网络访问策略。
 - [ ] 固定 L1 ACK 超时、L2 响应超时和负责人升级规则；不单独设计 CTO 角色；
 - [x] 确认首期采用 backend 内嵌 scheduler，独立 Worker 作为后续扩展项；
 - [ ] 确认 Oncall Redis 是否使用 MySQL 租约、独立 Redis，或同 Redis 独立 DB + prefix；
@@ -206,11 +206,13 @@ eks-dashboard-backend/src/oncall/
 - [x] 确认当前阶段使用 Internal ALB → EC2:3000，暂不使用 NLB；
 - [x] 确认 Phase 1 测试阶段可先使用 `severity="critical"` 分流，并保留现有 receiver；
 - [x] 创建 Internal ALB、Target Group、HTTPS 证书、DNS Alias 和最小安全组规则；
+- [x] 在 `mgbx/monitoring` 创建 `dashboard-oncall-alertmanager-token`（仅保存 Bearer Token），并通过 `Alertmanager/main.spec.secrets` 挂载到 Alertmanager Pod；
+- [x] 更新 `alertmanager-main-mgbx-lark`：新增 `dashboard-oncall-webhook` receiver，使用 `https://oncaaa.pree.mg56.net/api/oncall/alertmanager`、`send_resolved: true` 和 `bearer_token_file`；对 `severity=critical` 配置与现有 Lark receiver 并行的 `continue: true` route；
 - [ ] 使用 `im:message.urgent:phone` 权限完成 Hotline API 的测试调用、回执和限流确认。
 
-**验收目标：** 形成 `mgbx` 接入清单、高危告警清单、Lark 权限清单、运行模式/队列决策和链路测试方案；不修改生产配置。
+**验收目标：** 形成 `mgbx` 接入清单、高危告警清单、Lark 权限清单、运行模式/队列决策和链路测试方案；生产配置变更必须可回滚，并在真实测试告警上完成验收。
 
-**当前只读核查记录（2026-09-22）：**
+**变更前只读核查记录（2026-09-22）：**
 
 - 已通过 macmini 的 `macmini-mgbx-operator` profile 使用临时 kubeconfig 直连 `mgbx`，集群状态为 `ACTIVE`，EKS 版本为 `1.34`；未修改集群资源。
 - `monitoring/Prometheus/k8s` 与 `monitoring/Alertmanager/main` 已运行；Alertmanager 为 3 副本，Prometheus 通过 `monitoring/alertmanager-main:9093` 投递告警。
@@ -219,7 +221,14 @@ eks-dashboard-backend/src/oncall/
 - 现有 `monitoring/prometheus-alert-center` 为单副本部署，镜像为 `feiyu563/prometheus-alert:v4.9.1`，普通告警链路仍在运行。
 - 从 `monitoring/alertmanager-main-0` 只读测试访问 Dashboard EC2 `10.100.166.109` 的 3000/5173 端口均超时；EC2 安全组当前仅允许已有来源安全组访问 5173，以及 `172.32.1.15/32` 的全端口访问，未包含 EKS 节点来源。因此 Webhook 网络入口尚未具备，需单独设计并审批安全组/入口规则。
 
-上述检查未执行任何 Kubernetes `apply`、`patch`、删除、重启或 Alertmanager 配置变更。随后已创建 Internal ALB、最小安全组规则、ACM 证书及 `oncaaa.pree.mg56.net` DNS Alias，并完成 Phase 1/2 本地代码和共享数据库迁移；当前 Target Group 仍因 EC2 尚未部署 `/api/oncall/health` 返回 404。部署、Webhook Secret、Alertmanager 连通性和 Hotline API 验证完成前，不应切换生产告警路由或启用真实电话升级。
+上述记录是变更前快照。2026-09-24 已在 `mgbx` 执行以下配置：
+
+- `monitoring/dashboard-oncall-alertmanager-token` 已创建，数据键为 `token`；实际值不写入本文档、不写入普通 ConfigMap；
+- `Alertmanager/main.spec.secrets` 已挂载该 Secret，3 个 Alertmanager Pod 均确认文件已挂载且非空；
+- `monitoring/alertmanager-main-mgbx-lark` 已保留现有 `prometheus-alert-center-lark` receiver，并新增 Dashboard receiver；`severity=critical` 同时发送到两个 receiver，两个 receiver 均设置 `send_resolved: true`；
+- Alertmanager 3 副本滚动完成，`Reconciled=True`、`Available=True`，配置加载成功且包含 Bearer 文件引用；Internal ALB Target Group 中 EC2 目标为 `healthy`。
+
+当前尚未用真实 firing/resolved 告警完成一次从 Alertmanager Pod 经 Internal ALB 到 Dashboard 的端到端投递验收；变更期间集群没有活动告警，Pod 内置 BusyBox `wget` 对该 HTTPS ALB 的探测也不能作为成功投递证据。因此上线验收仍需安排一次可回收的测试告警，并分别核对 Dashboard 告警状态、事件审计和现有 Lark 通知。Hotline 电话保持关闭。
 
 ### Phase 1：Oncall 数据与接收能力
 
