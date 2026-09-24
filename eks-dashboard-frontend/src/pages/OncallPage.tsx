@@ -123,7 +123,7 @@ const OncallPage: React.FC = () => {
       type="info"
       showIcon
       message="Oncall 告警"
-      description="仅接收经 Alertmanager 专用 Webhook 认证的告警。普通告警现有链路不受影响；Lark 和 Hotline 的实际发送状态可在详情中核对。"
+      description="仅接收 Alertmanager 通过专用 Webhook 投递的告警，负责记录、通知、ACK、审计和生命周期展示。firing/resolved 以 Alertmanager 为准；resolved 由 Alertmanager 扇出，Dashboard 仅同步状态，不重复发送恢复消息。电话加急当前停用。"
     />
     <Card title="值班升级配置" size="small" extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRoster()} loading={rosterLoading}>刷新</Button>}>
       <Form form={rosterForm} layout="inline" onFinish={saveRoster} style={{ marginBottom: 12 }}>

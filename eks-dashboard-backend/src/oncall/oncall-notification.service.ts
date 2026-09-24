@@ -57,13 +57,12 @@ export class OncallNotificationService {
       await this.finish(notification.id, 'SENT', undefined, result.messageId);
       return;
     }
-    if (result.status === 'SKIPPED') {
-      await this.finish(notification.id, 'SKIPPED', result.detail);
-      return;
-    }
     try {
       const webhookUrl = String(process.env.ONCALL_LARK_WEBHOOK_URL || '').trim();
-      if (!webhookUrl) throw new Error(result.detail || 'Hotline App group message failed');
+      if (!webhookUrl) {
+        await this.finish(notification.id, result.status === 'SKIPPED' ? 'SKIPPED' : 'FAILED', result.detail || 'Hotline App group message failed');
+        return;
+      }
       const response = await axios.post(webhookUrl, {
         msg_type: 'text',
         content: { text: this.message(notification) },

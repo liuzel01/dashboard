@@ -1,12 +1,14 @@
 # Prometheus / Alertmanager / Lark Oncall 接入方案
 
-> 状态：Phase 0 基线核查中
-> 更新时间：2026-09-22
+> 状态：Alertmanager 接收、状态同步、ACK、审计和页面能力已完成；Hotline 电话能力暂停，生产接入前仍需完成 Alertmanager 双路由和 Webhook 验证
+> 更新时间：2026-09-24
 > 适用范围：`dashboard`、目标 EKS 集群 `mgbx`、Prometheus、Alertmanager、Lark 技术告警群与 Hotline Bot
 
 ## 1. 结论
 
 本方案可行，推荐将 Oncall 能力接入现有 `dashboard` 仓库，新增独立菜单和模块，不修改现有独立链路探测功能，也不替换当前普通告警 Bot。首期继续保持现有 backend + frontend 两个 Node/PM2 进程；Worker 只保留为后续可选的独立运行入口。
+
+当前菜单定版为 **Alertmanager 告警响应中心**：Dashboard 负责接收、记录、通知、ACK、审计和展示告警生命周期；Prometheus/Alertmanager 负责判断告警是否恢复。Alertmanager 应将 firing/resolved 事件同时扇出到现有 Lark receiver 和 Dashboard Webhook，Dashboard 不再针对同一 resolved 事件重复发送恢复消息。Hotline 电话接口不可用期间不启用电话升级，也不以电话能力作为菜单可用性的前置条件。
 
 最终采用：
 
@@ -32,9 +34,9 @@ Dashboard 单仓库
 ### 2.1 设计原则
 
 1. **Alertmanager 是告警事件入口和路由中心。** Dashboard 不主动轮询 Prometheus 指标来判断告警。
-2. **Prometheus 负责采集和规则计算，Alertmanager 负责分组、抑制、路由。** Oncall 服务负责状态、ACK、升级、审计和外部通知。
+2. **Prometheus 负责采集和规则计算，Alertmanager 负责分组、抑制、路由。** Oncall 服务负责状态、ACK、审计和页面展示；外部消息由 Alertmanager receiver 或明确的应急通知通道负责。
 3. **现有链路保持稳定。** 当前 `Alertmanager → prometheus-alert-center → 现有 Lark Bot` 不直接替换；普通告警可继续走原链路。
-4. **高危告警使用独立 Oncall 路由。** 高危告警发送至 Dashboard Webhook，由 Worker 触发应急群通知和升级流程。
+4. **高危告警使用独立 Oncall 路由。** 高危告警由 Alertmanager 扇出至 Dashboard Webhook 和现有 Lark receiver；Dashboard backend 负责状态、ACK、审计和必要的应急操作，独立 Worker 作为后续扩展选项。
 5. **所有升级动作幂等、可审计、可重试。** 不能因为 Worker 重启、API 多副本或重复 Webhook 重复打电话。
 6. **敏感配置只放 Secret/密钥存储。** Lark App 凭据、Webhook、电话服务凭据不得进入代码、普通 YAML、日志或页面返回值。
 7. **负责人统一承接后续升级。** 不单独建模 CTO 角色；L2 超时后的升级目标归入“负责人”范围，由值班配置决定具体人员。
@@ -53,14 +55,15 @@ flowchart LR
     P[Prometheus] --> AM[Alertmanager]
     AM -->|普通告警| OLD[prometheus-alert-center<br/>现有 Lark Custom Bot]
     OLD --> TECH[技术告警群]
-    AM -->|高危/Oncall 告警| WH[Dashboard Alertmanager Webhook]
+    AM -->|高危/Oncall firing + resolved| OLD2[现有 Lark receiver]
+    OLD2 --> TECH2[告警群]
+    AM -->|高危/Oncall firing + resolved| WH[Dashboard Alertmanager Webhook]
     WH --> DB[(MySQL)]
     WH --> Q[(Redis / Job Queue)]
     W[dashboard-backend<br/>embedded oncall scheduler] --> DB
     W --> Q
-    W --> GROUP[Lark 应急群<br/>可使用独立 Bot]
+    W --> GROUP[Lark 应急操作群<br/>仅发送必要的 ACK/升级消息]
     W --> ACK[Lark ACK 入口]
-    W --> HOTLINE[Hotline Bot<br/>电话/升级能力]
     API[dashboard-api] --> DB
     API --> UI[Oncall 告警菜单]
     UI --> ACKAPI[ACK / 手工升级 API]
@@ -72,9 +75,11 @@ flowchart LR
 | 告警类型 | 首期路径 | 说明 |
 | --- | --- | --- |
 | 普通告警 | Prometheus → Alertmanager → 现有 Alert Center → 技术告警群 | 保持现有行为，避免迁移风险 |
-| 高危告警 | Prometheus → Alertmanager → Dashboard Webhook → Worker → 应急群/ACK/升级 | 高危标签由规则或 Alertmanager 路由明确产生 |
+| 高危告警 | Prometheus → Alertmanager →（现有 Lark receiver + Dashboard Webhook）→ Dashboard 状态/ACK/审计 | Alertmanager 同时负责 firing/resolved 扇出；Dashboard 不重复发送 resolved |
 
 高危告警建议使用统一标签 `risk_level: high`，不要依赖告警文本关键词。高危规则至少应覆盖资金、充值、提现、入侵、AK 泄露、交易引擎等业务风险；具体清单在 Phase 0 确认。
+
+Phase 1 的临时测试分流可以先匹配现有 `severity="critical"`，并配置两个并行 receiver：现有 Lark receiver 与 Dashboard Webhook；两个 receiver 均设置 `send_resolved: true`。这样现有群通知不被替换，Dashboard 可同步恢复状态，也不会重复发送 resolved。由于当前 critical 规则包含监控基础设施和节点类告警，生产接入前仍需建立 alertname 白名单或补充业务风险标签。
 
 ### 3.2 Worker 运行方式
 
@@ -104,6 +109,29 @@ Oncall 可以使用与现有 Redis 实例相同的物理 Redis，但必须使用
 
 logical DB 不是强安全边界，生产推荐独立 Redis 实例或 ACL 用户；如果首期只使用 MySQL 租约锁而不引入队列，可以暂时不新增 Redis 依赖。
 
+### 3.4 Webhook 网络入口
+
+当前阶段采用 **Internal Application Load Balancer（ALB）**，暂不引入 NLB。Webhook 复用 Dashboard backend 的 `:3000`，但由独立 Internal ALB、安全组、Target Group 与精确路径规则构成边界：
+
+```text
+Alertmanager Pod
+  → Internal ALB（HTTPS / 专用 DNS）
+  → Target Group（Dashboard EC2:3000）
+  → Dashboard backend（仅由该 ALB 转发 /api/oncall/alertmanager）
+```
+
+实施约束：
+
+- ALB 使用内部 scheme，只选择同 VPC 可达子网；
+- ALB Security Group 仅允许 `mgbx` EKS 来源访问监听端口；
+- EC2 Security Group 仅允许 ALB Security Group 访问 TCP 3000；
+- Target Group 使用 EC2 私有地址/实例目标，健康检查使用独立的 `/api/oncall/health`，不能用 Webhook POST 路径；
+- Internal ALB 的默认规则固定返回 `404`，只转发 `/api/oncall/alertmanager`；面向用户的 Dashboard ALB 对同路径固定返回 `404`；
+- Alertmanager 使用 Secret 注入的 Bearer Token 或 mTLS，不能把 Secret 写入普通 ConfigMap；
+- NLB 只有在后续明确需要 TCP/TLS 透传、固定 IP 或源 IP 保留时再评估。
+
+ALB、安全组、证书和 DNS 已于 2026-09-22 创建：`oncaaa.pree.mg56.net` → Internal ALB，HTTPS 仅允许 `mgbx` EKS 受管工作负载安全组进入，ALB 再访问 Dashboard EC2 `:3000`。在完成健康检查和从 Alertmanager Pod 到 ALB 的连通性验证前，不切换生产 Alertmanager route。
+
 ## 4. Hotline Bot 可行性与前置条件
 
 新建 Hotline Bot 与当前告警 Bot 分离是合理的安全和运维边界，但“已创建 Bot”不等于链路已经可调用。实施前需要验证：
@@ -116,7 +144,7 @@ logical DB 不是强安全边界，生产推荐独立 Redis 实例或 ACL 用户
 - Bot 是否需要加入应急群，以及群消息和电话权限是否分开；
 - 凭据是否能通过 SecretRef/运行时 Secret 注入。
 
-若 Hotline Bot 暂不具备可编程电话接口，系统仍可先完成 Lark 应急群通知、ACK、审计和手工升级；电话能力作为可替换适配器延后，不阻塞前期建设。
+Hotline Bot 当前不可用，电话能力保持关闭。系统先完成现有 Lark 群通知、ACK、审计和 Alertmanager 状态同步；电话能力作为可替换适配器延后，不阻塞当前版本。
 
 ## 5. Dashboard 功能规划
 
@@ -171,9 +199,14 @@ eks-dashboard-backend/src/oncall/
 - [ ] 确认应急群、技术群和机器人归属；
 - [ ] 确认 Secret 注入与网络访问策略。
 - [ ] 固定 L1 ACK 超时、L2 响应超时和负责人升级规则；不单独设计 CTO 角色；
-- [ ] 确认首期采用 backend 内嵌 scheduler，还是提前启用独立 Worker；
+- [x] 确认首期采用 backend 内嵌 scheduler，独立 Worker 作为后续扩展项；
 - [ ] 确认 Oncall Redis 是否使用 MySQL 租约、独立 Redis，或同 Redis 独立 DB + prefix；
 - [ ] 核对 EC2 Dashboard 运行时 kubeconfig context、EKS Access Entry 和 `mgbx` 集群实际可达性。
+- [x] 确认首期继续使用 backend + frontend 两个 Node 进程，Worker 作为后续可选拆分项；
+- [x] 确认当前阶段使用 Internal ALB → EC2:3000，暂不使用 NLB；
+- [x] 确认 Phase 1 测试阶段可先使用 `severity="critical"` 分流，并保留现有 receiver；
+- [x] 创建 Internal ALB、Target Group、HTTPS 证书、DNS Alias 和最小安全组规则；
+- [ ] 使用 `im:message.urgent:phone` 权限完成 Hotline API 的测试调用、回执和限流确认。
 
 **验收目标：** 形成 `mgbx` 接入清单、高危告警清单、Lark 权限清单、运行模式/队列决策和链路测试方案；不修改生产配置。
 
@@ -186,14 +219,14 @@ eks-dashboard-backend/src/oncall/
 - 现有 `monitoring/prometheus-alert-center` 为单副本部署，镜像为 `feiyu563/prometheus-alert:v4.9.1`，普通告警链路仍在运行。
 - 从 `monitoring/alertmanager-main-0` 只读测试访问 Dashboard EC2 `10.100.166.109` 的 3000/5173 端口均超时；EC2 安全组当前仅允许已有来源安全组访问 5173，以及 `172.32.1.15/32` 的全端口访问，未包含 EKS 节点来源。因此 Webhook 网络入口尚未具备，需单独设计并审批安全组/入口规则。
 
-上述检查未执行任何 Kubernetes `apply`、`patch`、删除、重启或 Alertmanager 配置变更；Phase 0 仍未完成，当前阻塞项为 Webhook 网络可达性、高危标签/路由定义和 Hotline API 能力确认。
+上述检查未执行任何 Kubernetes `apply`、`patch`、删除、重启或 Alertmanager 配置变更。随后已创建 Internal ALB、最小安全组规则、ACM 证书及 `oncaaa.pree.mg56.net` DNS Alias，并完成 Phase 1/2 本地代码和共享数据库迁移；当前 Target Group 仍因 EC2 尚未部署 `/api/oncall/health` 返回 404。部署、Webhook Secret、Alertmanager 连通性和 Hotline API 验证完成前，不应切换生产告警路由或启用真实电话升级。
 
 ### Phase 1：Oncall 数据与接收能力
 
 - [ ] 新增 Oncall 菜单、权限和基础页面骨架；
 - [ ] 新增数据库表及迁移脚本；
 - [ ] 实现 Alertmanager Webhook 接收、签名/来源校验和原始事件落库；
-- [ ] 以告警 fingerprint 实现去重、firing/resolved 状态转换；
+- [ ] 以告警 fingerprint 实现去重、firing/resolved 状态转换，并验证 resolved 到达后 Dashboard 状态闭环；
 - [ ] 增加告警列表、详情和事件时间线。
 
 **验收目标：** 使用测试告警调用 Webhook，事件可查询；重复事件不产生重复告警记录，恢复事件能正确关闭对应告警。
@@ -201,7 +234,8 @@ eks-dashboard-backend/src/oncall/
 ### Phase 2：Lark 通知与 ACK
 
 - [ ] 配置高危 Alertmanager route 指向 Dashboard；
-- [ ] Worker 发送应急群消息；
+- [ ] Alertmanager 将 firing/resolved 扇出到现有 Lark receiver 和 Dashboard Webhook；
+- [ ] Dashboard backend 发送必要的应急操作消息，不重复发送 Alertmanager 已发送的 resolved 消息；
 - [ ] 增加 Lark ACK 入口并校验用户身份与告警状态；
 - [ ] 保存 ACK、通知和操作审计；
 - [ ] 普通告警保持走现有 Alert Center 链路。
@@ -214,12 +248,14 @@ eks-dashboard-backend/src/oncall/
 - [ ] 实现当前值班人和有效期；
 - [ ] 实现 ACK 超时状态机；
 - [ ] 实现 L1 → L2 → 负责人升级；
-- [ ] 实现 Worker 多副本锁、重试、失败记录和死信/人工接管；
+- [ ] 实现 scheduler 多副本锁、重试、失败记录和死信/人工接管（后续拆分 Worker 时复用）；
 - [ ] 提供手工重试、手工升级和关闭操作。
 
 **验收目标：** 在缩短测试阈值后可验证 ACK 超时、升级顺序、重启恢复和多副本不重复执行。
 
-### Phase 4：Hotline Bot 电话能力
+### Phase 4：Hotline Bot 电话能力（暂停）
+
+当前 Hotline 相关接口不可用，本阶段暂不执行，不作为当前 Oncall 菜单的上线依赖。恢复服务后再按以下计划重新评估：
 
 - [ ] 实现 `hotline.service.ts` 适配器，不将 Hotline API 逻辑散落在业务代码中；
 - [ ] 接入独立 Hotline Bot 的电话/加急接口；
@@ -272,10 +308,11 @@ eks-dashboard-backend/src/oncall/
 ```text
 Prometheus 采集与规则计算
   → Alertmanager 分组、抑制、高危路由
+  → Alertmanager 将 firing/resolved 扇出到现有 Lark receiver 与 Dashboard Webhook
   → Dashboard Webhook 统一接收与落库
-  → Oncall Worker 异步通知、ACK、超时升级
-  → 现有 Lark Bot 负责普通告警
-  → 独立 Hotline Bot 负责电话/加急升级
+  → Dashboard backend 提供状态、ACK、审计和必要的应急操作
+  → 现有 Lark Bot 负责群内 firing/resolved 通知
+  → Hotline Bot 电话/加急能力作为后续可选适配器
   → Dashboard 菜单提供配置、查询、审计和人工接管
 ```
 
