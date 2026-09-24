@@ -11,6 +11,7 @@ import SiteMonitorPage from './pages/SiteMonitorPage';
 import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
 import S3UploadPage from './pages/S3UploadPage';
 import AccountManagementPage from './pages/AccountManagementPage';
+import AccountSecurityPage from './pages/AccountSecurityPage';
 import AuditLogPage from './pages/AuditLogPage';
 import LineOnboardingPage from './pages/LineOnboardingPage';
 import AdminSiteIngressPage from './pages/AdminSiteIngressPage';
@@ -157,13 +158,22 @@ const AppLayout: React.FC = () => {
 
   const accessControlPermission = 'menu:access-control';
 
+  const accessControlChildren: NonNullable<MenuProps['items']> = [
+    ...(authLoading || hasPermission(accessControlPermission)
+      ? [{ key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link> }]
+      : []),
+    ...(authLoading || isAuthenticated
+      ? [{ key: '/access-control/security', label: <Link to="/access-control/security">账号安全 / MFA 管理</Link> }]
+      : []),
+    ...(authLoading || hasPermission(accessControlPermission)
+      ? [{ key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link> }]
+      : []),
+  ];
+
   const accessControlGroup: NonNullable<MenuProps['items']>[number] = {
     key: '/access-control',
     label: '账号管理',
-    children: [
-      { key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link> },
-      { key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link> },
-    ],
+    children: accessControlChildren,
   };
 
   const signalMonitorPermission = 'menu:signal-monitor';
@@ -251,7 +261,7 @@ const AppLayout: React.FC = () => {
           disabled: authLoading,
         }]
       : []),
-    ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
+    ...((authLoading || accessControlChildren.length > 0) ? [accessControlGroup] : []),
   ];
 
   const systemManagementGroup: NonNullable<MenuProps['items']>[number] | null =
@@ -379,6 +389,7 @@ const AppLayout: React.FC = () => {
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
               <Route path="/access-control" element={<Navigate to="/access-control/users" replace />} />
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />
+              <Route path="/access-control/security" element={<ProtectedRoute><AccountSecurityPage /></ProtectedRoute>} />
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
               <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
