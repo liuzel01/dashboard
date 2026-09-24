@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Post, Query, Res, ValidationPipe } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Res, ValidationPipe } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -13,34 +13,32 @@ export class AuthController {
     return this.authService.login(body.username, body.password, body.otpCode || body.mfaCode);
   }
 
-  @Get('mfa/status')
-  async mfaStatus(@Headers('authorization') authorization?: string) {
-    const user = await this.authService.resolveCurrentUser(authorization);
-    return this.authService.getMfaStatus(Number(user.id));
+  @Post('users/:id/mfa/enroll/start')
+  async startUserMfaEnrollment(
+    @Param('id') id: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    await this.authService.requireAdminCurrentUser(authorization);
+    return this.authService.startMfaEnrollment(Number(id));
   }
 
-  @Post('mfa/enroll/start')
-  async startMfaEnrollment(@Headers('authorization') authorization?: string) {
-    const user = await this.authService.resolveCurrentUser(authorization);
-    return this.authService.startMfaEnrollment(Number(user.id));
-  }
-
-  @Post('mfa/enroll/confirm')
-  async confirmMfaEnrollment(
+  @Post('users/:id/mfa/enroll/confirm')
+  async confirmUserMfaEnrollment(
+    @Param('id') id: string,
     @Headers('authorization') authorization: string | undefined,
     @Body(new ValidationPipe({ transform: true, whitelist: true })) body: MfaCodeDto,
   ) {
-    const user = await this.authService.resolveCurrentUser(authorization);
-    return this.authService.confirmMfaEnrollment(Number(user.id), body.otpCode);
+    await this.authService.requireAdminCurrentUser(authorization);
+    return this.authService.confirmMfaEnrollment(Number(id), body.otpCode);
   }
 
-  @Post('mfa/disable')
-  async disableMfa(
+  @Post('users/:id/mfa/disable')
+  async disableUserMfa(
+    @Param('id') id: string,
     @Headers('authorization') authorization: string | undefined,
-    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: MfaCodeDto,
   ) {
-    const user = await this.authService.resolveCurrentUser(authorization);
-    return this.authService.disableMfa(Number(user.id), body.otpCode);
+    await this.authService.requireAdminCurrentUser(authorization);
+    return this.authService.disableMfaForUser(Number(id));
   }
 
   @Get('keycloak/login')

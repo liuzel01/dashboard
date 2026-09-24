@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
 import { generateSecret, generateURI, verifySync } from 'otplib';
@@ -301,6 +301,16 @@ export class AuthService {
     return { ...user, identity: payload };
   }
 
+  async requireAdminCurrentUser(authorization?: string) {
+    const user = await this.resolveCurrentUser(authorization);
+    const roleNames = (user.roles || []).map((role: { name?: string }) => String(role.name || '').trim().toLowerCase());
+    const isAdmin = String(user.username || '').trim().toLowerCase() === 'admin'
+      || roleNames.includes('admin')
+      || roleNames.includes('管理员');
+    if (!isAdmin) throw new ForbiddenException('仅 admin 管理员可以管理其他用户的 MFA');
+    return user;
+  }
+
   async getMfaStatus(userId: number) {
     const rows = await this.db.query<any[]>(
       'SELECT mfa_enabled, mfa_secret, mfa_confirmed_at FROM users WHERE id = ? LIMIT 1',
@@ -324,7 +334,7 @@ export class AuthService {
     const user = rows[0];
     if (!user) throw new UnauthorizedException('用户不存在');
     if (Number(user.mfa_enabled || 0) === 1 && user.mfa_secret) {
-      throw new BadRequestException('当前账号已绑定 MFA，请先解除绑定后再重新设置');
+      throw new BadRequestException('该用户已绑定 MFA，请先解除绑定后再重新设置');
     }
 
     const secret = generateSecret();
@@ -354,8 +364,9 @@ export class AuthService {
     return this.getMfaStatus(userId);
   }
 
-  async disableMfa(userId: number, code?: string) {
-    await this.verifyMfaForUser(userId, code);
+  async disableMfaForUser(userId: number) {
+    const rows = await this.db.query<any[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [userId]);
+    if (!rows[0]) throw new BadRequestException('用户不存在');
     await this.db.query(
       'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_confirmed_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?',
       [userId],

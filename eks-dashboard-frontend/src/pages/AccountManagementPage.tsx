@@ -24,12 +24,15 @@ import {
   getAccessPermissions,
   getAccessRoles,
   getAccessUsers,
+  confirmAccessUserMfaEnrollment,
+  disableAccessUserMfa,
   resetAccessUserPassword,
+  startAccessUserMfaEnrollment,
   updateAccessRole,
   updateAccessRolePermissions,
   updateAccessUser,
+  type AccessUserMfaEnrollment,
 } from '../services/api';
-import MfaManagementCard from '../components/MfaManagementCard';
 
 const { Title, Text } = Typography;
 
@@ -41,6 +44,8 @@ type AccessUser = {
   last_login_at?: string | null;
   role_ids: number[];
   role_names: string[];
+  mfa_enabled: boolean;
+  mfa_pending: boolean;
 };
 
 type AccessRole = {
@@ -117,6 +122,11 @@ const AccountManagementPage: React.FC = () => {
   const [roleSaving, setRoleSaving] = useState(false);
   const [resetSaving, setResetSaving] = useState(false);
   const [permissionsSaving, setPermissionsSaving] = useState(false);
+  const [mfaUser, setMfaUser] = useState<AccessUser | null>(null);
+  const [mfaEnrollment, setMfaEnrollment] = useState<AccessUserMfaEnrollment | null>(null);
+  const [mfaModalOpen, setMfaModalOpen] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaSaving, setMfaSaving] = useState(false);
 
   const refreshUsers = async () => {
     const usersData = await getAccessUsers();
@@ -157,6 +167,62 @@ const AccountManagementPage: React.FC = () => {
     setRolePermissions(nextMap);
     setDirtyRoleIds(new Set());
   }, [roles]);
+
+  const openMfaBinding = async (user: AccessUser) => {
+    try {
+      setMfaSaving(true);
+      setMfaUser(user);
+      setMfaEnrollment(await startAccessUserMfaEnrollment(user.id));
+      setMfaCode('');
+      setMfaModalOpen(true);
+    } catch (e: any) {
+      message.error(e?.message || '生成用户 MFA 绑定信息失败');
+    } finally {
+      setMfaSaving(false);
+    }
+  };
+
+  const handleConfirmUserMfa = async () => {
+    if (!mfaUser || !/^\d{6}$/.test(mfaCode)) {
+      message.error('请输入目标用户设备当前显示的 6 位验证码');
+      return;
+    }
+    try {
+      setMfaSaving(true);
+      await confirmAccessUserMfaEnrollment(mfaUser.id, mfaCode);
+      setMfaModalOpen(false);
+      setMfaEnrollment(null);
+      setMfaCode('');
+      message.success(`用户 ${mfaUser.username} 的 MFA 已绑定`);
+      await refreshUsers();
+    } catch (e: any) {
+      message.error(e?.message || '确认用户 MFA 绑定失败');
+    } finally {
+      setMfaSaving(false);
+    }
+  };
+
+  const handleDisableUserMfa = (user: AccessUser) => {
+    Modal.confirm({
+      title: `解除用户 ${user.username} 的 MFA？`,
+      content: '解除后，该用户需要重新绑定 MFA 才能执行需要 MFA 的敏感操作。',
+      okText: '确认解除',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          setMfaSaving(true);
+          await disableAccessUserMfa(user.id);
+          message.success(`用户 ${user.username} 的 MFA 已解除`);
+          await refreshUsers();
+        } catch (e: any) {
+          message.error(e?.message || '解除用户 MFA 失败');
+          throw e;
+        } finally {
+          setMfaSaving(false);
+        }
+      },
+    });
+  };
 
   const openCreateUser = () => {
     setEditingUser(null);
@@ -349,6 +415,16 @@ const AccountManagementPage: React.FC = () => {
         render: (value: 'active' | 'disabled') => statusTag(value),
       },
       {
+        title: 'MFA 状态',
+        key: 'mfa',
+        width: 110,
+        render: (_: unknown, record: AccessUser) => record.mfa_enabled
+          ? <Tag color="green">已绑定</Tag>
+          : record.mfa_pending
+            ? <Tag color="orange">待确认</Tag>
+            : <Tag>未绑定</Tag>,
+      },
+      {
         title: '最近登录(北京时间)',
         dataIndex: 'last_login_at',
         width: 180,
@@ -357,7 +433,7 @@ const AccountManagementPage: React.FC = () => {
           {
             title: '操作',
             key: 'action',
-            width: 200,
+            width: 260,
             render: (_: any, record: AccessUser) => (
               <Space>
                 <Button type="link" icon={<EditOutlined />} onClick={() => openEditUser(record)}>
@@ -366,6 +442,15 @@ const AccountManagementPage: React.FC = () => {
                 {String(record.username || '').toLowerCase() === 'admin' && (
                   <Button type="link" icon={<KeyOutlined />} onClick={() => openResetPassword(record)}>
                     重置密码
+                  </Button>
+                )}
+                {record.mfa_enabled ? (
+                  <Button type="link" danger loading={mfaSaving && mfaUser?.id === record.id} onClick={() => handleDisableUserMfa(record)}>
+                    解绑 MFA
+                  </Button>
+                ) : (
+                  <Button type="link" loading={mfaSaving && mfaUser?.id === record.id} onClick={() => openMfaBinding(record)}>
+                    {record.mfa_pending ? '继续绑定' : '绑定 MFA'}
                   </Button>
                 )}
               </Space>
@@ -426,8 +511,6 @@ const AccountManagementPage: React.FC = () => {
       </Space>
 
       {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />}
-
-      <MfaManagementCard style={{ marginBottom: 16 }} />
 
       <Card title="用户列表" size="small" style={{ marginBottom: 16 }}>
         <Table
@@ -584,6 +667,37 @@ const AccountManagementPage: React.FC = () => {
             <Input.Password placeholder="留空将自动生成" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`为用户 ${mfaUser?.username || ''} 绑定 MFA`}
+        open={mfaModalOpen}
+        onCancel={() => setMfaModalOpen(false)}
+        onOk={handleConfirmUserMfa}
+        confirmLoading={mfaSaving}
+        okText="确认绑定"
+        cancelText="取消"
+        destroyOnClose
+      >
+        {mfaEnrollment && (
+          <Space direction="vertical" size="small">
+            <Alert
+              type="warning"
+              showIcon
+              message="请将二维码或手动密钥安全地交给目标用户，仅用于该用户设备绑定。"
+            />
+            <Text>请让目标用户使用 Google Authenticator 扫描二维码，然后提供设备当前显示的 6 位验证码。</Text>
+            <img src={mfaEnrollment.qrCodeDataUrl} alt="用户 MFA 二维码" style={{ width: 180, height: 180 }} />
+            <Text copyable={{ text: mfaEnrollment.secret }}>手动设置密钥：{mfaEnrollment.secret}</Text>
+            <Input
+              value={mfaCode}
+              onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="输入目标用户设备显示的 6 位验证码"
+              maxLength={6}
+              inputMode="numeric"
+            />
+          </Space>
+        )}
       </Modal>
 
     </div>

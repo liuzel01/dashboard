@@ -1,4 +1,4 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 
 const createService = () => {
@@ -35,6 +35,20 @@ describe('AuthService MFA management', () => {
     expect(user.id).toBe(27);
   });
 
+  it('rejects non-admin actors from managing another user MFA', async () => {
+    const { service, accessControl } = createService();
+    jest.spyOn(service, 'verifyToken').mockResolvedValue({
+      sub: 'keycloak-sub',
+      username: 'operator',
+      displayName: 'Operator',
+      source: 'keycloak',
+    });
+    accessControl.ensureUserByUsername.mockResolvedValue({ id: 27, username: 'operator' });
+    accessControl.getMe.mockResolvedValue({ id: 27, username: 'operator', roles: [{ name: '运维' }], permissions: [] });
+
+    await expect(service.requireAdminCurrentUser('Bearer operator-token')).rejects.toThrow('仅 admin 管理员');
+  });
+
   it('creates a pending enrollment and only enables it after code confirmation', async () => {
     const { service, db } = createService();
     db.query
@@ -58,20 +72,15 @@ describe('AuthService MFA management', () => {
     expect(db.query).toHaveBeenNthCalledWith(2, expect.stringContaining('mfa_enabled = 1'), [27]);
   });
 
-  it('requires the current account code when disabling MFA', async () => {
+  it('allows the admin MFA manager to disable a target account without target code', async () => {
     const { service, db } = createService();
-    jest.spyOn(service, 'verifyMfaForUser').mockRejectedValue(new UnauthorizedException('Google 验证码错误'));
-    await expect(service.disableMfa(27, '000000')).rejects.toThrow('Google 验证码错误');
-    expect(db.query).not.toHaveBeenCalled();
-
-    jest.restoreAllMocks();
-    jest.spyOn(service, 'verifyMfaForUser').mockResolvedValue(undefined);
     db.query
+      .mockResolvedValueOnce([{ id: 27 }])
       .mockResolvedValueOnce({ affectedRows: 1 })
       .mockResolvedValueOnce([{ mfa_enabled: 0, mfa_secret: null, mfa_confirmed_at: null }]);
-    const status = await service.disableMfa(27, '123456');
+    const status = await service.disableMfaForUser(27);
     expect(status.enabled).toBe(false);
-    expect(db.query).toHaveBeenNthCalledWith(1, expect.stringContaining('mfa_secret = NULL'), [27]);
+    expect(db.query).toHaveBeenNthCalledWith(2, expect.stringContaining('mfa_secret = NULL'), [27]);
   });
 
   it('does not treat an unbound account as MFA enabled', async () => {

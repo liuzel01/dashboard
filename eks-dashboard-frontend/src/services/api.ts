@@ -1522,36 +1522,25 @@ export const login = async (data: { username: string; password: string; otpCode?
   return response.data;
 };
 
-export type MfaStatus = {
-  enabled: boolean;
-  enrollmentPending: boolean;
-  confirmedAt: string | null;
-};
-
-export type MfaEnrollment = {
+export type AccessUserMfaEnrollment = {
   enabled: false;
   secret: string;
   otpauthUrl: string;
   qrCodeDataUrl: string;
 };
 
-export const getMyMfaStatus = async (): Promise<MfaStatus> => {
-  const response = await api.get('/auth/mfa/status');
+export const startAccessUserMfaEnrollment = async (id: number): Promise<AccessUserMfaEnrollment> => {
+  const response = await api.post(`/auth/users/${id}/mfa/enroll/start`);
   return response.data;
 };
 
-export const startMyMfaEnrollment = async (): Promise<MfaEnrollment> => {
-  const response = await api.post('/auth/mfa/enroll/start');
+export const confirmAccessUserMfaEnrollment = async (id: number, otpCode: string) => {
+  const response = await api.post(`/auth/users/${id}/mfa/enroll/confirm`, { otpCode });
   return response.data;
 };
 
-export const confirmMyMfaEnrollment = async (otpCode: string): Promise<MfaStatus> => {
-  const response = await api.post('/auth/mfa/enroll/confirm', { otpCode });
-  return response.data;
-};
-
-export const disableMyMfa = async (otpCode: string): Promise<MfaStatus> => {
-  const response = await api.post('/auth/mfa/disable', { otpCode });
+export const disableAccessUserMfa = async (id: number) => {
+  const response = await api.post(`/auth/users/${id}/mfa/disable`);
   return response.data;
 };
 

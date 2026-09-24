@@ -239,6 +239,8 @@ export class AccessControlService {
   async listUsers() {
     const rows = await this.db.query<any[]>(
       `SELECT u.id, u.username, u.display_name, u.status, u.last_login_at, u.created_at, u.updated_at,
+              CASE WHEN u.mfa_enabled = 1 AND u.mfa_secret IS NOT NULL THEN 1 ELSE 0 END AS mfa_enabled,
+              CASE WHEN u.mfa_enabled = 0 AND u.mfa_secret IS NOT NULL THEN 1 ELSE 0 END AS mfa_pending,
               GROUP_CONCAT(r.id ORDER BY r.id) AS role_ids,
               GROUP_CONCAT(r.name ORDER BY r.name) AS role_names
        FROM users u
@@ -254,6 +256,8 @@ export class AccessControlService {
       display_name: row.display_name || row.username,
       status: row.status,
       last_login_at: row.last_login_at,
+      mfa_enabled: Number(row.mfa_enabled || 0) === 1,
+      mfa_pending: Number(row.mfa_pending || 0) === 1,
       created_at: row.created_at,
       updated_at: row.updated_at,
       role_ids: row.role_ids ? String(row.role_ids).split(',').map((v) => Number(v)) : [],
