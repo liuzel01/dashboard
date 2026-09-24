@@ -1522,6 +1522,39 @@ export const login = async (data: { username: string; password: string; otpCode?
   return response.data;
 };
 
+export type MfaStatus = {
+  enabled: boolean;
+  enrollmentPending: boolean;
+  confirmedAt: string | null;
+};
+
+export type MfaEnrollment = {
+  enabled: false;
+  secret: string;
+  otpauthUrl: string;
+  qrCodeDataUrl: string;
+};
+
+export const getMyMfaStatus = async (): Promise<MfaStatus> => {
+  const response = await api.get('/auth/mfa/status');
+  return response.data;
+};
+
+export const startMyMfaEnrollment = async (): Promise<MfaEnrollment> => {
+  const response = await api.post('/auth/mfa/enroll/start');
+  return response.data;
+};
+
+export const confirmMyMfaEnrollment = async (otpCode: string): Promise<MfaStatus> => {
+  const response = await api.post('/auth/mfa/enroll/confirm', { otpCode });
+  return response.data;
+};
+
+export const disableMyMfa = async (otpCode: string): Promise<MfaStatus> => {
+  const response = await api.post('/auth/mfa/disable', { otpCode });
+  return response.data;
+};
+
 export const getSslCertificates = async (params: { environmentId: string; region?: string; keyword?: string; page?: number; pageSize?: number }) => {
   const response = await api.get('/ssl-certificates', { params });
   return response.data;

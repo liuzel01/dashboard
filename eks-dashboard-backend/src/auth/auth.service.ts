@@ -282,6 +282,87 @@ export class AuthService {
     }
   }
 
+  async resolveCurrentUser(authorization?: string) {
+    const auth = String(authorization || '');
+    if (!auth.toLowerCase().startsWith('bearer ')) {
+      throw new UnauthorizedException('缺少登录令牌');
+    }
+    const payload = await this.verifyToken(auth.slice(7).trim());
+    let userId: number;
+    if (payload.source === 'keycloak' || typeof payload.sub !== 'number') {
+      const user = await this.accessControl.ensureUserByUsername(payload.username, {
+        displayName: payload.displayName,
+      });
+      userId = user.id;
+    } else {
+      userId = Number(payload.sub);
+    }
+    const user = await this.accessControl.getMe({ userId });
+    return { ...user, identity: payload };
+  }
+
+  async getMfaStatus(userId: number) {
+    const rows = await this.db.query<any[]>(
+      'SELECT mfa_enabled, mfa_secret, mfa_confirmed_at FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    const user = rows[0];
+    if (!user) throw new UnauthorizedException('用户不存在');
+    const enabled = Number(user.mfa_enabled || 0) === 1 && !!user.mfa_secret;
+    return {
+      enabled,
+      enrollmentPending: !enabled && !!user.mfa_secret,
+      confirmedAt: user.mfa_confirmed_at || null,
+    };
+  }
+
+  async startMfaEnrollment(userId: number) {
+    const rows = await this.db.query<any[]>(
+      'SELECT username, mfa_enabled, mfa_secret FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    const user = rows[0];
+    if (!user) throw new UnauthorizedException('用户不存在');
+    if (Number(user.mfa_enabled || 0) === 1 && user.mfa_secret) {
+      throw new BadRequestException('当前账号已绑定 MFA，请先解除绑定后再重新设置');
+    }
+
+    const secret = generateSecret();
+    await this.db.query(
+      'UPDATE users SET mfa_secret = ?, mfa_enabled = 0, mfa_confirmed_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?',
+      [secret, userId],
+    );
+    const otpauthUrl = buildMfaOtpAuthUrl(String(user.username), secret);
+    const qrCodeDataUrl = await qrcode.toDataURL(otpauthUrl);
+    return { enabled: false, secret, otpauthUrl, qrCodeDataUrl };
+  }
+
+  async confirmMfaEnrollment(userId: number, code?: string) {
+    const rows = await this.db.query<any[]>(
+      'SELECT mfa_secret FROM users WHERE id = ? LIMIT 1',
+      [userId],
+    );
+    const secret = rows[0]?.mfa_secret;
+    if (!secret) throw new BadRequestException('请先开始绑定 MFA');
+    if (!this.verifyMfaCode(String(secret), code)) {
+      throw new UnauthorizedException('Google 验证码错误');
+    }
+    await this.db.query(
+      'UPDATE users SET mfa_enabled = 1, mfa_confirmed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
+      [userId],
+    );
+    return this.getMfaStatus(userId);
+  }
+
+  async disableMfa(userId: number, code?: string) {
+    await this.verifyMfaForUser(userId, code);
+    await this.db.query(
+      'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_confirmed_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?',
+      [userId],
+    );
+    return this.getMfaStatus(userId);
+  }
+
   private buildFallbackUser(user: {
     id: number;
     username: string;

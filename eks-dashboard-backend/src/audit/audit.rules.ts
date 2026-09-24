@@ -13,6 +13,10 @@ export type AuditPatternRuleConfig = AuditRuleConfig & { regex: RegExp };
 export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
   { method: 'POST', path: '/auth/login', action: 'auth.login', actionName: '登录' },
   { method: 'POST', path: '/auth/logout', action: 'auth.logout', actionName: '登出' },
+  { method: 'GET', path: '/auth/mfa/status', action: 'auth.mfa.status', actionName: '查看 MFA 状态', menuKey: 'menu:access-control', targetType: 'mfa' },
+  { method: 'POST', path: '/auth/mfa/enroll/start', action: 'auth.mfa.enroll.start', actionName: '开始绑定 MFA', menuKey: 'menu:access-control', targetType: 'mfa' },
+  { method: 'POST', path: '/auth/mfa/enroll/confirm', action: 'auth.mfa.enroll.confirm', actionName: '确认绑定 MFA', menuKey: 'menu:access-control', targetType: 'mfa' },
+  { method: 'POST', path: '/auth/mfa/disable', action: 'auth.mfa.disable', actionName: '解除 MFA 绑定', menuKey: 'menu:access-control', targetType: 'mfa' },
   { method: 'POST', path: '/lines/ingress/manifest/apply', action: 'lines.applyIngressManifest', actionName: '预检或创建 Ingress YAML', menuKey: 'menu:line-onboarding', targetType: 'ingress_manifest' },
   { method: 'GET', path: '/s3/buckets', action: 's3.listBuckets', actionName: '查询 S3 Bucket', menuKey: 'menu:s3-upload', targetType: 's3_bucket' },
   { method: 'GET', path: '/s3/prefixes', action: 's3.listPrefixes', actionName: '查询 S3 路径', menuKey: 'menu:s3-upload', targetType: 's3_prefix', getResourceId: ({ query }) => [query?.bucket, query?.prefix].filter(Boolean).join(':') || null },

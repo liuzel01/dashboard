@@ -1,5 +1,6 @@
--- Admin local-login MFA (Google Authenticator / TOTP)
--- Scope: local username `admin`; Keycloak/SSO users are not affected by this schema change.
+-- Account-scoped MFA (Google Authenticator / TOTP).
+-- The columns were introduced for local admin login and are also used by the
+-- self-service MFA enrollment flow for Keycloak/SSO users.
 -- Safe to run once on environments where these columns do not exist.
 
 ALTER TABLE `users`
