@@ -28,18 +28,18 @@ export class LinesController {
     private readonly accessControl: AccessControlService,
   ) {}
 
-  private async assertLineOnboardingAccess(authorization?: string) {
+  private async assertIngressProvisioningAccess(authorization?: string) {
     const raw = String(authorization || '');
     if (!raw.toLowerCase().startsWith('bearer ')) {
-      throw new ForbiddenException('Missing permissions: menu:line-onboarding');
+      throw new ForbiddenException('Missing permissions: menu:line-onboarding or menu:admin-site-onboarding');
     }
     const identity = await this.authService.verifyToken(raw.slice(7).trim());
     const user = identity.source === 'keycloak' || typeof identity.sub !== 'number'
       ? await this.accessControl.ensureUserByUsername(identity.username, { displayName: identity.displayName })
       : { id: Number(identity.sub), username: identity.username };
     const me = await this.accessControl.getMe({ userId: Number(user.id) });
-    if (!(me.permissions || []).includes('menu:line-onboarding')) {
-      throw new ForbiddenException('Missing permissions: menu:line-onboarding');
+    if (!(me.permissions || []).some((permission: string) => ['menu:line-onboarding', 'menu:admin-site-onboarding'].includes(permission))) {
+      throw new ForbiddenException('Missing permissions: menu:line-onboarding or menu:admin-site-onboarding');
     }
     return { userId: String(me.id), username: String(me.username || identity.username) };
   }
@@ -188,8 +188,9 @@ export class LinesController {
 
   @Post('tenant-domain/apply')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
-  applyTenantDomain(
+  async applyTenantDomain(
     @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string | undefined,
     @Req() req: any,
     @Body() body: ApplyTenantDomainDto,
   ) {
@@ -199,12 +200,12 @@ export class LinesController {
     if (body.environmentId && body.environmentId !== environmentId) {
       throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
     }
+    const actor = await this.assertIngressProvisioningAccess(authorization);
     return this.linesService.applyTenantDomain(environmentId, {
       tenantId: body.tenantId,
       domain: body.domain,
       requestId: req?.requestId,
-      userId: req?.user?.id ? String(req.user.id) : undefined,
-      username: req?.user?.username,
+      ...actor,
     });
   }
 
@@ -321,7 +322,7 @@ export class LinesController {
     if (body.environmentId !== environmentId) {
       throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
     }
-    const actor = await this.assertLineOnboardingAccess(authorization);
+    const actor = await this.assertIngressProvisioningAccess(authorization);
     return this.linesService.applyIngressManifest(environmentId, {
       manifestYaml: body.manifestYaml,
       sourceIngressName: body.sourceIngressName,

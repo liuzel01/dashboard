@@ -20,6 +20,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:cert-study', name: '证书题库' },
   { key: 'menu:lines', name: '线路总览' },
   { key: 'menu:line-onboarding', name: '新增线路向导' },
+  { key: 'menu:admin-site-onboarding', name: '管理端网站 Ingress' },
   { key: 'menu:site-monitors', name: '站点监控' },
   { key: 'menu:monitoring-requests', name: '监控资源申请' },
   { key: 'monitoring-requests:approve', name: '监控资源申请审批' },

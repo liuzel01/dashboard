@@ -13,6 +13,7 @@ import S3UploadPage from './pages/S3UploadPage';
 import AccountManagementPage from './pages/AccountManagementPage';
 import AuditLogPage from './pages/AuditLogPage';
 import LineOnboardingPage from './pages/LineOnboardingPage';
+import AdminSiteIngressPage from './pages/AdminSiteIngressPage';
 import LineListPage from './pages/LineListPage';
 import ForbiddenPage from './pages/ForbiddenPage';
 import LoginPage from './pages/LoginPage';
@@ -121,6 +122,7 @@ const AppLayout: React.FC = () => {
     securityGroups: { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
     lines: { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines' },
     lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
+    adminSiteOnboarding: { key: '/admin-site-ingress', label: '管理端网站 Ingress', icon: <GlobalOutlined />, permission: 'menu:admin-site-onboarding' },
     siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
     monitoringRequests: { key: '/monitoring-requests', label: '监控资源申请', icon: <FileProtectOutlined />, permission: 'menu:monitoring-requests' },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
@@ -217,7 +219,7 @@ const AppLayout: React.FC = () => {
     '/line-management',
     '线路管理',
     <GlobalOutlined />,
-    [menuItems.lines, menuItems.lineOnboarding],
+    [menuItems.lines, menuItems.lineOnboarding, menuItems.adminSiteOnboarding],
   );
 
   const monitoringGroup = createMenuGroup(
@@ -292,7 +294,7 @@ const AppLayout: React.FC = () => {
   const openKeys = [
     ...(['/deployments', '/jump-servers', '/security-groups', '/s3-upload'].some((path) => location.pathname.startsWith(path)) ? ['/cloud-resources'] : []),
     ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
-    ...(['/lines', '/line-onboarding'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
+    ...(['/lines', '/line-onboarding', '/admin-site-ingress'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
     ...(['/site-monitors', '/monitoring-requests', '/oncall'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
     ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
@@ -368,6 +370,7 @@ const AppLayout: React.FC = () => {
               <Route path="/asset-management/change-logs" element={<ProtectedRoute required={[assetManagementPermission]}><AssetManagementPage activeTab="change-logs" /></ProtectedRoute>} />
               <Route path="/lines" element={<ProtectedRoute required={['menu:lines']}><LineListPage /></ProtectedRoute>} />
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
+              <Route path="/admin-site-ingress" element={<ProtectedRoute required={['menu:admin-site-onboarding']}><AdminSiteIngressPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
               <Route path="/monitoring-requests" element={<ProtectedRoute required={['menu:monitoring-requests']}><MonitoringRequestsPage /></ProtectedRoute>} />
               <Route path="/oncall" element={<ProtectedRoute required={['menu:oncall']}><OncallPage /></ProtectedRoute>} />
