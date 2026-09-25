@@ -1158,6 +1158,15 @@ const LineOnboardingPage: React.FC = () => {
       message.warning('请先生成并确认可用的线路域名');
       return false;
     }
+    // 每次重新加载候选都开启新的 ingress 配置轮次，避免复用上一域名的名称、TLS 或 YAML。
+    setNewIngressNameInput('');
+    setTlsSecretNameInput('');
+    setIngressPreviewResult(null);
+    setIngressYamlInput('');
+    setIngressPreviewError(null);
+    setIngressApplyError(null);
+    setIngressApplyResult(null);
+    setIngressApplied(false);
     setSourceIngressLoading(true);
     setSourceIngressError(null);
     setResolvedIngressSource(null);
@@ -1190,9 +1199,7 @@ const LineOnboardingPage: React.FC = () => {
       }
       const first = `${candidates[0].namespace}/${candidates[0].name}`;
       setSelectedSourceIngressKey(first);
-      if (!newIngressNameInput.trim()) {
-        setNewIngressNameInput(generateDefaultIngressName(confirmedSubdomain));
-      }
+      setNewIngressNameInput(generateDefaultIngressName(confirmedSubdomain));
       message.success(`已加载 ${candidates.length} 个 source ingress 候选`);
     } catch (error: any) {
       const backendMsg = error?.response?.data?.message;
