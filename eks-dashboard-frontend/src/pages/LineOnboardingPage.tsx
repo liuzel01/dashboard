@@ -347,6 +347,9 @@ const LineOnboardingPage: React.FC = () => {
   const [tenantDomainApplyError, setTenantDomainApplyError] = useState<string | null>(null);
   const [tenantDomainApplyResult, setTenantDomainApplyResult] = useState<TenantDomainApplyResult | null>(null);
 
+  const ingressWorkflowOperationInProgress =
+    sourceIngressLoading || ingressPreviewLoading || ingressApplying || tenantDomainApplying;
+
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
@@ -1154,6 +1157,10 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleLoadSourceIngressCandidates = async () => {
+    if (ingressWorkflowOperationInProgress) {
+      message.info('请等待当前 Ingress 操作完成后再加载候选');
+      return false;
+    }
     if (!confirmedSubdomain) {
       message.warning('请先生成并确认可用的线路域名');
       return false;
@@ -1248,6 +1255,10 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handlePreviewCloneIngress = async () => {
+    if (ingressWorkflowOperationInProgress) {
+      message.info('请等待当前 Ingress 操作完成后再生成 YAML 预览');
+      return false;
+    }
     const validated = validateIngressCloneInputs();
     if (!validated || !confirmedSubdomain) return;
 
@@ -1307,6 +1318,10 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleCloneIngressApply = async () => {
+    if (ingressWorkflowOperationInProgress) {
+      message.info('请等待当前 Ingress 操作完成后再执行 dry-run');
+      return false;
+    }
     if (!ingressPreviewResult) {
       message.warning('请先生成 Ingress YAML 预览并确认');
       return;
@@ -1532,6 +1547,10 @@ const LineOnboardingPage: React.FC = () => {
   };
 
   const handleApplyTenantDomain = () => {
+    if (ingressWorkflowOperationInProgress) {
+      message.info('请等待当前 Ingress 操作完成后再验证并写入');
+      return;
+    }
     if (!selectedTenantId) {
       message.error('请先选择目标租户');
       return;
@@ -1745,7 +1764,7 @@ const LineOnboardingPage: React.FC = () => {
             <Button
               loading={sourceIngressLoading}
               onClick={handleLoadSourceIngressCandidates}
-              disabled={!confirmedSubdomain}
+              disabled={!confirmedSubdomain || ingressWorkflowOperationInProgress}
             >
               加载 source ingress 候选
             </Button>
@@ -1796,7 +1815,7 @@ const LineOnboardingPage: React.FC = () => {
             <Button
               loading={ingressPreviewLoading}
               onClick={handlePreviewCloneIngress}
-              disabled={!confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
+              disabled={ingressWorkflowOperationInProgress || !confirmedSubdomain || !selectedSourceIngressKey || !newIngressNameInput.trim()}
             >
               生成 Ingress YAML 预览
             </Button>
@@ -1804,7 +1823,7 @@ const LineOnboardingPage: React.FC = () => {
               type="primary"
               loading={ingressApplying}
               onClick={handleCloneIngressApply}
-              disabled={!ingressPreviewResult || ingressPreviewLoading}
+              disabled={ingressWorkflowOperationInProgress || !ingressPreviewResult}
             >
               校验并确认创建
             </Button>
@@ -2291,7 +2310,7 @@ const LineOnboardingPage: React.FC = () => {
               type="primary"
               loading={tenantDomainApplying}
               onClick={handleApplyTenantDomain}
-              disabled={!dcdnConfirmed || !selectedTenantId || !confirmedSubdomain}
+              disabled={ingressWorkflowOperationInProgress || !dcdnConfirmed || !selectedTenantId || !confirmedSubdomain}
             >
               自动写入 tenant_domain
             </Button>
