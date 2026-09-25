@@ -125,25 +125,24 @@ const AdminSiteIngressPage: React.FC = () => {
   };
 
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
-    <Alert type="info" showIcon message="管理端网站 Ingress" description="此向导只创建管理端网站的 Ingress 与 tenant_domain，不执行线路、DCDN、证书或平台登记操作。" />
     <Steps current={created ? 4 : tenantDomain ? 3 : dryRun ? 2 : preview ? 1 : 0} items={[{ title: '选择源站' }, { title: '编辑与预览' }, { title: 'Dry-run' }, { title: '写入域名' }, { title: '创建完成' }]} />
     <Card title="1. 选择管理端域名和 Ingress 源站">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Descriptions size="small" column={1}><Descriptions.Item label="目标环境">{currentEnvironment?.name || currentEnvironment?.id || '未选择'}</Descriptions.Item></Descriptions>
         <Space wrap><Select value={tenantId} loading={!tenants.length && !!currentEnvironment} onChange={(value) => { setTenantId(value); setIngressName(''); resetDownstream(); }} style={{ width: 280 }} placeholder="选择目标租户" options={tenants.map((tenant) => ({ value: tenant.id, label: `${tenant.id} - ${tenant.name}` }))} showSearch optionFilterProp="label" /><Input value={domain} onChange={(event) => { setDomain(event.target.value); setIngressName(''); resetDownstream(); }} placeholder="新管理端域名，例如 admin.example.com" style={{ width: 320 }} /></Space>
-        <Space wrap><Input value={candidateKeyword} onChange={(event) => setCandidateKeyword(event.target.value)} onPressEnter={() => void loadCandidates()} placeholder="按名称或 Host 筛选候选 Ingress" style={{ width: 320 }} /><Button icon={<FileSearchOutlined />} loading={candidatesLoading} disabled={previewing} onClick={() => void loadCandidates()}>加载候选 Ingress</Button></Space>
+        <Space wrap><Input value={candidateKeyword} onChange={(event) => setCandidateKeyword(event.target.value)} onPressEnter={() => void loadCandidates()} placeholder="按名称或 Host 筛选候选 Ingress" style={{ width: 320 }} /><Button icon={<FileSearchOutlined />} loading={candidatesLoading} disabled={previewing || dryRunning || writingTenantDomain || creating} onClick={() => void loadCandidates()}>加载候选 Ingress</Button></Space>
         {candidates.length ? <Select value={candidateKey} onChange={(value) => { setCandidateKey(value); setIngressName(''); resetDownstream(); }} style={{ width: '100%' }} options={candidates.map((candidate) => ({ value: `${candidate.namespace}/${candidate.name}`, label: `${candidate.namespace}/${candidate.name}${candidate.ruleHosts?.length ? ` · ${candidate.ruleHosts.join(', ')}` : ''}` }))} showSearch optionFilterProp="label" /> : null}
       </Space>
     </Card>
     <Card title="2. 生成并编辑 Ingress YAML" extra={<CloudUploadOutlined />}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={!selectedCandidate || !normalizedDomain || candidatesLoading}>生成 YAML 预览</Button></Space>
+        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={!selectedCandidate || !normalizedDomain || candidatesLoading || dryRunning || writingTenantDomain || creating}>生成 YAML 预览</Button></Space>
         {preview ? <Input.TextArea value={manifestYaml} onChange={(event) => { setManifestYaml(event.target.value); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined); }} rows={18} spellCheck={false} /> : <Text type="secondary">选择源站并填写域名后生成预览。</Text>}
       </Space>
     </Card>
     <Card title="3. 校验、写入 tenant_domain 并创建">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Button icon={<SafetyCertificateOutlined />} loading={dryRunning} disabled={!preview || !manifestYaml.trim()} onClick={() => void executeDryRun()}>执行 Kubernetes dry-run</Button>
+        <Button icon={<SafetyCertificateOutlined />} loading={dryRunning} disabled={!preview || !manifestYaml.trim() || previewing || candidatesLoading || writingTenantDomain || creating} onClick={() => void executeDryRun()}>执行 Kubernetes dry-run</Button>
         {dryRun ? <Alert type={dryRun.warnings?.length ? 'warning' : 'success'} showIcon message={dryRun.warnings?.length ? 'dry-run 通过，但检测到高风险字段' : 'dry-run 校验通过'} description={<Space direction="vertical"><Text>目标：<Text code>{dryRun.namespace}/{dryRun.newIngressName}</Text></Text>{dryRun.warnings?.map((warning) => <Text key={warning.annotation}><Text code>{warning.annotation}</Text>：{warning.message}</Text>)}</Space>} /> : null}
         <Space wrap><Button loading={writingTenantDomain} disabled={!dryRun || !tenantId} onClick={writeTenantDomain}>确认写入 tenant_domain</Button><Button type="primary" danger icon={<CheckCircleOutlined />} loading={creating} disabled={!tenantDomain || !dryRun} onClick={createIngress}>最终确认并创建 Ingress</Button></Space>
         {tenantDomain ? <Alert type="success" showIcon message={tenantDomain.action === 'created' ? 'tenant_domain 写入成功' : 'tenant_domain 已存在'} description={`Tenant ID: ${tenantDomain.tenantId}；Domain: ${tenantDomain.domain}；记录 ID: ${tenantDomain.id || '-'}`} /> : null}
