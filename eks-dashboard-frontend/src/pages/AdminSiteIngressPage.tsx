@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Input, Modal, Select, Space, Steps, Typography } from 'antd';
-import { CheckCircleOutlined, CloudUploadOutlined, FileSearchOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, FileSearchOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { applyIngressManifestForLineOnboarding, applyTenantDomainForLineOnboarding, getIngressSourceCandidatesForLineOnboarding, getTenantsForEnvironment, previewCloneIngressForLineOnboarding } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 
@@ -134,7 +134,7 @@ const AdminSiteIngressPage: React.FC = () => {
         {candidates.length ? <Select value={candidateKey} onChange={(value) => { setCandidateKey(value); setIngressName(''); resetDownstream(); }} style={{ width: '100%' }} options={candidates.map((candidate) => ({ value: `${candidate.namespace}/${candidate.name}`, label: `${candidate.namespace}/${candidate.name}${candidate.ruleHosts?.length ? ` · ${candidate.ruleHosts.join(', ')}` : ''}` }))} showSearch optionFilterProp="label" /> : null}
       </Space>
     </Card>
-    <Card title="2. 生成并编辑 Ingress YAML" extra={<CloudUploadOutlined />}>
+    <Card title="2. 生成并编辑 Ingress YAML">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={!selectedCandidate || !normalizedDomain || candidatesLoading || dryRunning || writingTenantDomain || creating}>生成 YAML 预览</Button></Space>
         {preview ? <Input.TextArea value={manifestYaml} onChange={(event) => { setManifestYaml(event.target.value); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined); }} rows={18} spellCheck={false} /> : <Text type="secondary">选择源站并填写域名后生成预览。</Text>}
