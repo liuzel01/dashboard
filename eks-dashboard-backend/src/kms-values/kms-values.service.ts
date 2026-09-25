@@ -2,10 +2,10 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException,
 import { createHash } from 'crypto';
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { fromInstanceMetadata, fromTemporaryCredentials } from '@aws-sdk/credential-providers';
-import { verifySync } from 'otplib';
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
+import { verifyTotpCode } from '../auth/mfa';
 import { EnvironmentsService } from '../environments/environments.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 
@@ -66,7 +66,7 @@ export class KmsValuesService {
   }
   private assertMfa(actor: Actor, code: string) {
     if (!actor.mfaEnabled || !actor.mfaSecret) throw new BadRequestException('当前账号未启用 Google Authenticator MFA');
-    if (!verifySync({ strategy: 'totp', secret: actor.mfaSecret, token: String(code || '').replace(/\s+/g, ''), epochTolerance: 0 })) throw new UnauthorizedException('Google 验证码错误');
+    if (!verifyTotpCode(actor.mfaSecret, code)) throw new UnauthorizedException('Google 验证码错误');
   }
   private digest(value: string) { return createHash('sha256').update(value).digest('hex'); }
   private async record(actor: Actor, action: string, environmentId: string, input: string, configuration: KmsConfiguration, meta: { ip?: string | null; userAgent?: string | null }) {

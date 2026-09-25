@@ -7,7 +7,6 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { verifySync } from 'otplib';
 import {
   fromInstanceMetadata,
   fromTemporaryCredentials,
@@ -23,6 +22,7 @@ import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import JSZip from 'jszip';
 import { createPrivateKey } from 'crypto';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
+import { verifyTotpCode } from '../auth/mfa';
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
 import { AuditService } from '../audit/audit.service';
@@ -62,14 +62,8 @@ export class SslCertificatesService {
     private readonly environmentsService: EnvironmentsService,
   ) {}
 
-  private normalizeOtpCode(code?: string) {
-    return String(code || '').replace(/\s+/g, '');
-  }
-
   private verifyMfa(secret: string, code?: string) {
-    const token = this.normalizeOtpCode(code);
-    if (!secret || !token) return false;
-    return verifySync({ strategy: 'totp', secret, token });
+    return verifyTotpCode(secret, code);
   }
 
   private ensurePermission(actor: ActorContext) {

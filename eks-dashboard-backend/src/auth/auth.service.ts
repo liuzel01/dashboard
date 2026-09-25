@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
-import { generateSecret, generateURI, verifySync } from 'otplib';
+import { generateSecret, generateURI } from 'otplib';
 import * as qrcode from 'qrcode';
 import * as jwt from 'jsonwebtoken';
 import jwksRsa from 'jwks-rsa';
@@ -9,6 +9,7 @@ import axios from 'axios';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AccessControlService } from '../access-control/access-control.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
+import { verifyTotpCode } from './mfa';
 
 const verifyPassword = (password: string, stored: string) => {
   const [salt, hash] = String(stored || '').split('$');
@@ -16,8 +17,6 @@ const verifyPassword = (password: string, stored: string) => {
   const computed = createHash('sha256').update(`${salt}:${password}`).digest('hex');
   return computed === hash;
 };
-
-const normalizeOtpCode = (code?: string) => String(code || '').replace(/\s+/g, '');
 
 const isAdminUsername = (username: string) => username.trim().toLowerCase() === 'admin';
 
@@ -263,9 +262,7 @@ export class AuthService {
   }
 
   private verifyMfaCode(secret: string, code?: string) {
-    const token = normalizeOtpCode(code);
-    if (!secret || !token) return false;
-    return verifySync({ strategy: 'totp', secret, token });
+    return verifyTotpCode(secret, code);
   }
 
   async verifyMfaForUser(userId: number, code?: string) {
