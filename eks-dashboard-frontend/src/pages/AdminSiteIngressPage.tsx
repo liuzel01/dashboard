@@ -48,7 +48,7 @@ const AdminSiteIngressPage: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    setTenants([]); setTenantId(undefined); setPreview(undefined); setManifestYaml(''); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined);
+    setTenants([]); setTenantId(undefined); setCandidates([]); setCandidateKey(undefined); setPreview(undefined); setManifestYaml(''); setIngressName(''); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined);
     if (!currentEnvironment?.id) return;
     getTenantsForEnvironment(currentEnvironment.id).then((data) => {
       if (cancelled) return;
@@ -61,7 +61,12 @@ const AdminSiteIngressPage: React.FC = () => {
   const resetDownstream = () => { setPreview(undefined); setManifestYaml(''); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined); };
   const loadCandidates = async () => {
     if (!currentEnvironment?.id) return;
-    setCandidatesLoading(true); setCandidates([]); setCandidateKey(undefined); resetDownstream();
+    if (previewing) {
+      message.info('请等待当前 YAML 预览完成后再加载候选 Ingress');
+      return;
+    }
+    // 候选加载开启新的配置轮次，不能沿用上一域名的 Ingress 名称或预览结果。
+    setCandidatesLoading(true); setCandidates([]); setCandidateKey(undefined); setIngressName(''); resetDownstream();
     try {
       const response = await getIngressSourceCandidatesForLineOnboarding({ environmentId: currentEnvironment.id, keyword: candidateKeyword.trim() || undefined }) as { data?: { items?: Candidate[] } };
       const values = response?.data?.items || [];
@@ -125,14 +130,14 @@ const AdminSiteIngressPage: React.FC = () => {
     <Card title="1. 选择管理端域名和 Ingress 源站">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Descriptions size="small" column={1}><Descriptions.Item label="目标环境">{currentEnvironment?.name || currentEnvironment?.id || '未选择'}</Descriptions.Item></Descriptions>
-        <Space wrap><Select value={tenantId} loading={!tenants.length && !!currentEnvironment} onChange={(value) => { setTenantId(value); resetDownstream(); }} style={{ width: 280 }} placeholder="选择目标租户" options={tenants.map((tenant) => ({ value: tenant.id, label: `${tenant.id} - ${tenant.name}` }))} showSearch optionFilterProp="label" /><Input value={domain} onChange={(event) => { setDomain(event.target.value); resetDownstream(); }} placeholder="新管理端域名，例如 admin.example.com" style={{ width: 320 }} /></Space>
-        <Space wrap><Input value={candidateKeyword} onChange={(event) => setCandidateKeyword(event.target.value)} onPressEnter={() => void loadCandidates()} placeholder="按名称或 Host 筛选候选 Ingress" style={{ width: 320 }} /><Button icon={<FileSearchOutlined />} loading={candidatesLoading} onClick={() => void loadCandidates()}>加载候选 Ingress</Button></Space>
-        {candidates.length ? <Select value={candidateKey} onChange={(value) => { setCandidateKey(value); resetDownstream(); }} style={{ width: '100%' }} options={candidates.map((candidate) => ({ value: `${candidate.namespace}/${candidate.name}`, label: `${candidate.namespace}/${candidate.name}${candidate.ruleHosts?.length ? ` · ${candidate.ruleHosts.join(', ')}` : ''}` }))} showSearch optionFilterProp="label" /> : null}
+        <Space wrap><Select value={tenantId} loading={!tenants.length && !!currentEnvironment} onChange={(value) => { setTenantId(value); setIngressName(''); resetDownstream(); }} style={{ width: 280 }} placeholder="选择目标租户" options={tenants.map((tenant) => ({ value: tenant.id, label: `${tenant.id} - ${tenant.name}` }))} showSearch optionFilterProp="label" /><Input value={domain} onChange={(event) => { setDomain(event.target.value); setIngressName(''); resetDownstream(); }} placeholder="新管理端域名，例如 admin.example.com" style={{ width: 320 }} /></Space>
+        <Space wrap><Input value={candidateKeyword} onChange={(event) => setCandidateKeyword(event.target.value)} onPressEnter={() => void loadCandidates()} placeholder="按名称或 Host 筛选候选 Ingress" style={{ width: 320 }} /><Button icon={<FileSearchOutlined />} loading={candidatesLoading} disabled={previewing} onClick={() => void loadCandidates()}>加载候选 Ingress</Button></Space>
+        {candidates.length ? <Select value={candidateKey} onChange={(value) => { setCandidateKey(value); setIngressName(''); resetDownstream(); }} style={{ width: '100%' }} options={candidates.map((candidate) => ({ value: `${candidate.namespace}/${candidate.name}`, label: `${candidate.namespace}/${candidate.name}${candidate.ruleHosts?.length ? ` · ${candidate.ruleHosts.join(', ')}` : ''}` }))} showSearch optionFilterProp="label" /> : null}
       </Space>
     </Card>
     <Card title="2. 生成并编辑 Ingress YAML" extra={<CloudUploadOutlined />}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={!selectedCandidate || !normalizedDomain}>生成 YAML 预览</Button></Space>
+        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={!selectedCandidate || !normalizedDomain || candidatesLoading}>生成 YAML 预览</Button></Space>
         {preview ? <Input.TextArea value={manifestYaml} onChange={(event) => { setManifestYaml(event.target.value); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined); }} rows={18} spellCheck={false} /> : <Text type="secondary">选择源站并填写域名后生成预览。</Text>}
       </Space>
     </Card>
