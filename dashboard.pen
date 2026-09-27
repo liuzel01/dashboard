@@ -9686,6 +9686,108 @@
       "fill": "#CCCCCC",
       "width": 1,
       "height": 1
+    },
+    {
+      "type": "frame",
+      "id": "P0uif",
+      "x": 2600,
+      "y": 0,
+      "name": "Phase0/UIFoundation",
+      "width": 1280,
+      "height": 1840,
+      "fill": "#F5F6FA",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": [32, 32],
+      "children": [
+        {
+          "type": "text",
+          "id": "P0tit",
+          "fill": "#1F1F1F",
+          "content": "Dashboard UI Foundation — Phase 0",
+          "fontFamily": "Inter",
+          "fontSize": 24,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "P0sub",
+          "fill": "#595959",
+          "content": "真实菜单、路由和环境上下文为基线；以下为 Phase 1–3 的组件与试点页面设计镜像。",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "P0cmp",
+          "name": "Section/ComponentInventory",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "P0cti",
+              "fill": "#1F1F1F",
+              "content": "Reusable components",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "P0row",
+              "width": "fill_container",
+              "layout": "horizontal",
+              "gap": 12,
+              "children": [
+                {"type":"frame","id":"CappS","name":"Cmp/AppShell","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"TappS","fill":"#1677FF","content":"AppShell\nHeader · Sider · Workspace","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"CpgHd","name":"Cmp/PageHeader","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"TpgHd","fill":"#1677FF","content":"PageHeader\nTitle · Scope · Actions","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"Cfltr","name":"Cmp/FilterBar","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"Tfltr","fill":"#1677FF","content":"FilterBar\nQuery · Reset · Tools","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"Cmetr","name":"Cmp/MetricCard","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"Tmetr","fill":"#1677FF","content":"MetricCard\nValue · Hint · State","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"CopsT","name":"Cmp/OpsTable","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"TopsT","fill":"#1677FF","content":"OpsTable\nDensity · Empty · Error","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"Cstat","name":"Cmp/StatusBadge","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"Tstat","fill":"#1677FF","content":"StatusBadge\nText + color + icon","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"Cdraw","name":"Cmp/DetailDrawer","width":142,"height":92,"fill":"#FFFFFF","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#D9D9D9"},"padding":[12,12],"children":[{"type":"text","id":"Tdraw","fill":"#1677FF","content":"DetailDrawer\nEvidence · Diagnostics","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]},
+                {"type":"frame","id":"Crisk","name":"Cmp/RiskConfirm","width":142,"height":92,"fill":"#FFF7E6","cornerRadius":8,"stroke":{"align":"inside","thickness":1,"fill":"#FFD591"},"padding":[12,12],"children":[{"type":"text","id":"Trisk","fill":"#AD4E00","content":"RiskConfirm\nEnvironment · Impact","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}]}
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "P0states",
+          "name": "Section/StatusVocabulary",
+          "width": "fill_container",
+          "layout": "horizontal",
+          "gap": 10,
+          "padding": [16, 16],
+          "fill": "#FFFFFF",
+          "cornerRadius": 8,
+          "children": [
+            {"type":"text","id":"Ssucc","fill":"#389E0D","content":"✓ 已完成 / 已恢复","fontFamily":"Inter","fontSize":13,"fontWeight":"600"},
+            {"type":"text","id":"Sprog","fill":"#1677FF","content":"◌ 处理中","fontFamily":"Inter","fontSize":13,"fontWeight":"600"},
+            {"type":"text","id":"Swarn","fill":"#D48806","content":"! 受阻 / 已确认 / 不支持","fontFamily":"Inter","fontSize":13,"fontWeight":"600"},
+            {"type":"text","id":"Sfail","fill":"#CF1322","content":"× 告警中 / 异常 / 失败","fontFamily":"Inter","fontSize":13,"fontWeight":"600"},
+            {"type":"text","id":"Sunkn","fill":"#595959","content":"? 未知 / 未确认","fontFamily":"Inter","fontSize":13,"fontWeight":"600"}
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "P0pages",
+          "name": "Section/PilotPages",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {"type":"text","id":"P0pti","fill":"#1F1F1F","content":"Pilot page frames","fontFamily":"Inter","fontSize":18,"fontWeight":"700"},
+            {"type":"frame","id":"Pdep0","name":"Page/Deployments/Phase0","width":"fill_container","height":170,"fill":"#FFFFFF","cornerRadius":8,"padding":[16,16],"layout":"vertical","gap":10,"children":[{"type":"text","id":"Dhead","fill":"#1F1F1F","content":"EKS 部署  |  当前环境：{Environment}  |  [刷新]","fontFamily":"Inter","fontSize":16,"fontWeight":"700"},{"type":"text","id":"Dbody","fill":"#595959","content":"Cmp/FilterBar → Cmp/MetricCard（已完成、发布中、受阻、异常） → Cmp/OpsTable → Cmp/DetailDrawer（诊断、镜像历史、回退）","fontFamily":"Inter","fontSize":13,"fontWeight":"normal"},{"type":"text","id":"Dst","fill":"#1677FF","content":"State/Loading · State/Empty · State/Error","fontFamily":"Inter","fontSize":12,"fontWeight":"600"}]},
+            {"type":"frame","id":"Psite0","name":"Page/SiteMonitors/Phase0","width":"fill_container","height":170,"fill":"#FFFFFF","cornerRadius":8,"padding":[16,16],"layout":"vertical","gap":10,"children":[{"type":"text","id":"Shead","fill":"#1F1F1F","content":"站点监控  |  当前环境：{Environment}  |  [刷新]","fontFamily":"Inter","fontSize":16,"fontWeight":"700"},{"type":"text","id":"Sbody","fill":"#595959","content":"Cmp/FilterBar → Cmp/MetricCard（可用性、延迟、证书期限、最近失败） → Cmp/OpsTable → Cmp/DetailDrawer（DNS / TCP / HTTP / SSL 证据）","fontFamily":"Inter","fontSize":13,"fontWeight":"normal"},{"type":"text","id":"Sstt0","fill":"#1677FF","content":"State/Loading · State/Empty · State/Error","fontFamily":"Inter","fontSize":12,"fontWeight":"600"}]},
+            {"type":"frame","id":"Poncl0","name":"Page/Oncall/Phase0","width":"fill_container","height":170,"fill":"#FFFFFF","cornerRadius":8,"padding":[16,16],"layout":"vertical","gap":10,"children":[{"type":"text","id":"Ohead","fill":"#1F1F1F","content":"Oncall 告警  |  当前环境：{Environment}  |  [刷新]","fontFamily":"Inter","fontSize":16,"fontWeight":"700"},{"type":"text","id":"Obody","fill":"#595959","content":"Cmp/MetricCard（告警中、已确认、升级中、已恢复） → Cmp/OpsTable → Cmp/DetailDrawer（标签、通知、升级时间线、ACK）","fontFamily":"Inter","fontSize":13,"fontWeight":"normal"},{"type":"text","id":"Ostt0","fill":"#D48806","content":"State/Loading · State/Empty · State/Error · State/Unsupported","fontFamily":"Inter","fontSize":12,"fontWeight":"600"}]},
+            {"type":"frame","id":"Passt0","name":"Page/AssetManagementOverview/Phase0","width":"fill_container","height":170,"fill":"#FFFFFF","cornerRadius":8,"padding":[16,16],"layout":"vertical","gap":10,"children":[{"type":"text","id":"Ahead","fill":"#1F1F1F","content":"资产总览  |  当前环境：{Environment}  |  [刷新]","fontFamily":"Inter","fontSize":16,"fontWeight":"700"},{"type":"text","id":"Abody","fill":"#595959","content":"Cmp/MetricCard（资源完整性、缺失负责人、凭证引用） → Cmp/OpsTable → Cmp/DetailDrawer（资源关系、变更记录）","fontFamily":"Inter","fontSize":13,"fontWeight":"normal"},{"type":"text","id":"Astt0","fill":"#1677FF","content":"State/Loading · State/Empty · State/Error","fontFamily":"Inter","fontSize":12,"fontWeight":"600"}]}
+          ]
+        }
+      ]
     }
   ]
 }

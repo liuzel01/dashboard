@@ -11,7 +11,25 @@ import '@ant-design/v5-patch-for-react-19';
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {/* 1. 将路由包裹在最外层 */}
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: '#1677ff',
+          colorInfo: '#1677ff',
+          colorSuccess: '#389e0d',
+          colorWarning: '#d48806',
+          colorError: '#cf1322',
+          colorBgLayout: '#f5f7fa',
+          borderRadius: 8,
+          fontFamily: 'Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif',
+        },
+        components: {
+          Layout: { headerBg: '#ffffff', siderBg: '#0f2741' },
+          Menu: { darkItemBg: '#0f2741', darkSubMenuItemBg: '#0b2037', darkItemSelectedBg: '#1677ff' },
+        },
+      }}
+    >
       <BrowserRouter>
         {/* 2. 将 Ant Design 的 App 上下文包裹在路由内部 */}
         <AntApp>

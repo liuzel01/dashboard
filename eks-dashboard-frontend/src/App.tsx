@@ -1,8 +1,8 @@
 import React, { useContext, useState } from 'react';
-import { Layout, Menu, Select, Spin, Alert, Space, Button, Typography } from 'antd';
+import { Select, Spin, Alert, Space, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, MenuFoldOutlined, MenuUnfoldOutlined, AlertOutlined } from '@ant-design/icons';
+import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, AlertOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -34,9 +34,7 @@ import { EnvironmentContext, EnvironmentProvider } from './contexts/EnvironmentC
 import { AuthContext, AuthProvider } from './contexts/AuthContext';
 import './App.css';
 import Home from './pages/Home';
-
-const { Header, Content, Sider } = Layout;
-const { Text } = Typography;
+import AppShell from './components/AppShell';
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, refreshEnvironments, loading, error } = useContext(EnvironmentContext);
@@ -304,58 +302,18 @@ const AppLayout: React.FC = () => {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        breakpoint="lg"
-        collapsed={siderCollapsed}
-        collapsedWidth={64}
-        trigger={null}
-        onCollapse={handleSiderCollapse}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', minHeight: 64, padding: '0 12px' }}>
-          {!siderCollapsed && <div className="logo" style={{ flex: 1, margin: 0 }}>运维支持系统</div>}
-          <Button
-            type="text"
-            aria-label={siderCollapsed ? '展开侧边栏' : '收起侧边栏'}
-            icon={siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => handleSiderCollapse(!siderCollapsed)}
-            style={{ color: '#fff', flexShrink: 0, marginLeft: siderCollapsed ? 0 : 8 }}
-          />
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          defaultOpenKeys={openKeys}
-          items={visibleMenuItems}
-        />
-      </Sider>
-      <Layout
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: '100vh',
-        }}
-      >
-        <Header
-          style={{
-            padding: '0 24px',
-            background: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <EnvironmentSwitcher />
-          <Space size={12}>
-            <Text type="secondary">{identityLabel}</Text>
-            <Button onClick={handleLogout}>退出登录</Button>
-          </Space>
-        </Header>
-        <Content style={{ margin: '24px 16px', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: 24, background: '#fff', borderRadius: '8px', flex: 1}}>
-            {authError && <Alert type="error" message={authError} showIcon style={{ marginBottom: 16 }} />}
-            <Routes>
+    <AppShell
+      collapsed={siderCollapsed}
+      onCollapsedChange={handleSiderCollapse}
+      menuItems={visibleMenuItems}
+      selectedKey={selectedKey}
+      defaultOpenKeys={openKeys}
+      headerStart={<EnvironmentSwitcher />}
+      identityLabel={identityLabel}
+      onLogout={handleLogout}
+      authError={authError}
+    >
+      <Routes>
               <Route path="/deployments" element={<ProtectedRoute required={['menu:deployments']}><DeploymentListPage /></ProtectedRoute>} />
               <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
               <Route path="/data-query" element={<ProtectedRoute required={['menu:data-query']}><DataQueryPage /></ProtectedRoute>} />
@@ -402,11 +360,8 @@ const AppLayout: React.FC = () => {
               <Route path="/signal-monitor/daily" element={<ProtectedRoute required={[signalMonitorPermission]}><SignalMonitorDailyPage /></ProtectedRoute>} />
               <Route path="/403" element={<ForbiddenPage />} />
               <Route path="/" element={<Home />} />
-            </Routes>
-          </div>
-        </Content>
-      </Layout>
-    </Layout>
+      </Routes>
+    </AppShell>
   );
 };
 
