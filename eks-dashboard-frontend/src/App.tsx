@@ -141,8 +141,8 @@ const AppLayout: React.FC = () => {
     icon: React.ReactNode,
     items: Array<{ key: string; label: string; icon: React.ReactNode; permission: string }>,
   ): NonNullable<MenuProps['items']>[number] | null => {
-    const visibleItems = authLoading ? items : items.filter((item) => hasPermission(item.permission));
-    if (!authLoading && visibleItems.length === 0) return null;
+    const visibleItems = items.filter((item) => hasPermission(item.permission));
+    if (visibleItems.length === 0) return null;
     return {
       key,
       label,
@@ -150,7 +150,6 @@ const AppLayout: React.FC = () => {
       children: visibleItems.map((item) => ({
         key: item.key,
         label: createMenuLink(item),
-        disabled: authLoading,
       })),
     };
   };
@@ -237,25 +236,23 @@ const AppLayout: React.FC = () => {
   );
 
   const systemManagementChildren: NonNullable<MenuProps['items']> = [
-    ...((authLoading || hasPermission(menuItems.environments.permission))
+    ...(hasPermission(menuItems.environments.permission)
       ? [{
           key: menuItems.environments.key,
           label: createMenuLink(menuItems.environments),
-          disabled: authLoading,
         }]
       : []),
-    ...((authLoading || hasPermission(menuItems.siteConf.permission))
+    ...(hasPermission(menuItems.siteConf.permission)
       ? [{
           key: menuItems.siteConf.key,
           label: createMenuLink(menuItems.siteConf),
-          disabled: authLoading,
         }]
       : []),
-    ...((authLoading || hasPermission(accessControlPermission)) ? [accessControlGroup] : []),
+    ...(hasPermission(accessControlPermission) ? [accessControlGroup] : []),
   ];
 
   const systemManagementGroup: NonNullable<MenuProps['items']>[number] | null =
-    !authLoading && systemManagementChildren.length === 0
+    systemManagementChildren.length === 0
       ? null
       : {
           key: '/system-management',
@@ -266,16 +263,20 @@ const AppLayout: React.FC = () => {
 
   const visibleMenuItems: MenuProps['items'] = [
     cloudResourceGroup,
-    ...((authLoading || hasPermission(assetManagementPermission)) ? [assetManagementGroup] : []),
+    ...(hasPermission(assetManagementPermission) ? [assetManagementGroup] : []),
     lineManagementGroup,
     monitoringGroup,
     opsToolsGroup,
-    ...((authLoading || hasPermission(certStudyPermission)) ? [certStudyGroup] : []),
+    ...(hasPermission(certStudyPermission) ? [certStudyGroup] : []),
     systemManagementGroup,
-    ...((authLoading || hasPermission(signalMonitorPermission)) ? [signalMonitorGroup] : []),
+    ...(hasPermission(signalMonitorPermission) ? [signalMonitorGroup] : []),
   ].filter(Boolean) as MenuProps['items'];
 
-  if (!authLoading && !isAuthenticated) {
+  if (authLoading) {
+    return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}><Spin size="large" /></div>;
+  }
+
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
