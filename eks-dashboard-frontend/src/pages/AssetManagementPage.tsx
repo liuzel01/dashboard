@@ -692,7 +692,7 @@ const AccountManagementTab: React.FC = () => {
   const [accountDomains, setAccountDomains] = useState<AssetDomain[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewPage, setPreviewPage] = useState(1);
-  const [previewPageSize, setPreviewPageSize] = useState(10);
+  const [previewPageSize, setPreviewPageSize] = useState(20);
   const [previewData, setPreviewData] = useState<(AccountAliyunDcdnDomainPreviewResponse | AccountAliyunEsaDomainPreviewResponse | AccountWangsuDomainPreviewResponse) | null>(null);
   const [syncResult, setSyncResult] = useState<(AccountAliyunEsaDomainSyncResponse | AccountAliyunDcdnDomainSyncResponse | AccountWangsuDomainSyncResponse) | null>(null);
 
@@ -1040,7 +1040,7 @@ const AccountManagementTab: React.FC = () => {
                 size="small"
                 loading={accountDomainsLoading}
                 dataSource={accountDomains}
-                pagination={{ pageSize: 5, hideOnSinglePage: true }}
+                pagination={{ pageSize: 20, hideOnSinglePage: true }}
                 scroll={{ x: 900 }}
                 columns={[
                   { title: '域名', dataIndex: 'domain', width: 220 },

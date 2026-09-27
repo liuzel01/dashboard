@@ -577,7 +577,7 @@ const DeploymentListPage: React.FC = () => {
         rowKey="name"
         tableLayout="fixed"
         scroll={{ x: 1550 }}
-        pagination={{ showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+        pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
         error={loadError}
         onRetry={() => fetchDeployments(filter)}
       />

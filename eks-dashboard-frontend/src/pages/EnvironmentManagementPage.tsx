@@ -194,7 +194,7 @@ const EnvironmentManagementPage: React.FC = () => {
           rowKey="id"
           columns={columns}
           dataSource={list}
-          pagination={{ pageSize: 10, showSizeChanger: true }}
+          pagination={{ pageSize: 20, showSizeChanger: true }}
         />
       </Spin>
 

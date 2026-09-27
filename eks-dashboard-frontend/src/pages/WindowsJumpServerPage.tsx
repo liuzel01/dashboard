@@ -159,7 +159,7 @@ const WindowsJumpServerPage: React.FC = () => {
             dataSource={jumpServers}
             rowKey="instanceId"
             // 显式配置分页，以确保在数据量少于一页时也显示分页器，保持UI一致性
-            pagination={{ showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
           />
         </Spin>
       </div>

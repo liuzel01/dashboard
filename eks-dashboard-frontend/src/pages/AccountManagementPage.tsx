@@ -518,7 +518,7 @@ const AccountManagementPage: React.FC = () => {
           columns={userColumns}
           dataSource={users}
           loading={loading}
-          pagination={{ pageSize: 10, showSizeChanger: true }}
+          pagination={{ pageSize: 20, showSizeChanger: true }}
         />
       </Card>
 
@@ -537,7 +537,7 @@ const AccountManagementPage: React.FC = () => {
           columns={roleColumns}
           dataSource={roles}
           loading={loading}
-          pagination={{ pageSize: 10, showSizeChanger: true }}
+          pagination={{ pageSize: 20, showSizeChanger: true }}
         />
       </Card>
 

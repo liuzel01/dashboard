@@ -2538,7 +2538,7 @@ const LineOnboardingPage: React.FC = () => {
             rowKey="key"
             loading={ingressCandidatesLoading}
             dataSource={ingressCandidates}
-            pagination={{ defaultPageSize: 10, pageSizeOptions: ['10', '20', '50'], showSizeChanger: true, showTotal: (total) => `共 ${total} 个候选源站` }}
+            pagination={{ defaultPageSize: 20, pageSizeOptions: ['10', '20', '50'], showSizeChanger: true, showTotal: (total) => `共 ${total} 个候选源站` }}
             rowSelection={{
               type: 'radio',
               selectedRowKeys: selectedIngressCandidateKey ? [selectedIngressCandidateKey] : [],
