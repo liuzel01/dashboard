@@ -66,6 +66,14 @@ Phase 0 的范围确认、试点确认、状态词典和 `.pen` 同步规则已�
 - 四页主查询均已保留原错误提示，并新增可见错误态与重试入口；未更改 API、路由、权限、环境选择、dry-run、回退、ACK 或审计调用。
 - 验证：`npm run build --prefix eks-dashboard-frontend` 通过，`git diff --check` 通过。全仓既有 lint 错误仍未纳入本阶段范围。
 
+## Phase 4 执行记录（2026-09-27）
+
+- 已将 `PageHeader` 推广到线路总览、Signal Monitor 实时、SiteConf 配置与新增线路向导；Signal Monitor 实时页进一步使用 `FilterBar`、`MetricGrid` 和 `OpsTable`。这保持了已有读取、自动刷新、向导步骤和外部验收动作的业务行为不变。
+- SiteConf 删除确认已迁移到 `RiskConfirm`，明确展示目标配置和“回退到环境变量/系统默认值”的实际影响；后端权限与敏感值处理未变。
+- 已评估历史 Tab / 页面保活：**当前不启用。** 全局环境切换、按路由实时计算的权限菜单，以及新增线路/配置写入页的未保存草稿均可能在恢复旧页面时携带过期上下文。后续只有在定义环境切换失效规则、权限重新校验和草稿恢复/丢弃策略，并完成真实多任务使用验证后，才单独立项试点。
+- 其余 Signal Monitor 子页和普通配置/列表页可继续复用本阶段组件，但不以一次跨页重构为前提；新页面默认从 `PageHeader`、`FilterBar`、`OpsTable` 开始。
+- 验证：`npm run build --prefix eks-dashboard-frontend` 通过，`git diff --check` 通过。
+
 ## 1. 结论
 
 本次采用“蒸馏设计模式、保留业务语义”的路径：借鉴 `web-admin-new` 成熟后台在页面层级、数据密集型列表、指标卡片、筛选工具栏、多任务切换方面的做法；**不**复制其商户后台业务、菜单权限模型、接口封装、路由缓存实现或主题色。

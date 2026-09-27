@@ -36,6 +36,7 @@ import {
   syncRoute53CnameForLineOnboarding,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { PageHeader } from '../components/ops';
 import TenantLinesTable from '../components/TenantLinesTable';
 import { buildProbeDetailUrl, getProbeDetailBaseUrl } from '../utils/probeDashboard';
 
@@ -1633,12 +1634,11 @@ const LineOnboardingPage: React.FC = () => {
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginBottom: 6 }}>
-        新增线路向导
-      </Typography.Title>
-      <Text type="secondary">
-        按步骤执行并确认，最后通过外部系统接口验收。当前阶段以“可跑通流程”为主。
-      </Text>
+      <PageHeader
+        title="新增线路向导"
+        description="按步骤执行并确认，最后通过外部系统接口验收。当前阶段以可跑通流程为主。"
+        environmentName={currentEnvironment?.name}
+      />
 
       <Card style={{ marginTop: 16, marginBottom: 16 }}>
         <Steps

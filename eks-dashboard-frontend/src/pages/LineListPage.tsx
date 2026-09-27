@@ -3,6 +3,7 @@ import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Select, S
 import { getLineInventory, getTenantsForEnvironment, previewDcdnSslSyncForLine, syncDcdnSslForLine } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import { buildProbeDetailUrl } from '../utils/probeDashboard';
+import { PageHeader } from '../components/ops';
 
 type TenantOption = {
   id: number;
@@ -332,6 +333,11 @@ const LineListPage: React.FC = () => {
 
   return (
     <div>
+      <PageHeader
+        title="线路总览"
+        description="按租户、线路、服务商和可用性查看线路库存；强制刷新仍沿用现有探测与查询流程。"
+        environmentName={currentEnvironment?.name}
+      />
       <Form
         form={form}
         layout="inline"

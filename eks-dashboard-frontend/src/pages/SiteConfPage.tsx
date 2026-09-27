@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { deleteDashboardSiteConf, getDashboardSiteConfCategories, getDashboardSiteConfList, saveDashboardSiteConf } from '../services/api';
+import { FilterBar, PageHeader, RiskConfirm } from '../components/ops';
 
 const { Text, Paragraph } = Typography;
 
@@ -266,6 +267,11 @@ const SiteConfPage: React.FC = () => {
 
   return (
     <>
+      <PageHeader
+        title="SiteConf 配置"
+        description="维护 Dashboard 运行期配置；敏感项的授权、写入和回退语义仍由现有接口与后端控制。"
+        actions={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增配置</Button>}
+      />
       <Alert
         type="info"
         showIcon
@@ -274,13 +280,12 @@ const SiteConfPage: React.FC = () => {
         description="这里维护 dashboard 项目自身运行期配置。启动必需配置（例如 DB_*）仍保留在 .env；敏感配置仅管理员可维护，当前接口仍会返回明文，请谨慎授权。"
       />
 
-      <Space style={{ marginBottom: 16 }} wrap>
+      <FilterBar>
         <Input allowClear placeholder="搜索 key / 说明" value={keyword} onChange={(e) => setKeyword(e.target.value)} onPressEnter={() => fetchList(1, size, keyword, category)} style={{ width: 280 }} />
         <Select allowClear placeholder="分类" value={category} onChange={(v) => setCategory(v)} options={categories.map((c) => ({ label: c, value: c }))} style={{ width: 180 }} />
         <Button type="primary" icon={<SearchOutlined />} onClick={() => fetchList(1, size, keyword, category)}>搜索</Button>
         <Button icon={<ReloadOutlined />} onClick={() => fetchList(page, size, keyword, category)}>刷新</Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增配置</Button>
-      </Space>
+      </FilterBar>
 
       {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />}
 
@@ -303,13 +308,14 @@ const SiteConfPage: React.FC = () => {
         />
       </Spin>
 
-      <Modal
+      <RiskConfirm
         title="确认删除 Siteconf 配置？"
         open={Boolean(deleteTarget)}
+        resourceName={deleteTarget?.confKey}
+        impact="删除后将移除当前 Siteconf 配置；如该项存在环境变量或系统默认值，程序将自动回退使用它。"
         onCancel={() => !deletingKey && setDeleteTarget(null)}
         onOk={() => void handleDelete()}
         okText="确认删除"
-        okButtonProps={{ danger: true }}
         cancelText="取消"
         confirmLoading={Boolean(deletingKey)}
         cancelButtonProps={{ disabled: Boolean(deletingKey) }}
@@ -320,10 +326,7 @@ const SiteConfPage: React.FC = () => {
         <Typography.Paragraph>
           确认删除 <Typography.Text code>{deleteTarget?.confKey}</Typography.Text>？
         </Typography.Paragraph>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          删除后将移除当前 Siteconf 配置；如该项存在环境变量或系统默认值，程序将自动回退使用它。
-        </Typography.Paragraph>
-      </Modal>
+      </RiskConfirm>
 
       <Modal
         title={editing ? '编辑 siteconf 配置' : '新增 siteconf 配置'}

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Input, Row, Space, Table, Tag, Switch, Empty, Tooltip } from 'antd';
+import { Alert, Button, Input, Space, Tag, Switch, Empty, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { getSignalMonitorRealtime } from '../services/signalMonitorApi';
 import type { RealtimeItem } from '../services/signalMonitorApi';
+import { FilterBar, MetricGrid, OpsTable, PageHeader } from '../components/ops';
 
 const SignalMonitorRealtimePage: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -94,24 +95,20 @@ const SignalMonitorRealtimePage: React.FC = () => {
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
+      <PageHeader
+        title="Signal Monitor 实时"
+        description="展示当前活跃信号；自动刷新只更新读模型，不触发外部通知或写入。"
+      />
       {error && <Alert type="error" showIcon message={error} />}
 
-      <Row gutter={16}>
-        <Col span={6}>
-          <Card title="活跃信号数">{filteredRows.length}</Card>
-        </Col>
-        <Col span={6}>
-          <Card title="高优先级信号">{highCount}</Card>
-        </Col>
-        <Col span={6}>
-          <Card title="v0.2建议发送数">{v02EmitCount}</Card>
-        </Col>
-        <Col span={6}>
-          <Card title="最近刷新时间">{lastTs || '-'}</Card>
-        </Col>
-      </Row>
+      <MetricGrid loading={loading} items={[
+        { key: 'active', label: '活跃信号数', value: filteredRows.length },
+        { key: 'high', label: '高优先级信号', value: highCount, valueStyle: { color: '#cf1322' } },
+        { key: 'emit', label: 'v0.2 建议发送数', value: v02EmitCount, valueStyle: { color: '#389e0d' } },
+        { key: 'updated', label: '最近刷新时间', value: lastTs || '-' },
+      ]} />
 
-      <Space wrap>
+      <FilterBar actions={<Button onClick={load} loading={loading}>刷新</Button>}>
         <Input
           placeholder="筛选交易对（如 BTC / BTCUSDT）"
           style={{ width: 260 }}
@@ -119,12 +116,11 @@ const SignalMonitorRealtimePage: React.FC = () => {
           onChange={(e) => setSymbolFilter(e.target.value)}
           allowClear
         />
-        <Button onClick={load} loading={loading}>刷新</Button>
         <span>自动刷新</span>
         <Switch checked={autoRefresh} onChange={setAutoRefresh} />
-      </Space>
+      </FilterBar>
 
-      <Table<RealtimeItem>
+      <OpsTable<RealtimeItem>
         rowKey={(r) => `${r.symbol}:${r.timeframe}:${r.rule}:${r.direction}`}
         loading={loading}
         columns={columns}
@@ -152,6 +148,8 @@ const SignalMonitorRealtimePage: React.FC = () => {
           rowExpandable: (record) => !!record.v02_breakdown?.length,
         }}
         locale={{ emptyText: <Empty description="暂无实时信号" /> }}
+        error={error}
+        onRetry={load}
       />
     </Space>
   );
