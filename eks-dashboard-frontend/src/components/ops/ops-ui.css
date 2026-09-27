@@ -1,0 +1,133 @@
+.ops-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.ops-page-header__main {
+  min-width: 0;
+}
+
+.ops-page-header__title-row,
+.ops-page-header__actions,
+.ops-page-header__meta,
+.ops-filter-bar,
+.ops-filter-bar__fields,
+.ops-filter-bar__actions,
+.ops-detail-drawer__summary,
+.ops-risk-confirm__scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ops-page-header__title {
+  margin: 0;
+  color: #1f1f1f;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.ops-page-header__description {
+  margin: 6px 0 0;
+  color: #595959;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.ops-page-header__meta {
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ops-page-header__actions,
+.ops-filter-bar__actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ops-filter-bar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #fafbfc;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+}
+
+.ops-filter-bar__fields {
+  flex: 1 1 360px;
+  flex-wrap: wrap;
+}
+
+.ops-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.ops-metric-card .ant-card-body {
+  padding: 16px;
+}
+
+.ops-metric-card__hint {
+  display: block;
+  margin-top: 8px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.ops-table__error {
+  margin-bottom: 12px;
+}
+
+.ops-table .ant-table-wrapper {
+  overflow: hidden;
+}
+
+.ops-detail-drawer__summary {
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.ops-risk-confirm__warning {
+  margin: 16px 0;
+}
+
+.ops-risk-confirm__scope {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.ops-risk-confirm__scope-label {
+  color: #595959;
+  font-size: 12px;
+}
+
+@media (max-width: 767px) {
+  .ops-page-header {
+    flex-direction: column;
+  }
+
+  .ops-page-header__actions {
+    justify-content: flex-start;
+  }
+
+  .ops-filter-bar {
+    align-items: stretch;
+  }
+
+  .ops-filter-bar__actions {
+    justify-content: flex-start;
+  }
+}

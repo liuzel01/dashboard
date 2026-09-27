@@ -48,6 +48,14 @@ Phase 0 的范围确认、试点确认、状态词典和 `.pen` 同步规则已�
 - 已在 `main.tsx` 的 `ConfigProvider` 设定 Dashboard 的首批 Ant Design token，包括主色、成功/警告/错误语义色、工作区背景、圆角、字体以及深色导航菜单 token。
 - 验证：`npm run build --prefix eks-dashboard-frontend` 通过；针对 `src/App.tsx` 与 `src/components/AppShell.tsx` 的 ESLint 通过；`git diff --check` 通过。全仓 `npm run lint --prefix eks-dashboard-frontend` 仍报告 163 个既有错误（主要是多处 `any`、既有 Hooks 依赖和 Fast Refresh 规则），本阶段未扩大范围修复这些非 UI 基线问题。
 
+## Phase 2 执行记录（2026-09-27）
+
+- 已新增 `src/components/ops/`，包含 `PageHeader`、`FilterBar`、`MetricGrid`、`StatusBadge`、`OpsTable`、`DetailDrawer`、`RiskConfirm` 和共享样式；通过 `index.ts` 作为统一导出入口。
+- 组件只定义展示与交互容器：它们不调用 API、不读取或写入环境、不自行发起危险操作，也不替换各页面的权限控制、dry-run、确认或审计逻辑。
+- `StatusBadge` 已落实 Phase 0 状态词典中的 completed / progressing / blocked / firing / acked / resolved / unsupported / failed / unknown 等展示映射，并允许页面传入领域专属文案。
+- `OpsTable` 已提供统一的加载失败、重试入口、空态与默认横向滚动；`RiskConfirm` 固定展示目标环境、目标资源和影响说明，但仍由页面传入执行回调。
+- 验证：`npm run build --prefix eks-dashboard-frontend` 通过；新增组件及 AppShell/App 的定向 ESLint 通过；`git diff --check` 通过。全仓既有 lint 错误未纳入本阶段范围。
+
 ## 1. 结论
 
 本次采用“蒸馏设计模式、保留业务语义”的路径：借鉴 `web-admin-new` 成熟后台在页面层级、数据密集型列表、指标卡片、筛选工具栏、多任务切换方面的做法；**不**复制其商户后台业务、菜单权限模型、接口封装、路由缓存实现或主题色。
