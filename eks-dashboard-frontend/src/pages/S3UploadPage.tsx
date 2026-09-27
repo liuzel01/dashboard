@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AutoComplete, Button, Form, Input, Modal, Select, Space, Upload, message, Progress } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { UploadOutlined, ReloadOutlined } from '@ant-design/icons';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { checkS3ObjectExists, getS3Buckets, getEnvironmentConfigs, getS3Prefixes, uploadS3Object } from '../services/api';
 
 type BucketResponse = {
@@ -48,7 +48,7 @@ const S3UploadPage: React.FC = () => {
   const fetchRegionFromConfigs = async () => {
     if (!envId) return;
     const list = await getEnvironmentConfigs();
-    const match = list.find((e: any) => e.id === envId);
+    const match = list.find((environment) => environment.id === envId);
     setRegion(match?.aws_region || '');
   };
 
@@ -59,7 +59,7 @@ const S3UploadPage: React.FC = () => {
       const data: BucketResponse = await getS3Buckets();
       setBuckets(data.buckets || []);
       setRegion(data.region || '');
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getErrorMessage(e) || '加载桶列表失败');
     } finally {
       setLoading(false);
@@ -123,7 +123,7 @@ const S3UploadPage: React.FC = () => {
       const nextPrefixes = data.prefixes || [];
       prefixCacheRef.current[cacheKey] = nextPrefixes;
       setPrefixOptions(buildPrefixOptions(input, nextPrefixes));
-    } catch (e: any) {
+    } catch (e: unknown) {
       setPrefixOptions([{ label: getErrorMessage(e) || '加载 S3 路径失败', value: '__error__', disabled: true }]);
     } finally {
       setPrefixLoading(false);
@@ -191,7 +191,7 @@ const S3UploadPage: React.FC = () => {
         return;
       }
       await doUpload(bucket, key, file);
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getErrorMessage(e) || '上传失败');
     } finally {
       setLoading(false);
@@ -199,12 +199,12 @@ const S3UploadPage: React.FC = () => {
     }
   };
 
-  const getErrorMessage = (e: any) => {
+  const getErrorMessage = (e: unknown) => {
     if (!e) return '';
-    const respMsg = e?.response?.data?.message;
+    const respMsg = (e as ApiError)?.response?.data?.message;
     if (Array.isArray(respMsg)) return respMsg.join('; ');
     if (respMsg) return String(respMsg);
-    return e?.message ? String(e.message) : '';
+    return (e as ApiError)?.message ? String((e as ApiError).message) : '';
   };
 
   const bucketOptions = useMemo(
@@ -313,7 +313,7 @@ const S3UploadPage: React.FC = () => {
             setConfirmOpen(false);
             setLoading(true);
             await doUpload(pendingUpload.bucket, pendingUpload.key, pendingUpload.file);
-          } catch (e: any) {
+          } catch (e: unknown) {
             message.error(getErrorMessage(e) || '上传失败');
           } finally {
             setLoading(false);

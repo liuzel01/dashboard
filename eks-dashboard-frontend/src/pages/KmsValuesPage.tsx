@@ -21,7 +21,7 @@ const KmsValuesPage: React.FC = () => {
   useEffect(() => { getEnvironmentConfigs().then((x) => setEnvs(Array.isArray(x) ? x : [])).catch(() => message.error('环境列表加载失败')); }, [message]);
   useEffect(() => {
     setKmsConfiguration(null);
-    getKmsValueConfiguration(environmentId).then(setKmsConfiguration).catch((e: any) => message.error(e?.response?.data?.message || 'KMS 配置加载失败'));
+    getKmsValueConfiguration(environmentId).then(setKmsConfiguration).catch((e: unknown) => message.error((e as ApiError)?.response?.data?.message || 'KMS 配置加载失败'));
   }, [environmentId, message]);
   const copy = async (value: string) => {
     if (!window.isSecureContext || !navigator.clipboard?.writeText) {
@@ -72,14 +72,14 @@ const KmsValuesPage: React.FC = () => {
     }]} /> : <Alert type="info" showIcon message="此环境暂未启用 KMS 变量值加解密" description={kmsConfiguration.reason} />)}
     <Row gutter={16}>
       <Col xs={24} lg={12}><Card title="加密变量值" extra={<LockOutlined />}>
-        <Form form={encryptForm} layout="vertical" onFinish={async (v) => { setEncrypting(true); try { const r = await encryptKmsValue({ environmentId, value: v.value }); setEncrypted(r.value); message.success('KMS 加密成功'); } catch (e: any) { message.error(e?.response?.data?.message || e?.message || '加密失败'); } finally { setEncrypting(false); } }}>
+        <Form form={encryptForm} layout="vertical" onFinish={async (v) => { setEncrypting(true); try { const r = await encryptKmsValue({ environmentId, value: v.value }); setEncrypted(r.value); message.success('KMS 加密成功'); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || (e as ApiError)?.message || '加密失败'); } finally { setEncrypting(false); } }}>
           <Form.Item name="value" label="明文变量值" rules={[{ required: true, message: '请输入变量值' }]}><Input.TextArea rows={8} autoComplete="off" /></Form.Item>
           <Button htmlType="submit" type="primary" loading={encrypting}>加密</Button>
         </Form>
         {encrypted && <><Text strong style={{ display: 'block', marginTop: 16 }}>加密结果</Text><Input.TextArea value={encrypted} readOnly rows={6} /><Button icon={<CopyOutlined />} style={{ marginTop: 8 }} onClick={() => copy(encrypted)}>复制密文</Button></>}
       </Card></Col>
       <Col xs={24} lg={12}><Card title="解密变量值" extra={<UnlockOutlined />}>
-        <Form form={decryptForm} layout="vertical" onFinish={async (v) => { setDecrypted(''); setDecrypting(true); try { const r = await decryptKmsValue({ environmentId, value: v.value, otpCode: v.otpCode }); setDecrypted(r.value); message.success('KMS 解密成功'); } catch (e: any) { setDecrypted(''); message.error(e?.response?.data?.message || e?.message || '解密失败'); } finally { setDecrypting(false); } }}>
+        <Form form={decryptForm} layout="vertical" onFinish={async (v) => { setDecrypted(''); setDecrypting(true); try { const r = await decryptKmsValue({ environmentId, value: v.value, otpCode: v.otpCode }); setDecrypted(r.value); message.success('KMS 解密成功'); } catch (e: unknown) { setDecrypted(''); message.error((e as ApiError)?.response?.data?.message || (e as ApiError)?.message || '解密失败'); } finally { setDecrypting(false); } }}>
           <Form.Item name="value" label="{kms-app} 密文" rules={[{ required: true, message: '请输入密文' }]}><Input.TextArea rows={6} autoComplete="off" /></Form.Item>
           <Form.Item name="otpCode" label="Google 验证码" rules={[{ required: true, message: '请输入验证码' }]}><Input.Password maxLength={12} autoComplete="one-time-code" /></Form.Item>
           <Button htmlType="submit" danger loading={decrypting}>验证 MFA 并解密</Button>

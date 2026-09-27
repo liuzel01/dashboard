@@ -21,8 +21,8 @@ const SignalMonitorStatsPage: React.FC = () => {
     try {
       const data = await getSignalMonitorStats24h();
       setStats(data);
-    } catch (e: any) {
-      setError(e?.message || '加载 stats 失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载 stats 失败');
     } finally {
       setLoading(false);
     }

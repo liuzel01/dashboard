@@ -18,8 +18,8 @@ type AuditLog = {
   action_name?: string;
   target_type?: string;
   target_id?: string;
-  request_summary?: any;
-  response_summary?: any;
+  request_summary?: unknown;
+  response_summary?: unknown;
   status?: string;
   status_code?: number;
   error_message?: string;
@@ -29,7 +29,7 @@ type AuditLog = {
   trace_id?: string;
 };
 
-const parseJsonMaybe = (value: any) => {
+const parseJsonMaybe = (value: unknown): unknown => {
   if (!value || typeof value !== 'string') return value;
   try { return JSON.parse(value); } catch { return value; }
 };
@@ -57,7 +57,7 @@ const renderOperation = (row: AuditLog) => {
   return <Text code>{operation}</Text>;
 };
 
-const renderJson = (value: any) => {
+const renderJson = (value: unknown) => {
   const parsed = parseJsonMaybe(value);
   if (parsed === null || parsed === undefined || parsed === '') return '-';
   return <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>{JSON.stringify(parsed, null, 2)}</pre>;
@@ -93,8 +93,8 @@ const AuditLogPage: React.FC = () => {
       setTotal(resp.total || 0);
       setPage(resp.page || nextPage);
       setPageSize(resp.pageSize || nextPageSize);
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || '加载审计日志失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.response?.data?.message || (e as ApiError)?.message || '加载审计日志失败');
     } finally {
       setLoading(false);
     }

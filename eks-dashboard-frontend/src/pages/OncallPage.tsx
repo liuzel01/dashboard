@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Form, Input, Popconfirm, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { acknowledgeOncallAlert, deleteOncallRoster, getOncallAlert, listOncallAlerts, listOncallRoster, saveOncallRoster, type OncallAlert, type OncallAlertStatus, type OncallRosterBinding, type OncallRosterLevel } from '../services/api';
 import { DetailDrawer, FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
@@ -43,8 +43,8 @@ const OncallPage: React.FC = () => {
       const result = await listOncallAlerts({ page: 1, pageSize: 100, status, environmentId, keyword: keyword.trim() || undefined });
       setItems(result.items);
       setTotal(result.total);
-    } catch (error: any) {
-      const errorMessage = error?.response?.data?.message || error?.message || 'Oncall 告警加载失败';
+    } catch (error: unknown) {
+      const errorMessage = (error as ApiError)?.response?.data?.message || (error as ApiError)?.message || 'Oncall 告警加载失败';
       setLoadError(errorMessage);
       message.error(errorMessage);
     } finally {
@@ -57,7 +57,7 @@ const OncallPage: React.FC = () => {
   const loadRoster = async () => {
     setRosterLoading(true);
     try { setRoster(await listOncallRoster(environmentId)); }
-    catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置加载失败'); }
+    catch (error: unknown) { message.error((error as ApiError)?.response?.data?.message || (error as ApiError)?.message || '值班配置加载失败'); }
     finally { setRosterLoading(false); }
   };
   useEffect(() => { void loadRoster(); }, [environmentId]);
@@ -73,13 +73,13 @@ const OncallPage: React.FC = () => {
     try {
       await saveOncallRoster({ id: editingRosterId, environmentId: rosterEnvironmentId || currentEnvironment?.id || 'mgbx', ...values });
       message.success(editingRosterId ? '值班配置已更新' : '值班配置已保存'); rosterForm.resetFields(); setEditingRosterId(undefined); await loadRoster();
-    } catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置保存失败'); }
+    } catch (error: unknown) { message.error((error as ApiError)?.response?.data?.message || (error as ApiError)?.message || '值班配置保存失败'); }
     finally { setRosterSaving(false); }
   };
 
   const removeRoster = async (id: number) => {
     try { await deleteOncallRoster(id); message.success('值班配置已删除'); await loadRoster(); }
-    catch (error: any) { message.error(error?.response?.data?.message || error?.message || '值班配置删除失败'); }
+    catch (error: unknown) { message.error((error as ApiError)?.response?.data?.message || (error as ApiError)?.message || '值班配置删除失败'); }
   };
 
   const cancelRosterEdit = () => { setEditingRosterId(undefined); rosterForm.resetFields(); };
@@ -89,8 +89,8 @@ const OncallPage: React.FC = () => {
     setDetailLoading(true);
     try {
       setSelected(await getOncallAlert(alert.id));
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || 'Oncall 告警详情加载失败');
+    } catch (error: unknown) {
+      message.error((error as ApiError)?.response?.data?.message || 'Oncall 告警详情加载失败');
     } finally {
       setDetailLoading(false);
     }
@@ -105,8 +105,8 @@ const OncallPage: React.FC = () => {
       ackForm.resetFields();
       await openDetail(selected);
       await load();
-    } catch (error: any) {
-      message.error(error?.response?.data?.message || '确认告警失败');
+    } catch (error: unknown) {
+      message.error((error as ApiError)?.response?.data?.message || '确认告警失败');
     } finally {
       setAcknowledging(false);
     }

@@ -20,8 +20,8 @@ const SignalMonitorRealtimePage: React.FC = () => {
       const data = await getSignalMonitorRealtime();
       setRows(data.active || []);
       setLastTs(data.ts || '');
-    } catch (e: any) {
-      setError(e?.message || '加载 realtime 失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载 realtime 失败');
     } finally {
       setLoading(false);
     }

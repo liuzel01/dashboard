@@ -148,8 +148,8 @@ const AccountManagementPage: React.FC = () => {
     setError(null);
     try {
       await Promise.all([refreshUsers(), refreshRoles(), refreshPermissions()]);
-    } catch (e: any) {
-      setError(e?.message || '加载账号管理数据失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载账号管理数据失败');
     } finally {
       setLoading(false);
     }
@@ -175,8 +175,8 @@ const AccountManagementPage: React.FC = () => {
       setMfaEnrollment(await startAccessUserMfaEnrollment(user.id));
       setMfaCode('');
       setMfaModalOpen(true);
-    } catch (e: any) {
-      message.error(e?.message || '生成用户 MFA 绑定信息失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '生成用户 MFA 绑定信息失败');
     } finally {
       setMfaSaving(false);
     }
@@ -195,8 +195,8 @@ const AccountManagementPage: React.FC = () => {
       setMfaCode('');
       message.success(`用户 ${mfaUser.username} 的 MFA 已绑定`);
       await refreshUsers();
-    } catch (e: any) {
-      message.error(e?.message || '确认用户 MFA 绑定失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '确认用户 MFA 绑定失败');
     } finally {
       setMfaSaving(false);
     }
@@ -214,8 +214,8 @@ const AccountManagementPage: React.FC = () => {
           await disableAccessUserMfa(user.id);
           message.success(`用户 ${user.username} 的 MFA 已解除`);
           await refreshUsers();
-        } catch (e: any) {
-          message.error(e?.message || '解除用户 MFA 失败');
+        } catch (e: unknown) {
+          message.error((e as ApiError)?.message || '解除用户 MFA 失败');
           throw e;
         } finally {
           setMfaSaving(false);
@@ -273,8 +273,8 @@ const AccountManagementPage: React.FC = () => {
       }
       setUserModalOpen(false);
       await Promise.all([refreshUsers(), refreshRoles()]);
-    } catch (e: any) {
-      message.error(e?.message || '保存用户失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '保存用户失败');
     } finally {
       setUserSaving(false);
     }
@@ -306,8 +306,8 @@ const AccountManagementPage: React.FC = () => {
       }
       setRoleModalOpen(false);
       await Promise.all([refreshRoles(), refreshUsers()]);
-    } catch (e: any) {
-      message.error(e?.message || '保存角色失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '保存角色失败');
     } finally {
       setRoleSaving(false);
     }
@@ -319,8 +319,8 @@ const AccountManagementPage: React.FC = () => {
       await deleteAccessRole(role.id);
       message.success('角色已删除');
       await Promise.all([refreshRoles(), refreshUsers()]);
-    } catch (e: any) {
-      message.error(e?.message || '删除角色失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '删除角色失败');
     } finally {
       setRoleSaving(false);
     }
@@ -346,8 +346,8 @@ const AccountManagementPage: React.FC = () => {
       } else {
         message.success('密码已重置');
       }
-    } catch (e: any) {
-      message.error(e?.message || '重置密码失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '重置密码失败');
     } finally {
       setResetSaving(false);
     }
@@ -366,8 +366,8 @@ const AccountManagementPage: React.FC = () => {
       const latestRoles = await getAccessRoles();
       setRoles(latestRoles || []);
       message.success('权限已更新');
-    } catch (e: any) {
-      message.error(e?.message || '更新权限失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '更新权限失败');
     } finally {
       setPermissionsSaving(false);
     }
@@ -434,7 +434,7 @@ const AccountManagementPage: React.FC = () => {
             title: '操作',
             key: 'action',
             width: 260,
-            render: (_: any, record: AccessUser) => (
+            render: (_: unknown, record: AccessUser) => (
               <Space>
                 <Button type="link" icon={<EditOutlined />} onClick={() => openEditUser(record)}>
                   编辑
@@ -469,7 +469,7 @@ const AccountManagementPage: React.FC = () => {
         title: '操作',
         key: 'action',
         width: 200,
-        render: (_: any, record: AccessRole) => (
+        render: (_: unknown, record: AccessRole) => (
           <Space>
             <Button type="link" onClick={() => openEditRole(record)}>
               编辑
@@ -552,7 +552,7 @@ const AccountManagementPage: React.FC = () => {
               title: '菜单',
               dataIndex: 'name',
               width: 220,
-              render: (_: any, record: AccessPermission) => (
+              render: (_: unknown, record: AccessPermission) => (
                 <div>
                   <div>{record.name}</div>
                   <Text type="secondary" style={{ fontSize: 12 }}>{record.key}</Text>
@@ -564,7 +564,7 @@ const AccountManagementPage: React.FC = () => {
               dataIndex: `role_${role.id}`,
               width: 120,
               align: 'center' as const,
-              render: (_: any, perm: AccessPermission) => (
+              render: (_: unknown, perm: AccessPermission) => (
                 <Checkbox
                   checked={(rolePermissions[role.id] || []).includes(perm.id)}
                   onChange={(e) => togglePermission(role.id, perm.id, e.target.checked)}

@@ -61,8 +61,8 @@ const TenantLinesTable: React.FC<TenantLinesTableProps> = ({
         currentSizeRef.current = result.size || nextSize;
         setTotal(result.total || 0);
         setItems(Array.isArray(result.items) ? result.items : []);
-      } catch (requestError: any) {
-        const backendMsg = requestError?.response?.data?.message;
+      } catch (requestError: unknown) {
+        const backendMsg = (requestError as ApiError)?.response?.data?.message;
         const msg = Array.isArray(backendMsg)
           ? backendMsg.join('; ')
           : backendMsg || '获取租户线路列表失败';

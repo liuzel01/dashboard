@@ -59,7 +59,7 @@ import {
   updateAssetResource,
   updateCredentialRef,
 } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
 import type {
   AssetAccount,
@@ -301,11 +301,11 @@ const selectFilterOption = (input: string, option?: { label?: string; value?: st
   return label.includes(keyword) || value.includes(keyword);
 };
 
-const tryParseJsonObject = (value?: string | null): Record<string, any> | null => {
+const tryParseJsonObject = (value?: string | null): JsonRecord | null => {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, any> : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as JsonRecord : null;
   } catch {
     return null;
   }
@@ -443,7 +443,7 @@ function EntityTab<T extends AssetEntity>({
       }
       setDrawerOpen(false);
       await load();
-    } catch (e: any) {
+    } catch (e: unknown) {
       message.error(getErrorMessage(e, `保存${title}失败`));
     } finally {
       setSubmitting(false);
@@ -709,7 +709,7 @@ const AccountManagementTab: React.FC = () => {
         const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
         setCredentialRefs(refs.items);
         setCredentialRefsLoadError(null);
-      } catch (e: any) {
+      } catch (e: unknown) {
         setCredentialRefs([]);
         setCredentialRefsLoadError(getErrorMessage(e, '凭证索引加载失败'));
       }
@@ -728,7 +728,7 @@ const AccountManagementTab: React.FC = () => {
     try {
       const res = await getAssetDomains({ page: 1, pageSize: 100, accountId });
       setAccountDomains(res.items);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setAccountDomains([]);
       setAccountDomainsError(getErrorMessage(e, '账号关联域名加载失败'));
     } finally {
@@ -750,7 +750,7 @@ const AccountManagementTab: React.FC = () => {
       const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
       setCredentialRefs(refs.items);
       setCredentialRefsLoadError(null);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setCredentialRefs([]);
       setCredentialRefsLoadError(getErrorMessage(e, '凭证索引加载失败'));
     }
@@ -764,7 +764,7 @@ const AccountManagementTab: React.FC = () => {
       const refs = await getCredentialRefs({ page: 1, pageSize: 200 });
       setCredentialRefs(refs.items);
       setCredentialRefsLoadError(null);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setCredentialRefs([]);
       setCredentialRefsLoadError(getErrorMessage(e, '凭证索引加载失败'));
     }
@@ -804,7 +804,7 @@ const AccountManagementTab: React.FC = () => {
       } else {
         setPreviewData(await previewAccountAliyunDcdnDomains(record.id));
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       setPreviewData(null);
       setPreviewError(getErrorMessage(e, '账号域名预览失败'));
     } finally {
@@ -816,7 +816,7 @@ const AccountManagementTab: React.FC = () => {
     setPreviewOpen(true);
     setSyncResult(null);
     const expectedProvider = provider === 'wangsu' ? 'wangsu' : service === 'esa' ? 'aliyun_esa' : 'aliyun_dcdn';
-    if (!previewData || previewData.account.id !== record.id || previewData.provider !== expectedProvider || (previewData as any).service !== service) {
+    if (!previewData || previewData.account.id !== record.id || previewData.provider !== expectedProvider || (previewData as { service?: string }).service !== service) {
       await handlePreview(record, provider, service);
     }
     if (dryRun) setPreviewLoading(true);
@@ -835,7 +835,7 @@ const AccountManagementTab: React.FC = () => {
         refreshAccountContext(record.id),
       ]);
       setPreviewData(nextPreview);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setPreviewError(getErrorMessage(e, dryRun ? '账号域名 Dry Run 失败' : '账号域名同步失败'));
     } finally {
       if (dryRun) setPreviewLoading(false);
@@ -1058,7 +1058,7 @@ const AccountManagementTab: React.FC = () => {
 
       <Modal title={previewData ? `账号域名预览 - ${previewData.account.account_name}` : '账号域名预览'} open={previewOpen} width={1100} onCancel={() => setPreviewOpen(false)} footer={null} destroyOnHidden>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`服务：${(previewData as any).service || 'dcdn'}；Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；${previewData.provider === 'aliyun_esa' ? `共 ${(previewData as AccountAliyunEsaDomainPreviewResponse).siteTotalCount} 个站点、${previewData.total} 条 DNS 记录` : `共 ${previewData.total} 条`}`} />}
+          {previewData && <Alert type="info" showIcon message={`账号：${previewData.account.account_name}（${previewData.account.account_identifier || '-'}）`} description={`服务：${(previewData as { service?: string }).service || 'dcdn'}；Endpoint：${previewData.endpoint}；抓取时间：${formatDateTime(previewData.fetchedAt)}；${previewData.provider === 'aliyun_esa' ? `共 ${(previewData as AccountAliyunEsaDomainPreviewResponse).siteTotalCount} 个站点、${previewData.total} 条 DNS 记录` : `共 ${previewData.total} 条`}`} />}
           {syncLoading && <Alert type="info" showIcon message="正在同步域名…" description="已收到操作请求，正在拉取并写入域名数据，请稍候。同步完成后会自动刷新预览结果。" />}
           {!syncLoading && previewLoading && <Alert type="info" showIcon message="正在执行 Dry Run…" description="正在预检本次同步将产生的变更，请稍候。完成后会展示本次预检结果。" />}
           {previewError && <Alert type="error" showIcon message="账号域名操作失败" description={previewError} />}
@@ -1114,7 +1114,7 @@ const OverviewTab: React.FC = () => {
     setLoadError(null);
     try {
       setData(await getAssetOverview());
-    } catch (error: any) {
+    } catch (error: unknown) {
       setLoadError(getErrorMessage(error, '加载资产总览失败'));
     } finally {
       setLoading(false);
@@ -1162,12 +1162,13 @@ const OverviewTab: React.FC = () => {
   );
 };
 
-const getErrorMessage = (error: any, fallback: string) => {
-  const serverMessage = error?.response?.data?.message;
+const getErrorMessage = (error: unknown, fallback: string) => {
+  const serverMessage = (error as ApiError)?.response?.data?.message;
   if (Array.isArray(serverMessage)) return serverMessage.join('；');
   if (serverMessage) return String(serverMessage);
-  if (error?.response?.data?.error) return String(error.response.data.error);
-  return error?.message || fallback;
+  const serverError = (error as ApiError)?.response?.data?.error;
+  if (serverError) return String(serverError);
+  return (error as ApiError)?.message || fallback;
 };
 
 const CdnSyncTab: React.FC = () => {
@@ -1225,7 +1226,7 @@ const WangsuCdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
       const next = await previewWangsuCdnDomains();
       setData(next);
       messageApi.success(`已加载 ${next.total} 个网宿 CDN 域名`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, '加载网宿 CDN 域名预览失败');
       setPreviewError(errorMessage);
       messageApi.error(errorMessage);
@@ -1243,7 +1244,7 @@ const WangsuCdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
       setSyncResult(result);
       const { created, updated, unchanged, total } = result.summary;
       messageApi.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${total} 条，新增 ${created}，更新 ${updated}，不变 ${unchanged}`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, dryRun ? '网宿 CDN 同步预检失败' : '同步网宿 CDN 域名失败');
       setPreviewError(errorMessage);
       messageApi.error(errorMessage);
@@ -1378,7 +1379,7 @@ const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
       const next = await previewAliyunDcdnDomains();
       setData(next);
       messageApi.success(`已加载 ${next.total} 个阿里云 DCDN 域名`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, '加载阿里云 DCDN 域名预览失败');
       setPreviewError(errorMessage);
       messageApi.error(errorMessage);
@@ -1396,7 +1397,7 @@ const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
       setSyncResult(result);
       const { created, updated, unchanged, conflicts, total } = result.summary;
       messageApi.success(`${dryRun ? 'Dry Run' : '同步'}完成：共 ${total} 条，新增 ${created}，更新 ${updated}，不变 ${unchanged}，冲突 ${conflicts}`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       const errorMessage = getErrorMessage(e, dryRun ? '阿里云 DCDN 同步预检失败' : '同步阿里云 DCDN 域名失败');
       setPreviewError(errorMessage);
       messageApi.error(errorMessage);

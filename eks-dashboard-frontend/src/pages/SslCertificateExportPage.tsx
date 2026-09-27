@@ -152,7 +152,7 @@ const SslCertificateExportPage: React.FC = () => {
       }
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || 'AWS 环境列表加载失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || 'AWS 环境列表加载失败');
     }
   };
 
@@ -172,7 +172,7 @@ const SslCertificateExportPage: React.FC = () => {
       setQueriedRegion(nextRegion || '');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || 'AWS ACM 证书列表加载失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || 'AWS ACM 证书列表加载失败');
     } finally {
       setLoading(false);
     }
@@ -206,7 +206,7 @@ const SslCertificateExportPage: React.FC = () => {
       setDetailOpen(true);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '详情加载失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '详情加载失败');
     } finally {
       setLoading(false);
     }
@@ -224,7 +224,7 @@ const SslCertificateExportPage: React.FC = () => {
       message.success('证书详情已刷新');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '详情刷新失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '详情刷新失败');
     } finally {
       setLoading(false);
     }
@@ -271,7 +271,7 @@ const SslCertificateExportPage: React.FC = () => {
       await load(keyword, queriedEnvironmentId, queriedRegion);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '操作失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '操作失败');
     } finally {
       setLoading(false);
     }
@@ -475,10 +475,11 @@ const SslCertificateExportPage: React.FC = () => {
             await load(keyword, environmentId, region);
           } catch (error) {
             const err = error as { errorFields?: Array<{ errors?: string[] }>; response?: { data?: { message?: string } }; message?: string };
-            if (Array.isArray(err?.errorFields) && err.errorFields.length > 0) {
+            const formErrors = err.errorFields;
+            if (Array.isArray(formErrors) && formErrors.length > 0) {
               return;
             }
-            message.error(err?.response?.data?.message || err?.message || '证书申请失败');
+            message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '证书申请失败');
           } finally {
             setLoading(false);
           }

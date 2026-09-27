@@ -34,7 +34,31 @@ import {
   removeRuleFromSg,
 } from '../services/api';
 
-type IpPermission = any;
+type IpPermission = JsonRecord & {
+  IpProtocol?: string;
+  FromPort?: number;
+  ToPort?: number;
+  IpRanges?: IpRange[];
+  UserIdGroupPairs?: UserIdGroupPair[];
+};
+
+type SecurityGroupRuleForm = {
+  protocol: string;
+  fromPort: number;
+  toPort: number;
+  cidrIp: string;
+  description?: string;
+};
+
+type DisplayRule = {
+  key: string;
+  protocol?: string;
+  fromPort?: number;
+  toPort?: number;
+  source?: string;
+  description?: string;
+  originalPermission: IpPermission;
+};
 
 interface SecurityGroupModalProps {
   visible: boolean;
@@ -63,8 +87,8 @@ export const SecurityGroupModal: React.FC<SecurityGroupModalProps> = ({
     try {
       const data = await getRulesForSg(securityGroupId);
       setRawRules(data || []);
-    } catch (error: any) {
-      message.error(`获取规则失败: ${error.response?.data?.message || error.message}`);
+    } catch (error: unknown) {
+      message.error(`获取规则失败: ${(error as ApiError).response?.data?.message || (error as ApiError).message}`);
     } finally {
       setLoading(false);
     }
@@ -76,15 +100,15 @@ export const SecurityGroupModal: React.FC<SecurityGroupModalProps> = ({
     }
   }, [visible, fetchRules]);
 
-  const handleAddRule = async (values: any) => {
+  const handleAddRule = async (values: SecurityGroupRuleForm) => {
     setActionLoading(true);
     try {
       await addRuleToSg(securityGroupId, values);
       message.success('规则添加成功');
       setIsAddModalVisible(false);
       await fetchRules();
-    } catch (error: any) {
-      message.error(`添加失败: ${error.response?.data?.message || error.message}`);
+    } catch (error: unknown) {
+      message.error(`添加失败: ${(error as ApiError).response?.data?.message || (error as ApiError).message}`);
     } finally {
       setActionLoading(false);
     }
@@ -101,8 +125,8 @@ export const SecurityGroupModal: React.FC<SecurityGroupModalProps> = ({
           await removeRuleFromSg(securityGroupId, ruleToRemove);
           message.success('规则已删除');
           await fetchRules();
-        } catch (error: any) {
-          message.error(`删除失败: ${error.response?.data?.message || error.message}`);
+        } catch (error: unknown) {
+          message.error(`删除失败: ${(error as ApiError).response?.data?.message || (error as ApiError).message}`);
         }
       },
     });
@@ -135,10 +159,10 @@ const userIdGroupPairs = (permission.UserIdGroupPairs || []).map((group: UserIdG
 
   const columns = [
     { title: '协议', dataIndex: 'protocol', key: 'protocol', render: (p: string) => <Tag>{p === '-1' ? 'ALL' : p.toUpperCase()}</Tag> },
-    { title: '端口范围', key: 'port', render: (_: any, r: any) => r.protocol === '-1' ? 'All' : (r.fromPort === r.toPort ? r.fromPort : `${r.fromPort}-${r.toPort}`) },
+    { title: '端口范围', key: 'port', render: (_: unknown, r: DisplayRule) => r.protocol === '-1' ? 'All' : (r.fromPort === r.toPort ? r.fromPort : `${r.fromPort}-${r.toPort}`) },
     { title: '来源', dataIndex: 'source', key: 'source' },
     { title: '描述', dataIndex: 'description', key: 'description' },
-    { title: '操作', key: 'action', render: (_: any, r: any) => <Button danger icon={<DeleteOutlined />} onClick={() => handleRemoveRule(r.originalPermission)}>删除</Button> },
+    { title: '操作', key: 'action', render: (_: unknown, r: DisplayRule) => <Button danger icon={<DeleteOutlined />} onClick={() => handleRemoveRule(r.originalPermission)}>删除</Button> },
   ];
 
   return (

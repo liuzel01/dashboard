@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const baseURL = (import.meta as any)?.env?.VITE_SIGNAL_MONITOR_API_BASE_URL || '/api/signal-monitor';
+const baseURL = import.meta.env?.VITE_SIGNAL_MONITOR_API_BASE_URL || '/api/signal-monitor';
 
 const signalMonitorApi = axios.create({
   baseURL,

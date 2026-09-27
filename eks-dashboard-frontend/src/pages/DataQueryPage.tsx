@@ -42,7 +42,7 @@ import {
   getAuthRecord,
   updateAuthRecord,
 } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import PlaceholderPage from './PlaceholderPage';
 
 const { Search } = Input;
@@ -308,7 +308,7 @@ const DataQueryPage: React.FC = () => {
               } as RedisData;
             } catch (err) {
               const e = err as { response?: { status?: number } };
-              if (e?.response?.status === 404) return null;
+              if ((e as ApiError)?.response?.status === 404) return null;
               return { key: hint.key, ttl: hint.ttl, value: null } as RedisData;
             }
           }),
@@ -1071,7 +1071,7 @@ const DataQueryPage: React.FC = () => {
             setTraderInfo(t || null);
           } catch (err) {
             const e = err as { response?: { data?: { message?: string } }; message?: string };
-            const msg = e?.response?.data?.message || e?.message || String(err);
+            const msg = (e as ApiError)?.response?.data?.message || (e as ApiError)?.message || String(err);
             message.error(`更新失败: ${msg}`);
           } finally {
             setTraderEditLoading(false);
@@ -1115,7 +1115,7 @@ const DataQueryPage: React.FC = () => {
               setOtcMerchantInfo(o || null);
             } catch (err) {
               const e = err as { response?: { data?: { message?: string } }; message?: string };
-              const msg = e?.response?.data?.message || e?.message || String(err);
+              const msg = (e as ApiError)?.response?.data?.message || (e as ApiError)?.message || String(err);
               message.error(`更新失败: ${msg}`);
             } finally {
               setOtcEditLoading(false);
@@ -1168,7 +1168,7 @@ const DataQueryPage: React.FC = () => {
               setAuthRecordInfo(auth || null);
             } catch (err) {
               const e = err as { response?: { data?: { message?: string } }; message?: string };
-              const msg = e?.response?.data?.message || e?.message || String(err);
+              const msg = (e as ApiError)?.response?.data?.message || (e as ApiError)?.message || String(err);
               message.error(`更新失败: ${msg}`);
             } finally {
               setAuthEditLoading(false);

@@ -7,7 +7,7 @@ import {
   getEnvironmentConfigs,
   updateEnvironmentConfig,
 } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 
 type EnvConfig = {
   id: string;
@@ -16,17 +16,17 @@ type EnvConfig = {
   aws_region?: string;
   aws_role_arn?: string;
   kubeContext?: string;
-  database?: any;
-  redis?: any;
-  jumpServer?: any;
-  tenants?: any;
-  platforms?: any;
-  alerts?: any;
+  database?: unknown;
+  redis?: unknown;
+  jumpServer?: unknown;
+  tenants?: unknown;
+  platforms?: unknown;
+  alerts?: unknown;
 };
 
 const jsonFields = ['database', 'redis', 'jumpServer', 'tenants', 'platforms', 'alerts'] as const;
 
-const toJsonString = (value: any) => {
+const toJsonString = (value: unknown) => {
   if (value === null || value === undefined) return '';
   try {
     return JSON.stringify(value, null, 2);
@@ -56,8 +56,8 @@ const EnvironmentManagementPage: React.FC = () => {
     try {
       const data = await getEnvironmentConfigs();
       setList(data || []);
-    } catch (e: any) {
-      setError(e?.message || '加载环境配置失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载环境配置失败');
     } finally {
       setLoading(false);
     }
@@ -95,8 +95,8 @@ const EnvironmentManagementPage: React.FC = () => {
         alerts: toJsonString(data.alerts),
       });
       setModalOpen(true);
-    } catch (e: any) {
-      message.error(e?.message || '加载环境详情失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '加载环境详情失败');
     } finally {
       setLoading(false);
     }
@@ -106,14 +106,14 @@ const EnvironmentManagementPage: React.FC = () => {
     if (!value || value.trim() === '') return undefined;
     try {
       return JSON.parse(value);
-    } catch (e) {
+    } catch {
       throw new Error(`${fieldLabel} 不是有效的 JSON`);
     }
   };
 
   const handleSubmit = async () => {
     const values = await form.validateFields();
-    const payload: any = {
+    const payload: JsonRecord = {
       id: values.id,
       name: values.name,
       super_admin_url: normalizeOptionalString(values.super_admin_url),
@@ -130,8 +130,8 @@ const EnvironmentManagementPage: React.FC = () => {
           payload[field] = parsed;
         }
       });
-    } catch (e: any) {
-      message.error(e.message || 'JSON 解析失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError).message || 'JSON 解析失败');
       return;
     }
 
@@ -147,8 +147,8 @@ const EnvironmentManagementPage: React.FC = () => {
       setModalOpen(false);
       await fetchList();
       await refreshEnvironments();
-    } catch (e: any) {
-      message.error(e?.message || '保存失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '保存失败');
     } finally {
       setLoading(false);
     }
@@ -166,7 +166,7 @@ const EnvironmentManagementPage: React.FC = () => {
         title: '操作',
         key: 'action',
         width: 120,
-        render: (_: any, record: EnvConfig) => (
+        render: (_: unknown, record: EnvConfig) => (
           <Button type="link" icon={<EditOutlined />} onClick={() => openEdit(record.id)}>
             编辑
           </Button>

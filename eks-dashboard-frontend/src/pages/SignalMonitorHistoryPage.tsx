@@ -19,8 +19,8 @@ const SignalMonitorHistoryPage: React.FC = () => {
       setRows(data.items || []);
       setTotal(data.total || 0);
       setQuery({ ...next, page: data.page, pageSize: data.pageSize });
-    } catch (e: any) {
-      setError(e?.message || '加载 history 失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载 history 失败');
     } finally {
       setLoading(false);
     }

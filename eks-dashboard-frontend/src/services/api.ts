@@ -321,8 +321,15 @@ export const getTenantsForEnvironment = async (environmentId?: string) => {
 };
 
 // 环境管理（配置）
-let environmentConfigsCache: any[] | null = null;
-let environmentConfigsRequest: Promise<any[]> | null = null;
+export type EnvironmentConfig = {
+  id: string;
+  name: string;
+  aws_region?: string;
+  [key: string]: unknown;
+};
+
+let environmentConfigsCache: EnvironmentConfig[] | null = null;
+let environmentConfigsRequest: Promise<EnvironmentConfig[]> | null = null;
 export const getEnvironmentConfigs = async () => {
   if (environmentConfigsCache) return environmentConfigsCache;
   if (environmentConfigsRequest) return environmentConfigsRequest;
@@ -343,12 +350,12 @@ export const getEnvironmentConfig = async (id: string) => {
   return response.data;
 };
 
-export const createEnvironmentConfig = async (data: any) => {
+export const createEnvironmentConfig = async (data: JsonRecord) => {
   const response = await api.post('/environments/config', data);
   return response.data;
 };
 
-export const updateEnvironmentConfig = async (id: string, data: any) => {
+export const updateEnvironmentConfig = async (id: string, data: JsonRecord) => {
   const response = await api.put(`/environments/config/${id}`, data);
   return response.data;
 };
@@ -434,7 +441,7 @@ export const uploadS3Object = async (
 
 
 // Audit Logs
-export const getAuditLogs = async (params: any) => {
+export const getAuditLogs = async (params: JsonRecord) => {
   const response = await api.get('/audit-logs', { params });
   return response.data;
 };
@@ -476,7 +483,7 @@ export const addSecurityGroupRule = async (
 /**
  * 移除一条安全组规则
  */
-export const removeSecurityGroupRule = async (loadBalancerArn: string, rule: any) => {
+export const removeSecurityGroupRule = async (loadBalancerArn: string, rule: JsonRecord) => {
   const response = await api.delete('/security-groups/rules', {
     data: { loadBalancerArn, rule },
   });
@@ -511,7 +518,7 @@ export const addRuleToSg = async (
 /**
  * 从指定安全组移除一条规则
  */
-export const removeRuleFromSg = async (groupId: string, rule: any) => {
+export const removeRuleFromSg = async (groupId: string, rule: JsonRecord) => {
   const response = await api.delete(`/security-groups/by-id/${groupId}/rules`, { data: rule });
   return response.data;
 };

@@ -3,7 +3,7 @@ import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, To
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
 import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
 // 定义 Deployment 对象的接口
@@ -151,7 +151,7 @@ const DeploymentListPage: React.FC = () => {
           return;
         }
         console.error('获取应用列表失败:', error);
-        const errorMessage = error.response?.data?.message || error.message;
+        const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
         setLoadError(errorMessage || '获取应用列表失败');
         message.error(`获取应用列表失败: ${errorMessage}`);
       })
@@ -346,9 +346,9 @@ const DeploymentListPage: React.FC = () => {
             result.targetGeneration,
           );
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (!cancelled) {
-          const errorMessage = error.response?.data?.message || error.message;
+          const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
           message.error(`回退到发布前镜像失败: ${errorMessage}`);
         }
       } finally {
@@ -382,9 +382,9 @@ const DeploymentListPage: React.FC = () => {
             duration: 2,
           });
           void trackRolloutProgress(deploymentName, '重启', result.targetGeneration);
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error('[Restart] Caught an error:', error);
-          const errorMessage = error.response?.data?.message || error.message;
+          const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
           message.error(`重启失败: ${errorMessage}`);
         } finally {
           console.log(`[Restart] Resetting loading state for ${deploymentName}`);
@@ -407,8 +407,8 @@ const DeploymentListPage: React.FC = () => {
       const recommended = history.imageVersions.find((item) => !item.isCurrent);
       setSelectedImageVersionId(recommended?.id ?? null);
       if (!recommended) message.warning('未找到可用于回退的历史镜像版本。');
-    } catch (error: any) {
-      message.error(`获取镜像历史失败: ${error.response?.data?.message || error.message}`);
+    } catch (error: unknown) {
+      message.error(`获取镜像历史失败: ${(error as ApiError).response?.data?.message || (error as ApiError).message}`);
     } finally { setImageHistoryLoading(false); }
   };
 
@@ -428,8 +428,8 @@ const DeploymentListPage: React.FC = () => {
         result.previousImages,
         true,
       );
-    } catch (error: any) {
-      message.error(`镜像回退失败: ${error.response?.data?.message || error.message}`);
+    } catch (error: unknown) {
+      message.error(`镜像回退失败: ${(error as ApiError).response?.data?.message || (error as ApiError).message}`);
     } finally { setRollingBack(false); void fetchDeployments(filter); }
   };
 
@@ -449,7 +449,7 @@ const DeploymentListPage: React.FC = () => {
       width: 100,
       fixed: 'left' as const,
       align: 'center' as const,
-      render: (_: any, record: Deployment) => `${record.availableReplicas || 0}/${record.replicas ?? 0}`,
+      render: (_: unknown, record: Deployment) => `${record.availableReplicas || 0}/${record.replicas ?? 0}`,
     },
     {
       title: '当前镜像',
@@ -463,7 +463,7 @@ const DeploymentListPage: React.FC = () => {
       title: '发布状态',
       key: 'status',
       width: 190,
-      render: (_: any, record: Deployment) => {
+      render: (_: unknown, record: Deployment) => {
         const operation = record.name && currentEnvironment?.id
           ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, record.name)]
           : undefined;
@@ -515,7 +515,7 @@ const DeploymentListPage: React.FC = () => {
       width: 230,
       fixed: 'right' as const,
       align: 'center' as const,
-      render: (_: any, record: Deployment) => (
+      render: (_: unknown, record: Deployment) => (
         <Space size={4}>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name)} loading={restarting === record.name}>重启</Button>
           <Button size="small" onClick={() => handleOpenImageHistory(record.name)}>镜像回退</Button>

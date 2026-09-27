@@ -20,8 +20,8 @@ const SignalMonitorDailyPage: React.FC = () => {
     try {
       const resp = await getSignalMonitorDailyReport(d);
       setData(resp);
-    } catch (e: any) {
-      setError(e?.message || '加载日报失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载日报失败');
     } finally {
       setLoading(false);
     }

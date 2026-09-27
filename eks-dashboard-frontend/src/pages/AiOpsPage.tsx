@@ -52,7 +52,7 @@ const AiOpsPage: React.FC = () => {
       message.success('SQL 预览成功');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || 'SQL 预览失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || 'SQL 预览失败');
     } finally {
       setLoading(false);
     }
@@ -65,7 +65,7 @@ const AiOpsPage: React.FC = () => {
       setAuditItems(Array.isArray(resp?.items) ? resp.items : []);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '审计读取失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '审计读取失败');
     } finally {
       setLoading(false);
     }

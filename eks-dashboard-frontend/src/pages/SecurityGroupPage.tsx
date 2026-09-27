@@ -21,9 +21,30 @@ import {
   removeSecurityGroupRule,
   getPlatforms,
 } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 
-type IpPermission = any; // Using any for now, can be typed out from AWS SDK
+type IpPermission = JsonRecord & {
+  IpProtocol?: string;
+  FromPort?: number;
+  ToPort?: number;
+  IpRanges?: IpRange[];
+  UserIdGroupPairs?: UserIdGroupPair[];
+};
+
+type SecurityGroupRuleForm = {
+  protocol: string;
+  fromPort: number;
+  toPort: number;
+  cidrIp: string;
+  description?: string;
+};
+
+type DisplayRule = {
+  protocol?: string;
+  fromPort?: number;
+  toPort?: number;
+  originalPermission: IpPermission;
+};
 
 interface IpRange {
   CidrIp?: string;
@@ -70,8 +91,8 @@ const SecurityGroupPage: React.FC = () => {
         setSelectedPlatformArn(null);
         setRawRules([]);
       }
-    } catch (error: any) {
-      message.error(`获取平台列表失败: ${error.response?.data?.message || error.message}`);
+    } catch (error: unknown) {
+      message.error(`获取平台列表失败: ${(error as ApiError).response?.data?.message || (error as ApiError).message}`);
     } finally {
       setLoading((prev) => ({ ...prev, platforms: false }));
     }
@@ -86,8 +107,8 @@ const SecurityGroupPage: React.FC = () => {
     try {
       const data = await getSecurityGroupRules(selectedPlatformArn);
       setRawRules(data || []);
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || error.message;
+    } catch (error: unknown) {
+      const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
       message.error(`获取安全组规则失败: ${errorMessage}`);
       setRawRules([]); // Clear rules on error
     } finally {
@@ -109,7 +130,7 @@ const SecurityGroupPage: React.FC = () => {
     fetchRules();
   }, [fetchRules]);
 
-  const handleAddRule = async (values: any) => {
+  const handleAddRule = async (values: SecurityGroupRuleForm) => {
     if (!selectedPlatformArn) return;
     setActionLoading(true);
     try {
@@ -117,8 +138,8 @@ const SecurityGroupPage: React.FC = () => {
       message.success(response.message);
       setIsModalVisible(false);
       await fetchRules();
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || error.message;
+    } catch (error: unknown) {
+      const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
       message.error(`添加失败: ${errorMessage}`);
     } finally {
       setActionLoading(false);
@@ -141,8 +162,8 @@ const SecurityGroupPage: React.FC = () => {
           await removeSecurityGroupRule(selectedPlatformArn, ruleToRemove);
           message.success('规则已删除');
           await fetchRules();
-        } catch (error: any) {
-          const errorMessage = error.response?.data?.message || error.message;
+        } catch (error: unknown) {
+          const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
           message.error(`删除失败: ${errorMessage}`);
         }
       },
@@ -204,7 +225,7 @@ const SecurityGroupPage: React.FC = () => {
     {
       title: '端口范围',
       key: 'port',
-      render: (_: any, r: any) =>
+      render: (_: unknown, r: DisplayRule) =>
         r.protocol === '-1'
           ? 'All'
           : r.fromPort === r.toPort
@@ -216,7 +237,7 @@ const SecurityGroupPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      render: (_: any, r: any) => (
+      render: (_: unknown, r: DisplayRule) => (
         <Button
           danger
           icon={<DeleteOutlined />}

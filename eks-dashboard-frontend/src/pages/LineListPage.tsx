@@ -1,7 +1,7 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { getLineInventory, getTenantsForEnvironment, previewDcdnSslSyncForLine, syncDcdnSslForLine } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { buildProbeDetailUrl } from '../utils/probeDashboard';
 import { PageHeader } from '../components/ops';
 
@@ -134,10 +134,10 @@ const LineListPage: React.FC = () => {
           setPage(1);
           void loadInventory(1, size, nextQuery, false);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (cancelled) return;
         setTenants([]);
-        const backendMsg = error?.response?.data?.message;
+        const backendMsg = (error as ApiError)?.response?.data?.message;
         const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '加载租户列表失败';
         setTenantLoadError(msg);
       } finally {
@@ -181,11 +181,11 @@ const LineListPage: React.FC = () => {
         setItems(Array.isArray(resp.items) ? resp.items : []);
         setWarning(resp.warning || null);
         setProbeSourceApi(resp.probeSnapshot?.sourceApi || null);
-      } catch (error: any) {
-        const backendMsg = error?.response?.data?.message;
+      } catch (error: unknown) {
+        const backendMsg = (error as ApiError)?.response?.data?.message;
         const msg = Array.isArray(backendMsg)
           ? backendMsg.join('; ')
-          : backendMsg || error?.message || '加载线路总览失败';
+          : backendMsg || (error as ApiError)?.message || '加载线路总览失败';
         setRequestError(msg);
         setItems([]);
         setTotal(0);
@@ -242,11 +242,11 @@ const LineListPage: React.FC = () => {
       const result = await previewDcdnSslSyncForLine({ lineUrl, namespace: 'default' }) as DcdnSslSyncPreview;
       setSslPreview(result);
       setSslPreviewOpen(true);
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || error?.message || '解析 SSL 同步信息失败';
+        : backendMsg || (error as ApiError)?.message || '解析 SSL 同步信息失败';
       message.error(msg);
       setSslPreviewLineUrl(null);
     } finally {
@@ -268,11 +268,11 @@ const LineListPage: React.FC = () => {
       setSslPreview(null);
       setSslPreviewLineUrl(null);
       void loadInventory(page, size, query, true);
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || error?.message || '同步 SSL 证书失败';
+        : backendMsg || (error as ApiError)?.message || '同步 SSL 证书失败';
       message.error(msg);
     } finally {
       setSyncingSslLineUrl(null);

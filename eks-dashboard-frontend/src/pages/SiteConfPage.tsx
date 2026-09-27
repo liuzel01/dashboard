@@ -83,8 +83,8 @@ const SiteConfPage: React.FC = () => {
       setTotal(Number(data?.total || 0));
       setPage(nextPage);
       setSize(nextSize);
-    } catch (e: any) {
-      setError(e?.message || '加载 siteconf 配置失败');
+    } catch (e: unknown) {
+      setError((e as ApiError)?.message || '加载 siteconf 配置失败');
     } finally {
       setLoading(false);
     }
@@ -148,8 +148,8 @@ const SiteConfPage: React.FC = () => {
       message.success('siteconf 配置已保存，正在刷新列表');
       void fetchCategories();
       void fetchList(page, size, keyword, category);
-    } catch (e: any) {
-      message.error(e?.message || '保存 siteconf 配置失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || '保存 siteconf 配置失败');
     } finally {
       setSaving(false);
     }
@@ -168,8 +168,8 @@ const SiteConfPage: React.FC = () => {
         message.success('配置已删除');
       }
       await Promise.all([fetchCategories(), fetchList(page, size, keyword, category)]);
-    } catch (e: any) {
-      message.error(e?.response?.data?.message || e?.message || '删除 siteconf 配置失败');
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.response?.data?.message || (e as ApiError)?.message || '删除 siteconf 配置失败');
     } finally {
       setDeletingKey(null);
       setDeleteTarget(null);
@@ -254,7 +254,7 @@ const SiteConfPage: React.FC = () => {
         width: 96,
         fixed: 'right' as const,
         align: 'center' as const,
-        render: (_: any, record: SiteConfItem) => (
+        render: (_: unknown, record: SiteConfItem) => (
           <Space size={4}>
             <Button aria-label="编辑" title="编辑" type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
             <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} loading={deletingKey === record.confKey} disabled={Boolean(deletingKey)} onClick={() => setDeleteTarget(record)} />

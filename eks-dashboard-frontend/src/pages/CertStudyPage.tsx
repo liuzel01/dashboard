@@ -446,7 +446,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       setTotal(Number(response.pagination?.total || 0));
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '加载题目失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '加载题目失败');
     } finally {
       setLoading(false);
     }
@@ -476,7 +476,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         });
       } catch (error) {
         const err = error as { response?: { data?: { message?: string } }; message?: string };
-        message.error(err?.response?.data?.message || err?.message || '加载题目详情失败');
+        message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '加载题目详情失败');
       } finally {
         setDetailLoading(false);
       }
@@ -540,7 +540,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       await loadQuestionDetail(targetQuestion.id);
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '切换题目失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '切换题目失败');
     } finally {
       setDetailNavLoading(false);
     }
@@ -572,7 +572,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       message.success('复习状态已更新');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '复习状态更新失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '复习状态更新失败');
     } finally {
       setSavingReview(false);
     }
@@ -590,7 +590,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       }
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '重点标记更新失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '重点标记更新失败');
     }
   };
 
@@ -606,7 +606,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       }
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '归档失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '归档失败');
     }
   };
 
@@ -638,7 +638,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       message.success('备注已添加');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '添加备注失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '添加备注失败');
     } finally {
       setAddingNote(false);
     }
@@ -665,7 +665,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       message.success('备注已删除');
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '删除备注失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '删除备注失败');
     }
   };
 
@@ -710,7 +710,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       }
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '更新备注失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '更新备注失败');
     } finally {
       setSavingEditedNote(false);
     }
@@ -723,7 +723,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       options = parseOptionsFromText(values.optionsText);
     } catch (error) {
       const err = error as { message?: string };
-      message.error(err.message || '解析选项失败');
+      message.error((err as ApiError).message || '解析选项失败');
       return;
     }
     setImporting(true);
@@ -752,7 +752,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       await loadQuestions();
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || '手动导入失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '手动导入失败');
     } finally {
       setImporting(false);
     }
@@ -794,7 +794,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
       await loadQuestions();
     } catch (error) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };
-      message.error(err?.response?.data?.message || err?.message || 'JSON 导入失败');
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || 'JSON 导入失败');
     } finally {
       setImporting(false);
     }

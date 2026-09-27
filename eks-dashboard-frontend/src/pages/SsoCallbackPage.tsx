@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Spin, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../contexts/AuthContext';
+import { AuthContext } from '../contexts/AuthContextValue';
 
 const { Text } = Typography;
 
@@ -47,8 +47,8 @@ const SsoCallbackPage: React.FC = () => {
         // Do not leave a bearer token in browser history or copied URLs.
         window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
         navigate('/', { replace: true });
-      } catch (err: any) {
-        const msg = err?.message || 'SSO 登录失败';
+      } catch (err: unknown) {
+        const msg = (err as ApiError)?.message || 'SSO 登录失败';
         setError(msg);
         message.error(msg);
       }

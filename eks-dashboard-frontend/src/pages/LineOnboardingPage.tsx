@@ -35,7 +35,7 @@ import {
   previewRoute53CnameForLineOnboarding,
   syncRoute53CnameForLineOnboarding,
 } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { PageHeader } from '../components/ops';
 import TenantLinesTable from '../components/TenantLinesTable';
 import { buildProbeDetailUrl, getProbeDetailBaseUrl } from '../utils/probeDashboard';
@@ -187,7 +187,7 @@ type TenantDomainApplyResult = {
 type SuperAdminRegisterResult = {
   action: 'created' | 'unchanged' | 'conflict' | 'updated';
   message: string;
-  differences?: Array<{ field: string; existing: any; incoming: any }>;
+  differences?: Array<{ field: string; existing: unknown; incoming: unknown }>;
   canUpdate?: boolean;
   connectivityCheck?: { ok: boolean; url: string; status: number } | null;
 };
@@ -442,11 +442,11 @@ const LineOnboardingPage: React.FC = () => {
           if (prev && normalized.some((item) => item.id === prev)) return prev;
           return normalized[0]?.id;
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (cancelled) return;
         setTenants([]);
         setSelectedTenantId(undefined);
-        const backendMsg = error?.response?.data?.message;
+        const backendMsg = (error as ApiError)?.response?.data?.message;
         const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '加载租户列表失败';
         setTenantLoadError(msg);
       } finally {
@@ -690,8 +690,8 @@ const LineOnboardingPage: React.FC = () => {
         setSelectedCasCertId(undefined);
         message.warning('未找到可复用的 CAS 证书，请切换为“上传新证书到CAS”');
       }
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || '加载 CAS 证书列表失败';
@@ -748,8 +748,8 @@ const LineOnboardingPage: React.FC = () => {
       if (rows.length === 0) {
         setIngressCandidatesError('未找到匹配 nginx-web-app 的 Ingress 源站候选');
       }
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || '获取 Ingress 候选源站失败';
@@ -862,8 +862,8 @@ const LineOnboardingPage: React.FC = () => {
       setVerifyResult(null);
       setVerifyError(null);
       message.success(result.created ? 'DCDN 域名创建成功' : 'DCDN 域名已存在，已获取当前信息');
-    } catch (error: any) {
-      const data = error?.response?.data;
+    } catch (error: unknown) {
+      const data = (error as ApiError)?.response?.data;
       const backendMsg = data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
@@ -890,7 +890,7 @@ const LineOnboardingPage: React.FC = () => {
     setDcdnRefreshing(true);
     setDcdnAutoError(null);
     try {
-      const status = (await getDcdnDomainStatus(confirmedSubdomain)) as any;
+      const status = (await getDcdnDomainStatus(confirmedSubdomain)) as Partial<DcdnProvisionResult>;
       setDcdnAutoResult((prev) => ({
         domainName: status.domainName || confirmedSubdomain,
         fetchedAt: status.fetchedAt || new Date().toISOString(),
@@ -929,8 +929,8 @@ const LineOnboardingPage: React.FC = () => {
       }
       setDcdnLastRefreshAt(status.fetchedAt || new Date().toISOString());
       message.success('已刷新 DCDN 域名状态');
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || '刷新 DCDN 状态失败';
@@ -1028,8 +1028,8 @@ const LineOnboardingPage: React.FC = () => {
       } else {
         message.success('HTTPS/WebSocket/WAF/缓存 配置完成');
       }
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || '应用 HTTPS/WebSocket/WAF/缓存 失败';
@@ -1072,8 +1072,8 @@ const LineOnboardingPage: React.FC = () => {
       } else {
         message.warning(result.message || 'Route53 CNAME 存在冲突');
       }
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || 'Route53 CNAME 预览失败';
@@ -1107,8 +1107,8 @@ const LineOnboardingPage: React.FC = () => {
       setRoute53SyncResult(result);
       message.success(result.changed ? 'Route53 CNAME 同步已提交' : 'Route53 CNAME 已存在，无需变更');
       await handleRefreshDcdnStatus();
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || 'Route53 CNAME 同步失败';
@@ -1209,11 +1209,11 @@ const LineOnboardingPage: React.FC = () => {
       setSelectedSourceIngressKey(first);
       setNewIngressNameInput(generateDefaultIngressName(confirmedSubdomain));
       message.success(`已加载 ${candidates.length} 个 source ingress 候选`);
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || error?.message || '加载 source ingress 候选失败';
+        : backendMsg || (error as ApiError)?.message || '加载 source ingress 候选失败';
       setSourceIngressError(msg);
       message.error(msg);
       return false;
@@ -1305,11 +1305,11 @@ const LineOnboardingPage: React.FC = () => {
         setTlsSecretNameInput(resp.data.tlsSecretNames[0]);
       }
       message.success('Ingress YAML 预览已生成，请确认后创建');
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || error?.message || '生成 Ingress 预览失败';
+        : backendMsg || (error as ApiError)?.message || '生成 Ingress 预览失败';
       setIngressPreviewError(msg);
       message.error(msg);
       return false;
@@ -1415,9 +1415,9 @@ const LineOnboardingPage: React.FC = () => {
             setVerifyResult(null);
             setVerifyError(null);
             message.success(`Ingress 创建成功：${resp.data.newIngressName}`);
-          } catch (error: any) {
-            const backendMsg = error?.response?.data?.message;
-            const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || error?.message || 'Ingress 创建失败';
+          } catch (error: unknown) {
+            const backendMsg = (error as ApiError)?.response?.data?.message;
+            const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || (error as ApiError)?.message || 'Ingress 创建失败';
             setIngressApplied(false);
             setIngressApplyError(msg);
             message.error(msg);
@@ -1427,12 +1427,12 @@ const LineOnboardingPage: React.FC = () => {
           }
         },
       });
-    } catch (error: any) {
-      const status = Number(error?.response?.status);
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const status = Number((error as ApiError)?.response?.status);
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
-        : backendMsg || error?.message || 'Ingress dry-run 校验失败';
+        : backendMsg || (error as ApiError)?.message || 'Ingress dry-run 校验失败';
 
       setIngressApplied(false);
       setIngressApplyError(msg);
@@ -1511,8 +1511,8 @@ const LineOnboardingPage: React.FC = () => {
       setVerifyError(null);
       message.success(result.connectivityCheck?.ok ? '连通性检查通过，平台线路已启用' : result.message || '超级后台登记成功');
       return true;
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
         ? backendMsg.join('; ')
         : backendMsg || '超级后台登记失败';
@@ -1590,11 +1590,11 @@ const LineOnboardingPage: React.FC = () => {
           setVerifyResult(null);
           setVerifyError(null);
           message.success(resp.data.action === 'created' ? 'tenant_domain 已自动写入' : 'tenant_domain 已存在，无需重复写入');
-        } catch (error: any) {
-          const backendMsg = error?.response?.data?.message;
+        } catch (error: unknown) {
+          const backendMsg = (error as ApiError)?.response?.data?.message;
           const msg = Array.isArray(backendMsg)
             ? backendMsg.join('; ')
-            : backendMsg || error?.message || '自动写入 tenant_domain 失败';
+            : backendMsg || (error as ApiError)?.message || '自动写入 tenant_domain 失败';
           setTenantDomainApplyError(msg);
           message.error(msg);
           throw error;
@@ -1620,8 +1620,8 @@ const LineOnboardingPage: React.FC = () => {
       } else {
         message.warning('未在外部 /api/lines 返回结果中找到该线路');
       }
-    } catch (error: any) {
-      const backendMsg = error?.response?.data?.message;
+    } catch (error: unknown) {
+      const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '外部 API 验收失败';
       setVerifyError(msg);
       setVerifyResult(null);

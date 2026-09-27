@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../contexts/AuthContext';
+import { AuthContext } from '../contexts/AuthContextValue';
 import { getRuntimeConfig } from '../services/runtimeConfig';
 import { resolveSsoRedirectUri } from '../services/sso';
 
@@ -40,8 +40,8 @@ const LoginPage: React.FC = () => {
         const redirectUri = resolveSsoRedirectUri(cfg.SSO_REDIRECT_URI);
         setConfig({ redirectUri });
         setSsoReady(true);
-      } catch (err: any) {
-        setSsoError(err?.message || '加载 SSO 配置失败');
+      } catch (err: unknown) {
+        setSsoError((err as ApiError)?.message || '加载 SSO 配置失败');
       }
     };
     load();
@@ -54,8 +54,8 @@ const LoginPage: React.FC = () => {
       const resp = await login(values.username, values.password, values.otpCode);
       if (resp?.mfaSetupRequired) {
         setMfaSetup({
-          username: resp.username,
-          secret: resp.secret,
+          username: resp.username || values.username,
+          secret: resp.secret || '',
           qrCodeDataUrl: resp.qrCodeDataUrl,
           otpauthUrl: resp.otpauthUrl,
           message: resp.message,
@@ -71,8 +71,8 @@ const LoginPage: React.FC = () => {
         return;
       }
       navigate('/', { replace: true });
-    } catch (err: any) {
-      message.error(err?.response?.data?.message || err?.message || '登录失败');
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.message || (err as ApiError)?.message || '登录失败');
     } finally {
       setLoggingIn(false);
     }
@@ -83,8 +83,8 @@ const LoginPage: React.FC = () => {
     try {
       const url = `/api/auth/keycloak/login?redirectUri=${encodeURIComponent(config.redirectUri)}`;
       window.location.href = url;
-    } catch (err: any) {
-      message.error(err?.message || 'SSO 登录失败');
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.message || 'SSO 登录失败');
     }
   };
 

@@ -1,31 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { setApiEnvironment } from '../services/api';
 import { getRuntimeConfig } from '../services/runtimeConfig';
-import { AuthContext } from './AuthContext';
-
-export interface Environment {
-  id: string;
-  name: string;
-}
-
-interface EnvironmentContextType {
-  environments: Environment[];
-  currentEnvironment: Environment | null;
-  setCurrentEnvironment: (environment: Environment) => void;
-  refreshEnvironments: () => Promise<void>;
-  loading: boolean;
-  error: string | null;
-}
-
-export const EnvironmentContext = createContext<EnvironmentContextType>({
-  environments: [],
-  currentEnvironment: null,
-  setCurrentEnvironment: () => {},
-  refreshEnvironments: async () => {},
-  loading: true,
-  error: null,
-});
+import { AuthContext } from './AuthContextValue';
+import { EnvironmentContext } from './EnvironmentContextValue';
+import type { Environment } from './EnvironmentContextValue';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -77,7 +56,7 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     setLoading(true);
     setError(null);
 
-    let lastError: any = null;
+    let lastError: unknown = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const config = await getRuntimeConfig();
@@ -100,7 +79,7 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
         }
         setError(null);
         return;
-      } catch (err: any) {
+      } catch (err: unknown) {
         lastError = err;
         if (attempt < 2) {
           await sleep(400 * (attempt + 1));
@@ -113,7 +92,7 @@ export const EnvironmentProvider: React.FC<{ children: ReactNode }> = ({ childre
     }
 
     if (seq === requestSeq.current) {
-      setError(lastError?.message || '加载环境失败');
+      setError((lastError as ApiError | null)?.message || '加载环境失败');
     }
   }, [authLoading, isAuthenticated, handleSetCurrentEnvironment]);
 

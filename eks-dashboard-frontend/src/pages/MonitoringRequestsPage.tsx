@@ -1,7 +1,7 @@
 import { useContext, useEffect, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, Skeleton, Space, Steps, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { AuthContext } from '../contexts/AuthContext';
+import { AuthContext } from '../contexts/AuthContextValue';
 import { createMonitoringRequest, decideMonitoringRequest, getMonitoringRequest, listMonitoringRequests, submitMonitoringRequest, submitManagedMonitoringRequest, withdrawMonitoringRequest, startMonitoringJenkinsExecution, listMonitoringJenkinsExecutions, refreshMonitoringJenkinsExecution } from '../services/api';
 import type { MonitoringJenkinsExecution, MonitoringRequest, MonitoringRequestStatus } from '../services/api';
 
@@ -28,38 +28,38 @@ export default function MonitoringRequestsPage() {
   const canApprove = permissions.includes('monitoring-requests:approve');
   const [executions, setExecutions] = useState<MonitoringJenkinsExecution[]>([]);
   const [executionLoading, setExecutionLoading] = useState(false);
-  const load = async () => { setLoading(true); try { setItems((await listMonitoringRequests()).items); } catch (e: any) { message.error(e?.response?.data?.message || '加载申请失败'); } finally { setLoading(false); } };
+  const load = async () => { setLoading(true); try { setItems((await listMonitoringRequests()).items); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '加载申请失败'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
-  const openDetail = async (id: string) => { setDetailOpen(true); setDetailLoading(true); setDetail(null); setExecutions([]); try { const [request, initialRuns] = await Promise.all([getMonitoringRequest(id), listMonitoringJenkinsExecutions(id)]); const staleRuns = initialRuns.filter(run => !['SUCCESS', 'FAILURE', 'ABORTED'].includes(run.status) || (run.mode === 'preview' && run.status === 'SUCCESS' && !run.diff_text)); if (staleRuns.length) await Promise.all(staleRuns.map(run => refreshMonitoringJenkinsExecution(id, run.id))); const runs = staleRuns.length ? await listMonitoringJenkinsExecutions(id) : initialRuns; const refreshedRequest = staleRuns.length ? await getMonitoringRequest(id) : request; setDetail(refreshedRequest); setExecutions(runs); } catch (e: any) { message.error(e?.response?.data?.message || '加载详情失败'); } finally { setDetailLoading(false); } };
-  const create = async () => { try { const values = await form.validateFields(); const row = await createMonitoringRequest(values); message.success('草稿已创建'); setCreateOpen(false); form.resetFields(); await load(); await openDetail(row.request_id); } catch (e: any) { if (e?.errorFields) return; message.error(e?.response?.data?.message || '创建失败'); } };
+  const openDetail = async (id: string) => { setDetailOpen(true); setDetailLoading(true); setDetail(null); setExecutions([]); try { const [request, initialRuns] = await Promise.all([getMonitoringRequest(id), listMonitoringJenkinsExecutions(id)]); const staleRuns = initialRuns.filter(run => !['SUCCESS', 'FAILURE', 'ABORTED'].includes(run.status) || (run.mode === 'preview' && run.status === 'SUCCESS' && !run.diff_text)); if (staleRuns.length) await Promise.all(staleRuns.map(run => refreshMonitoringJenkinsExecution(id, run.id))); const runs = staleRuns.length ? await listMonitoringJenkinsExecutions(id) : initialRuns; const refreshedRequest = staleRuns.length ? await getMonitoringRequest(id) : request; setDetail(refreshedRequest); setExecutions(runs); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '加载详情失败'); } finally { setDetailLoading(false); } };
+  const create = async () => { try { const values = await form.validateFields(); const row = await createMonitoringRequest(values); message.success('草稿已创建'); setCreateOpen(false); form.resetFields(); await load(); await openDetail(row.request_id); } catch (e: unknown) { if ((e as ApiError)?.errorFields) return; message.error((e as ApiError)?.response?.data?.message || '创建失败'); } };
   // These confirmations originate from inside a Drawer (z-index 1000). Raise the
   // static modal so its mask/panel remain clickable instead of being obscured.
   const submit = () => {
-    let modal: ReturnType<typeof Modal.confirm>;
-    modal = Modal.confirm({
+    const modalRef: { current?: ReturnType<typeof Modal.confirm> } = {};
+    modalRef.current = Modal.confirm({
       title: '提交审批', zIndex: 1100, closable: true, maskClosable: true, footer: null,
       content: <SubmitForm onDone={async (data) => {
         if (!detail) return;
         try {
           await submitMonitoringRequest(detail.request_id, data);
-          modal.destroy();
+          modalRef.current?.destroy();
           message.success('已提交审批');
           await load();
           await openDetail(detail.request_id);
-        } catch (e: any) {
-          message.error(e?.response?.data?.message || '提交失败');
+        } catch (e: unknown) {
+          message.error((e as ApiError)?.response?.data?.message || '提交失败');
           throw e;
         }
       }} />,
     });
   };
-  const managedSubmit = async () => { if (!detail) return; setExecutionLoading(true); try { await submitManagedMonitoringRequest(detail.request_id); message.success('已创建受控 GitLab MR 并提交审批'); await load(); await openDetail(detail.request_id); } catch (e: any) { message.error(e?.response?.data?.message || '创建受控 GitLab MR 失败'); } finally { setExecutionLoading(false); } };
-  const action = async (kind: 'approve'|'reject'|'withdraw') => { if (!detail) return; const label = kind === 'approve' ? '批准' : kind === 'reject' ? '拒绝' : '撤回'; Modal.confirm({ title: `确认${label}`, zIndex: 1100, content: `该操作会记录审计事件。${kind === 'approve' ? '批准仅绑定当前 MR IID 与 Commit SHA；后续 SHA 变更必须重新提交。' : ''}`, onOk: async () => { try { if (kind === 'withdraw') await withdrawMonitoringRequest(detail.request_id); else await decideMonitoringRequest(detail.request_id, kind); message.success(`已${label}`); await load(); await openDetail(detail.request_id); } catch (e: any) { message.error(e?.response?.data?.message || `${label}失败`); throw e; } } }); };
+  const managedSubmit = async () => { if (!detail) return; setExecutionLoading(true); try { await submitManagedMonitoringRequest(detail.request_id); message.success('已创建受控 GitLab MR 并提交审批'); await load(); await openDetail(detail.request_id); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '创建受控 GitLab MR 失败'); } finally { setExecutionLoading(false); } };
+  const action = async (kind: 'approve'|'reject'|'withdraw') => { if (!detail) return; const label = kind === 'approve' ? '批准' : kind === 'reject' ? '拒绝' : '撤回'; Modal.confirm({ title: `确认${label}`, zIndex: 1100, content: `该操作会记录审计事件。${kind === 'approve' ? '批准仅绑定当前 MR IID 与 Commit SHA；后续 SHA 变更必须重新提交。' : ''}`, onOk: async () => { try { if (kind === 'withdraw') await withdrawMonitoringRequest(detail.request_id); else await decideMonitoringRequest(detail.request_id, kind); message.success(`已${label}`); await load(); await openDetail(detail.request_id); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || `${label}失败`); throw e; } } }); };
   const latestPreview = executions.find(e => e.mode === 'preview' && e.status === 'SUCCESS' && !!e.diff_text);
   const auditEvents = detail?.events ? [...detail.events].reverse() : [];
   const auditStepIcon = (number: number) => <span style={{ display: 'inline-flex', width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#f0f0f0', border: '1px solid #d9d9d9', color: '#595959', fontSize: 12, fontWeight: 600 }}>{number}</span>;
-  const execution = async (mode: 'preview'|'apply') => { if (!detail) return; const label = mode === 'preview' ? '确认合并并生成最终 Diff' : '确认真实执行'; let comment = ''; let confirmation = ''; Modal.confirm({ title: label, zIndex: 1100, closable: true, maskClosable: true, width: 680, okText: mode === 'preview' ? '确认合并并生成 Diff' : '确认真实执行', content: mode === 'preview' ? <FinalDiffConfirmation detail={detail} /> : <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="将基于当前最终 Diff 触发 DRY_RUN=false。Jenkins 会再次校验 MR、SHA 和资源策略；授权仅 15 分钟有效且只能消费一次。" /><Input.TextArea rows={3} placeholder="确认说明（必填）" onChange={e => { comment = e.target.value; }} /><Input placeholder="输入 APPLY 以确认" onChange={e => { confirmation = e.target.value; }} /></Space>, onOk: async () => { try { if (mode === 'apply' && (confirmation !== 'APPLY' || !comment.trim())) { message.error('请输入 APPLY 并填写确认说明'); throw new Error('confirmation required'); } setExecutionLoading(true); const run = await startMonitoringJenkinsExecution(detail.request_id, mode, { comment, confirmation }); message.success(`${label}已进入 Jenkins 队列 #${run.queue_id}`); await openDetail(detail.request_id); } catch (e: any) { if (e?.message === 'confirmation required') return; message.error(e?.response?.data?.message || `${label}失败`); throw e; } finally { setExecutionLoading(false); } } }); };
-  const refreshRuns = async () => { if (!detail) return; try { setExecutionLoading(true); for (const run of executions.filter(e => !['SUCCESS','FAILURE','ABORTED'].includes(e.status))) await refreshMonitoringJenkinsExecution(detail.request_id, run.id); await openDetail(detail.request_id); } catch (e: any) { message.error(e?.response?.data?.message || '刷新执行状态失败'); } finally { setExecutionLoading(false); } };
+  const execution = async (mode: 'preview'|'apply') => { if (!detail) return; const label = mode === 'preview' ? '确认合并并生成最终 Diff' : '确认真实执行'; let comment = ''; let confirmation = ''; Modal.confirm({ title: label, zIndex: 1100, closable: true, maskClosable: true, width: 680, okText: mode === 'preview' ? '确认合并并生成 Diff' : '确认真实执行', content: mode === 'preview' ? <FinalDiffConfirmation detail={detail} /> : <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="将基于当前最终 Diff 触发 DRY_RUN=false。Jenkins 会再次校验 MR、SHA 和资源策略；授权仅 15 分钟有效且只能消费一次。" /><Input.TextArea rows={3} placeholder="确认说明（必填）" onChange={e => { comment = e.target.value; }} /><Input placeholder="输入 APPLY 以确认" onChange={e => { confirmation = e.target.value; }} /></Space>, onOk: async () => { try { if (mode === 'apply' && (confirmation !== 'APPLY' || !comment.trim())) { message.error('请输入 APPLY 并填写确认说明'); throw new Error('confirmation required'); } setExecutionLoading(true); const run = await startMonitoringJenkinsExecution(detail.request_id, mode, { comment, confirmation }); message.success(`${label}已进入 Jenkins 队列 #${run.queue_id}`); await openDetail(detail.request_id); } catch (e: unknown) { if ((e as ApiError)?.message === 'confirmation required') return; message.error((e as ApiError)?.response?.data?.message || `${label}失败`); throw e; } finally { setExecutionLoading(false); } } }); };
+  const refreshRuns = async () => { if (!detail) return; try { setExecutionLoading(true); for (const run of executions.filter(e => !['SUCCESS','FAILURE','ABORTED'].includes(e.status))) await refreshMonitoringJenkinsExecution(detail.request_id, run.id); await openDetail(detail.request_id); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '刷新执行状态失败'); } finally { setExecutionLoading(false); } };
   const columns: ColumnsType<MonitoringRequest> = [
     { title: '申请 ID', dataIndex: 'request_id', width: 230, render: (v) => <Button type="link" onClick={() => void openDetail(v)}>{v}</Button> },
     { title: '资源', render: (_, r) => <><div>{r.resource_type}/{r.resource_name}</div><Text type="secondary">{r.app_id}</Text></> },

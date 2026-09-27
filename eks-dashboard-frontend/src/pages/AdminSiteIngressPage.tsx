@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Input, Modal, Select, Space, Steps, Typography } from 'antd';
 import { CheckCircleOutlined, FileSearchOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { applyIngressManifestForLineOnboarding, applyTenantDomainForLineOnboarding, getIngressSourceCandidatesForLineOnboarding, getTenantsForEnvironment, previewCloneIngressForLineOnboarding } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 
 const { Text, Paragraph } = Typography;
 const DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -14,9 +14,9 @@ type Preview = { newIngressName: string; namespace: string; host: string; source
 type TenantDomainResult = { action: 'created' | 'unchanged'; id?: number; tenantId: number; domain: string; status: number };
 type DryRunResult = { newIngressName: string; namespace: string; host: string; warnings?: Array<{ annotation: string; message: string }> };
 
-const readableError = (error: any, fallback: string) => {
-  const message = error?.response?.data?.message;
-  return Array.isArray(message) ? message.join('; ') : message || error?.message || fallback;
+const readableError = (error: unknown, fallback: string) => {
+  const message = (error as ApiError)?.response?.data?.message;
+  return Array.isArray(message) ? message.join('; ') : message || (error as ApiError)?.message || fallback;
 };
 
 const AdminSiteIngressPage: React.FC = () => {
@@ -53,7 +53,10 @@ const AdminSiteIngressPage: React.FC = () => {
     if (!currentEnvironment?.id) return;
     getTenantsForEnvironment(currentEnvironment.id).then((data) => {
       if (cancelled) return;
-      const values = Array.isArray(data) ? data.map((item: any) => ({ id: Number(item.id), name: String(item.name || '') })).filter((item) => Number.isInteger(item.id) && item.id > 0) : [];
+      const values = Array.isArray(data) ? data.map((item: unknown) => {
+        const tenant = item as { id?: unknown; name?: unknown };
+        return { id: Number(tenant.id), name: String(tenant.name || '') };
+      }).filter((item) => Number.isInteger(item.id) && item.id > 0) : [];
       setTenants(values); setTenantId(values[0]?.id);
     }).catch((error) => { if (!cancelled) message.error(readableError(error, '加载租户列表失败')); });
     return () => { cancelled = true; };

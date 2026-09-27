@@ -3,7 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Table, Button, message, Spin, Input, Space, App, Alert } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import { getJumpServers, resetJumpServerPassword } from '../services/api';
-import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { SecurityGroupModal } from '../components/SecurityGroupModal';
 
 interface JumpServer {
@@ -48,8 +48,8 @@ const WindowsJumpServerPage: React.FC = () => {
       const data = await getJumpServers();
       setAllJumpServers(data);
       setError(null);
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || error.message;
+    } catch (error: unknown) {
+      const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
       setError(`获取跳板机列表失败: ${errorMessage}`);
       message.error(`获取跳板机列表失败: ${errorMessage}`);
     } finally {
@@ -93,8 +93,8 @@ const WindowsJumpServerPage: React.FC = () => {
         width: 520,
       });
 
-    } catch (error: any) {
-      message.error(`Failed to reset password: ${error.message}`);
+    } catch (error: unknown) {
+      message.error(`Failed to reset password: ${(error as ApiError).message}`);
     } finally {
       setResettingPasswordId(null);
     }

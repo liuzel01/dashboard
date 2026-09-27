@@ -23,7 +23,7 @@ import {
   updateSiteMonitor,
   getSiteMonitorById,
 } from "../services/api";
-import { EnvironmentContext } from "../contexts/EnvironmentContext";
+import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { getTenantsForEnvironment } from "../services/api";
 import { FilterBar, MetricGrid, OpsTable, PageHeader, RiskConfirm, StatusBadge } from '../components/ops';
 
@@ -135,8 +135,8 @@ const SiteMonitorPage: React.FC = () => {
     try {
       const rows = await getSiteMonitors(tenantFilter);
       setData(rows);
-    } catch (e: any) {
-      const errorMessage = e?.message || "加载失败";
+    } catch (e: unknown) {
+      const errorMessage = (e as ApiError)?.message || "加载失败";
       setLoadError(errorMessage);
       message.error(errorMessage);
     } finally {
@@ -164,7 +164,7 @@ const SiteMonitorPage: React.FC = () => {
       try {
         const list = await getTenantsForEnvironment();
         setTenants(list);
-      } catch (e: any) {
+      } catch {
         // ignore
       }
     };
@@ -187,9 +187,9 @@ const SiteMonitorPage: React.FC = () => {
       setModalOpen(false);
       form.resetFields();
       await load();
-    } catch (e: any) {
-      if (e?.errorFields) return; // form error
-      message.error(e?.message || "添加失败");
+    } catch (e: unknown) {
+      if ((e as ApiError)?.errorFields) return; // form error
+      message.error((e as ApiError)?.message || "添加失败");
     }
   };
 
@@ -204,8 +204,8 @@ const SiteMonitorPage: React.FC = () => {
       setData((prev) => prev.filter((row) => row.id !== target.id));
       setDetailRecord((prev) => (prev?.id === target.id ? null : prev));
       message.success("站点已删除");
-    } catch (e: any) {
-      message.error(e?.message || "删除失败");
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || "删除失败");
     } finally {
       setDeletingId(null);
       setDeleteTarget(null);
@@ -219,8 +219,8 @@ const SiteMonitorPage: React.FC = () => {
       setData((prev) =>
         prev.map((r) => (r.id === id ? { ...r, ...updated } : r)),
       );
-    } catch (e: any) {
-      message.error(e?.message || "检查失败");
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.message || "检查失败");
     } finally {
       setCheckingId(null);
     }
@@ -279,8 +279,8 @@ const SiteMonitorPage: React.FC = () => {
                 cfg.acceptable_status_codes ?? undefined,
               );
               setAlertModalOpen(true);
-            } catch (e: any) {
-              message.error(e?.message || "加载告警配置失败");
+            } catch (e: unknown) {
+              message.error((e as ApiError)?.message || "加载告警配置失败");
             }
           }}
         >
@@ -423,8 +423,8 @@ const SiteMonitorPage: React.FC = () => {
                           port: fresh.port,
                           notes: fresh.notes,
                         });
-                      } catch (e: any) {
-                        message.error(e?.message || "加载详情失败");
+                      } catch (e: unknown) {
+                        message.error((e as ApiError)?.message || "加载详情失败");
                       }
                     }}
                   >
@@ -493,7 +493,7 @@ const SiteMonitorPage: React.FC = () => {
         onOk={async () => {
           try {
             const values = await editForm.validateFields();
-            const payload: any = {};
+            const payload: JsonRecord = {};
             if ("tenant_id" in values) payload.tenantId = values.tenant_id;
             if ("name" in values) payload.name = values.name;
             if ("host" in values) payload.host = values.host;
@@ -514,9 +514,9 @@ const SiteMonitorPage: React.FC = () => {
               editForm.resetFields();
               setDetailRecord(null);
             }
-          } catch (e: any) {
-            if (e?.errorFields) return;
-            message.error(e?.message || "保存失败");
+          } catch (e: unknown) {
+            if ((e as ApiError)?.errorFields) return;
+            message.error((e as ApiError)?.message || "保存失败");
           }
         }}
         okText="保存"
@@ -642,8 +642,8 @@ const SiteMonitorPage: React.FC = () => {
             });
             message.success("已保存");
             setAlertModalOpen(false);
-          } catch (e: any) {
-            message.error(e?.message || "保存失败");
+          } catch (e: unknown) {
+            message.error((e as ApiError)?.message || "保存失败");
           }
         }}
         okText="保存"
@@ -689,8 +689,8 @@ const SiteMonitorPage: React.FC = () => {
               try {
                 await testAlert();
                 message.success("测试告警已发送");
-              } catch (e: any) {
-                message.error(e?.message || "发送失败");
+              } catch (e: unknown) {
+                message.error((e as ApiError)?.message || "发送失败");
               }
             }}
           >

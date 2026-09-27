@@ -1,6 +1,7 @@
-import React, { createContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { getMe, login as loginApi, setAuthToken } from '../services/api';
+import { AuthContext } from './AuthContextValue';
 
 export type AuthRole = {
   id: number;
@@ -22,54 +23,42 @@ export type AuthUser = {
   bootstrap?: boolean;
 };
 
-interface AuthContextType {
-  me: AuthUser | null;
-  permissions: string[];
-  isAuthenticated: boolean;
-  loading: boolean;
-  error: string | null;
-  refreshMe: () => Promise<void>;
-  login: (username: string, password: string, otpCode?: string) => Promise<any>;
-  applyToken: (token: string) => Promise<void>;
-  logout: () => void;
-}
-
-export const AuthContext = createContext<AuthContextType>({
-  me: null,
-  permissions: [],
-  isAuthenticated: false,
-  loading: true,
-  error: null,
-  refreshMe: async () => {},
-  login: async () => {},
-  applyToken: async () => {},
-  logout: () => {},
-});
+export type AuthLoginResponse = {
+  token?: string;
+  user?: AuthUser;
+  mfaRequired?: boolean;
+  mfaSetupRequired?: boolean;
+  username?: string;
+  secret?: string;
+  qrCodeDataUrl?: string;
+  otpauthUrl?: string;
+  message?: string;
+};
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [me, setMe] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchMe = async () => {
+  const fetchMe = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getMe();
       setMe(data);
-    } catch (err: any) {
-      const status = err?.response?.status;
+    } catch (err: unknown) {
+      const status = (err as ApiError)?.response?.status;
       if (status === 401) {
         setMe(null);
         setError(null);
       } else {
-        setError(err?.message || '加载用户信息失败');
+        setError((err as ApiError)?.message || '加载用户信息失败');
         setMe(null);
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken');
@@ -79,9 +68,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [fetchMe]);
 
-  const login = async (username: string, password: string, otpCode?: string) => {
+  const login = useCallback(async (username: string, password: string, otpCode?: string) => {
     const resp = await loginApi({ username, password, otpCode });
     const token = resp?.token as string | undefined;
     if (!token) {
@@ -95,20 +84,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } else {
       await fetchMe();
     }
-    return resp;
-  };
+    return resp as AuthLoginResponse;
+  }, [fetchMe]);
 
-  const applyToken = async (token: string) => {
+  const applyToken = useCallback(async (token: string) => {
     localStorage.setItem('authToken', token);
     setAuthToken(token);
     await fetchMe();
-  };
+  }, [fetchMe]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('authToken');
     setAuthToken(null);
     setMe(null);
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -122,7 +111,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       applyToken,
       logout,
     }),
-    [me, loading, error],
+    [me, loading, error, fetchMe, login, applyToken, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
