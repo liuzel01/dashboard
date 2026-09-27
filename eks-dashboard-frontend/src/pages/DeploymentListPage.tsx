@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Table, Input, Button, App, Spin, Space, Alert, Tag, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
+import React, { useState, useEffect, useCallback, useContext, useRef, useMemo } from 'react';
+import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
 import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
 // 定义 Deployment 对象的接口
 interface Deployment {
@@ -105,6 +106,7 @@ const DeploymentListPage: React.FC = () => {
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
   const [searchRevision, setSearchRevision] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState<string | null>(null);
   const [imageHistoryTarget, setImageHistoryTarget] = useState<string | null>(null);
   const [imageHistory, setImageHistory] = useState<DeploymentImageHistory | null>(null);
@@ -136,6 +138,7 @@ const DeploymentListPage: React.FC = () => {
     }
     const requestSeq = ++requestSeqRef.current;
     setLoading(true);
+    setLoadError(null);
     getDeployments({ name })
       .then((data) => {
         if (requestSeq !== requestSeqRef.current) {
@@ -149,6 +152,7 @@ const DeploymentListPage: React.FC = () => {
         }
         console.error('获取应用列表失败:', error);
         const errorMessage = error.response?.data?.message || error.message;
+        setLoadError(errorMessage || '获取应用列表失败');
         message.error(`获取应用列表失败: ${errorMessage}`);
       })
       .finally(() => {
@@ -468,27 +472,27 @@ const DeploymentListPage: React.FC = () => {
           const detail = diagnostic
             ? `${diagnostic.reason}: ${diagnostic.message}`
             : 'Kubernetes 已报告发布错误';
-          return <Tooltip title={detail}><Tag color="error">发布失败</Tag></Tooltip>;
+          return <Tooltip title={detail}><StatusBadge status="failed" label="发布失败" /></Tooltip>;
         }
         if (operation?.phase === 'progressing') {
           const diagnostic = operation.diagnostics[0];
-          return <Tooltip title={diagnostic ? `${diagnostic.reason}: ${diagnostic.message}` : `${operation.operationName}正在核查 Kubernetes 发布状态`}><Tag color="processing">发布中</Tag></Tooltip>;
+          return <Tooltip title={diagnostic ? `${diagnostic.reason}: ${diagnostic.message}` : `${operation.operationName}正在核查 Kubernetes 发布状态`}><StatusBadge status="progressing" label="发布中" /></Tooltip>;
         }
         if (operation?.phase === 'blocked') {
           const diagnostic = operation.diagnostics[0];
           const detail = diagnostic
             ? `${diagnostic.reason}: ${diagnostic.message}`
             : 'Kubernetes 报告暂态诊断，Dashboard 正在继续跟踪';
-          return <Tooltip title={detail}><Tag color="warning">发布受阻</Tag></Tooltip>;
+          return <Tooltip title={detail}><StatusBadge status="blocked" label="发布受阻" /></Tooltip>;
         }
         const phase = getRolloutPhase(record);
         const desired = record.replicas ?? 0;
         const ready = record.readyReplicas ?? 0;
         const updated = record.updatedReplicas ?? 0;
         const unavailable = record.unavailableReplicas ?? 0;
-        if (phase === 'completed') return <Space size={6}><Tag color="success">已完成</Tag><span>{`${ready}/${desired}`}</span></Space>;
-        if (phase === 'failed') return <Tooltip title={record.progressingReason || 'Progressing=False'}><Tag color="error">发布异常</Tag></Tooltip>;
-        return <Tooltip title={`ready ${ready}/${desired}, updated ${updated}/${desired}, unavailable ${unavailable}`}><Tag color="processing">发布中</Tag></Tooltip>;
+        if (phase === 'completed') return <Space size={6}><StatusBadge status="completed" /><span>{`${ready}/${desired}`}</span></Space>;
+        if (phase === 'failed') return <Tooltip title={record.progressingReason || 'Progressing=False'}><StatusBadge status="failed" label="发布异常" /></Tooltip>;
+        return <Tooltip title={`ready ${ready}/${desired}, updated ${updated}/${desired}, unavailable ${unavailable}`}><StatusBadge status="in_progress" label="发布中" /></Tooltip>;
       },
     },
     {
@@ -521,35 +525,62 @@ const DeploymentListPage: React.FC = () => {
     },
   ];
 
+  const summaryItems = useMemo(() => {
+    const summary = { completed: 0, progressing: 0, blocked: 0, failed: 0 };
+    allDeployments.forEach((deployment) => {
+      const operation = deployment.name && currentEnvironment
+        ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, deployment.name)]
+        : undefined;
+      const phase = operation?.phase === 'progressing' ? 'progressing' : operation?.phase || getRolloutPhase(deployment);
+      if (phase === 'completed') summary.completed += 1;
+      else if (phase === 'failed') summary.failed += 1;
+      else if (phase === 'blocked') summary.blocked += 1;
+      else summary.progressing += 1;
+    });
+    return [
+      { key: 'completed', label: '已完成', value: summary.completed, valueStyle: { color: '#389e0d' } },
+      { key: 'progressing', label: '发布中', value: summary.progressing, valueStyle: { color: '#1677ff' } },
+      { key: 'blocked', label: '发布受阻', value: summary.blocked, valueStyle: { color: '#d48806' } },
+      { key: 'failed', label: '发布异常', value: summary.failed, valueStyle: { color: '#cf1322' } },
+    ];
+  }, [allDeployments, currentEnvironment, rolloutOperations]);
+
   if (!currentEnvironment) {
     return <Alert message="请先在页面顶部选择一个项目环境" type="info" />;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Space style={{ marginBottom: 20 }}>
+    <div>
+      <PageHeader
+        title="EKS 部署"
+        description="查看工作负载副本、镜像与发布状态；重启和镜像回退仍按既有确认与跟踪流程执行。"
+        environmentName={currentEnvironment.name}
+      />
+      <FilterBar
+        actions={<Button onClick={() => handleSearch(filterInput)} loading={loading}>刷新</Button>}
+      >
         <Input.Search
           placeholder="按名称模糊筛选..."
           value={filterInput}
           onChange={(e) => setFilterInput(e.target.value)}
           onSearch={handleSearch}
-          style={{ width: 400 }}
+          style={{ width: 400, maxWidth: '100%' }}
           allowClear
           enterButton
         />
-      </Space>
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        <Spin spinning={loading}>
-          <Table
-            columns={columns}
-            dataSource={allDeployments}
-            rowKey="name"
-            tableLayout="fixed"
-            scroll={{ x: 1550 }}
-            pagination={{ showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
-          />
-        </Spin>
-      </div>
+      </FilterBar>
+      <MetricGrid items={summaryItems} loading={loading} />
+      <OpsTable
+        columns={columns}
+        dataSource={allDeployments}
+        loading={loading}
+        rowKey="name"
+        tableLayout="fixed"
+        scroll={{ x: 1550 }}
+        pagination={{ showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+        error={loadError}
+        onRetry={() => fetchDeployments(filter)}
+      />
 
       <Modal
         title={imageHistoryTarget ? `镜像历史与回退：${imageHistoryTarget}` : '镜像历史与回退'}

@@ -1,13 +1,13 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
+import { Alert, App, Button, Card, Descriptions, Form, Input, Popconfirm, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
 import { acknowledgeOncallAlert, deleteOncallRoster, getOncallAlert, listOncallAlerts, listOncallRoster, saveOncallRoster, type OncallAlert, type OncallAlertStatus, type OncallRosterBinding, type OncallRosterLevel } from '../services/api';
+import { DetailDrawer, FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
 const { Text } = Typography;
 
-const statusColor: Record<OncallAlertStatus, string> = { FIRING: 'red', ACKED: 'gold', RESOLVED: 'green' };
 const asJsonText = (value: unknown) => {
   if (typeof value === 'string') {
     try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
@@ -21,6 +21,7 @@ const OncallPage: React.FC = () => {
   const [items, setItems] = useState<OncallAlert[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<OncallAlertStatus | undefined>();
   const [environmentId, setEnvironmentId] = useState<string | undefined>(currentEnvironment?.id);
   const [keyword, setKeyword] = useState('');
@@ -37,12 +38,15 @@ const OncallPage: React.FC = () => {
 
   const load = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await listOncallAlerts({ page: 1, pageSize: 100, status, environmentId, keyword: keyword.trim() || undefined });
       setItems(result.items);
       setTotal(result.total);
     } catch (error: any) {
-      message.error(error?.response?.data?.message || error?.message || 'Oncall 告警加载失败');
+      const errorMessage = error?.response?.data?.message || error?.message || 'Oncall 告警加载失败';
+      setLoadError(errorMessage);
+      message.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -109,16 +113,33 @@ const OncallPage: React.FC = () => {
   };
 
   const columns = useMemo<ColumnsType<OncallAlert>>(() => [
-    { title: '状态', dataIndex: 'status', width: 100, render: (value: OncallAlertStatus) => <Tag color={statusColor[value]}>{value}</Tag> },
+    { title: '状态', dataIndex: 'status', width: 100, render: (value: OncallAlertStatus) => <StatusBadge status={value} /> },
     { title: '告警', dataIndex: 'alert_name', render: (value: string, row) => <Button type="link" style={{ padding: 0 }} onClick={() => void openDetail(row)}>{value}</Button> },
     { title: '环境', dataIndex: 'environment_id', width: 120 },
     { title: 'Namespace', dataIndex: 'namespace', width: 160, render: (value) => value || '-' },
     { title: 'Severity / 风险', width: 150, render: (_, row) => <Space size={4}>{row.severity && <Tag>{row.severity}</Tag>}{row.risk_level && <Tag color="volcano">{row.risk_level}</Tag>}</Space> },
     { title: '最近触发', dataIndex: 'last_fired_at', width: 180, render: (value) => value || '-' },
     { title: '恢复时间', dataIndex: 'resolved_at', width: 180, render: (value) => value || '-' },
-  ], [items]);
+  ], []);
+
+  const summaryItems = useMemo(() => {
+    const counts = { FIRING: 0, ACKED: 0, RESOLVED: 0 };
+    items.forEach((item) => { counts[item.status] += 1; });
+    const escalationInProgress = items.filter((item) => item.escalations?.some((escalation) => !['SENT', 'FAILED', 'UNSUPPORTED'].includes(escalation.status))).length;
+    return [
+      { key: 'firing', label: '告警中', value: counts.FIRING, valueStyle: { color: '#cf1322' } },
+      { key: 'acked', label: '已确认', value: counts.ACKED, valueStyle: { color: '#d48806' } },
+      { key: 'escalating', label: '升级中', value: escalationInProgress, hint: '仅统计已加载的告警记录', valueStyle: { color: '#1677ff' } },
+      { key: 'resolved', label: '已恢复', value: counts.RESOLVED, valueStyle: { color: '#389e0d' } },
+    ];
+  }, [items]);
 
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <PageHeader
+      title="Oncall 告警"
+      description="接收 Alertmanager 专用 Webhook 的告警生命周期；确认、升级和通知记录均以现有后端状态为准。"
+      environmentName={currentEnvironment?.name}
+    />
     <Alert
       type="info"
       showIcon
@@ -140,18 +161,25 @@ const OncallPage: React.FC = () => {
         { title: '操作', width: 150, render: (_: unknown, row: OncallRosterBinding) => <Space size={0}><Button type="link" onClick={() => editRoster(row)}>编辑</Button><Popconfirm title="确认删除这条值班配置？" onConfirm={() => void removeRoster(row.id)}><Button danger type="link">删除</Button></Popconfirm></Space> },
       ]} />
     </Card>
-    <Space wrap>
+    <FilterBar actions={<Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>搜索</Button>}>
       <Select allowClear placeholder="状态" value={status} onChange={setStatus} style={{ width: 140 }} options={['FIRING', 'ACKED', 'RESOLVED'].map((value) => ({ value, label: value }))} />
       <Select allowClear showSearch optionFilterProp="label" placeholder="环境" value={environmentId} onChange={setEnvironmentId} style={{ width: 220 }} options={environments.map((env) => ({ value: env.id, label: `${env.name} (${env.id})` }))} />
       <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} onPressEnter={() => void load()} placeholder="告警名称、Namespace 或指纹" style={{ width: 260 }} />
-      <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>搜索</Button>
       <Text type="secondary">共 {total} 条</Text>
-    </Space>
-    <Table rowKey="id" loading={loading} columns={columns} dataSource={items} pagination={false} scroll={{ x: 1000 }} />
-    <Drawer title={selected ? `Oncall 告警 #${selected.id}` : 'Oncall 告警'} open={!!selected} onClose={() => setSelected(null)} width={760} loading={detailLoading}>
+    </FilterBar>
+    <MetricGrid items={summaryItems} loading={loading} />
+    <OpsTable rowKey="id" loading={loading} columns={columns} dataSource={items} pagination={false} scroll={{ x: 1000 }} error={loadError} onRetry={() => void load()} />
+    <DetailDrawer
+      title={selected ? `Oncall 告警 #${selected.id}` : 'Oncall 告警'}
+      open={!!selected}
+      onClose={() => setSelected(null)}
+      width={760}
+      loading={detailLoading}
+      summary={selected ? <><StatusBadge status={selected.status} /><Tag>{selected.environment_id}</Tag></> : null}
+    >
       {selected && <Space direction="vertical" size={18} style={{ width: '100%' }}>
         <Descriptions bordered column={2} size="small">
-          <Descriptions.Item label="状态"><Tag color={statusColor[selected.status]}>{selected.status}</Tag></Descriptions.Item>
+          <Descriptions.Item label="状态"><StatusBadge status={selected.status} /></Descriptions.Item>
           <Descriptions.Item label="环境">{selected.environment_id}</Descriptions.Item>
           <Descriptions.Item label="告警名称">{selected.alert_name}</Descriptions.Item>
           <Descriptions.Item label="Namespace">{selected.namespace || '-'}</Descriptions.Item>
@@ -167,7 +195,7 @@ const OncallPage: React.FC = () => {
         <div><Text strong>Lark 通知</Text><Timeline style={{ marginTop: 12 }} items={(selected.notifications || []).map((notification) => ({ color: notification.status === 'SENT' ? 'green' : notification.status === 'FAILED' ? 'red' : 'gray', children: `${notification.created_at}  ${notification.channel}: ${notification.status}${notification.error_message ? ` — ${notification.error_message}` : ''}` }))} /></div>
         <div><Text strong>升级记录</Text><Timeline style={{ marginTop: 12 }} items={(selected.escalations || []).map((escalation) => ({ color: escalation.status === 'SENT' ? 'green' : escalation.status === 'UNSUPPORTED' ? 'gold' : escalation.status === 'FAILED' ? 'red' : 'gray', children: `${escalation.scheduled_at}  ${escalation.level}: ${escalation.status}${escalation.error_message ? ` — ${escalation.error_message}` : ''}` }))} /></div>
       </Space>}
-    </Drawer>
+    </DetailDrawer>
   </Space>;
 };
 

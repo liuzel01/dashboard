@@ -13,7 +13,6 @@ import {
   Popover,
   Select,
   Space,
-  Statistic,
   Table,
   Tabs,
   Tag,
@@ -61,6 +60,7 @@ import {
   updateCredentialRef,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContext';
+import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
 import type {
   AssetAccount,
   AssetChangeLog,
@@ -1107,11 +1107,15 @@ const overviewStats = [
 const OverviewTab: React.FC = () => {
   const [data, setData] = useState<Awaited<ReturnType<typeof getAssetOverview>> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       setData(await getAssetOverview());
+    } catch (error: any) {
+      setLoadError(getErrorMessage(error, '加载资产总览失败'));
     } finally {
       setLoading(false);
     }
@@ -1122,23 +1126,30 @@ const OverviewTab: React.FC = () => {
   }, [load]);
 
   if (!data) {
-    return <Button loading={loading} onClick={load}>加载总览</Button>;
+    return (
+      <Space direction="vertical">
+        {loadError && <Alert type="error" showIcon message="加载资产总览失败" description={loadError} />}
+        <Button loading={loading} onClick={load}>加载总览</Button>
+      </Space>
+    );
   }
 
   return (
     <Space direction="vertical" size={20} style={{ width: '100%' }}>
-      <Space wrap size={32}>
-        {overviewStats.map((item) => (
-          <Statistic key={item.key} title={item.label} value={data[item.key].total} loading={loading} />
-        ))}
-        <Statistic title="未设置负责人" value={data.missingOwners.total} loading={loading} />
-      </Space>
-      <Table
+      <MetricGrid
+        loading={loading}
+        items={[
+          ...overviewStats.map((item) => ({ key: item.key, label: item.label, value: data[item.key].total })),
+          { key: 'missingOwners', label: '未设置负责人', value: data.missingOwners.total, valueStyle: { color: '#d48806' } },
+        ]}
+      />
+      <OpsTable
         rowKey="id"
         size="small"
-        title={() => <Text strong>最近变更</Text>}
         dataSource={data.recentChanges}
         pagination={false}
+        error={loadError}
+        onRetry={load}
         columns={[
           { title: '时间', dataIndex: 'created_at', render: (value: string) => formatDateTime(value) },
           { title: '资产类型', dataIndex: 'asset_type' },
@@ -1961,10 +1972,10 @@ const AssetManagementPage: React.FC<AssetManagementPageProps> = ({ activeTab = '
   return (
     <AntApp>
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <div>
-          <Typography.Title level={3} style={{ marginTop: 0 }}>资产管理</Typography.Title>
-          <Text type="secondary">轻量 CMDB 台账，仅记录凭证索引，不保存密码、AK/SK、私钥等敏感明文。</Text>
-        </div>
+        <PageHeader
+          title="资产管理"
+          description="轻量 CMDB 台账，仅记录凭证索引，不保存密码、AK/SK、私钥等敏感明文。"
+        />
         {tabItems.find((item) => item.key === activeTab)?.children || <OverviewTab />}
       </Space>
     </AntApp>

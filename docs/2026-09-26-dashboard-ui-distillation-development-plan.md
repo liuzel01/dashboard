@@ -56,6 +56,16 @@ Phase 0 的范围确认、试点确认、状态词典和 `.pen` 同步规则已�
 - `OpsTable` 已提供统一的加载失败、重试入口、空态与默认横向滚动；`RiskConfirm` 固定展示目标环境、目标资源和影响说明，但仍由页面传入执行回调。
 - 验证：`npm run build --prefix eks-dashboard-frontend` 通过；新增组件及 AppShell/App 的定向 ESLint 通过；`git diff --check` 通过。全仓既有 lint 错误未纳入本阶段范围。
 
+## Phase 3 执行记录（2026-09-27）
+
+- 已改造四个试点页面的展示层：`DeploymentListPage`、`SiteMonitorPage`、`OncallPage`、`AssetManagementPage` 的资产总览。它们分别接入了 `PageHeader`、`FilterBar`、`MetricGrid`、`OpsTable` 和统一状态展示；Oncall 已使用 `DetailDrawer`，站点删除已使用 `RiskConfirm`。
+- **EKS 部署：** 增加已完成、发布中、受阻、异常指标；表格状态改用统一状态词典，保留既有重启、镜像回退、日志和发布跟踪逻辑。
+- **站点监控：** 增加站点数、可用、不可用、HTTPS 指标；保留单点/多地域探针差异、原始详情和告警配置；删除确认现在明确显示目标环境、资源和影响范围。
+- **Oncall：** 增加告警中、已确认、升级中、已恢复指标；表格和详情使用统一状态标识及抽屉容器；ACK、通知、升级时间线和 `UNSUPPORTED` 语义保持原样。
+- **资产总览：** 改用指标网格和统一表格，保留敏感凭证不落明文的既有边界。
+- 四页主查询均已保留原错误提示，并新增可见错误态与重试入口；未更改 API、路由、权限、环境选择、dry-run、回退、ACK 或审计调用。
+- 验证：`npm run build --prefix eks-dashboard-frontend` 通过，`git diff --check` 通过。全仓既有 lint 错误仍未纳入本阶段范围。
+
 ## 1. 结论
 
 本次采用“蒸馏设计模式、保留业务语义”的路径：借鉴 `web-admin-new` 成熟后台在页面层级、数据密集型列表、指标卡片、筛选工具栏、多任务切换方面的做法；**不**复制其商户后台业务、菜单权限模型、接口封装、路由缓存实现或主题色。

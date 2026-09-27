@@ -1,7 +1,6 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 import {
   Button,
-  Table,
   Tag,
   Space,
   Modal,
@@ -26,6 +25,7 @@ import {
 } from "../services/api";
 import { EnvironmentContext } from "../contexts/EnvironmentContext";
 import { getTenantsForEnvironment } from "../services/api";
+import { FilterBar, MetricGrid, OpsTable, PageHeader, RiskConfirm, StatusBadge } from '../components/ops';
 
 type SiteRow = {
   id: number;
@@ -64,6 +64,7 @@ const SiteMonitorPage: React.FC = () => {
   const { currentEnvironment } = useContext(EnvironmentContext);
   const [data, setData] = useState<SiteRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<SiteRow | null>(null);
@@ -130,11 +131,14 @@ const SiteMonitorPage: React.FC = () => {
     }
     setData([]);
     setLoading(true);
+    setLoadError(null);
     try {
       const rows = await getSiteMonitors(tenantFilter);
       setData(rows);
     } catch (e: any) {
-      message.error(e?.message || "加载失败");
+      const errorMessage = e?.message || "加载失败";
+      setLoadError(errorMessage);
+      message.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -222,15 +226,30 @@ const SiteMonitorPage: React.FC = () => {
     }
   };
 
+  const summaryItems = useMemo(() => {
+    const availability = (row: SiteRow) => row.monitor_source === 'line_inventory'
+      ? row.availability === 'up'
+      : row.treated_ok === true;
+    const unavailable = (row: SiteRow) => row.monitor_source === 'line_inventory'
+      ? row.availability === 'down'
+      : row.treated_ok === false && typeof row.http_status === 'number';
+    return [
+      { key: 'total', label: '监控站点', value: filteredData.length },
+      { key: 'available', label: '可用', value: filteredData.filter(availability).length, valueStyle: { color: '#389e0d' } },
+      { key: 'unavailable', label: '不可用', value: filteredData.filter(unavailable).length, valueStyle: { color: '#cf1322' } },
+      { key: 'https', label: 'HTTPS 站点', value: filteredData.filter((row) => row.is_https === 1).length, hint: '含单点和多地域探测', valueStyle: { color: '#1677ff' } },
+    ];
+  }, [filteredData]);
+
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button type="primary" onClick={() => setModalOpen(true)}>
-          添加站点
-        </Button>
-        <Button onClick={load} loading={loading}>
-          刷新
-        </Button>
+      <PageHeader
+        title="站点监控"
+        description="展示单点与多地域探针结果；详情保留 DNS、TCP、HTTP、SSL 等原始诊断证据。"
+        environmentName={currentEnvironment?.name}
+        actions={<Button type="primary" onClick={() => setModalOpen(true)}>添加站点</Button>}
+      />
+      <FilterBar actions={<Button onClick={load} loading={loading}>刷新</Button>}>
         <Input
           allowClear
           placeholder="按 Host筛选"
@@ -267,8 +286,9 @@ const SiteMonitorPage: React.FC = () => {
         >
           告警设置
         </Button>
-      </Space>
-      <Table<SiteRow>
+      </FilterBar>
+      <MetricGrid items={summaryItems} loading={loading} />
+      <OpsTable<SiteRow>
         rowKey="id"
         dataSource={filteredData}
         loading={loading}
@@ -280,6 +300,8 @@ const SiteMonitorPage: React.FC = () => {
         }}
         tableLayout="fixed"
         scroll={{ x: 1900 }}
+        error={loadError}
+        onRetry={load}
         columns={[
           {
             title: "名称",
@@ -336,16 +358,14 @@ const SiteMonitorPage: React.FC = () => {
             width: 110,
             render: (_, r) => {
               if (r.monitor_source === "line_inventory") {
-                if (r.availability === "up")
-                  return <Tag color="green">可用</Tag>;
-                if (r.availability === "down")
-                  return <Tag color="red">不可用</Tag>;
-                return <Tag color="default">探测未知</Tag>;
+                if (r.availability === "up") return <StatusBadge status="healthy" label="可用" />;
+                if (r.availability === "down") return <StatusBadge status="failed" label="不可用" />;
+                return <StatusBadge status="unknown" label="探测未知" />;
               }
               return r.treated_ok ? (
-                <Tag color="green">可用</Tag>
+                <StatusBadge status="healthy" label="可用" />
               ) : typeof r.http_status === "number" ? (
-                <Tag color="red">不可用</Tag>
+                <StatusBadge status="failed" label="不可用" />
               ) : (
                 "-"
               );
@@ -441,13 +461,15 @@ const SiteMonitorPage: React.FC = () => {
         ]}
       />
 
-      <Modal
+      <RiskConfirm
         title="确认删除站点？"
         open={Boolean(deleteTarget)}
+        environmentName={currentEnvironment?.name}
+        resourceName={deleteTarget?.name}
+        impact="删除后将停止该单点站点监控；此操作不会影响线路库存或多地域探针数据。"
         onCancel={() => !deletingId && setDeleteTarget(null)}
         onOk={() => void onDelete()}
         okText="确认删除"
-        okButtonProps={{ danger: true }}
         cancelText="取消"
         confirmLoading={Boolean(deletingId)}
         cancelButtonProps={{ disabled: Boolean(deletingId) }}
@@ -455,13 +477,10 @@ const SiteMonitorPage: React.FC = () => {
         keyboard={!deletingId}
         destroyOnClose
       >
-        <div>
-          将删除单点监控站点：<strong>{deleteTarget?.name}</strong>
-        </div>
         <div style={{ color: "#8c8c8c", marginTop: 8 }}>
           Host：{deleteTarget?.host}
         </div>
-      </Modal>
+      </RiskConfirm>
 
       <Modal
         title="站点详情"
