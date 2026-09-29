@@ -14,6 +14,45 @@ type Preview = { newIngressName: string; namespace: string; host: string; source
 type TenantDomainResult = { action: 'created' | 'unchanged'; id?: number; tenantId: number; domain: string; status: number };
 type DryRunResult = { newIngressName: string; namespace: string; host: string; warnings?: Array<{ annotation: string; message: string }> };
 
+const formatIngressTimestamp = (date = new Date()) => {
+  const yy = String(date.getFullYear()).slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${yy}${mm}${dd}${hh}${min}`;
+};
+
+const toIngressNamePart = (value: string) => value
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/-+/g, '-')
+  .replace(/^-+|-+$/g, '');
+
+const buildAdminIngressName = (candidate: Candidate | undefined, host: string, date = new Date()) => {
+  const normalizedHost = host.trim().toLowerCase();
+  const hostPart = toIngressNamePart(normalizedHost);
+  if (!candidate || !hostPart) return '';
+
+  const nameWithoutTimestamp = candidate.name.toLowerCase().replace(/-\d{10}$/, '');
+  const targetLabel = normalizedHost.split('.')[0] || '';
+  const sourceLabels = (candidate.ruleHosts || []).map((ruleHost) => ruleHost.trim().toLowerCase().split('.')[0]);
+  const removableSuffix = [hostPart, targetLabel, ...sourceLabels]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .find((suffix) => nameWithoutTimestamp.endsWith(`-${suffix}`));
+  const businessPrefix = removableSuffix
+    ? nameWithoutTimestamp.slice(0, -(removableSuffix.length + 1))
+    : nameWithoutTimestamp;
+  const timestamp = formatIngressTimestamp(date);
+  const maxHostLength = 50;
+  const safeHostPart = hostPart.slice(0, maxHostLength).replace(/-+$/g, '') || 'host';
+  const maxPrefixLength = 63 - safeHostPart.length - timestamp.length - 2;
+  const safePrefix = toIngressNamePart(businessPrefix).slice(0, Math.max(1, maxPrefixLength)).replace(/-+$/g, '') || 'ingress';
+  return `${safePrefix}-${safeHostPart}-${timestamp}`;
+};
+
 const readableError = (error: unknown, fallback: string) => {
   const message = (error as ApiError)?.response?.data?.message;
   return Array.isArray(message) ? message.join('; ') : message || (error as ApiError)?.message || fallback;
@@ -74,7 +113,9 @@ const AdminSiteIngressPage: React.FC = () => {
     try {
       const response = await getIngressSourceCandidatesForLineOnboarding({ environmentId: currentEnvironment.id, keyword: candidateKeyword.trim() || undefined }) as { data?: { items?: Candidate[] } };
       const values = response?.data?.items || [];
-      setCandidates(values); setCandidateKey(values[0] ? `${values[0].namespace}/${values[0].name}` : undefined);
+      const firstCandidate = values[0];
+      setCandidates(values); setCandidateKey(firstCandidate ? `${firstCandidate.namespace}/${firstCandidate.name}` : undefined);
+      setIngressName(buildAdminIngressName(firstCandidate, normalizedDomain));
       if (!values.length) message.warning('未找到匹配的 Ingress 候选，请调整关键词后重试');
     } catch (error) { message.error(readableError(error, '加载 Ingress 候选失败')); } finally { setCandidatesLoading(false); }
   };
@@ -85,7 +126,7 @@ const AdminSiteIngressPage: React.FC = () => {
     }
     if (!currentEnvironment?.id || !selectedCandidate) return message.warning('请先选择候选 Ingress');
     if (!DOMAIN_PATTERN.test(normalizedDomain)) return message.error('请输入有效的管理端域名');
-    const name = ingressName.trim().toLowerCase();
+    const name = ingressName.trim().toLowerCase() || buildAdminIngressName(selectedCandidate, normalizedDomain);
     if (name && !K8S_NAME_PATTERN.test(name)) return message.error('Ingress 名称只能使用小写字母、数字和中划线');
     setPreviewing(true); resetDownstream();
     try {
@@ -149,14 +190,14 @@ const AdminSiteIngressPage: React.FC = () => {
     <Card title="1. 选择管理端域名和 Ingress 源站">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Descriptions size="small" column={1}><Descriptions.Item label="目标环境">{currentEnvironment?.name || currentEnvironment?.id || '未选择'}</Descriptions.Item></Descriptions>
-        <Space wrap><Select value={tenantId} loading={!tenants.length && !!currentEnvironment} onChange={(value) => { setTenantId(value); setIngressName(''); resetDownstream(); }} style={{ width: 280 }} placeholder="选择目标租户" options={tenants.map((tenant) => ({ value: tenant.id, label: `${tenant.id} - ${tenant.name}` }))} showSearch optionFilterProp="label" /><Input value={domain} onChange={(event) => { setDomain(event.target.value); setIngressName(''); resetDownstream(); }} placeholder="新管理端域名，例如 admin.example.com" style={{ width: 320 }} /></Space>
+        <Space wrap><Select value={tenantId} loading={!tenants.length && !!currentEnvironment} onChange={(value) => { setTenantId(value); setIngressName(buildAdminIngressName(selectedCandidate, normalizedDomain)); resetDownstream(); }} style={{ width: 280 }} placeholder="选择目标租户" options={tenants.map((tenant) => ({ value: tenant.id, label: `${tenant.id} - ${tenant.name}` }))} showSearch optionFilterProp="label" /><Input value={domain} onChange={(event) => { const nextDomain = event.target.value.trim().toLowerCase(); setDomain(event.target.value); setIngressName(buildAdminIngressName(selectedCandidate, nextDomain)); resetDownstream(); }} placeholder="新管理端域名，例如 admin.example.com" style={{ width: 320 }} /></Space>
         <Space wrap><Input value={candidateKeyword} onChange={(event) => setCandidateKeyword(event.target.value)} onPressEnter={() => void loadCandidates()} placeholder="按名称或 Host 筛选候选 Ingress" style={{ width: 320 }} /><Button icon={<FileSearchOutlined />} loading={candidatesLoading} disabled={operationInProgress} onClick={() => void loadCandidates()}>加载候选 Ingress</Button></Space>
-        {candidates.length ? <Select value={candidateKey} onChange={(value) => { setCandidateKey(value); setIngressName(''); resetDownstream(); }} style={{ width: '100%' }} options={candidates.map((candidate) => ({ value: `${candidate.namespace}/${candidate.name}`, label: `${candidate.namespace}/${candidate.name}${candidate.ruleHosts?.length ? ` · ${candidate.ruleHosts.join(', ')}` : ''}` }))} showSearch optionFilterProp="label" /> : null}
+        {candidates.length ? <Select value={candidateKey} onChange={(value) => { const candidate = candidates.find((item) => `${item.namespace}/${item.name}` === value); setCandidateKey(value); setIngressName(buildAdminIngressName(candidate, normalizedDomain)); resetDownstream(); }} style={{ width: '100%' }} options={candidates.map((candidate) => ({ value: `${candidate.namespace}/${candidate.name}`, label: `${candidate.namespace}/${candidate.name}${candidate.ruleHosts?.length ? ` · ${candidate.ruleHosts.join(', ')}` : ''}` }))} showSearch optionFilterProp="label" /> : null}
       </Space>
     </Card>
     <Card title="2. 生成并编辑 Ingress YAML">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={operationInProgress || !selectedCandidate || !normalizedDomain}>生成 YAML 预览</Button></Space>
+        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可修改；留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={operationInProgress || !selectedCandidate || !normalizedDomain}>生成 YAML 预览</Button></Space>
         {preview ? <Input.TextArea value={manifestYaml} onChange={(event) => { setManifestYaml(event.target.value); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined); }} rows={18} spellCheck={false} /> : <Text type="secondary">选择源站并填写域名后生成预览。</Text>}
       </Space>
     </Card>
