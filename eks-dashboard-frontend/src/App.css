@@ -4,6 +4,10 @@
 }
 
 .app-shell__sider {
+  position: sticky !important;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
   background: #0f2741 !important;
   box-shadow: 2px 0 12px rgb(15 39 65 / 8%);
 }
