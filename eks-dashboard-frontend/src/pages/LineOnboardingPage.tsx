@@ -1457,10 +1457,6 @@ const LineOnboardingPage: React.FC = () => {
     verifyConnectivity = false,
     options: { showRegisterLoading?: boolean } = {},
   ): Promise<boolean> => {
-    if (mode !== 'update' && !dcdnConfirmed) {
-      message.warning('请先完成步骤4：DCDN/HTTPS 配置并点击“确认 DCDN 配置”');
-      return false;
-    }
     if (!confirmedSubdomain) {
       message.warning('请先生成并确认可用的线路域名');
       return false;
@@ -2310,7 +2306,7 @@ const LineOnboardingPage: React.FC = () => {
               type="primary"
               loading={tenantDomainApplying}
               onClick={handleApplyTenantDomain}
-              disabled={ingressWorkflowOperationInProgress || !dcdnConfirmed || !selectedTenantId || !confirmedSubdomain}
+              disabled={ingressWorkflowOperationInProgress || !selectedTenantId || !confirmedSubdomain}
             >
               自动写入 tenant_domain
             </Button>
@@ -2363,7 +2359,6 @@ const LineOnboardingPage: React.FC = () => {
               setSuperAdminRegisterResult(null);
             }}
             placeholder="线路中文名（zh），例如：线路-l01"
-            disabled={!dcdnConfirmed}
           />
           <Input
             value={superAdminLineEn}
@@ -2374,7 +2369,6 @@ const LineOnboardingPage: React.FC = () => {
               setSuperAdminRegisterResult(null);
             }}
             placeholder="线路英文名（en），例如：l01"
-            disabled={!dcdnConfirmed}
           />
           <CollapsibleInfo itemKey="platform-registration-default" title="平台登记默认停用">
             <Text>新线路先以停用状态登记；步骤6 连通性验证通过后再启用。</Text>
@@ -2391,7 +2385,6 @@ const LineOnboardingPage: React.FC = () => {
                 setSuperAdminPendingUpdate(false);
                 setSuperAdminRegisterResult(null);
               }}
-              disabled={!dcdnConfirmed}
             />
           </Space>
           <Space>
@@ -2399,7 +2392,7 @@ const LineOnboardingPage: React.FC = () => {
               type="primary"
               loading={superAdminRegistering}
               onClick={handleConfirmSuperAdminRegistration}
-              disabled={!dcdnConfirmed || !selectedTenantId || !confirmedSubdomain}
+              disabled={!selectedTenantId || !confirmedSubdomain}
             >
               确认并自动登记新线路（默认停用）
             </Button>
