@@ -30,12 +30,18 @@ const toIngressNamePart = (value: string) => value
   .replace(/-+/g, '-')
   .replace(/^-+|-+$/g, '');
 
+const stripIngressTimestamp = (name: string) => name.replace(/-(?:\d{12}|\d{10})$/, '');
+
+const normalizeStoredIngressNamePrefix = (prefix: string) => toIngressNamePart(prefix)
+  // Historical prefixes occasionally include a MMDD release date, such as oex-app-0914.
+  .replace(/-(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$/, '');
+
 const getAdminIngressNamePrefix = (candidate: Candidate | undefined, host: string) => {
   const normalizedHost = host.trim().toLowerCase();
   const hostPart = toIngressNamePart(normalizedHost);
   if (!candidate || !hostPart) return '';
 
-  const nameWithoutTimestamp = candidate.name.toLowerCase().replace(/-\d{10}$/, '');
+  const nameWithoutTimestamp = stripIngressTimestamp(candidate.name.toLowerCase());
   const targetLabel = normalizedHost.split('.')[0] || '';
   const sourceHosts = (candidate.ruleHosts || []).map((ruleHost) => toIngressNamePart(ruleHost));
   const sourceLabels = (candidate.ruleHosts || []).map((ruleHost) => ruleHost.trim().toLowerCase().split('.')[0]);
@@ -46,7 +52,7 @@ const getAdminIngressNamePrefix = (candidate: Candidate | undefined, host: strin
   const inferredPrefix = removableSuffix
     ? nameWithoutTimestamp.slice(0, -(removableSuffix.length + 1))
     : nameWithoutTimestamp;
-  return toIngressNamePart(candidate.namePrefix || inferredPrefix).slice(0, 63).replace(/-+$/g, '');
+  return normalizeStoredIngressNamePrefix(candidate.namePrefix || inferredPrefix).slice(0, 63).replace(/-+$/g, '');
 };
 
 const buildAdminIngressName = (candidate: Candidate | undefined, host: string, date = new Date()) => {
