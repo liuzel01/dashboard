@@ -9,7 +9,7 @@ const DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-
 const K8S_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 type Tenant = { id: number; name: string };
-type Candidate = { namespace: string; name: string; ruleHosts?: string[]; lbAddresses?: string[]; createdAt?: string | null };
+type Candidate = { namespace: string; name: string; namePrefix?: string; ruleHosts?: string[]; lbAddresses?: string[]; createdAt?: string | null };
 type Preview = { newIngressName: string; namespace: string; host: string; sourceIngressName: string; yaml?: string };
 type TenantDomainResult = { action: 'created' | 'unchanged'; id?: number; tenantId: number; domain: string; status: number };
 type DryRunResult = { newIngressName: string; namespace: string; host: string; warnings?: Array<{ annotation: string; message: string }> };
@@ -30,21 +30,30 @@ const toIngressNamePart = (value: string) => value
   .replace(/-+/g, '-')
   .replace(/^-+|-+$/g, '');
 
-const buildAdminIngressName = (candidate: Candidate | undefined, host: string, date = new Date()) => {
+const getAdminIngressNamePrefix = (candidate: Candidate | undefined, host: string) => {
   const normalizedHost = host.trim().toLowerCase();
   const hostPart = toIngressNamePart(normalizedHost);
   if (!candidate || !hostPart) return '';
 
   const nameWithoutTimestamp = candidate.name.toLowerCase().replace(/-\d{10}$/, '');
   const targetLabel = normalizedHost.split('.')[0] || '';
+  const sourceHosts = (candidate.ruleHosts || []).map((ruleHost) => toIngressNamePart(ruleHost));
   const sourceLabels = (candidate.ruleHosts || []).map((ruleHost) => ruleHost.trim().toLowerCase().split('.')[0]);
-  const removableSuffix = [hostPart, targetLabel, ...sourceLabels]
+  const removableSuffix = [hostPart, targetLabel, ...sourceHosts, ...sourceLabels]
     .filter(Boolean)
     .sort((left, right) => right.length - left.length)
     .find((suffix) => nameWithoutTimestamp.endsWith(`-${suffix}`));
-  const businessPrefix = removableSuffix
+  const inferredPrefix = removableSuffix
     ? nameWithoutTimestamp.slice(0, -(removableSuffix.length + 1))
     : nameWithoutTimestamp;
+  return toIngressNamePart(candidate.namePrefix || inferredPrefix).slice(0, 63).replace(/-+$/g, '');
+};
+
+const buildAdminIngressName = (candidate: Candidate | undefined, host: string, date = new Date()) => {
+  const hostPart = toIngressNamePart(host);
+  if (!candidate || !hostPart) return '';
+
+  const businessPrefix = getAdminIngressNamePrefix(candidate, host);
   const timestamp = formatIngressTimestamp(date);
   const maxHostLength = 50;
   const safeHostPart = hostPart.slice(0, maxHostLength).replace(/-+$/g, '') || 'host';
@@ -130,7 +139,8 @@ const AdminSiteIngressPage: React.FC = () => {
     if (name && !K8S_NAME_PATTERN.test(name)) return message.error('Ingress 名称只能使用小写字母、数字和中划线');
     setPreviewing(true); resetDownstream();
     try {
-      const response = await previewCloneIngressForLineOnboarding({ environmentId: currentEnvironment.id, namespace: selectedCandidate.namespace, sourceIngressName: selectedCandidate.name, newHost: normalizedDomain, ...(name ? { newIngressName: name } : {}) }) as { data?: Preview };
+      const namePrefix = getAdminIngressNamePrefix(selectedCandidate, normalizedDomain);
+      const response = await previewCloneIngressForLineOnboarding({ environmentId: currentEnvironment.id, namespace: selectedCandidate.namespace, sourceIngressName: selectedCandidate.name, newHost: normalizedDomain, ...(name ? { newIngressName: name } : {}), ...(namePrefix ? { namePrefix } : {}) }) as { data?: Preview };
       if (!response.data?.yaml) throw new Error('预览未返回 YAML');
       setPreview(response.data); setManifestYaml(response.data.yaml); setIngressName(response.data.newIngressName); message.success('Ingress YAML 已生成，可编辑后进行 dry-run');
     } catch (error) { message.error(readableError(error, '生成 Ingress YAML 预览失败')); } finally { setPreviewing(false); }

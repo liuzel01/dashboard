@@ -241,6 +241,7 @@ export class AgentIngressService {
     sourceIngressName: string;
     newHost: string;
     newIngressName?: string;
+    namePrefix?: string;
     tlsSecretMode?: 'new' | 'reuse' | 'custom';
     tlsSecretName?: string;
     confirmed?: boolean;
@@ -293,6 +294,7 @@ export class AgentIngressService {
     const cloned = this.cloneIngressSpec(source, {
       newName: newIngressName,
       newHost,
+      namePrefix: input.namePrefix,
       tlsSecretMode,
       tlsSecretName: requestedTlsSecretName || undefined,
     });
@@ -407,6 +409,7 @@ export class AgentIngressService {
         return {
           namespace: String(item?.metadata?.namespace || 'default'),
           name: String(item?.metadata?.name || ''),
+          namePrefix: String(item?.metadata?.annotations?.['dashboard.ops/name-prefix'] || '').trim() || undefined,
           createdAt: item?.metadata?.creationTimestamp || null,
           ruleHosts,
           lbAddresses,
@@ -567,7 +570,7 @@ export class AgentIngressService {
 
   private cloneIngressSpec(
     source: any,
-    input: { newName: string; newHost: string; tlsSecretMode?: 'new' | 'reuse' | 'custom'; tlsSecretName?: string },
+    input: { newName: string; newHost: string; namePrefix?: string; tlsSecretMode?: 'new' | 'reuse' | 'custom'; tlsSecretName?: string },
   ) {
     const cloned = JSON.parse(JSON.stringify(source || {}));
     cloned.metadata = cloned.metadata || {};
@@ -578,6 +581,10 @@ export class AgentIngressService {
     delete cloned.metadata.managedFields;
     if (cloned.metadata.annotations) {
       delete cloned.metadata.annotations['kubectl.kubernetes.io/last-applied-configuration'];
+    }
+    if (input.namePrefix) {
+      cloned.metadata.annotations = cloned.metadata.annotations || {};
+      cloned.metadata.annotations['dashboard.ops/name-prefix'] = input.namePrefix;
     }
     delete cloned.status;
 

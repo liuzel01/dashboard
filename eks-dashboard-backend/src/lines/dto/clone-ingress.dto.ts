@@ -29,6 +29,11 @@ export class CloneIngressDto {
 
   @IsOptional()
   @IsString()
+  @Matches(K8S_RESOURCE_NAME_REGEX, { message: 'namePrefix format is invalid' })
+  namePrefix?: string;
+
+  @IsOptional()
+  @IsString()
   @IsIn(['new', 'reuse', 'custom'])
   tlsSecretMode?: 'new' | 'reuse' | 'custom';
 

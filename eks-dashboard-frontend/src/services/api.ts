@@ -625,6 +625,7 @@ export const previewCloneIngressForLineOnboarding = async (data: {
   sourceIngressName: string;
   newHost: string;
   newIngressName?: string;
+  namePrefix?: string;
   tlsSecretMode?: 'new' | 'reuse' | 'custom';
   tlsSecretName?: string;
 }) => {

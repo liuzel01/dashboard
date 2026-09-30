@@ -71,6 +71,7 @@ export class IngressGatewayClientService {
       sourceIngressName: string;
       newHost: string;
       newIngressName?: string;
+      namePrefix?: string;
       tlsSecretMode?: 'new' | 'reuse' | 'custom';
       tlsSecretName?: string;
     },
@@ -86,6 +87,7 @@ export class IngressGatewayClientService {
       sourceIngressName: string;
       newHost: string;
       newIngressName?: string;
+      namePrefix?: string;
       tlsSecretMode?: 'new' | 'reuse' | 'custom';
       tlsSecretName?: string;
       confirmed?: boolean;
