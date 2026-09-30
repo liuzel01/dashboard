@@ -311,6 +311,7 @@ const LineOnboardingPage: React.FC = () => {
   const [resolvedIngressSource, setResolvedIngressSource] = useState<ResolvedIngressSource | null>(null);
   const [sourceIngressLoading, setSourceIngressLoading] = useState(false);
   const [sourceIngressError, setSourceIngressError] = useState<string | null>(null);
+  const [sourceIngressKeyword, setSourceIngressKeyword] = useState('');
   const [selectedSourceIngressKey, setSelectedSourceIngressKey] = useState<string>('');
   const [newIngressNameInput, setNewIngressNameInput] = useState('');
   const [tlsSecretNameInput, setTlsSecretNameInput] = useState('');
@@ -552,6 +553,11 @@ const LineOnboardingPage: React.FC = () => {
     setIngressCandidatesError(null);
     setIngressCandidates([]);
     setSelectedIngressCandidateKey(null);
+    setSourceIngressKeyword('');
+    setResolvedIngressSource(null);
+    setSourceIngressError(null);
+    setSelectedSourceIngressKey('');
+    setNewIngressNameInput('');
     setDcdnCname('');
     setDcdnAutoResult(null);
     setDcdnAutoError(null);
@@ -619,6 +625,7 @@ const LineOnboardingPage: React.FC = () => {
     setResolvedIngressSource(null);
     setSourceIngressLoading(false);
     setSourceIngressError(null);
+    setSourceIngressKeyword('');
     setSelectedSourceIngressKey('');
     setNewIngressNameInput('');
     setDcdnAutoResult(null);
@@ -1182,6 +1189,7 @@ const LineOnboardingPage: React.FC = () => {
     try {
       const candidatesResp = (await getIngressSourceCandidatesForLineOnboarding({
         environmentId: currentEnvironment?.id || '',
+        keyword: sourceIngressKeyword.trim() || undefined,
       })) as {
         success?: boolean;
         data?: {
@@ -1194,7 +1202,7 @@ const LineOnboardingPage: React.FC = () => {
       const candidates = candidatesResp?.data?.items || [];
       setResolvedIngressSource({
         namespace: candidatesResp?.data?.namespace || candidates[0]?.namespace || '',
-        sourceIngressName: candidates[0]?.name || '',
+        sourceIngressName: '',
         matchedBy: 'manual-candidates',
         candidates,
       });
@@ -1205,10 +1213,8 @@ const LineOnboardingPage: React.FC = () => {
         setSourceIngressError('未找到可用 source ingress 候选');
         return;
       }
-      const first = `${candidates[0].namespace}/${candidates[0].name}`;
-      setSelectedSourceIngressKey(first);
       setNewIngressNameInput(generateDefaultIngressName(confirmedSubdomain));
-      message.success(`已加载 ${candidates.length} 个 source ingress 候选`);
+      message.success(`已加载 ${candidates.length} 个 source ingress 候选，请手动选择`);
     } catch (error: unknown) {
       const backendMsg = (error as ApiError)?.response?.data?.message;
       const msg = Array.isArray(backendMsg)
@@ -1757,6 +1763,14 @@ const LineOnboardingPage: React.FC = () => {
             <Text>source ingress：<Text code>{selectedSourceIngressKey || '(未选择)'}</Text></Text>
           </Space>
           <Space wrap>
+            <Input
+              style={{ width: 320 }}
+              value={sourceIngressKeyword}
+              onChange={(event) => setSourceIngressKeyword(event.target.value)}
+              onPressEnter={() => void handleLoadSourceIngressCandidates()}
+              placeholder="按名称或 Host 筛选候选 Ingress"
+              disabled={ingressWorkflowOperationInProgress}
+            />
             <Button
               loading={sourceIngressLoading}
               onClick={handleLoadSourceIngressCandidates}
