@@ -637,8 +637,8 @@ export class AgentIngressService {
     if (!namespace || !K8S_RESOURCE_NAME_REGEX.test(namespace)) {
       throw new BadRequestException('Ingress metadata.namespace format is invalid');
     }
-    if (!name || !K8S_RESOURCE_NAME_REGEX.test(name)) {
-      throw new BadRequestException('Ingress metadata.name format is invalid');
+    if (!name || !K8S_RESOURCE_NAME_REGEX.test(name) || name.length > 63) {
+      throw new BadRequestException('Ingress metadata.name must use lowercase letters, numbers, or hyphens and be at most 63 characters');
     }
     if (manifest.status !== undefined) {
       throw new BadRequestException('Ingress YAML must not include status');
