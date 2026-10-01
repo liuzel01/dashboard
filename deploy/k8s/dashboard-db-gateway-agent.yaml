@@ -26,13 +26,13 @@ data:
   # Dedicated datasource configs for dashboard-db-gateway-agent.
   datasource.url: "jdbc:mysql://meganew.c786smwyy2x7.ap-southeast-1.rds.amazonaws.com/spot?useUnicode=true&characterEncoding=utf-8&serverTimeZone=UTC&allowMultiQueries=true&&useSSL=false"
   datasource.username: "megauuusss"
-  datasource.password: "Q9#vE8mT!2xPa4Hr"
+  datasource.password: "{kms-app}AQICAHjWIeisr1y9JyBCa2eymWGvpovtd6uWg0HlbPjbZsb0mgED+HPnvAGsVQi6NxILnlgxAAAAbjBsBgkqhkiG9w0BBwagXzBdAgEAMFgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMqv4AgUn5eoNdJGKEAgEQgCt4uMxwrHbsTi6OpQRycH4QTEVe8VF1ZARBAw/rWBDFovP2C8478ACYuvC5"
 
   redis.host: "master.megatiger.ijxpl8.apse1.cache.amazonaws.com"
   redis.port: "6379"
   redis.database: "0"
   redis.ssl: "true"
-  redis.password: "NKA*cme2p#1sAsaznlyy12"
+  redis.password: "{kms-app}AQICAHjWIeisr1y9JyBCa2eymWGvpovtd6uWg0HlbPjbZsb0mgGtv9g/3sz/cI5rH2mfbK3jAAAAdDByBgkqhkiG9w0BBwagZTBjAgEAMF4GCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMQPd5BZSe7NT36liHAgEQgDHDjp7ICI2oeYxU4jFGZsv9w1Lg7bdIlAeszqkkI6mC8nyFUV94MzodNY2nt0wN0Bkk"
 
   mongo.uri: "mongodb://megauuaa:KA*cme2pqg@172.31.23.137:27017,172.31.22.44:27017,172.31.27.168:27017/spot?replicaSet=mongo-repl&readPreference=secondaryPreferred&ssl=false"
 ---
