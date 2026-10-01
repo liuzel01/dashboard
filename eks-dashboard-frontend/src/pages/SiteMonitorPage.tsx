@@ -263,7 +263,9 @@ const SiteMonitorPage: React.FC = () => {
           value={tenantFilter}
           onChange={(v) => setTenantFilter(v)}
           style={{ width: 220 }}
-          options={tenants.map((t) => ({ label: t.name, value: t.id }))}
+          showSearch
+          optionFilterProp="label"
+          options={tenants.map((t) => ({ label: `${t.id} - ${t.name}`, value: t.id }))}
         />
         <Button
           onClick={async () => {
@@ -550,7 +552,9 @@ const SiteMonitorPage: React.FC = () => {
                 <Select
                   allowClear
                   placeholder="选择租户"
-                  options={tenants.map((t) => ({ label: t.name, value: t.id }))}
+                  showSearch
+                  optionFilterProp="label"
+                  options={tenants.map((t) => ({ label: `${t.id} - ${t.name}`, value: t.id }))}
                 />
               </Form.Item>
               <Form.Item
@@ -721,7 +725,9 @@ const SiteMonitorPage: React.FC = () => {
             <Select
               allowClear
               placeholder="选择租户"
-              options={tenants.map((t) => ({ label: t.name, value: t.id }))}
+              showSearch
+              optionFilterProp="label"
+              options={tenants.map((t) => ({ label: `${t.id} - ${t.name}`, value: t.id }))}
             />
           </Form.Item>
           <Form.Item

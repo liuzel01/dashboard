@@ -351,6 +351,8 @@ const LineListPage: React.FC = () => {
             style={{ width: 240 }}
             placeholder={tenantLoading ? '加载中...' : '全部租户'}
             loading={tenantLoading}
+            showSearch
+            optionFilterProp="label"
             options={tenants.map((tenant) => ({
               value: tenant.id,
               label: `${tenant.id} - ${tenant.name}`,

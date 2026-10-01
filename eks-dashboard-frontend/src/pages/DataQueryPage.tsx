@@ -974,10 +974,12 @@ const DataQueryPage: React.FC = () => {
           <Select
             value={selectedTenantId}
             onChange={setSelectedTenantId}
-            options={tenants.map((t) => ({ label: t.name, value: t.id }))}
-            style={{ width: 120 }}
+            options={tenants.map((t) => ({ label: `${t.id} - ${t.name}`, value: t.id }))}
+            style={{ width: 240 }}
             loading={tenantsLoading}
             placeholder="选择租户"
+            showSearch
+            optionFilterProp="label"
           />
         )}
       </Space>

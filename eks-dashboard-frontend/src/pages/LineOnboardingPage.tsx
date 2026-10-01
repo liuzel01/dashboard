@@ -1679,6 +1679,8 @@ const LineOnboardingPage: React.FC = () => {
               loading={tenantLoading}
               style={{ width: '100%' }}
               placeholder={tenantLoading ? '加载中...' : '请选择租户'}
+              showSearch
+              optionFilterProp="label"
               options={tenants.map((tenant) => ({
                 value: tenant.id,
                 label: `${tenant.id} - ${tenant.name}`,
