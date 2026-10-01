@@ -1,145 +1,90 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# EKS Dashboard 后端
 
+基于 NestJS 的 Dashboard API 服务，同时包含可部署到 EKS 集群内的 `dashboard-db-gateway-agent` 入口。
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 架构
 
-## Description
+```text
+Browser
+  -> Dashboard Frontend
+  -> Dashboard Backend (/api, 默认 3000)
+  -> Kubernetes Service Proxy
+  -> 各环境集群内 Agent / 管理端服务
+```
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+中心后端负责认证、权限、审计、环境路由和受控操作；涉及集群内数据库、Redis 或 Ingress 的操作优先通过目标环境的 Agent / Service Proxy 执行，避免中心服务直接保存或使用业务数据库凭证。
 
-## AI Ops LLM 配置说明（OpenClaw）
+主要模块包括：认证与权限、环境与 siteconf、Deployment、线路、查询中心、资产、站点监控、SSL、KMS、审计、告警和值班。
 
-当前 `AI 运维` 模块仅支持通过 OpenClaw gateway 调用模型，不直接调用 OpenAI API。
+## 本地开发
 
-### 必填环境变量
+推荐从仓库根目录启动完整开发环境：
 
-在 `eks-dashboard-backend/.env` 中配置：
+```bash
+./scripts/dev.sh start
+```
+
+仅启动后端：
+
+```bash
+npm ci
+npm run start:dev
+```
+
+默认监听 `0.0.0.0:3000`，API 前缀为 `/api`。
+
+## 配置边界
+
+复制 `.env-example` 为 `.env`，填写 Dashboard 自身数据库的启动级连接配置：
 
 ```dotenv
-AIOPS_LLM_PROVIDER=openclaw
-AIOPS_OPENCLAW_BASE_URL=http://127.0.0.1:18949/v1
-AIOPS_OPENCLAW_TOKEN=replace-with-openclaw-gateway-token
-AIOPS_OPENCLAW_MODEL=openclaw/default
-# 可选：OpenClaw chat/completions 请求超时（毫秒，默认 20000）
-AIOPS_OPENCLAW_TIMEOUT_MS=20000
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=dashboard
+DB_PASSWORD=replace-me
+DB_DATABASE=replace-me
+PORT=3000
 ```
 
-含义：
+配置原则：
 
-- `AIOPS_LLM_PROVIDER`：当前仅支持 `openclaw`。
-- `AIOPS_OPENCLAW_BASE_URL`：OpenClaw gateway 地址（通常以 `/v1` 结尾）。
-- `AIOPS_OPENCLAW_TOKEN`：gateway 鉴权 token（由 OpenClaw 管理员发放）。
-- `AIOPS_OPENCLAW_MODEL`：网关暴露的模型标识（如 `openclaw/default`）。
-- `AIOPS_OPENCLAW_TIMEOUT_MS`：调用 `/chat/completions` 的请求超时（可选，默认 `20000` 毫秒，建议在网关高负载时适当调大）。
+- `dashboard_site_conf`：管理 Dashboard 运行期配置、业务开关与敏感配置；优先于兼容性环境变量。
+- `environments_config`：管理环境元数据、Kubernetes context、目标 AWS Role ARN 等环境级配置。
+- AWS：生产环境使用 EC2 Instance Role / IRSA，再按环境 `aws_role_arn` AssumeRole；不要恢复或新增环境 AK/SK、`aws_profile` 作为运行时主路径。
+- 集群访问：通过 kubeconfig context 和 Kubernetes RBAC 访问目标集群；中心服务到环境 Agent 使用 Service Proxy 与 `X-Agent-Token`。
 
-### 关于“使用哪个账号”
+`.env`、siteconf 导出、kubeconfig、数据库导出以及所有密钥均不得提交到仓库或前端构建产物。
 
-Dashboard 后端只使用 `AIOPS_OPENCLAW_TOKEN` 调 OpenClaw，不直接感知底层 ChatGPT/OpenAI 账号。
-底层使用哪个组织/seat/额度，取决于你们 OpenClaw 服务端该 token 绑定的上游凭据。
+## Agent 入口
 
-### 连接检查（探活）
-
-可调用以下接口验证 gateway 连通性与模型可见性：
-
-```http
-GET /api/ai-ops/health/llm
-```
-
-返回中会包含 `configuredModel`、`modelAvailable`、`models` 等字段。
-
-### OpenClaw 会话清理策略（运维侧）
-
-当前已在 OpenClaw 侧启用会话定期维护策略（由运维配置）：
-
-- 每天 04:00 执行会话重置/清理维护
-- 会话保留期为 30 天
-
-这意味着 dashboard 侧无需额外实现会话长期留存清理，也能避免会话无限积累。
-
-## Project setup
+同一代码库可构建 Agent 入口：
 
 ```bash
-npm install
+npm run build:agent
+npm run start:agent:dev
 ```
 
-## Compile and run the project
+Agent 默认监听 `8080`，提供 `/v1/...` 受保护接口和 `/metrics`。生产环境应部署到目标 EKS 集群，并配置独立 ServiceAccount、最小 RBAC、网络访问规则和 Agent Token；不要将 Agent 直接暴露到公网。
+
+## 验证命令
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm run build        # 构建中心后端
+npm run build:agent  # 构建 Agent 入口
+npm test             # Jest 单元测试
 ```
 
-## Run tests
+## 生产运行与发布
 
-```bash
-# unit tests
-$ npm run test
+根目录的 `ecosystem.prod.config.js` 管理两个 PM2 进程：
 
-# e2e tests
-$ npm run test:e2e
+- `eks-dashboard-backend`：运行 `dist/main.js`
+- `eks-dashboard-frontend`：预览前端构建产物
 
-# test coverage
-$ npm run test:cov
-```
+发布脚本与 GitHub Actions 说明见 [部署文档](../docs/github-actions-deployment.md)。部署后应至少验证登录、`/api` 健康访问、目标环境权限、Agent 连通性及关键审计记录。
 
-## Deployment
+## 安全要求
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-npm install -g @nestjs/mau
-mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- 写操作必须在后端完成授权与审计；高风险数据库写入、解密或基础设施操作应要求 MFA / 明确确认。
+- Ingress 创建先 dry-run，再最终确认；错误信息应保留 Kubernetes 原始原因。
+- 不记录明文密码、MFA Secret、AK/SK、Agent Token、私钥或解密结果；日志和审计只保存必要的脱敏摘要。

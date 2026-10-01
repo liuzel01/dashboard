@@ -1,69 +1,73 @@
-# React + TypeScript + Vite
+# EKS Dashboard 前端
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+基于 React、TypeScript、Vite 和 Ant Design 的运维控制台前端。
 
-Currently, two official plugins are available:
+前端通过同源 `/api` 调用 Dashboard 后端；环境选择、权限菜单、运行期日志 Socket 地址等由后端和 `siteconf` 提供，不在前端写入环境凭证。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 功能范围
 
-## Expanding the ESLint configuration
+- EKS Deployment 查询、发布、回退与日志追踪
+- 环境、账号权限、资产、线路、站点监控与查询中心
+- Ingress / TLS / `tenant_domain` 等受控运维流程
+- SSL 证书、KMS、审计、告警与值班能力
+- SSO 登录与基于权限码的菜单控制
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 本地开发
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+推荐在仓库根目录启动完整开发环境：
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+./scripts/dev.sh start
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+该命令会构建后端，并通过独立的 PM2 开发命名空间启动：
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- 后端：`http://localhost:3000`
+- 前端：Vite 开发服务器（默认 `http://localhost:5173`）
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+查看或重启：
+
+```bash
+./scripts/dev.sh status
+./scripts/dev.sh restart
+./scripts/dev.sh stop
 ```
+
+仅启动前端时：
+
+```bash
+npm ci
+npm run dev
+```
+
+## 配置
+
+复制 `.env.example` 为 `.env`，通常只需保留：
+
+```dotenv
+VITE_API_BASE_URL=/api
+# 可选：探测详情页地址
+VITE_PROBE_DASHBOARD_URL=https://probe.example.internal
+```
+
+不要在前端 `.env`、构建参数或仓库中放入 AWS AK/SK、数据库密码、MFA Secret、Agent Token 或 SSO Client Secret。
+
+运行期配置（例如日志 Socket 地址）由后端接口提供；修改 `siteconf` 后刷新页面即可生效，通常不需要重新构建前端。
+
+## 常用命令
+
+```bash
+npm run build    # TypeScript 检查并构建 dist/
+npm run lint     # ESLint
+npm run preview  # 本地预览构建产物
+```
+
+生产环境使用 `npm run preview -- --host 0.0.0.0 --port 5173` 提供已构建的 `dist/`；实际由仓库根目录的 `ecosystem.prod.config.js` 和发布脚本管理。
+
+## 开发约束
+
+- 新功能以真实路由、权限码和环境上下文为准，不以原型文件替代。
+- 高风险操作须保留后端授权、MFA / 确认、dry-run 和审计链路；前端禁用状态不能作为唯一保护。
+- 租户、环境和 Ingress 等选择必须使用当前环境返回的数据，不允许任意输入绕过后端校验。
+
+部署流程见仓库根目录的 [GitHub Actions 部署说明](../docs/github-actions-deployment.md)。
