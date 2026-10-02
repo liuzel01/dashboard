@@ -8,7 +8,7 @@ import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { defaultPrometheusRuleGroupName, defaultPrometheusRuleResourceName, normalizePrometheusRuleFields, renderPrometheusRuleYaml, type MonitoringCreatableResourceType, type MonitoringResourceType, type PrometheusRuleFields, validatePrometheusRuleFields } from './monitoring-request-policy';
-import { getMonitoringEnvironmentPolicy, MONITORING_ENVIRONMENT_POLICIES, requireMonitoringEnvironmentPolicy } from './monitoring-environment-policy';
+import { getMonitoringEnvironmentPolicy, getMonitoringEnvironmentPolicyByExecutorKey, MONITORING_ENVIRONMENT_POLICIES, requireMonitoringEnvironmentPolicy } from './monitoring-environment-policy';
 
 type Actor = { userId: number; username: string; permissions: string[] };
 type RequestInput = {
@@ -415,6 +415,7 @@ export class MonitoringRequestsService {
       throw new BadRequestException(`真实 Apply 授权有效期必须为 ${REAL_APPLY_MINUTES}-${REAL_APPLY_MAX_MINUTES} 分钟`);
     }
     const row = await this.read(requestId);
+    this.executionPolicy(row);
     if (row.status !== 'APPROVED') throw new BadRequestException('仅已批准申请可授予真实 Apply 权限');
     if (this.owns(actor, row)) throw new ForbiddenException('申请人不能授予自己的真实 Apply 权限');
     await this.db.withTransaction(async conn => {
@@ -428,6 +429,7 @@ export class MonitoringRequestsService {
   /** Read-only preflight proves a matching one-time grant still exists. */
   async authorizeRealApplyPreflight(requestId: string, input: { mrIid: number; commitSha: string }, token?: string) {
     if (!(await this.approvalTokenMatches(token))) throw new UnauthorizedException('Invalid Jenkins approval token');
+    this.executionPolicy(await this.read(requestId));
     const rows = await this.db.query<any[]>(`SELECT r.status,a.mr_iid,a.commit_sha FROM monitoring_requests r JOIN monitoring_real_apply_authorizations a ON a.request_id=r.request_id WHERE r.request_id=? AND a.consumed_at IS NULL AND a.revoked_at IS NULL AND a.expires_at > UTC_TIMESTAMP() ORDER BY a.id DESC LIMIT 1`, [requestId]);
     const row = rows[0];
     if (!row || row.status !== 'APPROVED') throw new ForbiddenException('No active real Apply authorization for this approved request');
@@ -437,6 +439,7 @@ export class MonitoringRequestsService {
   /** Jenkins calls this immediately before the only mutating kubectl command. */
   async consumeRealApplyAuthorization(requestId: string, input: { mrIid: number; commitSha: string }, token?: string) {
     if (!(await this.approvalTokenMatches(token))) throw new UnauthorizedException('Invalid Jenkins approval token');
+    this.executionPolicy(await this.read(requestId));
     return this.db.withTransaction(async conn => {
       const [rows] = await conn.execute<any[]>('SELECT r.status,a.id,a.mr_iid,a.commit_sha FROM monitoring_requests r JOIN monitoring_real_apply_authorizations a ON a.request_id=r.request_id WHERE r.request_id=? AND a.consumed_at IS NULL AND a.revoked_at IS NULL ORDER BY a.id DESC LIMIT 1 FOR UPDATE', [requestId]);
       const row = rows[0];
@@ -457,6 +460,7 @@ export class MonitoringRequestsService {
     if (!(await this.approvalTokenMatches(token))) throw new UnauthorizedException('Invalid Jenkins approval token');
     if (input.dryRun !== true) throw new ForbiddenException('Dashboard authorization is preview-only; DRY_RUN must be true');
     const row = await this.read(requestId);
+    this.executionPolicy(row);
     if (row.status !== 'APPROVED') throw new ForbiddenException(`Request status must be APPROVED, received ${row.status}`);
     if (Number(row.mr_iid) !== input.mrIid || String(row.commit_sha).toLowerCase() !== input.commitSha.toLowerCase()) {
       throw new ForbiddenException('Approved MR IID/Commit SHA binding does not match this build');
@@ -547,19 +551,21 @@ export class MonitoringRequestsService {
     return { ...row, commit_sha: mergeSha, gitlab_merged_at: mergedAt, gitlab_merge_commit_sha: mergeSha };
   }
 
-  private async jenkinsConfig() {
-    if (!(await this.siteConf.getBoolean('monitoring.requests.jenkins.enabled', false))) throw new ServiceUnavailableException('Dashboard Jenkins 受控执行未启用');
-    const baseUrl = (await this.siteConf.getString('monitoring.requests.jenkins.base_url', '')).trim().replace(/\/+$/, '');
-    const username = (await this.siteConf.getString('monitoring.requests.jenkins.username', '')).trim();
-    const apiToken = (await this.siteConf.getString('monitoring.requests.jenkins.api_token', '')).trim();
-    const jobName = (await this.siteConf.getString('monitoring.requests.jenkins.job_name', 'platform-bootstrap-hash')).trim();
-    const timeoutMs = Math.min(JENKINS_TIMEOUT_MAX_MS, Math.max(JENKINS_TIMEOUT_MIN_MS, await this.siteConf.getNumber('monitoring.requests.jenkins.timeout_ms', 15_000)));
-    if (!baseUrl || !username || !apiToken || jobName !== 'platform-bootstrap-hash') throw new ServiceUnavailableException('Jenkins 受控执行器未完成配置');
+  private async jenkinsConfig(executorKey: string) {
+    const policy = getMonitoringEnvironmentPolicyByExecutorKey(executorKey);
+    if (!policy?.executionEnabled) throw new ServiceUnavailableException(`Jenkins 执行器 ${executorKey} 尚未开放`);
+    const prefix = `monitoring.requests.executors.${policy.executorKey}`;
+    if (!(await this.siteConf.getBoolean(`${prefix}.enabled`, false))) throw new ServiceUnavailableException(`Jenkins 执行器 ${policy.executorKey} 未启用`);
+    const baseUrl = (await this.siteConf.getString(`${prefix}.base_url`, '')).trim().replace(/\/+$/, '');
+    const username = (await this.siteConf.getString(`${prefix}.username`, '')).trim();
+    const apiToken = (await this.siteConf.getString(`${prefix}.api_token`, '')).trim();
+    const jobName = (await this.siteConf.getString(`${prefix}.job_name`, policy.jenkinsJobName)).trim();
+    const timeoutMs = Math.min(JENKINS_TIMEOUT_MAX_MS, Math.max(JENKINS_TIMEOUT_MIN_MS, await this.siteConf.getNumber(`${prefix}.timeout_ms`, 15_000)));
+    if (!baseUrl || !username || !apiToken || jobName !== policy.jenkinsJobName) throw new ServiceUnavailableException(`Jenkins 执行器 ${policy.executorKey} 未完成配置`);
     if (!/^https?:\/\/[A-Za-z0-9._:-]+$/.test(baseUrl)) throw new ServiceUnavailableException('Jenkins 地址配置无效');
-    return { baseUrl, username, apiToken, jobName, timeoutMs };
+    return { executorKey: policy.executorKey, baseUrl, username, apiToken, jobName, timeoutMs };
   }
-  private async jenkinsRequest<T>(method: 'get'|'post', path: string, config: any = {}) {
-    const c = await this.jenkinsConfig();
+  private async jenkinsRequest<T>(c: { baseUrl: string; username: string; apiToken: string; timeoutMs: number }, method: 'get'|'post', path: string, config: any = {}) {
     return axios.request<T>({ method, url: c.baseUrl + path, auth: { username: c.username, password: c.apiToken }, timeout: c.timeoutMs, validateStatus: () => true, ...config });
   }
   private extractDiff(consoleText: string) {
@@ -571,8 +577,10 @@ export class MonitoringRequestsService {
     return diff.length <= 200_000 ? diff : null;
   }
   private async refreshExecutionRecord(ex: any, actor?: Actor) {
+    const c = await this.jenkinsConfig(String(ex.executor_key || 'hash-jenkins'));
+    if (String(ex.job_name || c.jobName) !== c.jobName) throw new ServiceUnavailableException('执行记录绑定的 Jenkins Job 与受控配置不一致');
     if (!ex.build_number) {
-      const q = await this.jenkinsRequest<any>('get', `/queue/item/${ex.queue_id}/api/json`);
+      const q = await this.jenkinsRequest<any>(c, 'get', `/queue/item/${ex.queue_id}/api/json`);
       const n = Number(q.data?.executable?.number);
       if (n) {
         await this.db.query('UPDATE monitoring_jenkins_executions SET build_number=?,status="RUNNING",updated_at=UTC_TIMESTAMP() WHERE id=?', [n, ex.id]);
@@ -582,10 +590,11 @@ export class MonitoringRequestsService {
     if (!ex.build_number) return ex;
     const mustReadConsole = ex.mode === 'preview' && ex.status === 'SUCCESS' && !ex.diff_text;
     if (!mustReadConsole && ['SUCCESS', 'FAILURE', 'ABORTED'].includes(ex.status)) return ex;
-    const b = await this.jenkinsRequest<any>('get', `/job/platform-bootstrap-hash/${ex.build_number}/api/json`);
+    const jobPath = `/job/${encodeURIComponent(c.jobName)}`;
+    const b = await this.jenkinsRequest<any>(c, 'get', `${jobPath}/${ex.build_number}/api/json`);
     if (b.data?.building) return ex;
     const status = String(b.data?.result || 'FAILURE');
-    const log = (await this.jenkinsRequest<string>('get', `/job/platform-bootstrap-hash/${ex.build_number}/consoleText`, { responseType: 'text' })).data || '';
+    const log = (await this.jenkinsRequest<string>(c, 'get', `${jobPath}/${ex.build_number}/consoleText`, { responseType: 'text' })).data || '';
     const diff = ex.mode === 'preview' && status === 'SUCCESS' ? this.extractDiff(log) : null;
     await this.db.query('UPDATE monitoring_jenkins_executions SET status=?,diff_text=?,finished_at=COALESCE(finished_at,UTC_TIMESTAMP()),updated_at=UTC_TIMESTAMP() WHERE id=?', [status, diff, ex.id]);
     if (actor && !['SUCCESS', 'FAILURE', 'ABORTED'].includes(ex.status) && ['SUCCESS', 'FAILURE', 'ABORTED'].includes(status)) {
@@ -632,18 +641,18 @@ export class MonitoringRequestsService {
       const preview = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE request_id=? AND mode="preview" AND status="SUCCESS" AND mr_iid=? AND commit_sha=? AND diff_text IS NOT NULL AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 MINUTE) ORDER BY id DESC LIMIT 1', [requestId, row.mr_iid, String(row.commit_sha).toLowerCase()]);
       if (!preview[0]) throw new BadRequestException('当前 MR/SHA 尚无 30 分钟内成功的最终 Diff 预检');
     } else if (!this.owns(actor, row) && !this.can(actor, APPROVE) && !this.can(actor, MANAGE)) throw new ForbiddenException('无权发起预检');
-    const c = await this.jenkinsConfig();
-    const crumb = await this.jenkinsRequest<any>('get', '/crumbIssuer/api/json');
+    const c = await this.jenkinsConfig(String(row.executor_key));
+    const crumb = await this.jenkinsRequest<any>(c, 'get', '/crumbIssuer/api/json');
     if (crumb.status !== 200 || !crumb.data?.crumbRequestField || !crumb.data?.crumb) throw new ServiceUnavailableException('Jenkins crumb 获取失败');
     if (mode === 'apply') { await this.grantRealApply(auth, requestId, 15, `Dashboard 确认真实执行；预检已通过；${comment!.trim()}`); applyGrantCreated = true; }
-    const params = new URLSearchParams({ REQUEST_ID: requestId, MR_IID: String(row.mr_iid), COMMIT_SHA: String(row.commit_sha), APPLICATION_ID: String(row.app_id), DRY_RUN: mode === 'preview' ? 'true' : 'false' });
+    const params = new URLSearchParams({ REQUEST_ID: requestId, MR_IID: String(row.mr_iid), COMMIT_SHA: String(row.commit_sha), APPLICATION_ID: String(row.app_id), TARGET_BRANCH: String(row.target_branch), DRY_RUN: mode === 'preview' ? 'true' : 'false' });
     let queued: any;
-    try { queued = await this.jenkinsRequest<any>('post', `/job/${encodeURIComponent(c.jobName)}/buildWithParameters`, { data: params.toString(), headers: { [crumb.data.crumbRequestField]: crumb.data.crumb, 'content-type': 'application/x-www-form-urlencoded' }, maxRedirects: 0 }); }
+    try { queued = await this.jenkinsRequest<any>(c, 'post', `/job/${encodeURIComponent(c.jobName)}/buildWithParameters`, { data: params.toString(), headers: { [crumb.data.crumbRequestField]: crumb.data.crumb, 'content-type': 'application/x-www-form-urlencoded' }, maxRedirects: 0 }); }
     catch (err) { if (applyGrantCreated) await this.db.query('UPDATE monitoring_real_apply_authorizations SET revoked_at=UTC_TIMESTAMP() WHERE request_id=? AND consumed_at IS NULL AND revoked_at IS NULL', [requestId]); throw err; }
     const queueUrl = String(queued.headers?.location || '');
     const queueId = Number((queueUrl.match(/\/queue\/item\/(\d+)/) || [])[1]);
     if (![201, 302].includes(queued.status) || !Number.isInteger(queueId)) { if (applyGrantCreated) await this.db.query('UPDATE monitoring_real_apply_authorizations SET revoked_at=UTC_TIMESTAMP() WHERE request_id=? AND consumed_at IS NULL AND revoked_at IS NULL', [requestId]); throw new ServiceUnavailableException('Jenkins 未接受构建请求'); }
-    const result = await this.db.query<any>('INSERT INTO monitoring_jenkins_executions (request_id,mode,mr_iid,commit_sha,application_id,queue_id,status,requested_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,"QUEUED",?,UTC_TIMESTAMP(),UTC_TIMESTAMP())', [requestId, mode, row.mr_iid, String(row.commit_sha).toLowerCase(), row.app_id, queueId, actor.userId]);
+    const result = await this.db.query<any>('INSERT INTO monitoring_jenkins_executions (request_id,mode,mr_iid,commit_sha,application_id,executor_key,job_name,queue_id,status,requested_by_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,"QUEUED",?,UTC_TIMESTAMP(),UTC_TIMESTAMP())', [requestId, mode, row.mr_iid, String(row.commit_sha).toLowerCase(), row.app_id, c.executorKey, c.jobName, queueId, actor.userId]);
     await this.event(requestId, actor, mode === 'preview' ? 'PREVIEW_QUEUED' : 'REAL_APPLY_QUEUED', 'APPROVED', 'APPROVED', `Jenkins 队列 #${queueId}`);
     return { id: Number(result.insertId), mode, queueId, status: 'QUEUED' };
   }
@@ -652,9 +661,9 @@ export class MonitoringRequestsService {
     const rows = await this.db.query<any[]>('SELECT * FROM monitoring_jenkins_executions WHERE id=? AND request_id=? LIMIT 1', [id, requestId]);
     if (!rows[0]) throw new NotFoundException('执行记录不存在');
     await this.refreshExecutionRecord(rows[0], actor);
-    return (await this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE id=?', [id]))[0];
+    return (await this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,executor_key,job_name,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE id=?', [id]))[0];
   }
-  async listDashboardExecutions(auth: string | undefined, requestId: string) { const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row); return this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE request_id=? ORDER BY id DESC',[requestId]); }
+  async listDashboardExecutions(auth: string | undefined, requestId: string) { const actor=await this.actor(auth); const row=await this.read(requestId); this.assertRead(actor,row); return this.db.query<any[]>('SELECT id,mode,mr_iid,commit_sha,application_id,executor_key,job_name,queue_id,build_number,status,diff_text,created_at,updated_at,finished_at FROM monitoring_jenkins_executions WHERE request_id=? ORDER BY id DESC',[requestId]); }
   async withdraw(auth: string | undefined, requestId: string, comment?: string) {
     const actor=await this.actor(auth); const row=await this.read(requestId); if (!this.owns(actor,row) || !['DRAFT','SUBMITTED','REJECTED'].includes(row.status)) throw new ForbiddenException('当前状态不可撤回');
     // For a bound request, close the exact Open MR first. Dashboard status changes only

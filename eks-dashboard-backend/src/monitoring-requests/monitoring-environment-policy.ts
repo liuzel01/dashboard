@@ -4,6 +4,7 @@ export type MonitoringEnvironmentPolicy = {
   targetBranch: string;
   repositoryEnvironmentPath: string;
   executorKey: string;
+  jenkinsJobName: string;
   executionEnabled: boolean;
 };
 
@@ -15,6 +16,7 @@ export const MONITORING_ENVIRONMENT_POLICIES: readonly MonitoringEnvironmentPoli
       targetBranch: 'hash-jenkins',
       repositoryEnvironmentPath: 'hash',
       executorKey: 'hash-jenkins',
+      jenkinsJobName: 'platform-bootstrap-hash',
       executionEnabled: true,
     },
     {
@@ -23,6 +25,7 @@ export const MONITORING_ENVIRONMENT_POLICIES: readonly MonitoringEnvironmentPoli
       targetBranch: 'jenkins-mega',
       repositoryEnvironmentPath: 'mgbx',
       executorKey: 'mgbx-jenkins',
+      jenkinsJobName: 'platform-bootstrap-mgbx',
       executionEnabled: false,
     },
     {
@@ -31,6 +34,7 @@ export const MONITORING_ENVIRONMENT_POLICIES: readonly MonitoringEnvironmentPoli
       targetBranch: 'icoin-jenkins',
       repositoryEnvironmentPath: 'icoin',
       executorKey: 'icoin-jenkins',
+      jenkinsJobName: 'platform-bootstrap-icoin',
       executionEnabled: false,
     },
     {
@@ -39,6 +43,7 @@ export const MONITORING_ENVIRONMENT_POLICIES: readonly MonitoringEnvironmentPoli
       targetBranch: 'vlink-jenkins',
       repositoryEnvironmentPath: 'vlink',
       executorKey: 'vlink-jenkins',
+      jenkinsJobName: 'platform-bootstrap-vlink',
       executionEnabled: false,
     },
   ] as const;
@@ -46,6 +51,14 @@ export const MONITORING_ENVIRONMENT_POLICIES: readonly MonitoringEnvironmentPoli
 export function getMonitoringEnvironmentPolicy(environmentId: string) {
   return MONITORING_ENVIRONMENT_POLICIES.find(
     (item) => item.environmentId === String(environmentId || '').trim(),
+  );
+}
+
+export function getMonitoringEnvironmentPolicyByExecutorKey(
+  executorKey: string,
+) {
+  return MONITORING_ENVIRONMENT_POLICIES.find(
+    (item) => item.executorKey === String(executorKey || '').trim(),
   );
 }
 

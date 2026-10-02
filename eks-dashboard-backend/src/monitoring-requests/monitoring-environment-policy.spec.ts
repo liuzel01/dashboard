@@ -1,5 +1,6 @@
 import {
   getMonitoringEnvironmentPolicy,
+  getMonitoringEnvironmentPolicyByExecutorKey,
   requireMonitoringEnvironmentPolicy,
 } from './monitoring-environment-policy';
 
@@ -26,5 +27,15 @@ describe('monitoring environment policy', () => {
 
   it('does not expose unknown environments', () => {
     expect(getMonitoringEnvironmentPolicy('unknown')).toBeUndefined();
+  });
+
+  it('resolves the Hash Jenkins executor and controlled job', () => {
+    expect(
+      getMonitoringEnvironmentPolicyByExecutorKey('hash-jenkins'),
+    ).toMatchObject({
+      environmentId: 'hashex',
+      jenkinsJobName: 'platform-bootstrap-hash',
+      executionEnabled: true,
+    });
   });
 });
