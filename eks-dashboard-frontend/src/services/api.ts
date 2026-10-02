@@ -1638,6 +1638,14 @@ export const deleteOncallRoster = async (id: number) =>
 
 export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
 export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
+export type MonitoringEnvironmentOption = {
+  environmentId: string;
+  label: string;
+  targetBranch: string;
+  repositoryEnvironmentPath: string;
+  executorKey: string;
+  executionEnabled: boolean;
+};
 export type MonitoringPrometheusRuleFields = {
   alertName: string;
   expr: string;
@@ -1650,6 +1658,7 @@ export type MonitoringPrometheusRuleFields = {
 };
 export type MonitoringRequest = {
   request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: MonitoringRequestResourceType;
+  environment_id: string; environment_name?: string; target_branch: string; repository_environment_path: string; executor_key: string; execution_enabled: boolean;
   resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null; gitlab_merged_at?: string | null; gitlab_merge_commit_sha?: string | null;
   prometheus_rule_alert_name?: string | null; prometheus_rule_expr?: string | null; prometheus_rule_for?: string | null; prometheus_rule_severity?: 'warning' | 'critical' | null;
   prometheus_rule_summary?: string | null; prometheus_rule_description?: string | null; prometheus_rule_owner?: string | null; prometheus_rule_runbook_url?: string | null;
@@ -1658,8 +1667,9 @@ export type MonitoringRequest = {
   events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
 };
 export const listMonitoringRequests = async (params: { status?: MonitoringRequestStatus; page?: number; pageSize?: number } = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
+export const getMonitoringEnvironmentOptions = async () => (await api.get('/monitoring-requests/environment-options')).data as MonitoringEnvironmentOption[];
 export const getMonitoringRequest = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`)).data as MonitoringRequest;
-export const createMonitoringRequest = async (data: { appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
+export const createMonitoringRequest = async (data: { environmentId: string; targetBranch: string; appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
 export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
 export const submitMonitoringRequest = async (requestId: string, data: { mrIid: number; commitSha: string }) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/submit`, data)).data as MonitoringRequest;
 export const submitManagedMonitoringRequest = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/managed-submit`)).data as MonitoringRequest;
