@@ -5,6 +5,8 @@ import { MonitoringRequestsService } from './monitoring-requests.service';
 import { MONITORING_CREATABLE_RESOURCE_TYPES, MONITORING_RESOURCE_TYPES, PROMETHEUS_RULE_SEVERITIES, type MonitoringCreatableResourceType, type MonitoringResourceType, type PrometheusRuleSeverity } from './monitoring-request-policy';
 
 const APP_ID = /^[a-z][a-z0-9-]{1,62}$/;
+const ENVIRONMENT_ID = /^[a-z][a-z0-9-]{1,63}$/;
+const TARGET_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 const SHA = /^[a-f0-9]{40}$/i;
 const validation = new ValidationPipe({ transform: true, whitelist: true });
 
@@ -20,6 +22,8 @@ class PrometheusRuleFieldsDto {
 }
 
 class CreateRequestDto {
+  @IsString() @Matches(ENVIRONMENT_ID) environmentId!: string;
+  @IsString() @Matches(TARGET_BRANCH) targetBranch!: string;
   @IsString() @Matches(APP_ID) appId!: string;
   @IsIn(MONITORING_CREATABLE_RESOURCE_TYPES) resourceType!: MonitoringCreatableResourceType;
   @ValidateIf((o) => o.resourceType !== 'PrometheusRule') @IsString() @Matches(APP_ID) resourceName?: string;
@@ -65,6 +69,7 @@ class ListDto {
 export class MonitoringRequestsController {
   constructor(private readonly service: MonitoringRequestsService) {}
   @Get() list(@Headers('authorization') auth: string | undefined, @Query(validation) query: ListDto) { return this.service.list(auth, query); }
+  @Get('environment-options') environmentOptions(@Headers('authorization') auth: string | undefined) { return this.service.environmentOptions(auth); }
   @Get(':requestId') get(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string) { return this.service.get(auth, requestId); }
   @Post() create(@Headers('authorization') auth: string | undefined, @Body(validation) body: CreateRequestDto) { return this.service.create(auth, body); }
   @Patch(':requestId') update(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: UpdateDraftDto) { return this.service.updateDraft(auth, requestId, body); }

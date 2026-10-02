@@ -8,9 +8,12 @@ import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { defaultPrometheusRuleGroupName, defaultPrometheusRuleResourceName, normalizePrometheusRuleFields, renderPrometheusRuleYaml, type MonitoringCreatableResourceType, type MonitoringResourceType, type PrometheusRuleFields, validatePrometheusRuleFields } from './monitoring-request-policy';
+import { getMonitoringEnvironmentPolicy, MONITORING_ENVIRONMENT_POLICIES, requireMonitoringEnvironmentPolicy } from './monitoring-environment-policy';
 
 type Actor = { userId: number; username: string; permissions: string[] };
 type RequestInput = {
+  environmentId: string;
+  targetBranch: string;
   appId: string;
   resourceType: MonitoringCreatableResourceType;
   resourceName?: string;
@@ -30,8 +33,6 @@ type StoredPrometheusRuleFields = {
 const MENU = 'menu:monitoring-requests';
 const APPROVE = 'monitoring-requests:approve';
 const MANAGE = 'monitoring-requests:manage';
-// Dashboard environment ID; KubernetesService resolves it to kubeconfig context "hash".
-const CONTROLLED_MONITORING_ENVIRONMENT_ID = 'hashex';
 const REAL_APPLY_MINUTES = 5;
 const REAL_APPLY_MAX_MINUTES = 30;
 const JENKINS_TIMEOUT_MIN_MS = 1_000;
@@ -62,6 +63,14 @@ export class MonitoringRequestsService {
     return { userId: Number(me.id), username: String(me.username), permissions };
   }
   private can(actor: Actor, permission: string) { return actor.permissions.includes(permission); }
+  private requestView(row: any) {
+    const policy = getMonitoringEnvironmentPolicy(String(row.environment_id || ''));
+    const executionEnabled = !!policy?.executionEnabled
+      && row.target_branch === policy.targetBranch
+      && row.repository_environment_path === policy.repositoryEnvironmentPath
+      && row.executor_key === policy.executorKey;
+    return { ...row, environment_name: policy?.label || row.environment_id, execution_enabled: executionEnabled };
+  }
   private async read(requestId: string) {
     const rows = await this.db.query<any[]>(`SELECT r.*, u.username AS requester_username, u.display_name AS requester_display_name,
       au.username AS approver_username, au.display_name AS approver_display_name
@@ -70,18 +79,18 @@ export class MonitoringRequestsService {
     if (!rows[0]) throw new NotFoundException('申请不存在');
     const r = rows[0];
     r.events = await this.db.query<any[]>('SELECT event_type, actor_username, comment, from_status, to_status, created_at FROM monitoring_request_events WHERE request_id=? ORDER BY id ASC', [requestId]);
-    return r;
+    return this.requestView(r);
   }
   private owns(actor: Actor, row: any) { return Number(row.requester_user_id) === actor.userId; }
   private assertRead(actor: Actor, row: any) { if (!this.owns(actor, row) && !this.can(actor, APPROVE) && !this.can(actor, MANAGE)) throw new ForbiddenException('仅可查看本人申请'); }
   private async event(requestId: string, actor: Actor, type: string, from: string | null, to: string | null, comment?: string) {
     await this.db.query('INSERT INTO monitoring_request_events (request_id,event_type,actor_user_id,actor_username,from_status,to_status,comment,created_at) VALUES (?,?,?,?,?,?,?,UTC_TIMESTAMP())', [requestId, type, actor.userId, actor.username, from, to, comment?.trim() || null]);
   }
-  private resourcePath(appId: string) { return `k8s-yaml/platform/environments/hash/apps/${appId}/monitoring/`; }
+  private resourcePath(appId: string, repositoryEnvironmentPath: string) { return `k8s-yaml/platform/environments/${repositoryEnvironmentPath}/apps/${appId}/monitoring/`; }
   private managedBranch(requestId: string) { return `platform/${requestId.toLowerCase()}`; }
   private managedFilePath(row: { app_id: string; resource_type: MonitoringResourceType }) {
     const fileName = row.resource_type === 'PrometheusRule' ? 'prometheus-rule.yaml' : 'service-monitor.yaml';
-    return `${this.resourcePath(String(row.app_id))}${fileName}`;
+    return `${String((row as any).resource_path || '')}${fileName}`;
   }
   private serviceMonitorYaml(row: any) {
     // First managed template: a conventional HTTP /metrics Service endpoint.
@@ -96,13 +105,13 @@ export class MonitoringRequestsService {
   }
   private async validateServiceMonitorTarget(row: any) {
     // The managed YAML has a fixed namespace, selector and endpoint port. Check the
-    // live hash cluster before creating an MR and again immediately before merging.
+    // live target cluster before creating an MR and again immediately before merging.
     // This call is read-only; it never derives or mutates the Git-managed template.
-    try { return await this.kubernetes.getServiceMonitorTarget(CONTROLLED_MONITORING_ENVIRONMENT_ID, 'default', `app.kubernetes.io/name=${String(row.app_id)}`, 'http'); }
+    try { return await this.kubernetes.getServiceMonitorTarget(String(row.environment_id), 'default', `app.kubernetes.io/name=${String(row.app_id)}`, 'http'); }
     catch (err: any) {
       const detail = String(err?.message || 'unknown Kubernetes API error').slice(0, 500);
       if (detail.startsWith('expected exactly one matching Service') || detail.startsWith('matching Service')) throw new BadRequestException(`ServiceMonitor 目标 Service 不满足受控契约：${detail}`);
-      throw new ServiceUnavailableException(`无法读取 hash 集群中的 ServiceMonitor 目标 Service：${detail}`);
+      throw new ServiceUnavailableException(`无法读取 ${row.environment_id} 集群中的 ServiceMonitor 目标 Service：${detail}`);
     }
   }
   private normalizePrometheusRuleInput(appId: string, fields: Partial<PrometheusRuleFields> | undefined | null): StoredPrometheusRuleFields {
@@ -194,7 +203,7 @@ export class MonitoringRequestsService {
   private async validatePrometheusRuleTarget(row: any) {
     try {
       const conflicts = await this.kubernetes.getPrometheusRuleConflicts(
-        CONTROLLED_MONITORING_ENVIRONMENT_ID,
+        String(row.environment_id),
         'platform-monitoring',
         String(row.resource_name),
         defaultPrometheusRuleGroupName(String(row.app_id)),
@@ -212,13 +221,25 @@ export class MonitoringRequestsService {
     } catch (err: any) {
       if (err instanceof BadRequestException) throw err;
       const detail = String(err?.message || 'unknown Kubernetes API error').slice(0, 500);
-      throw new ServiceUnavailableException(`无法读取 hash 集群中的 PrometheusRule 状态：${detail}`);
+      throw new ServiceUnavailableException(`无法读取 ${row.environment_id} 集群中的 PrometheusRule 状态：${detail}`);
     }
   }
   private async validateManagedResource(row: any) {
     if (row.resource_type === 'PrometheusRule') return this.validatePrometheusRuleTarget(row);
     if (row.resource_type === 'ServiceMonitor') return this.validateServiceMonitorTarget(row);
     throw new BadRequestException(`当前不支持受控发布资源类型 ${row.resource_type}`);
+  }
+  private executionPolicy(row: any) {
+    let policy;
+    try { policy = requireMonitoringEnvironmentPolicy(String(row.environment_id || ''), String(row.target_branch || '')); }
+    catch (error: any) { throw new BadRequestException(error?.message || '监控环境配置无效'); }
+    if (row.repository_environment_path !== policy.repositoryEnvironmentPath || row.executor_key !== policy.executorKey) {
+      throw new BadRequestException('申请中的环境执行快照与受控配置不一致');
+    }
+    if (!policy.executionEnabled) {
+      throw new BadRequestException(`环境 ${policy.label} 的 Jenkins 执行器尚未配置；当前只能保存草稿，不能提交审批或执行`);
+    }
+    return policy;
   }
   private requireNonBlank(value: string, field: string) {
     if (!value || !value.trim()) throw new BadRequestException(`${field}不能为空`);
@@ -240,19 +261,28 @@ export class MonitoringRequestsService {
     const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const total = await this.db.query<any[]>(`SELECT COUNT(*) total FROM monitoring_requests r ${sql}`, values);
     const items = await this.db.query<any[]>(`SELECT r.*,u.username requester_username,u.display_name requester_display_name,au.username approver_username FROM monitoring_requests r JOIN users u ON u.id=r.requester_user_id LEFT JOIN users au ON au.id=r.approver_user_id ${sql} ORDER BY r.updated_at DESC LIMIT ? OFFSET ?`, [...values, pageSize, (page - 1) * pageSize]);
-    return { items, total: Number(total[0]?.total || 0), page, pageSize };
+    return { items: items.map((item) => this.requestView(item)), total: Number(total[0]?.total || 0), page, pageSize };
+  }
+  async environmentOptions(auth: string | undefined) {
+    await this.actor(auth);
+    return MONITORING_ENVIRONMENT_POLICIES.map((policy) => ({ ...policy }));
   }
   async get(auth: string | undefined, requestId: string) { const actor = await this.actor(auth); const row = await this.read(requestId); this.assertRead(actor,row); return row; }
   async create(auth: string | undefined, input: RequestInput) {
     const normalized = this.normalizeCreateInput(input);
-    const actor = await this.actor(auth); const requestId = `HASH-MON-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
+    let environmentPolicy;
+    try { environmentPolicy = requireMonitoringEnvironmentPolicy(input.environmentId, input.targetBranch); }
+    catch (error: any) { throw new BadRequestException(error?.message || '监控环境配置无效'); }
+    const actor = await this.actor(auth); const requestId = `${environmentPolicy.environmentId.toUpperCase()}-MON-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
     await this.db.query(`INSERT INTO monitoring_requests (
-      request_id,status,requester_user_id,app_id,resource_type,resource_name,resource_path,reason,
+      request_id,status,requester_user_id,environment_id,target_branch,repository_environment_path,executor_key,
+      app_id,resource_type,resource_name,resource_path,reason,
       prometheus_rule_alert_name,prometheus_rule_expr,prometheus_rule_for,prometheus_rule_severity,
       prometheus_rule_summary,prometheus_rule_description,prometheus_rule_owner,prometheus_rule_runbook_url,
       created_at,updated_at
-    ) VALUES (?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [
-      requestId, actor.userId, normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId), normalized.reason,
+    ) VALUES (?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [
+      requestId, actor.userId, environmentPolicy.environmentId, environmentPolicy.targetBranch, environmentPolicy.repositoryEnvironmentPath, environmentPolicy.executorKey,
+      normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId, environmentPolicy.repositoryEnvironmentPath), normalized.reason,
       normalized.prometheus_rule_alert_name, normalized.prometheus_rule_expr, normalized.prometheus_rule_for, normalized.prometheus_rule_severity,
       normalized.prometheus_rule_summary, normalized.prometheus_rule_description, normalized.prometheus_rule_owner, normalized.prometheus_rule_runbook_url,
     ]);
@@ -267,7 +297,7 @@ export class MonitoringRequestsService {
       prometheus_rule_summary=?,prometheus_rule_description=?,prometheus_rule_owner=?,prometheus_rule_runbook_url=?,
       updated_at=UTC_TIMESTAMP()
       WHERE request_id=?`, [
-      normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId), normalized.reason,
+      normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId, String(row.repository_environment_path || 'hash')), normalized.reason,
       normalized.prometheus_rule_alert_name, normalized.prometheus_rule_expr, normalized.prometheus_rule_for, normalized.prometheus_rule_severity,
       normalized.prometheus_rule_summary, normalized.prometheus_rule_description, normalized.prometheus_rule_owner, normalized.prometheus_rule_runbook_url,
       requestId,
@@ -277,6 +307,7 @@ export class MonitoringRequestsService {
   async submit(auth: string | undefined, requestId: string, input: { mrIid:number; commitSha:string }) {
     if (!Number.isInteger(input.mrIid) || input.mrIid < 1 || !/^[a-f0-9]{40}$/i.test(input.commitSha)) throw new BadRequestException('MR IID 或 Commit SHA 无效');
     const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || row.status !== 'DRAFT' || row.mr_iid || row.commit_sha) throw new ForbiddenException('当前状态不可提交');
+    this.executionPolicy(row);
     if (row.resource_type === 'PrometheusRule') throw new BadRequestException('PrometheusRule 一期仅允许 Dashboard 托管生成固定 YAML 与受控 MR，不支持手工绑定');
     await this.db.query('UPDATE monitoring_requests SET status=\'SUBMITTED\',mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [input.mrIid,input.commitSha.toLowerCase(),requestId]);
     await this.event(requestId,actor,'SUBMITTED',row.status,'SUBMITTED'); return this.read(requestId);
@@ -285,10 +316,12 @@ export class MonitoringRequestsService {
     const actor = await this.actor(auth); const row = await this.read(requestId);
     if (!this.owns(actor, row) || row.status !== 'DRAFT') throw new ForbiddenException('当前状态不可提交');
     if (row.mr_iid || row.commit_sha) throw new BadRequestException('该申请已绑定 GitLab MR；请使用手工绑定流程继续处理');
+    this.executionPolicy(row);
     if (!['ServiceMonitor', 'PrometheusRule'].includes(String(row.resource_type))) throw new BadRequestException('Dashboard 托管 MR 创建当前仅支持 ServiceMonitor 与 PrometheusRule');
     await this.validateManagedResource(row);
     const config = await this.gitlabMergeConfig();
     if (!config.enabled) throw new ServiceUnavailableException('GitLab 托管 MR 创建未启用');
+    if (config.targetBranch !== row.target_branch) throw new BadRequestException('申请目标分支与当前 GitLab 执行器配置不一致');
     const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row); const yaml = this.managedYaml(row);
     if (row.resource_type === 'PrometheusRule') {
       const existingFile = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(config.targetBranch)}`);
@@ -359,7 +392,7 @@ export class MonitoringRequestsService {
         throw new BadRequestException(`创建受控 GitLab MR 失败：${detail}`);
       }
     }
-    await this.db.query("UPDATE monitoring_requests SET status='SUBMITTED',resource_path=?,mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?", [this.resourcePath(String(row.app_id)), mrIid, sourceSha, requestId]);
+    await this.db.query("UPDATE monitoring_requests SET status='SUBMITTED',resource_path=?,mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?", [this.resourcePath(String(row.app_id), String(row.repository_environment_path)), mrIid, sourceSha, requestId]);
     await this.event(requestId, actor, 'GITLAB_MR_CREATED', row.status, 'SUBMITTED', `MR !${mrIid}；分支 ${branch}；${filePath}`);
     await this.event(requestId, actor, 'SUBMITTED', row.status, 'SUBMITTED', 'Dashboard 已创建并绑定受控 GitLab MR');
     return this.read(requestId);
@@ -575,6 +608,7 @@ export class MonitoringRequestsService {
   }
   async startDashboardExecution(auth: string | undefined, requestId: string, mode: 'preview'|'apply', comment?: string, confirmation?: string) {
     const actor = await this.actor(auth); let row = await this.read(requestId); this.assertRead(actor, row);
+    this.executionPolicy(row);
     if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
     const gitlab = await this.gitlabMergeConfig();
     if (mode === 'preview') await this.validateManagedResource(row);
