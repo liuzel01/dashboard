@@ -8,6 +8,7 @@ const APP_ID = /^[a-z][a-z0-9-]{1,62}$/;
 const ENVIRONMENT_ID = /^[a-z][a-z0-9-]{1,63}$/;
 const TARGET_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 const SHA = /^[a-f0-9]{40}$/i;
+const JENKINS_JOB = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/;
 const validation = new ValidationPipe({ transform: true, whitelist: true });
 
 class PrometheusRuleFieldsDto {
@@ -23,6 +24,7 @@ class PrometheusRuleFieldsDto {
 class WorkloadBundleDto {
   @IsString() @MaxLength(512) filePath!: string;
   @IsString() @MaxLength(100000) yaml!: string;
+  @IsString() @Matches(JENKINS_JOB) serviceJobName!: string;
 }
 
 class CreateRequestDto {
