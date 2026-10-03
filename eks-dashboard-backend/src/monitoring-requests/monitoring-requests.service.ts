@@ -9,6 +9,7 @@ import { AuthService } from '../auth/auth.service';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { defaultPrometheusRuleGroupName, defaultPrometheusRuleResourceName, normalizePrometheusRuleFields, renderPrometheusRuleYaml, type MonitoringCreatableResourceType, type MonitoringResourceType, type PrometheusRuleFields, validatePrometheusRuleFields } from './monitoring-request-policy';
 import { getMonitoringEnvironmentPolicy, getMonitoringEnvironmentPolicyByExecutorKey, MONITORING_ENVIRONMENT_POLICIES, requireMonitoringEnvironmentPolicy } from './monitoring-environment-policy';
+import { validateWorkloadBundle } from './workload-bundle-policy';
 
 type Actor = { userId: number; username: string; permissions: string[] };
 type RequestInput = {
@@ -19,6 +20,7 @@ type RequestInput = {
   resourceName?: string;
   reason: string;
   prometheusRule?: Partial<PrometheusRuleFields>;
+  workload?: { filePath: string; yaml: string };
 };
 type StoredPrometheusRuleFields = {
   prometheus_rule_alert_name: string;
@@ -69,7 +71,11 @@ export class MonitoringRequestsService {
       && row.target_branch === policy.targetBranch
       && row.repository_environment_path === policy.repositoryEnvironmentPath
       && row.executor_key === policy.executorKey;
-    return { ...row, environment_name: policy?.label || row.environment_id, execution_enabled: executionEnabled };
+    let workloadStatus = null;
+    if (row.workload_last_check_json) {
+      try { workloadStatus = JSON.parse(String(row.workload_last_check_json)); } catch { workloadStatus = null; }
+    }
+    return { ...row, workload_status: workloadStatus, environment_name: policy?.label || row.environment_id, execution_enabled: executionEnabled };
   }
   private async read(requestId: string) {
     const rows = await this.db.query<any[]>(`SELECT r.*, u.username AS requester_username, u.display_name AS requester_display_name,
@@ -89,6 +95,7 @@ export class MonitoringRequestsService {
   private resourcePath(appId: string, repositoryEnvironmentPath: string) { return `k8s-yaml/platform/environments/${repositoryEnvironmentPath}/apps/${appId}/monitoring/`; }
   private managedBranch(requestId: string) { return `platform/${requestId.toLowerCase()}`; }
   private managedFilePath(row: { app_id: string; resource_type: MonitoringResourceType }) {
+    if (row.resource_type === 'WorkloadBundle') return String((row as any).resource_path || '');
     const fileName = row.resource_type === 'PrometheusRule' ? 'prometheus-rule.yaml' : 'service-monitor.yaml';
     return `${String((row as any).resource_path || '')}${fileName}`;
   }
@@ -101,6 +108,7 @@ export class MonitoringRequestsService {
     return renderPrometheusRuleYaml(row);
   }
   private managedYaml(row: any) {
+    if (row.resource_type === 'WorkloadBundle') return String(row.workload_yaml || '');
     return row.resource_type === 'PrometheusRule' ? this.prometheusRuleYaml(row) : this.serviceMonitorYaml(row);
   }
   private async validateServiceMonitorTarget(row: any) {
@@ -134,6 +142,20 @@ export class MonitoringRequestsService {
   }
   private normalizeCreateInput(input: RequestInput) {
     this.requireNonBlank(input.reason, '申请说明');
+    if (input.resourceType === 'WorkloadBundle') {
+      let workload;
+      try { workload = validateWorkloadBundle(String(input.workload?.yaml || ''), String(input.workload?.filePath || '')); }
+      catch (error: any) { throw new BadRequestException(String(error?.message || '工作负载资源包无效')); }
+      return {
+        appId: input.appId, resourceType: input.resourceType, resourceName: workload.deploymentName,
+        reason: input.reason.trim(), resourcePath: workload.filePath, workload_yaml: workload.yaml,
+        workload_namespace: workload.namespace, workload_deployment_name: workload.deploymentName,
+        workload_service_name: workload.serviceName,
+        prometheus_rule_alert_name: null, prometheus_rule_expr: null, prometheus_rule_for: null,
+        prometheus_rule_severity: null, prometheus_rule_summary: null, prometheus_rule_description: null,
+        prometheus_rule_owner: null, prometheus_rule_runbook_url: null,
+      };
+    }
     if (input.resourceType === 'PrometheusRule') {
       return {
         appId: input.appId,
@@ -141,6 +163,7 @@ export class MonitoringRequestsService {
         resourceName: defaultPrometheusRuleResourceName(input.appId),
         reason: input.reason.trim(),
         ...this.normalizePrometheusRuleInput(input.appId, input.prometheusRule),
+        resourcePath: null, workload_yaml: null, workload_namespace: null, workload_deployment_name: null, workload_service_name: null,
       };
     }
     this.requireNonBlank(String(input.resourceName || ''), '资源名称');
@@ -157,6 +180,7 @@ export class MonitoringRequestsService {
       prometheus_rule_description: null,
       prometheus_rule_owner: null,
       prometheus_rule_runbook_url: null,
+      resourcePath: null, workload_yaml: null, workload_namespace: null, workload_deployment_name: null, workload_service_name: null,
     };
   }
   private normalizeUpdateInput(row: any, input: Partial<RequestInput>) {
@@ -164,6 +188,19 @@ export class MonitoringRequestsService {
     const resourceType = String(input.resourceType || row.resource_type) as MonitoringCreatableResourceType;
     const reason = input.reason?.trim() || row.reason;
     this.requireNonBlank(reason, '申请说明');
+    if (resourceType === 'WorkloadBundle') {
+      let workload;
+      try { workload = validateWorkloadBundle(String(input.workload?.yaml ?? row.workload_yaml ?? ''), String(input.workload?.filePath ?? row.resource_path ?? '')); }
+      catch (error: any) { throw new BadRequestException(String(error?.message || '工作负载资源包无效')); }
+      return {
+        appId, resourceType, resourceName: workload.deploymentName, reason, resourcePath: workload.filePath,
+        workload_yaml: workload.yaml, workload_namespace: workload.namespace,
+        workload_deployment_name: workload.deploymentName, workload_service_name: workload.serviceName,
+        prometheus_rule_alert_name: null, prometheus_rule_expr: null, prometheus_rule_for: null,
+        prometheus_rule_severity: null, prometheus_rule_summary: null, prometheus_rule_description: null,
+        prometheus_rule_owner: null, prometheus_rule_runbook_url: null,
+      };
+    }
     if (resourceType === 'PrometheusRule') {
       const current = {
         alertName: row.prometheus_rule_alert_name,
@@ -181,6 +218,7 @@ export class MonitoringRequestsService {
         resourceName: defaultPrometheusRuleResourceName(appId),
         reason,
         ...this.normalizePrometheusRuleInput(appId, { ...current, ...(input.prometheusRule || {}) }),
+        resourcePath: null, workload_yaml: null, workload_namespace: null, workload_deployment_name: null, workload_service_name: null,
       };
     }
     const resourceName = String(input.resourceName || row.resource_name).trim();
@@ -198,6 +236,7 @@ export class MonitoringRequestsService {
       prometheus_rule_description: null,
       prometheus_rule_owner: null,
       prometheus_rule_runbook_url: null,
+      resourcePath: null, workload_yaml: null, workload_namespace: null, workload_deployment_name: null, workload_service_name: null,
     };
   }
   private async validatePrometheusRuleTarget(row: any) {
@@ -225,9 +264,27 @@ export class MonitoringRequestsService {
     }
   }
   private async validateManagedResource(row: any) {
+    if (row.resource_type === 'WorkloadBundle') {
+      if (row.environment_id !== 'hashex') throw new BadRequestException('工作负载资源包第一版仅支持 hashex');
+      try { return validateWorkloadBundle(String(row.workload_yaml || ''), String(row.resource_path || '')); }
+      catch (error: any) { throw new BadRequestException(String(error?.message || '工作负载资源包无效')); }
+    }
     if (row.resource_type === 'PrometheusRule') return this.validatePrometheusRuleTarget(row);
     if (row.resource_type === 'ServiceMonitor') return this.validateServiceMonitorTarget(row);
     throw new BadRequestException(`当前不支持受控发布资源类型 ${row.resource_type}`);
+  }
+  private async assertWorkloadCreateOnly(row: any) {
+    let status;
+    try {
+      status = await this.kubernetes.getWorkloadBundleStatus(
+        String(row.environment_id), String(row.workload_deployment_name), String(row.workload_service_name), String(row.workload_namespace || 'default'),
+      );
+    } catch (error: any) {
+      throw new ServiceUnavailableException(`无法读取 ${row.environment_id} 集群中的工作负载状态：${String(error?.message || error).slice(0, 500)}`);
+    }
+    if (status.deploymentFound || status.serviceFound) {
+      throw new BadRequestException(`第一版仅允许新增：集群中已存在${status.deploymentFound ? ` Deployment/${row.workload_deployment_name}` : ''}${status.deploymentFound && status.serviceFound ? ' 与' : ''}${status.serviceFound ? ` Service/${row.workload_service_name}` : ''}`);
+    }
   }
   private executionPolicy(row: any) {
     let policy;
@@ -273,16 +330,19 @@ export class MonitoringRequestsService {
     let environmentPolicy;
     try { environmentPolicy = requireMonitoringEnvironmentPolicy(input.environmentId, input.targetBranch); }
     catch (error: any) { throw new BadRequestException(error?.message || '监控环境配置无效'); }
+    if (normalized.resourceType === 'WorkloadBundle' && environmentPolicy.environmentId !== 'hashex') throw new BadRequestException('工作负载资源包第一版仅支持 hashex');
     const actor = await this.actor(auth); const requestId = `${environmentPolicy.environmentId.toUpperCase()}-MON-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
     await this.db.query(`INSERT INTO monitoring_requests (
       request_id,status,requester_user_id,environment_id,target_branch,repository_environment_path,executor_key,
       app_id,resource_type,resource_name,resource_path,reason,
+      workload_yaml,workload_namespace,workload_deployment_name,workload_service_name,
       prometheus_rule_alert_name,prometheus_rule_expr,prometheus_rule_for,prometheus_rule_severity,
       prometheus_rule_summary,prometheus_rule_description,prometheus_rule_owner,prometheus_rule_runbook_url,
       created_at,updated_at
-    ) VALUES (?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [
+    ) VALUES (?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`, [
       requestId, actor.userId, environmentPolicy.environmentId, environmentPolicy.targetBranch, environmentPolicy.repositoryEnvironmentPath, environmentPolicy.executorKey,
-      normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId, environmentPolicy.repositoryEnvironmentPath), normalized.reason,
+      normalized.appId, normalized.resourceType, normalized.resourceName, normalized.resourcePath || this.resourcePath(normalized.appId, environmentPolicy.repositoryEnvironmentPath), normalized.reason,
+      normalized.workload_yaml, normalized.workload_namespace, normalized.workload_deployment_name, normalized.workload_service_name,
       normalized.prometheus_rule_alert_name, normalized.prometheus_rule_expr, normalized.prometheus_rule_for, normalized.prometheus_rule_severity,
       normalized.prometheus_rule_summary, normalized.prometheus_rule_description, normalized.prometheus_rule_owner, normalized.prometheus_rule_runbook_url,
     ]);
@@ -291,13 +351,16 @@ export class MonitoringRequestsService {
   async updateDraft(auth: string | undefined, requestId: string, input: Partial<RequestInput>) {
     const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || row.status !== 'DRAFT') throw new ForbiddenException('仅申请人可编辑草稿');
     const normalized = this.normalizeUpdateInput(row, input);
+    if (normalized.resourceType === 'WorkloadBundle' && row.environment_id !== 'hashex') throw new BadRequestException('工作负载资源包第一版仅支持 hashex');
     await this.db.query(`UPDATE monitoring_requests SET
       app_id=?,resource_type=?,resource_name=?,resource_path=?,reason=?,
+      workload_yaml=?,workload_namespace=?,workload_deployment_name=?,workload_service_name=?,workload_last_check_json=NULL,workload_last_checked_at=NULL,
       prometheus_rule_alert_name=?,prometheus_rule_expr=?,prometheus_rule_for=?,prometheus_rule_severity=?,
       prometheus_rule_summary=?,prometheus_rule_description=?,prometheus_rule_owner=?,prometheus_rule_runbook_url=?,
       updated_at=UTC_TIMESTAMP()
       WHERE request_id=?`, [
-      normalized.appId, normalized.resourceType, normalized.resourceName, this.resourcePath(normalized.appId, String(row.repository_environment_path || 'hash')), normalized.reason,
+      normalized.appId, normalized.resourceType, normalized.resourceName, normalized.resourcePath || this.resourcePath(normalized.appId, String(row.repository_environment_path || 'hash')), normalized.reason,
+      normalized.workload_yaml, normalized.workload_namespace, normalized.workload_deployment_name, normalized.workload_service_name,
       normalized.prometheus_rule_alert_name, normalized.prometheus_rule_expr, normalized.prometheus_rule_for, normalized.prometheus_rule_severity,
       normalized.prometheus_rule_summary, normalized.prometheus_rule_description, normalized.prometheus_rule_owner, normalized.prometheus_rule_runbook_url,
       requestId,
@@ -308,7 +371,7 @@ export class MonitoringRequestsService {
     if (!Number.isInteger(input.mrIid) || input.mrIid < 1 || !/^[a-f0-9]{40}$/i.test(input.commitSha)) throw new BadRequestException('MR IID 或 Commit SHA 无效');
     const actor = await this.actor(auth); const row = await this.read(requestId); if (!this.owns(actor,row) || row.status !== 'DRAFT' || row.mr_iid || row.commit_sha) throw new ForbiddenException('当前状态不可提交');
     this.executionPolicy(row);
-    if (row.resource_type === 'PrometheusRule') throw new BadRequestException('PrometheusRule 一期仅允许 Dashboard 托管生成固定 YAML 与受控 MR，不支持手工绑定');
+    if (row.resource_type !== 'ServiceMonitor') throw new BadRequestException(`${row.resource_type} 一期仅允许 Dashboard 托管生成受控 MR，不支持手工绑定`);
     await this.db.query('UPDATE monitoring_requests SET status=\'SUBMITTED\',mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?', [input.mrIid,input.commitSha.toLowerCase(),requestId]);
     await this.event(requestId,actor,'SUBMITTED',row.status,'SUBMITTED'); return this.read(requestId);
   }
@@ -317,16 +380,17 @@ export class MonitoringRequestsService {
     if (!this.owns(actor, row) || row.status !== 'DRAFT') throw new ForbiddenException('当前状态不可提交');
     if (row.mr_iid || row.commit_sha) throw new BadRequestException('该申请已绑定 GitLab MR；请使用手工绑定流程继续处理');
     this.executionPolicy(row);
-    if (!['ServiceMonitor', 'PrometheusRule'].includes(String(row.resource_type))) throw new BadRequestException('Dashboard 托管 MR 创建当前仅支持 ServiceMonitor 与 PrometheusRule');
+    if (!['ServiceMonitor', 'PrometheusRule', 'WorkloadBundle'].includes(String(row.resource_type))) throw new BadRequestException('Dashboard 托管 MR 创建当前仅支持 ServiceMonitor、PrometheusRule 与工作负载资源包');
     await this.validateManagedResource(row);
+    if (row.resource_type === 'WorkloadBundle') await this.assertWorkloadCreateOnly(row);
     const config = await this.gitlabMergeConfig();
     if (!config.enabled) throw new ServiceUnavailableException('GitLab 托管 MR 创建未启用');
     if (config.targetBranch !== row.target_branch) throw new BadRequestException('申请目标分支与当前 GitLab 执行器配置不一致');
     const project = encodeURIComponent(config.projectId); const branch = this.managedBranch(requestId); const filePath = this.managedFilePath(row); const yaml = this.managedYaml(row);
-    if (row.resource_type === 'PrometheusRule') {
+    if (row.resource_type === 'PrometheusRule' || row.resource_type === 'WorkloadBundle') {
       const existingFile = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(config.targetBranch)}`);
-      if (existingFile.status === 200) throw new BadRequestException('目标分支已存在该应用的受控 PrometheusRule 文件；一期不允许覆盖');
-      if (existingFile.status !== 404) throw new ServiceUnavailableException('无法读取 GitLab 目标分支中的 PrometheusRule 文件状态');
+      if (existingFile.status === 200) throw new BadRequestException(`目标分支已存在 ${filePath}；第一版仅允许新增，不允许覆盖`);
+      if (existingFile.status !== 404) throw new ServiceUnavailableException(`无法读取 GitLab 目标分支中的 ${row.resource_type} 文件状态`);
     }
     const base = await this.gitlabRequest<any>(config, 'get', `/projects/${project}/repository/branches/${encodeURIComponent(config.targetBranch)}`);
     const baseSha = String(base.data?.commit?.id || '').toLowerCase();
@@ -358,7 +422,8 @@ export class MonitoringRequestsService {
       }
     }
     if (!sourceSha) {
-      const fileResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}`, { branch, content: yaml, commit_message: `feat(monitoring): add ${row.resource_name}` });
+      const commitTitle = row.resource_type === 'WorkloadBundle' ? `feat(k8s): add ${row.resource_name}` : `feat(monitoring): add ${row.resource_name}`;
+      const fileResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/repository/files/${encodeURIComponent(filePath)}`, { branch, content: yaml, commit_message: commitTitle });
       sourceSha = String(fileResponse.data?.commit_id || fileResponse.data?.commit?.id || '').toLowerCase();
       // GitLab-compatible servers can return 201 without a top-level commit_id. A success
       // response is never trusted on its own: bind only after reading the branch HEAD and
@@ -378,8 +443,9 @@ export class MonitoringRequestsService {
         throw new BadRequestException(`写入受控 GitLab YAML 失败：${detail}`);
       }
     }
-    const description = `Dashboard 托管的监控资源申请。\n\nDashboard-Request-ID: ${requestId}`;
-    const mrResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/merge_requests`, { source_branch: branch, target_branch: config.targetBranch, title: `feat(monitoring): add ${row.resource_name}`, description });
+    const description = `Dashboard 托管的${row.resource_type === 'WorkloadBundle' ? '工作负载资源' : '监控资源'}申请。\n\nDashboard-Request-ID: ${requestId}`;
+    const mrTitle = row.resource_type === 'WorkloadBundle' ? `feat(k8s): add ${row.resource_name}` : `feat(monitoring): add ${row.resource_name}`;
+    const mrResponse = await this.gitlabRequest<any>(config, 'post', `/projects/${project}/merge_requests`, { source_branch: branch, target_branch: config.targetBranch, title: mrTitle, description });
     let mrIid = Number(mrResponse.data?.iid); let mrSha = String(mrResponse.data?.sha || '').toLowerCase();
     if (mrResponse.status !== 201 || !Number.isInteger(mrIid) || mrIid < 1 || mrSha !== sourceSha) {
       // If an earlier call created the MR but the response was lost, recover only the exact binding.
@@ -392,7 +458,10 @@ export class MonitoringRequestsService {
         throw new BadRequestException(`创建受控 GitLab MR 失败：${detail}`);
       }
     }
-    await this.db.query("UPDATE monitoring_requests SET status='SUBMITTED',resource_path=?,mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?", [this.resourcePath(String(row.app_id), String(row.repository_environment_path)), mrIid, sourceSha, requestId]);
+    const storedResourcePath = row.resource_type === 'WorkloadBundle'
+      ? filePath
+      : this.resourcePath(String(row.app_id), String(row.repository_environment_path));
+    await this.db.query("UPDATE monitoring_requests SET status='SUBMITTED',resource_path=?,mr_iid=?,commit_sha=?,approver_user_id=NULL,approval_comment=NULL,approved_at=NULL,updated_at=UTC_TIMESTAMP() WHERE request_id=?", [storedResourcePath, mrIid, sourceSha, requestId]);
     await this.event(requestId, actor, 'GITLAB_MR_CREATED', row.status, 'SUBMITTED', `MR !${mrIid}；分支 ${branch}；${filePath}`);
     await this.event(requestId, actor, 'SUBMITTED', row.status, 'SUBMITTED', 'Dashboard 已创建并绑定受控 GitLab MR');
     return this.read(requestId);
@@ -551,6 +620,48 @@ export class MonitoringRequestsService {
     return { ...row, commit_sha: mergeSha, gitlab_merged_at: mergedAt, gitlab_merge_commit_sha: mergeSha };
   }
 
+  async mergeWorkload(auth: string | undefined, requestId: string) {
+    const actor = await this.actor(auth);
+    const row = await this.read(requestId);
+    this.assertRead(actor, row);
+    if (row.resource_type !== 'WorkloadBundle') throw new BadRequestException('仅工作负载资源包可使用该操作');
+    if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须已批准并绑定受控 MR/SHA');
+    await this.validateManagedResource(row);
+    await this.assertWorkloadCreateOnly(row);
+    const config = await this.gitlabMergeConfig();
+    if (!config.enabled) throw new ServiceUnavailableException('GitLab 受控自动合并器未启用');
+    const merged = await this.mergeApprovedRequest(row, actor);
+    const updated = await this.db.query<any>(`UPDATE monitoring_requests SET
+      status='MERGED_PENDING_DEPLOY',commit_sha=?,gitlab_merged_at=?,gitlab_merge_commit_sha=?,gitlab_merge_error=NULL,
+      workload_last_check_json=NULL,workload_last_checked_at=NULL,updated_at=UTC_TIMESTAMP()
+      WHERE request_id=? AND status='APPROVED'`, [merged.commit_sha, merged.gitlab_merged_at, merged.gitlab_merge_commit_sha, requestId]);
+    if (Number(updated.affectedRows) !== 1) throw new BadRequestException('申请状态已发生变化，请刷新后重试');
+    await this.event(requestId, actor, 'GITLAB_MERGED', 'APPROVED', 'MERGED_PENDING_DEPLOY', `GitLab MR !${row.mr_iid} 已合并；等待正常服务 Job 首次发布`);
+    return this.read(requestId);
+  }
+
+  async refreshWorkloadStatus(auth: string | undefined, requestId: string) {
+    const actor = await this.actor(auth);
+    const row = await this.read(requestId);
+    this.assertRead(actor, row);
+    if (row.resource_type !== 'WorkloadBundle') throw new BadRequestException('仅工作负载资源包可检查首次发布状态');
+    if (!['MERGED_PENDING_DEPLOY', 'COMPLETED'].includes(String(row.status))) throw new BadRequestException('请先批准并合并工作负载配置');
+    let workloadStatus;
+    try {
+      workloadStatus = await this.kubernetes.getWorkloadBundleStatus(
+        String(row.environment_id), String(row.workload_deployment_name), String(row.workload_service_name), String(row.workload_namespace || 'default'),
+      );
+    } catch (error: any) {
+      throw new ServiceUnavailableException(`无法读取 ${row.environment_id} 集群中的工作负载状态：${String(error?.message || error).slice(0, 500)}`);
+    }
+    const nextStatus = workloadStatus.phase === 'completed' ? 'COMPLETED' : row.status;
+    await this.db.query('UPDATE monitoring_requests SET status=?,workload_last_check_json=?,workload_last_checked_at=UTC_TIMESTAMP(),updated_at=UTC_TIMESTAMP() WHERE request_id=?', [nextStatus, JSON.stringify(workloadStatus), requestId]);
+    if (row.status === 'MERGED_PENDING_DEPLOY' && nextStatus === 'COMPLETED') {
+      await this.event(requestId, actor, 'WORKLOAD_READY', 'MERGED_PENDING_DEPLOY', 'COMPLETED', `Deployment/${row.workload_deployment_name} 已完成 rollout，Service/${row.workload_service_name} 已有 Ready endpoints`);
+    }
+    return this.read(requestId);
+  }
+
   private async jenkinsConfig(executorKey: string) {
     const policy = getMonitoringEnvironmentPolicyByExecutorKey(executorKey);
     if (!policy?.executionEnabled) throw new ServiceUnavailableException(`Jenkins 执行器 ${executorKey} 尚未开放`);
@@ -617,6 +728,7 @@ export class MonitoringRequestsService {
   }
   async startDashboardExecution(auth: string | undefined, requestId: string, mode: 'preview'|'apply', comment?: string, confirmation?: string) {
     const actor = await this.actor(auth); let row = await this.read(requestId); this.assertRead(actor, row);
+    if (row.resource_type === 'WorkloadBundle') throw new BadRequestException('工作负载资源包不使用平台 Bootstrap Jenkins Job；请合并后由正常服务 Job 首次发布');
     this.executionPolicy(row);
     if (row.status !== 'APPROVED' || !row.mr_iid || !row.commit_sha) throw new BadRequestException('申请必须为已批准且已绑定 MR/SHA');
     const gitlab = await this.gitlabMergeConfig();

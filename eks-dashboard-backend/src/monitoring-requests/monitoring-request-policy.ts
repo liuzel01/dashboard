@@ -1,5 +1,5 @@
-export const MONITORING_RESOURCE_TYPES = ['ServiceMonitor', 'PodMonitor', 'PrometheusRule'] as const;
-export const MONITORING_CREATABLE_RESOURCE_TYPES = ['ServiceMonitor', 'PrometheusRule'] as const;
+export const MONITORING_RESOURCE_TYPES = ['ServiceMonitor', 'PodMonitor', 'PrometheusRule', 'WorkloadBundle'] as const;
+export const MONITORING_CREATABLE_RESOURCE_TYPES = ['ServiceMonitor', 'PrometheusRule', 'WorkloadBundle'] as const;
 export const PROMETHEUS_RULE_SEVERITIES = ['warning', 'critical'] as const;
 
 export type MonitoringCreatableResourceType = (typeof MONITORING_CREATABLE_RESOURCE_TYPES)[number];

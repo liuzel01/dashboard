@@ -20,15 +20,20 @@ class PrometheusRuleFieldsDto {
   @IsString() @MaxLength(64) owner!: string;
   @IsString() @MaxLength(500) runbookUrl!: string;
 }
+class WorkloadBundleDto {
+  @IsString() @MaxLength(512) filePath!: string;
+  @IsString() @MaxLength(100000) yaml!: string;
+}
 
 class CreateRequestDto {
   @IsString() @Matches(ENVIRONMENT_ID) environmentId!: string;
   @IsString() @Matches(TARGET_BRANCH) targetBranch!: string;
   @IsString() @Matches(APP_ID) appId!: string;
   @IsIn(MONITORING_CREATABLE_RESOURCE_TYPES) resourceType!: MonitoringCreatableResourceType;
-  @ValidateIf((o) => o.resourceType !== 'PrometheusRule') @IsString() @Matches(APP_ID) resourceName?: string;
+  @ValidateIf((o) => o.resourceType === 'ServiceMonitor') @IsString() @Matches(APP_ID) resourceName?: string;
   @IsString() @MaxLength(1000) reason!: string;
   @ValidateIf((o) => o.resourceType === 'PrometheusRule') @ValidateNested() @Type(() => PrometheusRuleFieldsDto) prometheusRule?: PrometheusRuleFieldsDto;
+  @ValidateIf((o) => o.resourceType === 'WorkloadBundle') @ValidateNested() @Type(() => WorkloadBundleDto) workload?: WorkloadBundleDto;
 }
 class UpdateDraftDto {
   @IsOptional() @IsString() @Matches(APP_ID) appId?: string;
@@ -36,6 +41,7 @@ class UpdateDraftDto {
   @IsOptional() @IsString() @Matches(APP_ID) resourceName?: string;
   @IsOptional() @IsString() @MaxLength(1000) reason?: string;
   @IsOptional() @ValidateNested() @Type(() => PrometheusRuleFieldsDto) prometheusRule?: PrometheusRuleFieldsDto;
+  @IsOptional() @ValidateNested() @Type(() => WorkloadBundleDto) workload?: WorkloadBundleDto;
 }
 class SubmitDto {
   @IsInt() @Min(1) mrIid!: number;
@@ -59,7 +65,7 @@ class DecisionDto {
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
 }
 class ListDto {
-  @IsOptional() @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'COMPLETED', 'REJECTED', 'WITHDRAWN']) status?: string;
+  @IsOptional() @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'MERGED_PENDING_DEPLOY', 'COMPLETED', 'REJECTED', 'WITHDRAWN']) status?: string;
   @IsOptional() @IsIn(MONITORING_RESOURCE_TYPES) resourceType?: MonitoringResourceType;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) pageSize?: number;
@@ -94,6 +100,8 @@ export class MonitoringRequestsController {
   @Post(':requestId/jenkins-executions') execute(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: JenkinsExecutionDto) { return this.service.startDashboardExecution(auth, requestId, body.mode, body.comment, body.confirmation); }
   @Get(':requestId/jenkins-executions') executions(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string) { return this.service.listDashboardExecutions(auth, requestId); }
   @Post(':requestId/jenkins-executions/:id/refresh') refreshExecution(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Param('id') id: string) { return this.service.refreshDashboardExecution(auth, requestId, Number(id)); }
+  @Post(':requestId/merge-workload') mergeWorkload(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string) { return this.service.mergeWorkload(auth, requestId); }
+  @Post(':requestId/workload-status/refresh') refreshWorkloadStatus(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string) { return this.service.refreshWorkloadStatus(auth, requestId); }
   @Post(':requestId/approve') approve(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.decide(auth, requestId, 'APPROVED', body.comment); }
   @Post(':requestId/reject') reject(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.decide(auth, requestId, 'REJECTED', body.comment); }
   @Post(':requestId/withdraw') withdraw(@Headers('authorization') auth: string | undefined, @Param('requestId') requestId: string, @Body(validation) body: DecisionDto) { return this.service.withdraw(auth, requestId, body.comment); }

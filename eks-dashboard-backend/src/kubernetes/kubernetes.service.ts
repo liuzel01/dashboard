@@ -622,6 +622,50 @@ export class KubernetesService {
     };
   }
 
+  /** Read-only reconciliation for a newly merged Service + Deployment bundle. */
+  async getWorkloadBundleStatus(
+    environmentId: string,
+    deploymentName: string,
+    serviceName: string,
+    namespace = 'default',
+  ) {
+    const { k8sAppsV1Api, k8sCoreV1Api } = await this.getK8sApis(environmentId);
+    const isNotFound = (error: any) => Number(error?.response?.statusCode || error?.statusCode || error?.body?.code) === 404;
+    let deploymentFound = true;
+    let serviceFound = true;
+    let service: k8s.V1Service | null = null;
+    try { await k8sAppsV1Api.readNamespacedDeployment(deploymentName, namespace); }
+    catch (error) { if (isNotFound(error)) deploymentFound = false; else throw error; }
+    try { service = (await k8sCoreV1Api.readNamespacedService(serviceName, namespace)).body; }
+    catch (error) { if (isNotFound(error)) serviceFound = false; else throw error; }
+
+    if (!deploymentFound || !serviceFound) {
+      return {
+        phase: 'pending', deploymentFound, serviceFound, readyEndpointCount: 0,
+        diagnostics: [{
+          source: 'resource', severity: 'warning', reason: 'ResourceNotCreated',
+          message: `等待正常服务 Job 创建${!deploymentFound ? ` Deployment/${deploymentName}` : ''}${!deploymentFound && !serviceFound ? ' 与' : ''}${!serviceFound ? ` Service/${serviceName}` : ''}。`,
+        }],
+      };
+    }
+
+    const rollout = await this.getDeploymentRolloutStatus(environmentId, deploymentName, undefined, namespace);
+    let readyEndpointCount = 0;
+    try {
+      const endpoints = (await k8sCoreV1Api.readNamespacedEndpoints(serviceName, namespace)).body;
+      readyEndpointCount = (endpoints.subsets || []).reduce((count, subset) => count + (subset.addresses || []).length, 0);
+    } catch (error) { if (!isNotFound(error)) throw error; }
+    const selector = service?.spec?.selector || {};
+    const diagnostics: Array<{ source: string; severity: 'error' | 'warning'; reason: string; message: string; pod?: string; container?: string; timestamp?: string }> = [...rollout.diagnostics];
+    if (Object.keys(selector).length === 0) diagnostics.push({ source: 'service', severity: 'error', reason: 'MissingSelector', message: `Service/${serviceName} 没有 selector。` });
+    else if (readyEndpointCount === 0) diagnostics.push({ source: 'service', severity: 'warning', reason: 'NoReadyEndpoints', message: `Service/${serviceName} 暂无 Ready endpoints。` });
+    const hasError = diagnostics.some((item) => item.severity === 'error');
+    return {
+      phase: hasError ? 'failed' : rollout.phase === 'completed' && readyEndpointCount > 0 ? 'completed' : rollout.phase === 'blocked' || diagnostics.length > 0 ? 'blocked' : 'progressing',
+      deploymentFound, serviceFound, readyEndpointCount, rollout, diagnostics,
+    };
+  }
+
   async getPodsForDeployment(
     environmentId: string,
     deploymentName: string,
