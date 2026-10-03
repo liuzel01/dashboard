@@ -331,6 +331,7 @@ export class MonitoringRequestsService {
     const actor = await this.actor(auth); const page = Math.max(1, Number(query.page || 1)); const pageSize = Math.min(100, Math.max(1, Number(query.pageSize || 20)));
     const where: string[] = []; const values: any[] = [];
     if (!this.can(actor, APPROVE) && !this.can(actor, MANAGE)) { where.push('r.requester_user_id=?'); values.push(actor.userId); }
+    if (query.environmentId) { where.push('r.environment_id=?'); values.push(query.environmentId); }
     if (query.status) { where.push('r.status=?'); values.push(query.status); }
     if (query.resourceType) { where.push('r.resource_type=?'); values.push(query.resourceType); }
     const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';

@@ -1,5 +1,6 @@
-import { useContext, useEffect, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, Skeleton, Space, Steps, Table, Tag, Typography, message } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
+import { useCallback, useContext, useEffect, useState } from 'react';
+import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, Skeleton, Space, Steps, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AuthContext } from '../contexts/AuthContextValue';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
@@ -74,6 +75,7 @@ const beijingTime = (value?: string | null) => {
 export default function MonitoringRequestsPage() {
   const { me, permissions } = useContext(AuthContext); const [items, setItems] = useState<MonitoringRequest[]>([]); const [loading, setLoading] = useState(false); const [createOpen, setCreateOpen] = useState(false); const [detailOpen, setDetailOpen] = useState(false); const [detailLoading, setDetailLoading] = useState(false); const [detail, setDetail] = useState<MonitoringRequest | null>(null); const [form] = Form.useForm();
   const { environments, currentEnvironment } = useContext(EnvironmentContext);
+  const [filters, setFilters] = useState<{ environmentId?: string; resourceType?: MonitoringRequest['resource_type']; status?: MonitoringRequestStatus }>({});
   const [environmentOptions, setEnvironmentOptions] = useState<MonitoringEnvironmentOption[]>([]);
   const selectedEnvironmentId = Form.useWatch<string | undefined>('environmentId', form);
   const selectedResourceType = Form.useWatch<'ServiceMonitor' | 'PrometheusRule' | 'WorkloadBundle' | undefined>('resourceType', form);
@@ -84,8 +86,9 @@ export default function MonitoringRequestsPage() {
   const canApprove = permissions.includes('monitoring-requests:approve');
   const [executions, setExecutions] = useState<MonitoringJenkinsExecution[]>([]);
   const [executionLoading, setExecutionLoading] = useState(false);
-  const load = async () => { setLoading(true); try { setItems((await listMonitoringRequests()).items); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '加载申请失败'); } finally { setLoading(false); } };
-  useEffect(() => { void load(); void getMonitoringEnvironmentOptions().then(setEnvironmentOptions).catch((e: unknown) => message.error((e as ApiError)?.response?.data?.message || '加载监控环境配置失败')); }, []);
+  const load = useCallback(async () => { setLoading(true); try { setItems((await listMonitoringRequests(filters)).items); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '加载申请失败'); } finally { setLoading(false); } }, [filters]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void getMonitoringEnvironmentOptions().then(setEnvironmentOptions).catch((e: unknown) => message.error((e as ApiError)?.response?.data?.message || '加载监控环境配置失败')); }, []);
   useEffect(() => {
     if (!detailOpen || detail?.resource_type !== 'WorkloadBundle' || detail.status !== 'MERGED_PENDING_DEPLOY') return;
     const requestId = detail.request_id;
@@ -144,8 +147,12 @@ export default function MonitoringRequestsPage() {
   ];
   const mine = detail && Number(detail.requester_user_id) === Number(me?.id);
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
-    <Card title="监控资源申请与审批" extra={<Button type="primary" disabled={!environments.length || !environmentOptions.length} onClick={openCreate}>新建申请</Button>}>
-      <Alert type="info" showIcon message="当前开放 ServiceMonitor、PrometheusRule，以及 hashex 的 Deployment + Service 工作负载资源包。" description="工作负载资源包由 Dashboard 校验并创建 MR；合并后使用服务原有 Jenkins Job 首次发布，Dashboard 不直接 apply 任意 YAML。" style={{ marginBottom: 16 }} />
+    <Card title={<Space size={6} align="center"><span>监控资源申请与审批</span><Tooltip placement="bottomLeft" overlayStyle={{ maxWidth: 620 }} title={<div style={{ width: 520, lineHeight: 1.8, whiteSpace: 'normal' }}><div>当前开放 ServiceMonitor、PrometheusRule，以及 hashex 的 Deployment + Service 工作负载资源包。</div><div>工作负载资源包由 Dashboard 校验并创建 MR；合并后使用服务原有 Jenkins Job 首次发布，Dashboard 不直接 apply 任意 YAML。</div></div>}><InfoCircleOutlined aria-label="监控资源申请说明" style={{ color: '#1677ff', cursor: 'help' }} /></Tooltip></Space>} extra={<Button type="primary" disabled={!environments.length || !environmentOptions.length} onClick={openCreate}>新建申请</Button>}>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Select allowClear showSearch optionFilterProp="label" value={filters.environmentId} placeholder="筛选目标环境" style={{ width: 220 }} options={environments.map(option => ({ value: option.id, label: `${option.name} (${option.id})` }))} onChange={(environmentId) => setFilters((current) => ({ ...current, environmentId: environmentId || undefined }))} />
+        <Select allowClear showSearch optionFilterProp="label" value={filters.resourceType} placeholder="筛选资源类型" style={{ width: 200 }} options={resourceOptions.map(value => ({ value, label: value === 'WorkloadBundle' ? 'Deployment + Service' : value }))} onChange={(resourceType) => setFilters((current) => ({ ...current, resourceType: resourceType || undefined }))} />
+        <Select allowClear showSearch optionFilterProp="label" value={filters.status} placeholder="筛选申请状态" style={{ width: 180 }} options={(Object.keys(names) as MonitoringRequestStatus[]).map(value => ({ value, label: names[value] }))} onChange={(status) => setFilters((current) => ({ ...current, status: status || undefined }))} />
+      </Space>
       <Table rowKey="request_id" loading={loading} columns={columns} dataSource={items} pagination={false} />
     </Card>
     <Modal title="新建监控资源申请" width={selectedResourceType === 'WorkloadBundle' ? 900 : 520} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} okButtonProps={{ disabled: !environmentReady }} okText="创建草稿" destroyOnHidden>

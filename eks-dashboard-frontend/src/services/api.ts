@@ -1668,7 +1668,13 @@ export type MonitoringRequest = {
   approval_comment?: string | null; approved_at?: string | null; created_at: string; updated_at: string;
   events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
 };
-export const listMonitoringRequests = async (params: { status?: MonitoringRequestStatus; page?: number; pageSize?: number } = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
+export const listMonitoringRequests = async (params: {
+  environmentId?: string;
+  resourceType?: MonitoringRequestResourceType;
+  status?: MonitoringRequestStatus;
+  page?: number;
+  pageSize?: number;
+} = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
 export const getMonitoringEnvironmentOptions = async () => (await api.get('/monitoring-requests/environment-options')).data as MonitoringEnvironmentOption[];
 export const getMonitoringRequest = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`)).data as MonitoringRequest;
 export type MonitoringWorkloadBundleInput = { filePath: string; yaml: string; serviceJobName: string };

@@ -67,6 +67,7 @@ class DecisionDto {
   @IsOptional() @IsString() @MaxLength(1000) comment?: string;
 }
 class ListDto {
+  @IsOptional() @IsString() @Matches(ENVIRONMENT_ID) environmentId?: string;
   @IsOptional() @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'MERGED_PENDING_DEPLOY', 'COMPLETED', 'REJECTED', 'WITHDRAWN']) status?: string;
   @IsOptional() @IsIn(MONITORING_RESOURCE_TYPES) resourceType?: MonitoringResourceType;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
