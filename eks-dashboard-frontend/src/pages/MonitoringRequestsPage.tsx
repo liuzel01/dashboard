@@ -3,16 +3,65 @@ import { Alert, Button, Card, Descriptions, Drawer, Form, Input, Modal, Select, 
 import type { ColumnsType } from 'antd/es/table';
 import { AuthContext } from '../contexts/AuthContextValue';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { createMonitoringRequest, decideMonitoringRequest, getMonitoringEnvironmentOptions, getMonitoringRequest, listMonitoringRequests, submitMonitoringRequest, submitManagedMonitoringRequest, withdrawMonitoringRequest, startMonitoringJenkinsExecution, listMonitoringJenkinsExecutions, refreshMonitoringJenkinsExecution } from '../services/api';
+import { createMonitoringRequest, decideMonitoringRequest, getMonitoringEnvironmentOptions, getMonitoringRequest, listMonitoringRequests, submitMonitoringRequest, submitManagedMonitoringRequest, withdrawMonitoringRequest, startMonitoringJenkinsExecution, listMonitoringJenkinsExecutions, refreshMonitoringJenkinsExecution, mergeMonitoringWorkload, refreshMonitoringWorkloadStatus } from '../services/api';
 import type { MonitoringEnvironmentOption, MonitoringJenkinsExecution, MonitoringRequest, MonitoringRequestStatus } from '../services/api';
 
 const { Text, Paragraph } = Typography;
-const colors: Record<MonitoringRequestStatus, string> = { DRAFT: 'default', SUBMITTED: 'processing', APPROVED: 'success', COMPLETED: 'cyan', REJECTED: 'error', WITHDRAWN: 'default' };
-const names: Record<MonitoringRequestStatus, string> = { DRAFT: '草稿', SUBMITTED: '待审批', APPROVED: '已批准', COMPLETED: '已完成', REJECTED: '已拒绝', WITHDRAWN: '已撤回' };
-const eventNames: Record<string, string> = { CREATED: '已创建草稿', DRAFT_UPDATED: '已更新草稿', SUBMITTED: '已提交审批', APPROVED: '已批准', COMPLETED: '已完成', REJECTED: '已拒绝', WITHDRAWN: '已撤回', PREVIEW_QUEUED: '已发起最终 Diff 预检', PREVIEW_SUCCEEDED: '最终 Diff 预检成功', PREVIEW_FAILED: '最终 Diff 预检失败', REAL_APPLY_GRANTED: '已签发真实执行授权', REAL_APPLY_QUEUED: '已发起真实执行', REAL_APPLY_SUCCEEDED: '真实执行成功并完成申请', REAL_APPLY_FAILED: '真实执行失败', GITLAB_MERGED: 'GitLab 已受控合并（生成最终 Diff 前）', GITLAB_MERGE_FAILED: 'GitLab 合并失败', GITLAB_MR_CREATED: 'Dashboard 已创建 GitLab MR', GITLAB_MR_CREATE_FAILED: 'Dashboard 创建 GitLab MR 失败' };
+const colors: Record<MonitoringRequestStatus, string> = { DRAFT: 'default', SUBMITTED: 'processing', APPROVED: 'success', MERGED_PENDING_DEPLOY: 'gold', COMPLETED: 'cyan', REJECTED: 'error', WITHDRAWN: 'default' };
+const names: Record<MonitoringRequestStatus, string> = { DRAFT: '草稿', SUBMITTED: '待审批', APPROVED: '已批准', MERGED_PENDING_DEPLOY: '待首次发布', COMPLETED: '已完成', REJECTED: '已拒绝', WITHDRAWN: '已撤回' };
+const eventNames: Record<string, string> = { CREATED: '已创建草稿', DRAFT_UPDATED: '已更新草稿', SUBMITTED: '已提交审批', APPROVED: '已批准', COMPLETED: '已完成', REJECTED: '已拒绝', WITHDRAWN: '已撤回', PREVIEW_QUEUED: '已发起最终 Diff 预检', PREVIEW_SUCCEEDED: '最终 Diff 预检成功', PREVIEW_FAILED: '最终 Diff 预检失败', REAL_APPLY_GRANTED: '已签发真实执行授权', REAL_APPLY_QUEUED: '已发起真实执行', REAL_APPLY_SUCCEEDED: '真实执行成功并完成申请', REAL_APPLY_FAILED: '真实执行失败', GITLAB_MERGED: 'GitLab 已受控合并', GITLAB_MERGE_FAILED: 'GitLab 合并失败', GITLAB_MR_CREATED: 'Dashboard 已创建 GitLab MR', GITLAB_MR_CREATE_FAILED: 'Dashboard 创建 GitLab MR 失败', WORKLOAD_READY: '首次发布已健康' };
 const auditStatus = (status?: string | null) => status && names[status as MonitoringRequestStatus] ? names[status as MonitoringRequestStatus] : (status || '—');
 const statusTag = (s: MonitoringRequestStatus) => <Tag color={colors[s]}>{names[s]}</Tag>;
-const resourceOptions = ['ServiceMonitor', 'PrometheusRule'] as const;
+const resourceOptions = ['ServiceMonitor', 'PrometheusRule', 'WorkloadBundle'] as const;
+const workloadTemplate = (name: string) => `apiVersion: v1
+kind: Service
+metadata:
+  name: ${name}
+  namespace: default
+spec:
+  selector:
+    app: ${name}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${name}
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${name}
+  template:
+    metadata:
+      labels:
+        app: ${name}
+    spec:
+      serviceAccountName: default
+      imagePullSecrets:
+        - name: \${IMAGE_PULL_SECRET}
+      containers:
+        - name: ${name}
+          image: \${IMAGE_REGISTRY}/\${IMAGE_NAME}:\${DOCKER_TAG}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 1, memory: 1Gi }
+`;
 const beijingTime = (value?: string | null) => {
   if (!value) return '—';
   // API uses UTC DATETIME strings (mysql dateStrings=true), which have no offset.
@@ -27,7 +76,7 @@ export default function MonitoringRequestsPage() {
   const { currentEnvironment } = useContext(EnvironmentContext);
   const [environmentOptions, setEnvironmentOptions] = useState<MonitoringEnvironmentOption[]>([]);
   const selectedEnvironmentId = Form.useWatch<string | undefined>('environmentId', form);
-  const selectedResourceType = Form.useWatch<'ServiceMonitor' | 'PrometheusRule' | undefined>('resourceType', form);
+  const selectedResourceType = Form.useWatch<'ServiceMonitor' | 'PrometheusRule' | 'WorkloadBundle' | undefined>('resourceType', form);
   const selectedAppId = Form.useWatch<string | undefined>('appId', form);
   const selectedEnvironment = environmentOptions.find(option => option.environmentId === selectedEnvironmentId);
   const canApprove = permissions.includes('monitoring-requests:approve');
@@ -35,6 +84,17 @@ export default function MonitoringRequestsPage() {
   const [executionLoading, setExecutionLoading] = useState(false);
   const load = async () => { setLoading(true); try { setItems((await listMonitoringRequests()).items); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '加载申请失败'); } finally { setLoading(false); } };
   useEffect(() => { void load(); void getMonitoringEnvironmentOptions().then(setEnvironmentOptions).catch((e: unknown) => message.error((e as ApiError)?.response?.data?.message || '加载监控环境配置失败')); }, []);
+  useEffect(() => {
+    if (!detailOpen || detail?.resource_type !== 'WorkloadBundle' || detail.status !== 'MERGED_PENDING_DEPLOY') return;
+    const requestId = detail.request_id;
+    const timer = window.setInterval(() => {
+      void refreshMonitoringWorkloadStatus(requestId).then((row) => {
+        setDetail((current) => current?.request_id === requestId ? row : current);
+        setItems((current) => current.map((item) => item.request_id === requestId ? row : item));
+      }).catch(() => { /* keep manual error handling on the explicit refresh action */ });
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [detailOpen, detail?.request_id, detail?.resource_type, detail?.status]);
   const openCreate = () => {
     const selected = environmentOptions.find(option => option.environmentId === currentEnvironment?.id) || environmentOptions.find(option => option.environmentId === 'hashex') || environmentOptions[0];
     form.setFieldsValue({ environmentId: selected?.environmentId, targetBranch: selected?.targetBranch, resourceType: 'ServiceMonitor' });
@@ -70,24 +130,26 @@ export default function MonitoringRequestsPage() {
   const auditStepIcon = (number: number) => <span style={{ display: 'inline-flex', width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: '#f0f0f0', border: '1px solid #d9d9d9', color: '#595959', fontSize: 12, fontWeight: 600 }}>{number}</span>;
   const execution = async (mode: 'preview'|'apply') => { if (!detail) return; const label = mode === 'preview' ? '确认合并并生成最终 Diff' : '确认真实执行'; let comment = ''; let confirmation = ''; Modal.confirm({ title: label, zIndex: 1100, closable: true, maskClosable: true, width: 680, okText: mode === 'preview' ? '确认合并并生成 Diff' : '确认真实执行', content: mode === 'preview' ? <FinalDiffConfirmation detail={detail} /> : <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="将基于当前最终 Diff 触发 DRY_RUN=false。Jenkins 会再次校验 MR、SHA 和资源策略；授权仅 15 分钟有效且只能消费一次。" /><Input.TextArea rows={3} placeholder="确认说明（必填）" onChange={e => { comment = e.target.value; }} /><Input placeholder="输入 APPLY 以确认" onChange={e => { confirmation = e.target.value; }} /></Space>, onOk: async () => { try { if (mode === 'apply' && (confirmation !== 'APPLY' || !comment.trim())) { message.error('请输入 APPLY 并填写确认说明'); throw new Error('confirmation required'); } setExecutionLoading(true); const run = await startMonitoringJenkinsExecution(detail.request_id, mode, { comment, confirmation }); message.success(`${label}已进入 Jenkins 队列 #${run.queue_id}`); await openDetail(detail.request_id); } catch (e: unknown) { if ((e as ApiError)?.message === 'confirmation required') return; message.error((e as ApiError)?.response?.data?.message || `${label}失败`); throw e; } finally { setExecutionLoading(false); } } }); };
   const refreshRuns = async () => { if (!detail) return; try { setExecutionLoading(true); for (const run of executions.filter(e => !['SUCCESS','FAILURE','ABORTED'].includes(e.status))) await refreshMonitoringJenkinsExecution(detail.request_id, run.id); await openDetail(detail.request_id); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '刷新执行状态失败'); } finally { setExecutionLoading(false); } };
+  const mergeWorkload = () => { if (!detail) return; Modal.confirm({ title: '确认合并工作负载配置', zIndex: 1100, width: 680, okText: '确认合并', content: <Space direction="vertical"><Alert type="warning" showIcon message="合并后不会由平台 Bootstrap Job 执行" description="配置进入 hash-jenkins 后，请通过该服务原有 Jenkins Job 完成首次发布。Dashboard 只读检查 Deployment rollout、Pod 诊断和 Service Ready endpoints。" /><Text>第一版仅允许新增资源；合并前后都会校验目标文件及集群同名资源不存在。</Text></Space>, onOk: async () => { try { setExecutionLoading(true); await mergeMonitoringWorkload(detail.request_id); message.success('配置已合并，等待正常服务 Job 首次发布'); await load(); await openDetail(detail.request_id); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '合并失败'); throw e; } finally { setExecutionLoading(false); } } }); };
+  const refreshWorkload = async () => { if (!detail) return; try { setExecutionLoading(true); const row = await refreshMonitoringWorkloadStatus(detail.request_id); setDetail(row); await load(); message.success(row.status === 'COMPLETED' ? '首次发布已健康，申请已完成' : '已刷新集群状态'); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '刷新工作负载状态失败'); } finally { setExecutionLoading(false); } };
   const columns: ColumnsType<MonitoringRequest> = [
     { title: '申请 ID', dataIndex: 'request_id', width: 230, render: (v) => <Button type="link" onClick={() => void openDetail(v)}>{v}</Button> },
     { title: '资源', render: (_, r) => <><div>{r.resource_type}/{r.resource_name}</div><Text type="secondary">{r.app_id}</Text></> },
     { title: '环境', width: 120, render: (_, r) => <Tag>{r.environment_name || r.environment_id}</Tag> },
-    { title: '状态', dataIndex: 'status', render: statusTag },
+    { title: '状态', dataIndex: 'status', render: (_, r) => <Space size={4}>{statusTag(r.status)}{r.status === 'MERGED_PENDING_DEPLOY' && r.workload_status?.phase && <Tag color={r.workload_status.phase === 'failed' ? 'error' : r.workload_status.phase === 'blocked' ? 'warning' : 'processing'}>{r.workload_status.phase === 'failed' ? '首次发布失败' : r.workload_status.phase === 'blocked' ? '首次发布受阻' : r.workload_status.phase === 'pending' ? '等待服务 Job' : '发布中'}</Tag>}</Space> },
     { title: '申请人', dataIndex: 'requester_display_name', render: (_, r) => r.requester_display_name || r.requester_username },
     { title: '更新时间', dataIndex: 'updated_at', width: 180, render: beijingTime },
   ];
   const mine = detail && Number(detail.requester_user_id) === Number(me?.id);
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     <Card title="监控资源申请与审批" extra={<Button type="primary" disabled={!environmentOptions.length} onClick={openCreate}>新建申请</Button>}>
-      <Alert type="info" showIcon message="当前一期仅开放 ServiceMonitor 与 PrometheusRule。PrometheusRule 走固定 YAML 与结构化字段，不支持 PodMonitor，也不修改 Alertmanager 路由。" style={{ marginBottom: 16 }} />
+      <Alert type="info" showIcon message="当前开放 ServiceMonitor、PrometheusRule，以及 hashex 的 Deployment + Service 工作负载资源包。" description="工作负载资源包由 Dashboard 校验并创建 MR；合并后使用服务原有 Jenkins Job 首次发布，Dashboard 不直接 apply 任意 YAML。" style={{ marginBottom: 16 }} />
       <Table rowKey="request_id" loading={loading} columns={columns} dataSource={items} pagination={false} />
     </Card>
-    <Modal title="新建监控资源申请" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} okText="创建草稿" destroyOnHidden>
+    <Modal title="新建监控资源申请" width={selectedResourceType === 'WorkloadBundle' ? 900 : 520} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} okText="创建草稿" destroyOnHidden>
       <Form form={form} layout="vertical" initialValues={{ resourceType: 'ServiceMonitor' }}>
         <Form.Item name="environmentId" label="目标环境" rules={[{ required: true, message: '请选择目标环境' }]}>
-          <Select showSearch optionFilterProp="label" placeholder="输入环境名称或 ID 匹配" options={environmentOptions.map(option => ({ value: option.environmentId, label: `${option.label} (${option.environmentId})` }))} onChange={(environmentId) => { const option = environmentOptions.find(item => item.environmentId === environmentId); form.setFieldValue('targetBranch', option?.targetBranch); }} />
+          <Select showSearch optionFilterProp="label" placeholder="输入环境名称或 ID 匹配" options={environmentOptions.filter(option => selectedResourceType !== 'WorkloadBundle' || option.environmentId === 'hashex').map(option => ({ value: option.environmentId, label: `${option.label} (${option.environmentId})` }))} onChange={(environmentId) => { const option = environmentOptions.find(item => item.environmentId === environmentId); form.setFieldValue('targetBranch', option?.targetBranch); }} />
         </Form.Item>
         <Form.Item name="targetBranch" label="目标分支" rules={[{ required: true, message: '请选择目标分支' }]}>
           <Select showSearch optionFilterProp="label" placeholder="输入分支名称匹配" options={selectedEnvironment ? [{ value: selectedEnvironment.targetBranch, label: selectedEnvironment.targetBranch }] : []} />
@@ -97,34 +159,63 @@ export default function MonitoringRequestsPage() {
           <Input placeholder="dashboard-chain-test" />
         </Form.Item>
         <Form.Item name="resourceType" label="资源类型" rules={[{ required: true }]}>
-          <Select options={resourceOptions.map(value => ({ value }))} />
+          <Select options={resourceOptions.map(value => ({ value, label: value === 'WorkloadBundle' ? 'Deployment + Service' : value }))} onChange={(value) => { if (value === 'WorkloadBundle') { const hashex = environmentOptions.find(item => item.environmentId === 'hashex'); form.setFieldsValue({ environmentId: hashex?.environmentId, targetBranch: hashex?.targetBranch, workload: selectedAppId ? { filePath: `k8s-yaml/deployments/kylin/${selectedAppId}-deployment.yaml`, yaml: workloadTemplate(selectedAppId) } : undefined }); } }} />
         </Form.Item>
-        {selectedResourceType !== 'PrometheusRule' ? (
+        {selectedResourceType === 'ServiceMonitor' ? (
           <Form.Item name="resourceName" label="资源名称" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/ }]}>
             <Input placeholder={selectedAppId ? `${selectedAppId}-metrics` : 'dashboard-chain-test-metrics'} />
           </Form.Item>
-        ) : (
+        ) : selectedResourceType === 'PrometheusRule' ? (
           <Form.Item label="资源名称">
             <Input value={selectedAppId ? `${selectedAppId}-platform-rules` : ''} disabled placeholder="自动生成：<appId>-platform-rules" />
           </Form.Item>
-        )}
+        ) : null}
         <Form.Item name="reason" label="申请说明" rules={[{ required: true, max: 1000 }]}>
           <Input.TextArea rows={4} />
         </Form.Item>
         {selectedResourceType === 'PrometheusRule' && <PrometheusRuleFieldsForm />}
+        {selectedResourceType === 'WorkloadBundle' && <WorkloadBundleFieldsForm />}
       </Form>
     </Modal>
     <Drawer title={detail?.request_id || '申请详情'} open={detailOpen} onClose={() => { setDetailOpen(false); setDetail(null); setExecutions([]); }} width={720}>
       {detailLoading && !detail ? <Skeleton active paragraph={{ rows: 10 }} /> : detail && <Space direction="vertical" size={16} style={{ width: '100%' }}><Descriptions bordered column={1} size="small"><Descriptions.Item label="状态">{statusTag(detail.status)}</Descriptions.Item><Descriptions.Item label="目标环境">{detail.environment_name || detail.environment_id} ({detail.environment_id})</Descriptions.Item><Descriptions.Item label="目标分支"><Text code>{detail.target_branch}</Text></Descriptions.Item><Descriptions.Item label="仓库环境路径"><Text code>{detail.repository_environment_path}</Text></Descriptions.Item><Descriptions.Item label="执行器">{detail.execution_enabled ? <Tag color="success">{detail.executor_key} 已启用</Tag> : <Tag color="warning">{detail.executor_key} 待配置</Tag>}</Descriptions.Item><Descriptions.Item label="受控路径"><Text code>{detail.resource_path}</Text></Descriptions.Item><Descriptions.Item label="资源">{detail.resource_type}/{detail.resource_name}</Descriptions.Item><Descriptions.Item label="申请说明">{detail.reason}</Descriptions.Item><Descriptions.Item label="GitLab 绑定">{detail.mr_iid ? `MR !${detail.mr_iid} @ ${detail.commit_sha}${detail.gitlab_merged_at ? '（已受控合并）' : ''}` : '尚未提交'}</Descriptions.Item><Descriptions.Item label="审批信息">{detail.approver_username ? `${detail.approver_username}${detail.approval_comment ? `：${detail.approval_comment}` : ''}` : '-'}</Descriptions.Item></Descriptions>
         {!detail.execution_enabled && <Alert type="warning" showIcon message="该环境当前只能保存草稿" description="独立 Jenkins 地址与凭据尚未配置，提交审批、创建 MR 和 Jenkins 执行入口已停用。" />}
         {detail.resource_type === 'PrometheusRule' && <Descriptions bordered column={1} size="small"><Descriptions.Item label="告警名">{detail.prometheus_rule_alert_name}</Descriptions.Item><Descriptions.Item label="Severity">{detail.prometheus_rule_severity}</Descriptions.Item><Descriptions.Item label="For">{detail.prometheus_rule_for}</Descriptions.Item><Descriptions.Item label="Owner">{detail.prometheus_rule_owner}</Descriptions.Item><Descriptions.Item label="Runbook">{detail.prometheus_rule_runbook_url}</Descriptions.Item><Descriptions.Item label="Summary">{detail.prometheus_rule_summary}</Descriptions.Item><Descriptions.Item label="Description">{detail.prometheus_rule_description}</Descriptions.Item><Descriptions.Item label="Expr"><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{detail.prometheus_rule_expr}</pre></Descriptions.Item></Descriptions>}
-        {detail.status === 'COMPLETED' && <Alert type="success" showIcon message="真实执行已完成" description={`Jenkins #${executions.find(e => e.mode === 'apply' && e.status === 'SUCCESS')?.build_number || '—'} 已成功完成。该申请已进入终态，不可再次预检、执行、撤回或重新提交。`} />}<Space wrap>{mine && detail.status === 'DRAFT' && !detail.mr_iid && !detail.commit_sha && <><Button type="primary" disabled={!detail.execution_enabled} loading={executionLoading} onClick={() => void managedSubmit()}>创建 MR 并提交</Button>{detail.resource_type === 'ServiceMonitor' && <Button disabled={executionLoading || !detail.execution_enabled} onClick={submit}>手工绑定 MR</Button>}</>}{mine && ['DRAFT','SUBMITTED','REJECTED'].includes(detail.status) && <Button onClick={() => void action('withdraw')}>撤回</Button>}{canApprove && !mine && detail.status === 'SUBMITTED' && <><Button type="primary" onClick={() => void action('approve')}>批准</Button><Button danger onClick={() => void action('reject')}>拒绝</Button></>}{detail.status === 'APPROVED' && <Button disabled={!detail.execution_enabled} loading={executionLoading} onClick={() => void execution('preview')}>{detail.gitlab_merged_at ? '生成最终 Diff' : '确认合并并生成最终 Diff'}</Button>}{canApprove && !mine && detail.status === 'APPROVED' && <Button type="primary" danger disabled={!detail.execution_enabled || !latestPreview} loading={executionLoading} onClick={() => void execution('apply')}>确认真实执行</Button>}{!['WITHDRAWN','COMPLETED'].includes(detail.status) && <Button loading={executionLoading} onClick={() => void refreshRuns()}>刷新执行状态</Button>}</Space>
-        <Card size="small" title="Jenkins 受控执行">{executions.length ? <Space direction="vertical" style={{ width: '100%' }}>{executions.map(run => <Card key={run.id} size="small" title={`${run.mode === 'preview' ? '最终 Diff 预检' : '真实执行'} #${run.build_number || `队列 ${run.queue_id}`}`} extra={<Tag color={run.status === 'SUCCESS' ? 'success' : run.status === 'FAILURE' ? 'error' : 'processing'}>{run.status}</Tag>}><Text type="secondary">MR !{run.mr_iid} @ {run.commit_sha} · {beijingTime(run.created_at)}</Text>{run.diff_text && <><Paragraph strong style={{ marginTop: 12 }}>最终 server-side Diff（仅当前绑定 SHA 有效）</Paragraph><pre style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{run.diff_text}</pre></>}</Card>)}</Space> : <Text type="secondary">尚未生成最终 Diff。</Text>}</Card>
+        {detail.resource_type === 'WorkloadBundle' && <WorkloadBundleDetail detail={detail} />}
+        {detail.status === 'COMPLETED' && <Alert type="success" showIcon message={detail.resource_type === 'WorkloadBundle' ? '首次发布已健康' : '真实执行已完成'} description={detail.resource_type === 'WorkloadBundle' ? `Deployment/${detail.workload_deployment_name} rollout 完成，Service/${detail.workload_service_name} 已有 Ready endpoints。` : `Jenkins #${executions.find(e => e.mode === 'apply' && e.status === 'SUCCESS')?.build_number || '—'} 已成功完成。该申请已进入终态，不可再次预检、执行、撤回或重新提交。`} />}
+        <Space wrap>{mine && detail.status === 'DRAFT' && !detail.mr_iid && !detail.commit_sha && <><Button type="primary" disabled={!detail.execution_enabled} loading={executionLoading} onClick={() => void managedSubmit()}>创建 MR 并提交</Button>{detail.resource_type === 'ServiceMonitor' && <Button disabled={executionLoading || !detail.execution_enabled} onClick={submit}>手工绑定 MR</Button>}</>}{mine && ['DRAFT','SUBMITTED','REJECTED'].includes(detail.status) && <Button onClick={() => void action('withdraw')}>撤回</Button>}{canApprove && !mine && detail.status === 'SUBMITTED' && <><Button type="primary" onClick={() => void action('approve')}>批准</Button><Button danger onClick={() => void action('reject')}>拒绝</Button></>}{detail.status === 'APPROVED' && detail.resource_type === 'WorkloadBundle' && <Button type="primary" loading={executionLoading} onClick={mergeWorkload}>确认合并配置</Button>}{detail.status === 'APPROVED' && detail.resource_type !== 'WorkloadBundle' && <Button disabled={!detail.execution_enabled} loading={executionLoading} onClick={() => void execution('preview')}>{detail.gitlab_merged_at ? '生成最终 Diff' : '确认合并并生成最终 Diff'}</Button>}{canApprove && !mine && detail.status === 'APPROVED' && detail.resource_type !== 'WorkloadBundle' && <Button type="primary" danger disabled={!detail.execution_enabled || !latestPreview} loading={executionLoading} onClick={() => void execution('apply')}>确认真实执行</Button>}{detail.resource_type === 'WorkloadBundle' && ['MERGED_PENDING_DEPLOY','COMPLETED'].includes(detail.status) && <Button loading={executionLoading} onClick={() => void refreshWorkload()}>检查首次发布状态</Button>}{detail.resource_type !== 'WorkloadBundle' && !['WITHDRAWN','COMPLETED'].includes(detail.status) && <Button loading={executionLoading} onClick={() => void refreshRuns()}>刷新执行状态</Button>}</Space>
+        {detail.resource_type !== 'WorkloadBundle' && <Card size="small" title="Jenkins 受控执行">{executions.length ? <Space direction="vertical" style={{ width: '100%' }}>{executions.map(run => <Card key={run.id} size="small" title={`${run.mode === 'preview' ? '最终 Diff 预检' : '真实执行'} #${run.build_number || `队列 ${run.queue_id}`}`} extra={<Tag color={run.status === 'SUCCESS' ? 'success' : run.status === 'FAILURE' ? 'error' : 'processing'}>{run.status}</Tag>}><Text type="secondary">MR !{run.mr_iid} @ {run.commit_sha} · {beijingTime(run.created_at)}</Text>{run.diff_text && <><Paragraph strong style={{ marginTop: 12 }}>最终 server-side Diff（仅当前绑定 SHA 有效）</Paragraph><pre style={{ maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{run.diff_text}</pre></>}</Card>)}</Space> : <Text type="secondary">尚未生成最终 Diff。</Text>}</Card>}
         <Card size="small" title="状态流转审计"><Steps direction="vertical" size="small" current={auditEvents.length ? 0 : -1} items={auditEvents.map((e, index) => ({ icon: auditStepIcon(auditEvents.length - index), title: <><Text strong>{eventNames[e.event_type] || e.event_type}</Text>{e.to_status && <Tag color={colors[e.to_status as MonitoringRequestStatus]} style={{ marginInlineStart: 8 }}>{auditStatus(e.to_status)}</Tag>}</>, description: <>{auditStatus(e.from_status)} → {auditStatus(e.to_status)} · {e.actor_username} · {beijingTime(e.created_at)}{e.comment ? ` · ${e.comment}` : ''}</> }))} /></Card>
       </Space>}
     </Drawer>
   </Space>;
 }
+function WorkloadBundleFieldsForm() {
+  return <Space direction="vertical" style={{ width: '100%' }} size={0}>
+    <Alert type="warning" showIcon message="hashex 第一版：仅新增 Deployment + Service" description="YAML 会做结构化安全校验并保留镜像变量；不允许覆盖已有仓库文件或集群同名资源。合并后仍由服务原有 Jenkins Job 注入变量并首次发布。" style={{ marginBottom: 16 }} />
+    <Form.Item name={['workload', 'filePath']} label="目标仓库文件" rules={[{ required: true, pattern: /^k8s-yaml\/deployments\/(kylin|kylin-node)\/[a-z0-9][a-z0-9-]*\.ya?ml$/, message: '仅允许 k8s-yaml/deployments/kylin 或 kylin-node 下的 YAML' }]}>
+      <Input placeholder="k8s-yaml/deployments/kylin/example-deployment.yaml" />
+    </Form.Item>
+    <Form.Item name={['workload', 'yaml']} label="Deployment + Service YAML" rules={[{ required: true, max: 100000 }]}>
+      <Input.TextArea rows={26} spellCheck={false} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} />
+    </Form.Item>
+  </Space>;
+}
+
+function WorkloadBundleDetail({ detail }: { detail: MonitoringRequest }) {
+  const status = detail.workload_status;
+  return <Space direction="vertical" style={{ width: '100%' }}>
+    <Descriptions bordered column={1} size="small">
+      <Descriptions.Item label="Deployment">{detail.workload_namespace}/{detail.workload_deployment_name}</Descriptions.Item>
+      <Descriptions.Item label="Service">{detail.workload_namespace}/{detail.workload_service_name}</Descriptions.Item>
+      <Descriptions.Item label="最后检查">{beijingTime(detail.workload_last_checked_at)}</Descriptions.Item>
+      <Descriptions.Item label="集群状态">{status ? <><Tag color={status.phase === 'completed' ? 'success' : status.phase === 'failed' ? 'error' : status.phase === 'blocked' ? 'warning' : 'processing'}>{status.phase}</Tag>Deployment {status.deploymentFound ? '已存在' : '未创建'}；Service {status.serviceFound ? '已存在' : '未创建'}；Ready endpoints {status.readyEndpointCount}</> : '合并后可检查'}</Descriptions.Item>
+    </Descriptions>
+    {status?.diagnostics?.length ? <Alert type={status.diagnostics.some(item => item.severity === 'error') ? 'error' : 'warning'} showIcon message="Kubernetes 诊断" description={<ul style={{ margin: 0, paddingInlineStart: 18 }}>{status.diagnostics.map((item, index) => <li key={`${item.reason}-${index}`}><Text strong>{item.reason}</Text>：{item.message}{item.pod ? `（Pod ${item.pod}${item.container ? ` / ${item.container}` : ''}）` : ''}</li>)}</ul>} /> : null}
+    <Card size="small" title="受控 YAML"><pre style={{ maxHeight: 420, overflow: 'auto', whiteSpace: 'pre-wrap', margin: 0 }}>{detail.workload_yaml}</pre></Card>
+  </Space>;
+}
+
 function SubmitForm({ onDone }: { onDone: (data: { mrIid: number; commitSha: string }) => Promise<void> }) {
   const [form] = Form.useForm(); const [submitting, setSubmitting] = useState(false);
   const submit = async (v: { mrIid: number; commitSha: string }) => { setSubmitting(true); try { await onDone({ ...v, mrIid: Number(v.mrIid) }); } catch { /* parent has shown the request error; retain the form for correction */ } finally { setSubmitting(false); } };

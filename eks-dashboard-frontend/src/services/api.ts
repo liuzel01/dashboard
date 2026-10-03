@@ -1636,8 +1636,8 @@ export const saveOncallRoster = async (data: { id?: number; environmentId: strin
 export const deleteOncallRoster = async (id: number) =>
   (await api.delete(`/oncall/roster/${id}`)).data as { ok: boolean; deleted: number };
 
-export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
-export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule';
+export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'MERGED_PENDING_DEPLOY' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
+export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule' | 'WorkloadBundle';
 export type MonitoringEnvironmentOption = {
   environmentId: string;
   label: string;
@@ -1662,6 +1662,8 @@ export type MonitoringRequest = {
   resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null; gitlab_merged_at?: string | null; gitlab_merge_commit_sha?: string | null;
   prometheus_rule_alert_name?: string | null; prometheus_rule_expr?: string | null; prometheus_rule_for?: string | null; prometheus_rule_severity?: 'warning' | 'critical' | null;
   prometheus_rule_summary?: string | null; prometheus_rule_description?: string | null; prometheus_rule_owner?: string | null; prometheus_rule_runbook_url?: string | null;
+  workload_yaml?: string | null; workload_namespace?: string | null; workload_deployment_name?: string | null; workload_service_name?: string | null; workload_last_checked_at?: string | null;
+  workload_status?: { phase: 'pending'|'progressing'|'blocked'|'failed'|'completed'; deploymentFound: boolean; serviceFound: boolean; readyEndpointCount: number; diagnostics?: Array<{ source: string; severity: 'warning'|'error'; reason: string; message: string; pod?: string; container?: string }> } | null;
   requester_user_id: number; requester_username?: string; requester_display_name?: string; approver_username?: string | null;
   approval_comment?: string | null; approved_at?: string | null; created_at: string; updated_at: string;
   events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
@@ -1669,8 +1671,9 @@ export type MonitoringRequest = {
 export const listMonitoringRequests = async (params: { status?: MonitoringRequestStatus; page?: number; pageSize?: number } = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
 export const getMonitoringEnvironmentOptions = async () => (await api.get('/monitoring-requests/environment-options')).data as MonitoringEnvironmentOption[];
 export const getMonitoringRequest = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`)).data as MonitoringRequest;
-export const createMonitoringRequest = async (data: { environmentId: string; targetBranch: string; appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
-export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
+export type MonitoringWorkloadBundleInput = { filePath: string; yaml: string };
+export const createMonitoringRequest = async (data: { environmentId: string; targetBranch: string; appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields; workload?: MonitoringWorkloadBundleInput }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
+export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields; workload?: MonitoringWorkloadBundleInput }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
 export const submitMonitoringRequest = async (requestId: string, data: { mrIid: number; commitSha: string }) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/submit`, data)).data as MonitoringRequest;
 export const submitManagedMonitoringRequest = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/managed-submit`)).data as MonitoringRequest;
 export const decideMonitoringRequest = async (requestId: string, decision: 'approve' | 'reject', comment?: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/${decision}`, { comment })).data as MonitoringRequest;
@@ -1679,3 +1682,5 @@ export type MonitoringJenkinsExecution = { id: number; mode: 'preview'|'apply'; 
 export const startMonitoringJenkinsExecution = async (requestId: string, mode: 'preview'|'apply', data: { comment?: string; confirmation?: string } = {}) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions`, { mode, ...data })).data as MonitoringJenkinsExecution;
 export const listMonitoringJenkinsExecutions = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions`)).data as MonitoringJenkinsExecution[];
 export const refreshMonitoringJenkinsExecution = async (requestId: string, id: number) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions/${id}/refresh`)).data as MonitoringJenkinsExecution;
+export const mergeMonitoringWorkload = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/merge-workload`)).data as MonitoringRequest;
+export const refreshMonitoringWorkloadStatus = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/workload-status/refresh`)).data as MonitoringRequest;
