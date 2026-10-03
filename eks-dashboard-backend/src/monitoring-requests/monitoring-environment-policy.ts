@@ -29,6 +29,15 @@ export const MONITORING_ENVIRONMENT_POLICIES: readonly MonitoringEnvironmentPoli
       executionEnabled: false,
     },
     {
+      environmentId: 'mega',
+      label: 'MEGA',
+      targetBranch: 'jenkins-mega',
+      repositoryEnvironmentPath: 'mgbx',
+      executorKey: 'mgbx-jenkins',
+      jenkinsJobName: 'platform-bootstrap-mgbx',
+      executionEnabled: false,
+    },
+    {
       environmentId: 'icoin',
       label: 'iCoin',
       targetBranch: 'icoin-jenkins',

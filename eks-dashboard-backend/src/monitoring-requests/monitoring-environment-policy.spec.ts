@@ -8,6 +8,7 @@ describe('monitoring environment policy', () => {
   it.each([
     ['hashex', 'hash-jenkins', true],
     ['mgbx', 'jenkins-mega', false],
+    ['mega', 'jenkins-mega', false],
     ['icoin', 'icoin-jenkins', false],
     ['tb', 'vlink-jenkins', false],
   ])(

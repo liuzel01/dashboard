@@ -73,12 +73,14 @@ const beijingTime = (value?: string | null) => {
 
 export default function MonitoringRequestsPage() {
   const { me, permissions } = useContext(AuthContext); const [items, setItems] = useState<MonitoringRequest[]>([]); const [loading, setLoading] = useState(false); const [createOpen, setCreateOpen] = useState(false); const [detailOpen, setDetailOpen] = useState(false); const [detailLoading, setDetailLoading] = useState(false); const [detail, setDetail] = useState<MonitoringRequest | null>(null); const [form] = Form.useForm();
-  const { currentEnvironment } = useContext(EnvironmentContext);
+  const { environments, currentEnvironment } = useContext(EnvironmentContext);
   const [environmentOptions, setEnvironmentOptions] = useState<MonitoringEnvironmentOption[]>([]);
   const selectedEnvironmentId = Form.useWatch<string | undefined>('environmentId', form);
   const selectedResourceType = Form.useWatch<'ServiceMonitor' | 'PrometheusRule' | 'WorkloadBundle' | undefined>('resourceType', form);
   const selectedAppId = Form.useWatch<string | undefined>('appId', form);
-  const selectedEnvironment = environmentOptions.find(option => option.environmentId === selectedEnvironmentId);
+  const selectedEnvironmentPolicy = environmentOptions.find(option => option.environmentId === selectedEnvironmentId);
+  const selectedEnvironment = environments.find(option => option.id === selectedEnvironmentId);
+  const environmentReady = !!selectedEnvironmentPolicy?.targetBranch && (selectedResourceType !== 'WorkloadBundle' || selectedEnvironmentId === 'hashex');
   const canApprove = permissions.includes('monitoring-requests:approve');
   const [executions, setExecutions] = useState<MonitoringJenkinsExecution[]>([]);
   const [executionLoading, setExecutionLoading] = useState(false);
@@ -96,12 +98,12 @@ export default function MonitoringRequestsPage() {
     return () => window.clearInterval(timer);
   }, [detailOpen, detail?.request_id, detail?.resource_type, detail?.status]);
   const openCreate = () => {
-    const selected = environmentOptions.find(option => option.environmentId === currentEnvironment?.id) || environmentOptions.find(option => option.environmentId === 'hashex') || environmentOptions[0];
-    form.setFieldsValue({ environmentId: selected?.environmentId, targetBranch: selected?.targetBranch, resourceType: 'ServiceMonitor' });
+    const policy = environmentOptions.find(option => option.environmentId === currentEnvironment?.id);
+    form.setFieldsValue({ environmentId: currentEnvironment?.id, targetBranch: policy?.targetBranch, resourceType: 'ServiceMonitor' });
     setCreateOpen(true);
   };
   const openDetail = async (id: string) => { setDetailOpen(true); setDetailLoading(true); setDetail(null); setExecutions([]); try { const [request, initialRuns] = await Promise.all([getMonitoringRequest(id), listMonitoringJenkinsExecutions(id)]); const staleRuns = initialRuns.filter(run => !['SUCCESS', 'FAILURE', 'ABORTED'].includes(run.status) || (run.mode === 'preview' && run.status === 'SUCCESS' && !run.diff_text)); if (staleRuns.length) await Promise.all(staleRuns.map(run => refreshMonitoringJenkinsExecution(id, run.id))); const runs = staleRuns.length ? await listMonitoringJenkinsExecutions(id) : initialRuns; const refreshedRequest = staleRuns.length ? await getMonitoringRequest(id) : request; setDetail(refreshedRequest); setExecutions(runs); } catch (e: unknown) { message.error((e as ApiError)?.response?.data?.message || '加载详情失败'); } finally { setDetailLoading(false); } };
-  const create = async () => { try { const values = await form.validateFields(); const row = await createMonitoringRequest(values); message.success('草稿已创建'); setCreateOpen(false); form.resetFields(); await load(); await openDetail(row.request_id); } catch (e: unknown) { if ((e as ApiError)?.errorFields) return; message.error((e as ApiError)?.response?.data?.message || '创建失败'); } };
+  const create = async () => { try { if (!selectedEnvironmentPolicy?.targetBranch) { message.error(`环境 ${selectedEnvironment?.name || selectedEnvironmentId || '—'} 未录入目标分支，无法创建申请`); return; } if (selectedResourceType === 'WorkloadBundle' && selectedEnvironmentId !== 'hashex') { message.error('工作负载资源包第一版仅支持 hashex'); return; } const values = await form.validateFields(); const row = await createMonitoringRequest(values); message.success('草稿已创建'); setCreateOpen(false); form.resetFields(); await load(); await openDetail(row.request_id); } catch (e: unknown) { if ((e as ApiError)?.errorFields) return; message.error((e as ApiError)?.response?.data?.message || '创建失败'); } };
   // These confirmations originate from inside a Drawer (z-index 1000). Raise the
   // static modal so its mask/panel remain clickable instead of being obscured.
   const submit = () => {
@@ -142,24 +144,26 @@ export default function MonitoringRequestsPage() {
   ];
   const mine = detail && Number(detail.requester_user_id) === Number(me?.id);
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
-    <Card title="监控资源申请与审批" extra={<Button type="primary" disabled={!environmentOptions.length} onClick={openCreate}>新建申请</Button>}>
+    <Card title="监控资源申请与审批" extra={<Button type="primary" disabled={!environments.length || !environmentOptions.length} onClick={openCreate}>新建申请</Button>}>
       <Alert type="info" showIcon message="当前开放 ServiceMonitor、PrometheusRule，以及 hashex 的 Deployment + Service 工作负载资源包。" description="工作负载资源包由 Dashboard 校验并创建 MR；合并后使用服务原有 Jenkins Job 首次发布，Dashboard 不直接 apply 任意 YAML。" style={{ marginBottom: 16 }} />
       <Table rowKey="request_id" loading={loading} columns={columns} dataSource={items} pagination={false} />
     </Card>
-    <Modal title="新建监控资源申请" width={selectedResourceType === 'WorkloadBundle' ? 900 : 520} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} okText="创建草稿" destroyOnHidden>
+    <Modal title="新建监控资源申请" width={selectedResourceType === 'WorkloadBundle' ? 900 : 520} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} okButtonProps={{ disabled: !environmentReady }} okText="创建草稿" destroyOnHidden>
       <Form form={form} layout="vertical" initialValues={{ resourceType: 'ServiceMonitor' }}>
         <Form.Item name="environmentId" label="目标环境" rules={[{ required: true, message: '请选择目标环境' }]}>
-          <Select showSearch optionFilterProp="label" placeholder="输入环境名称或 ID 匹配" options={environmentOptions.filter(option => selectedResourceType !== 'WorkloadBundle' || option.environmentId === 'hashex').map(option => ({ value: option.environmentId, label: `${option.label} (${option.environmentId})` }))} onChange={(environmentId) => { const option = environmentOptions.find(item => item.environmentId === environmentId); form.setFieldValue('targetBranch', option?.targetBranch); }} />
+          <Select showSearch optionFilterProp="label" placeholder="输入环境名称或 ID 匹配" options={environments.map(option => ({ value: option.id, label: `${option.name} (${option.id})` }))} onChange={(environmentId) => { const policy = environmentOptions.find(item => item.environmentId === environmentId); form.setFieldValue('targetBranch', policy?.targetBranch); }} />
         </Form.Item>
         <Form.Item name="targetBranch" label="目标分支" rules={[{ required: true, message: '请选择目标分支' }]}>
-          <Select showSearch optionFilterProp="label" placeholder="输入分支名称匹配" options={selectedEnvironment ? [{ value: selectedEnvironment.targetBranch, label: selectedEnvironment.targetBranch }] : []} />
+          <Select showSearch optionFilterProp="label" disabled={!selectedEnvironmentPolicy?.targetBranch} placeholder={selectedEnvironmentPolicy?.targetBranch ? '输入分支名称匹配' : '当前环境未录入目标分支'} options={selectedEnvironmentPolicy?.targetBranch ? [{ value: selectedEnvironmentPolicy.targetBranch, label: selectedEnvironmentPolicy.targetBranch }] : []} />
         </Form.Item>
-        {selectedEnvironment && (selectedResourceType === 'WorkloadBundle' ? <Alert type="info" showIcon message="工作负载申请不依赖平台 Bootstrap Jenkins 执行器" description={`Dashboard 仅创建并合并 ${selectedEnvironment.targetBranch} 的受控 MR；首次发布使用表单中填写的服务发布 Job。仓库环境路径：${selectedEnvironment.repositoryEnvironmentPath}`} style={{ marginBottom: 16 }} /> : <Alert type={selectedEnvironment.executionEnabled ? 'info' : 'warning'} showIcon message={selectedEnvironment.executionEnabled ? '该环境已启用受控执行' : '该环境的 Jenkins 执行器尚未配置'} description={selectedEnvironment.executionEnabled ? `仓库环境路径：${selectedEnvironment.repositoryEnvironmentPath}；执行器：${selectedEnvironment.executorKey}` : `当前可创建和保存草稿，但暂不能提交审批或执行。目标仓库环境路径：${selectedEnvironment.repositoryEnvironmentPath}；预留执行器：${selectedEnvironment.executorKey}`} style={{ marginBottom: 16 }} />)}
+        {selectedEnvironment && !selectedEnvironmentPolicy && <Alert type="error" showIcon message="当前环境未录入目标分支" description={`环境 ${selectedEnvironment.name} (${selectedEnvironment.id}) 尚未配置监控申请的目标分支，已阻断创建。`} style={{ marginBottom: 16 }} />}
+        {selectedEnvironmentPolicy && selectedResourceType === 'WorkloadBundle' && selectedEnvironmentId !== 'hashex' && <Alert type="error" showIcon message="工作负载资源包第一版仅支持 hashex" description="可以选择该环境申请监控资源，但当前不能在该环境申请 Deployment + Service。" style={{ marginBottom: 16 }} />}
+        {selectedEnvironmentPolicy && (selectedResourceType === 'WorkloadBundle' ? selectedEnvironmentId === 'hashex' && <Alert type="info" showIcon message="工作负载申请不依赖平台 Bootstrap Jenkins 执行器" description={`Dashboard 仅创建并合并 ${selectedEnvironmentPolicy.targetBranch} 的受控 MR；首次发布使用表单中填写的服务发布 Job。仓库环境路径：${selectedEnvironmentPolicy.repositoryEnvironmentPath}`} style={{ marginBottom: 16 }} /> : <Alert type={selectedEnvironmentPolicy.executionEnabled ? 'info' : 'warning'} showIcon message={selectedEnvironmentPolicy.executionEnabled ? '该环境已启用受控执行' : '该环境的 Jenkins 执行器尚未配置'} description={selectedEnvironmentPolicy.executionEnabled ? `仓库环境路径：${selectedEnvironmentPolicy.repositoryEnvironmentPath}；执行器：${selectedEnvironmentPolicy.executorKey}` : `当前可创建和保存草稿，但暂不能提交审批或执行。目标仓库环境路径：${selectedEnvironmentPolicy.repositoryEnvironmentPath}；预留执行器：${selectedEnvironmentPolicy.executorKey}`} style={{ marginBottom: 16 }} />)}
         <Form.Item name="appId" label="应用 ID" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/, message: '小写字母开头，仅小写字母、数字和连字符' }]}>
           <Input placeholder="dashboard-chain-test" />
         </Form.Item>
         <Form.Item name="resourceType" label="资源类型" rules={[{ required: true }]}>
-          <Select options={resourceOptions.map(value => ({ value, label: value === 'WorkloadBundle' ? 'Deployment + Service' : value }))} onChange={(value) => { if (value === 'WorkloadBundle') { const hashex = environmentOptions.find(item => item.environmentId === 'hashex'); form.setFieldsValue({ environmentId: hashex?.environmentId, targetBranch: hashex?.targetBranch, workload: selectedAppId ? { filePath: `k8s-yaml/deployments/kylin/${selectedAppId}-deployment.yaml`, yaml: workloadTemplate(selectedAppId), serviceJobName: '' } : undefined }); } }} />
+          <Select options={resourceOptions.map(value => ({ value, label: value === 'WorkloadBundle' ? 'Deployment + Service' : value }))} onChange={(value) => { if (value === 'WorkloadBundle') form.setFieldsValue({ workload: selectedAppId ? { filePath: `k8s-yaml/deployments/kylin/${selectedAppId}-deployment.yaml`, yaml: workloadTemplate(selectedAppId), serviceJobName: '' } : undefined }); }} />
         </Form.Item>
         {selectedResourceType === 'ServiceMonitor' ? (
           <Form.Item name="resourceName" label="资源名称" rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{1,62}$/ }]}>
