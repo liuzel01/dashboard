@@ -174,7 +174,6 @@ const DataQueryPage: React.FC = () => {
     if (!value.trim()) return;
 
     setLastSearchTerm(value);
-    setActiveTabKey('1');
     setRedisPage(1);
     setLoading(true);
     setError(null);
@@ -708,13 +707,7 @@ const DataQueryPage: React.FC = () => {
   );
 
   const renderResults = () => {
-    if (loading) {
-      return <div style={{ textAlign: 'center', marginTop: 50 }}><Spin size="large" tip="正在聚合查询..." /></div>;
-    }
-
-    if (error) {
-      return <Alert message="查询出错" description={error} type="error" showIcon />;
-    }
+    const tabLoading = (tip: string) => <div style={{ textAlign: 'center', marginTop: 50 }}><Spin size="large" tip={tip} /></div>;
 
     const inviteByValue =
       userInfo?.invite_by == null || userInfo?.invite_by === ''
@@ -752,7 +745,7 @@ const DataQueryPage: React.FC = () => {
     return (
       <Tabs activeKey={activeTabKey} onChange={(k) => setActiveTabKey(k)} type="card">
         <TabPane tab="用户基本信息 (MySQL)" key="1">
-          {userInfo ? (
+          {loading && activeTabKey === '1' ? tabLoading('正在查询用户基本信息...') : error && activeTabKey === '1' ? <Alert message="查询出错" description={error} type="error" showIcon /> : userInfo ? (
             <>
             <Card
               title="用户详情 (spot.tbl_user)"
@@ -917,7 +910,7 @@ const DataQueryPage: React.FC = () => {
           ) : ( <Empty description="无用户基本信息" /> )}
         </TabPane>
         <TabPane tab="缓存数据 (Redis)" key="2">
-          <Card
+          {loading && activeTabKey === '2' ? tabLoading('正在查询缓存数据...') : error && activeTabKey === '2' ? <Alert message="查询出错" description={error} type="error" showIcon /> : <Card
             title={redisMatchId ? `与 ID ${redisMatchId} 关联的缓存键（含订单关联缓存）` : '缓存键'}
             extra={
               <Button type="primary" onClick={() => setIsCreateRedisModalVisible(true)}>
@@ -947,10 +940,10 @@ const DataQueryPage: React.FC = () => {
             ) : (
               <Empty description="无缓存数据" />
             )}
-          </Card>
+          </Card>}
         </TabPane>
         <TabPane tab="其他信息 (Mongo)" key="3">
-          <PlaceholderPage />
+          {loading && activeTabKey === '3' ? tabLoading('正在查询其他信息...') : error && activeTabKey === '3' ? <Alert message="查询出错" description={error} type="error" showIcon /> : <PlaceholderPage />}
         </TabPane>
       </Tabs>
     );
