@@ -14,8 +14,7 @@ interface JdbcConfig {
 
 @Injectable()
 export class AgentQueryService implements OnModuleDestroy {
-  private static readonly SYSTEM_ERROR_TX_STATUS = 6;
-  private static readonly MAX_SYSTEM_ERROR_ORDERS = 100;
+  private static readonly MAX_ORDER_REDIS_ORDERS = 100;
   private static readonly MAX_REDIS_KEYS_PER_ORDER = 20;
   private static readonly MAX_REDIS_KEYS_TOTAL = 200;
   private static readonly MAX_REDIS_VALUE_BYTES = 16 * 1024;
@@ -259,12 +258,12 @@ export class AgentQueryService implements OnModuleDestroy {
   }
 
   /**
-   * Read-only diagnostic query for the Redis records associated with system-error
-   * withdrawal orders. It deliberately accepts only a UID and tenant, fixes
-   * tx_status to 6, and scans a fixed Redis key prefix rather than exposing a
-   * caller-controlled key pattern.
+   * Read-only lookup for existing order-related Redis records. It deliberately
+   * accepts only a UID and tenant, reads a bounded set of that user's recent
+   * orders, and scans a fixed key prefix rather than exposing a caller-controlled
+   * Redis pattern.
    */
-  async getSystemErrorWithdrawOrderRedis(
+  async getUserOrderRedis(
     environmentId: string,
     uid: string,
     tenantId: number,
@@ -284,13 +283,12 @@ export class AgentQueryService implements OnModuleDestroy {
         tx_deposit_status, tx_coin, tx_amount, tx_fee,
         tx_from_wallet, tx_to_wallet, remark, created_time, update_time
       FROM \`spot\`.\`tbl_tx\`
-      WHERE user_id = ? AND tenant_id = ? AND tx_status = ?
+      WHERE user_id = ? AND tenant_id = ?
       ORDER BY update_time DESC
-      LIMIT ${AgentQueryService.MAX_SYSTEM_ERROR_ORDERS}`;
+      LIMIT ${AgentQueryService.MAX_ORDER_REDIS_ORDERS}`;
     const [orderRows] = (await pool.execute(ordersSql, [
       userId,
       tenantId,
-      AgentQueryService.SYSTEM_ERROR_TX_STATUS,
     ])) as any;
     const orders = Array.isArray(orderRows) ? orderRows : [];
     const client = await this.getRedisClient(environmentId);
@@ -355,7 +353,7 @@ export class AgentQueryService implements OnModuleDestroy {
       0,
     );
     this.logger.log(
-      `[AgentQuery] system-error-withdraw-order-redis env=${environmentId} tenantId=${tenantId} orders=${ordersWithRedis.length} redisKeys=${redisKeyCount}`,
+      `[AgentQuery] user-order-redis env=${environmentId} tenantId=${tenantId} orders=${ordersWithRedis.length} redisKeys=${redisKeyCount}`,
     );
     return {
       status: 'success',
@@ -363,8 +361,7 @@ export class AgentQueryService implements OnModuleDestroy {
         uid,
         userId,
         tenantId,
-        txStatus: AgentQueryService.SYSTEM_ERROR_TX_STATUS,
-        orderLimit: AgentQueryService.MAX_SYSTEM_ERROR_ORDERS,
+        orderLimit: AgentQueryService.MAX_ORDER_REDIS_ORDERS,
         redisKeyLimit: AgentQueryService.MAX_REDIS_KEYS_TOTAL,
         orders: ordersWithRedis,
       },

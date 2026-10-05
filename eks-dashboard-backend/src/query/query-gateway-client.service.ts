@@ -301,7 +301,7 @@ export class QueryGatewayClientService {
     return response.data;
   }
 
-  async getSystemErrorWithdrawOrderRedis(
+  async getUserOrderRedis(
     environmentId: string,
     uid: string,
     tenantId: number,
@@ -318,7 +318,7 @@ export class QueryGatewayClientService {
       ...(context?.username ? { 'X-Username': context.username } : {}),
       ...(token ? { 'X-Agent-Token': token } : {}),
     };
-    const path = `/v1/query/users/${encodeURIComponent(uid)}/system-error-withdraw-order-redis`;
+    const path = `/v1/query/users/${encodeURIComponent(uid)}/order-redis-cache`;
     const transport = await this.getGatewayTransport();
     if (transport === 'k8s-proxy') {
       const { namespace, serviceName, servicePort } = await this.getAgentK8sTarget();

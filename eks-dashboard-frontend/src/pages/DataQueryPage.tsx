@@ -32,7 +32,7 @@ import {
   deleteRedisKey,
   getTenantsForEnvironment,
   getRedisKey,
-  getSystemErrorWithdrawOrderRedis,
+  getUserOrderRedis,
   getTraderInfo,
   getOtcMerchantInfo,
   updateTraderNickName,
@@ -198,7 +198,7 @@ const DataQueryPage: React.FC = () => {
       const tenantFromRef = currentTenantRef.current;
       let mysqlUserId: string | number | null = null;
       let redisKeyHints: RedisData[] = [];
-      let systemErrorOrderCachePromise: Promise<Awaited<ReturnType<typeof getSystemErrorWithdrawOrderRedis>> | null> =
+      let userOrderCachePromise: Promise<Awaited<ReturnType<typeof getUserOrderRedis>> | null> =
         Promise.resolve(null);
 
       if (!tenantFromRef) {
@@ -226,11 +226,11 @@ const DataQueryPage: React.FC = () => {
           (mysqlData as { id?: unknown }).id !== null
         ) {
           mysqlUserId = (mysqlData as { id: string | number }).id;
-          systemErrorOrderCachePromise = getSystemErrorWithdrawOrderRedis(uid, tenantFromRef)
+          userOrderCachePromise = getUserOrderRedis(uid, tenantFromRef)
             .catch((err) => {
               const axiosError = err as { response?: { status?: number } };
               if (axiosError.response?.status !== 404) {
-                console.warn('getSystemErrorWithdrawOrderRedis failed', err);
+                console.warn('getUserOrderRedis failed', err);
               }
               return null;
             });
@@ -313,8 +313,8 @@ const DataQueryPage: React.FC = () => {
             }
           }),
         );
-        const systemErrorOrderCache = await systemErrorOrderCachePromise;
-        const systemErrorRedisItems: RedisData[] = systemErrorOrderCache?.orders.flatMap((order) =>
+        const userOrderCache = await userOrderCachePromise;
+        const userOrderRedisItems: RedisData[] = userOrderCache?.orders.flatMap((order) =>
           order.redisKeys.map((item) => ({
             key: item.key,
             ttl: item.ttlSeconds,
@@ -323,7 +323,7 @@ const DataQueryPage: React.FC = () => {
         ) ?? [];
         const combinedRedisItems = [
           ...redisItems.filter((item): item is RedisData => item !== null),
-          ...systemErrorRedisItems,
+          ...userOrderRedisItems,
         ];
         setRedisData(Array.from(new Map(combinedRedisItems.map((item) => [item.key, item])).values()));
       }
@@ -921,7 +921,7 @@ const DataQueryPage: React.FC = () => {
         </TabPane>
         <TabPane tab="缓存数据 (Redis)" key="2">
           <Card
-            title={redisMatchId ? `包含 ID ${redisMatchId} 的缓存键（含系统异常订单缓存）` : '缓存键'}
+            title={redisMatchId ? `与 ID ${redisMatchId} 关联的缓存键（含订单关联缓存）` : '缓存键'}
             extra={
               <Button type="primary" onClick={() => setIsCreateRedisModalVisible(true)}>
                 新增缓存键

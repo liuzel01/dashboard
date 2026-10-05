@@ -124,8 +124,8 @@ export class AgentController {
     return this.queryService.getTraderInfoByUserUid(envId, uid, Number(tenantId));
   }
 
-  @Get('v1/query/users/:uid/system-error-withdraw-order-redis')
-  async getSystemErrorWithdrawOrderRedis(
+  @Get('v1/query/users/:uid/order-redis-cache')
+  async getUserOrderRedis(
     @Param('uid') uid: string,
     @Query('tenantId') tenantId: string | undefined,
     @Headers('x-environment-id') environmentId: string | undefined,
@@ -137,7 +137,7 @@ export class AgentController {
       throw new BadRequestException('tenantId must be a positive integer');
     }
     const envId = environmentId || this.configService.getAgentEnvironmentId();
-    return this.queryService.getSystemErrorWithdrawOrderRedis(
+    return this.queryService.getUserOrderRedis(
       envId,
       uid,
       normalizedTenantId,

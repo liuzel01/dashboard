@@ -176,8 +176,8 @@ export class QueryController {
     return this.queryService.getRedisKey(environmentId, key);
   }
 
-  @Get('users/:uid/system-error-withdraw-order-redis')
-  async getSystemErrorWithdrawOrderRedis(
+  @Get('users/:uid/order-redis-cache')
+  async getUserOrderRedis(
     @Headers('x-target-environment') environmentId: string,
     @Headers('x-request-id') requestId: string | undefined,
     @Headers('x-user-id') userId: string | undefined,
@@ -193,7 +193,7 @@ export class QueryController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.queryService.getSystemErrorWithdrawOrderRedis(
+    return this.queryService.getUserOrderRedis(
       environmentId,
       uid,
       normalizedTenantId,

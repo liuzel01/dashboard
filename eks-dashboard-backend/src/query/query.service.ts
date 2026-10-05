@@ -89,7 +89,7 @@ export class QueryService {
     }
   }
 
-  async getSystemErrorWithdrawOrderRedis(
+  async getUserOrderRedis(
     environmentId: string,
     uid: string,
     tenantId: number,
@@ -99,7 +99,7 @@ export class QueryService {
       throw new InternalServerErrorException('AGENT_ONLY_MODE_DISABLED');
     }
     try {
-      const data = await this.queryGatewayClient.getSystemErrorWithdrawOrderRedis(
+      const data = await this.queryGatewayClient.getUserOrderRedis(
         environmentId,
         uid,
         tenantId,
@@ -107,17 +107,17 @@ export class QueryService {
       );
       if (!data) throw new InternalServerErrorException('AGENT_UNREACHABLE');
       if (data?.status === 'not_found') {
-        throw new NotFoundException(data?.error || 'No system-error withdrawal orders found');
+        throw new NotFoundException(data?.error || 'No order records found');
       }
       if (data?.status === 'success') return data.data;
       return data;
     } catch (error) {
       if (error instanceof HttpException) throw error;
       this.logger.error(
-        `Error fetching system-error withdrawal order Redis data for uid ${uid} in env ${environmentId}:`,
+        `Error fetching user order Redis data for uid ${uid} in env ${environmentId}:`,
         error,
       );
-      throw new InternalServerErrorException('Failed to fetch system-error withdrawal order Redis data');
+      throw new InternalServerErrorException('Failed to fetch user order Redis data');
     }
   }
 

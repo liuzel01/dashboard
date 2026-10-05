@@ -207,11 +207,10 @@ export const getRedisKey = async (key: string) => {
   return response.data;
 };
 
-export type SystemErrorWithdrawOrderRedisResult = {
+export type UserOrderRedisResult = {
   uid: string;
   userId: string;
   tenantId: number;
-  txStatus: number;
   orderLimit: number;
   redisKeyLimit: number;
   orders: Array<Record<string, unknown> & {
@@ -228,13 +227,13 @@ export type SystemErrorWithdrawOrderRedisResult = {
   }>;
 };
 
-/** Query read-only Redis records for withdrawal orders whose tx_status is fixed to 6. */
-export const getSystemErrorWithdrawOrderRedis = async (
+/** Query existing BALANCE_EXCHANGE_BIZ Redis records associated with a user's recent orders. */
+export const getUserOrderRedis = async (
   uid: string,
   tenantId: number,
-): Promise<SystemErrorWithdrawOrderRedisResult> => {
+): Promise<UserOrderRedisResult> => {
   const response = await api.get(
-    `/query/users/${encodeURIComponent(uid)}/system-error-withdraw-order-redis`,
+    `/query/users/${encodeURIComponent(uid)}/order-redis-cache`,
     { params: { tenantId } },
   );
   return response.data;
