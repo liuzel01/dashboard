@@ -12,6 +12,19 @@ interface JdbcConfig {
   params: URLSearchParams;
 }
 
+type RedisKeyData = {
+  key: string;
+  value: string | object | null;
+  valueTruncated: boolean;
+  ttlSeconds: number;
+};
+
+type OrderRedisLookup = {
+  orderNo: string;
+  lookupOrderNo: string;
+  lookupTruncated: boolean;
+};
+
 @Injectable()
 export class AgentQueryService implements OnModuleDestroy {
   private static readonly MAX_ORDER_REDIS_ORDERS = 100;
@@ -292,68 +305,47 @@ export class AgentQueryService implements OnModuleDestroy {
     ])) as any;
     const orders = Array.isArray(orderRows) ? orderRows : [];
     const client = await this.getRedisClient(environmentId);
-    let remainingKeys = AgentQueryService.MAX_REDIS_KEYS_TOTAL;
+    const orderLookups: OrderRedisLookup[] = orders.map((order) => {
+      const orderNo = String(order.order_no);
+      const lookupTruncated = orderNo.length > 19;
+      return {
+        orderNo,
+        lookupOrderNo: lookupTruncated ? orderNo.slice(0, 19) : orderNo,
+        lookupTruncated,
+      };
+    });
+    const scan = await this.scanUserOrderRedisKeys(client, orderLookups);
+    const redisValuesByKey = await this.readRedisKeys(
+      client,
+      [...new Set([...scan.keysByOrder.values()].flat())],
+    );
 
     const ordersWithRedis: Array<Record<string, any> & {
-      redisKeys: Array<{
-        key: string;
-        value: string | object | null;
-        valueTruncated: boolean;
-        ttlSeconds: number;
-      }>;
+      redisKeys: RedisKeyData[];
       redisKeySearchTruncated: boolean;
       redisLookupOrderNo: string;
       redisLookupTruncated: boolean;
-    }> = [];
-    for (const order of orders) {
-      if (remainingKeys <= 0) {
-        const orderNo = String(order.order_no);
-        const redisLookupTruncated = orderNo.length > 19;
-        ordersWithRedis.push({
-          ...order,
-          redisKeys: [],
-          redisKeySearchTruncated: true,
-          redisLookupOrderNo: redisLookupTruncated ? orderNo.slice(0, 19) : orderNo,
-          redisLookupTruncated,
-        });
-        continue;
-      }
-      const orderNo = String(order.order_no);
-      const redisLookupTruncated = orderNo.length > 19;
-      const redisLookupOrderNo = redisLookupTruncated ? orderNo.slice(0, 19) : orderNo;
-      const limit = Math.min(AgentQueryService.MAX_REDIS_KEYS_PER_ORDER, remainingKeys);
-      const keys = await this.scanRedisKeysForOrder(
-        client,
-        redisLookupOrderNo,
-        redisLookupTruncated,
-        limit,
-      );
-      remainingKeys -= keys.length;
-      const redisKeys: Array<{
-        key: string;
-        value: string | object | null;
-        valueTruncated: boolean;
-        ttlSeconds: number;
-      }> = [];
-      for (const key of keys) {
-        const result = await this.readRedisKey(client, key);
-        if (result.status === 'success' && result.data) redisKeys.push(result.data);
-      }
-      ordersWithRedis.push({
+    }> = orders.map((order, index) => {
+      const lookup = orderLookups[index];
+      const keys = scan.keysByOrder.get(lookup.orderNo) || [];
+      return {
         ...order,
-        redisKeys,
-        redisKeySearchTruncated: keys.length === limit,
-        redisLookupOrderNo,
-        redisLookupTruncated,
-      });
-    }
+        redisKeys: keys.flatMap((key) => {
+          const value = redisValuesByKey.get(key);
+          return value ? [value] : [];
+        }),
+        redisKeySearchTruncated: keys.length >= AgentQueryService.MAX_REDIS_KEYS_PER_ORDER || scan.limitReached,
+        redisLookupOrderNo: lookup.lookupOrderNo,
+        redisLookupTruncated: lookup.lookupTruncated,
+      };
+    });
 
     const redisKeyCount = ordersWithRedis.reduce(
       (count, order) => count + order.redisKeys.length,
       0,
     );
     this.logger.log(
-      `[AgentQuery] user-order-redis env=${environmentId} tenantId=${tenantId} orders=${ordersWithRedis.length} redisKeys=${redisKeyCount}`,
+      `[AgentQuery] user-order-redis env=${environmentId} tenantId=${tenantId} orders=${ordersWithRedis.length} redisKeys=${redisKeyCount} scanLimitReached=${scan.limitReached}`,
     );
     return {
       status: 'success',
@@ -544,43 +536,61 @@ export class AgentQueryService implements OnModuleDestroy {
     return this.readRedisKey(client, key);
   }
 
-  private async scanRedisKeys(client: RedisClient, pattern: string, limit: number) {
-    let cursor = '0';
-    const keys: string[] = [];
-    do {
-      const [nextCursor, batch] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-      cursor = nextCursor;
-      for (const key of batch) {
-        keys.push(key);
-        if (keys.length >= limit) return keys;
-      }
-    } while (cursor !== '0');
-    return keys;
+  private matchesOrderRedisKey(key: string, lookup: OrderRedisLookup) {
+    const keyPrefix = `BALANCE_EXCHANGE_BIZ:${lookup.lookupOrderNo}`;
+    return lookup.lookupTruncated
+      ? key.startsWith(keyPrefix)
+      : key === keyPrefix || key.startsWith(`${keyPrefix}:`);
   }
 
-  private async scanRedisKeysForOrder(
-    client: RedisClient,
-    lookupOrderNo: string,
-    isTruncated: boolean,
-    limit: number,
-  ) {
-    const keyPrefix = `BALANCE_EXCHANGE_BIZ:${lookupOrderNo}`;
-    if (isTruncated) {
-      // Historical Redis blob keys omit the long-order suffix, so prefix matching
-      // is required only when the database order number was truncated to 19 chars.
-      return this.scanRedisKeys(client, `${keyPrefix}*`, limit);
-    }
+  /**
+   * Redis has no prefix index. Scan the BALANCE_EXCHANGE_BIZ keyspace once and
+   * associate matches with the bounded MySQL order set, rather than scanning the
+   * whole database once per order.
+   */
+  private async scanUserOrderRedisKeys(client: RedisClient, lookups: OrderRedisLookup[]) {
+    let cursor = '0';
+    let remainingKeys = AgentQueryService.MAX_REDIS_KEYS_TOTAL;
+    const keysByOrder = new Map(lookups.map((lookup) => [lookup.orderNo, [] as string[]]));
+    const seenKeys = new Set<string>();
+    do {
+      const [nextCursor, batch] = await client.scan(
+        cursor,
+        'MATCH',
+        'BALANCE_EXCHANGE_BIZ:*',
+        'COUNT',
+        1000,
+      );
+      cursor = nextCursor;
+      for (const key of batch) {
+        if (remainingKeys <= 0) return { keysByOrder, limitReached: true };
+        if (seenKeys.has(key)) continue;
+        const lookup = lookups.find((item) => this.matchesOrderRedisKey(key, item));
+        if (!lookup) continue;
+        const keys = keysByOrder.get(lookup.orderNo);
+        if (!keys || keys.length >= AgentQueryService.MAX_REDIS_KEYS_PER_ORDER) continue;
+        seenKeys.add(key);
+        keys.push(key);
+        remainingKeys -= 1;
+      }
+    } while (cursor !== '0');
+    return { keysByOrder, limitReached: false };
+  }
 
-    // Short order numbers retain exact semantics while accepting either a bare key
-    // or the normal colon-delimited suffix form.
-    const exactKeys = await this.scanRedisKeys(client, keyPrefix, limit);
-    if (exactKeys.length >= limit) return exactKeys;
-    const suffixedKeys = await this.scanRedisKeys(
-      client,
-      `${keyPrefix}:*`,
-      limit - exactKeys.length,
-    );
-    return [...new Set([...exactKeys, ...suffixedKeys])];
+  private async readRedisKeys(client: RedisClient, keys: string[]) {
+    const valuesByKey = new Map<string, RedisKeyData>();
+    const batchSize = 10;
+    for (let index = 0; index < keys.length; index += batchSize) {
+      const results = await Promise.all(
+        keys.slice(index, index + batchSize).map((key) => this.readRedisKey(client, key)),
+      );
+      for (const result of results) {
+        if (result.status === 'success' && result.data) {
+          valuesByKey.set(result.data.key, result.data);
+        }
+      }
+    }
+    return valuesByKey;
   }
 
   private truncateRedisValue(value: string | object | null) {

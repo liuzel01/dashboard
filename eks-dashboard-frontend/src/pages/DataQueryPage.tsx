@@ -123,6 +123,7 @@ const DataQueryPage: React.FC = () => {
   const [isCreateRedisModalVisible, setIsCreateRedisModalVisible] = useState(false);
   const [creatingRedisKey, setCreatingRedisKey] = useState(false);
   const [redisMatchId, setRedisMatchId] = useState<string | null>(null);
+  const [orderRedisError, setOrderRedisError] = useState<string | null>(null);
   const [redisCreateForm] = Form.useForm();
   const [redisPage, setRedisPage] = useState(1);
   const [redisPageSize, setRedisPageSize] = useState(20);
@@ -189,6 +190,7 @@ const DataQueryPage: React.FC = () => {
         setUserInfo(res.mysql?.data || null);
         setRedisData(res.redis?.data || null);
         setRedisMatchId(null);
+        setOrderRedisError(null);
         setTraderInfo(null);
         setOtcMerchantInfo(null);
         return;
@@ -196,6 +198,7 @@ const DataQueryPage: React.FC = () => {
 
       const uid = value.trim();
       const tenantFromRef = currentTenantRef.current;
+      setOrderRedisError(null);
       let mysqlUserId: string | number | null = null;
       let redisKeyHints: RedisData[] = [];
       let userOrderCachePromise: Promise<Awaited<ReturnType<typeof getUserOrderRedis>> | null> =
@@ -206,6 +209,7 @@ const DataQueryPage: React.FC = () => {
         setUserInfo(null);
         setRedisData(null);
         setRedisMatchId(null);
+        setOrderRedisError(null);
         setTraderInfo(null);
         setOtcMerchantInfo(null);
         return;
@@ -228,10 +232,10 @@ const DataQueryPage: React.FC = () => {
           mysqlUserId = (mysqlData as { id: string | number }).id;
           userOrderCachePromise = getUserOrderRedis(uid, tenantFromRef)
             .catch((err) => {
-              const axiosError = err as { response?: { status?: number } };
-              if (axiosError.response?.status !== 404) {
-                console.warn('getUserOrderRedis failed', err);
-              }
+              const axiosError = err as { response?: { data?: { message?: string } }; message?: string };
+              const detail = axiosError.response?.data?.message || axiosError.message || '未知错误';
+              setOrderRedisError(detail);
+              console.warn('getUserOrderRedis failed', err);
               return null;
             });
         }
@@ -928,6 +932,7 @@ const DataQueryPage: React.FC = () => {
               </Button>
             }
           >
+            {orderRedisError && <Alert type="warning" showIcon message="订单关联缓存未加载" description={orderRedisError} style={{ marginBottom: 16 }} />}
             {redisData && redisData.length > 0 ? (
               <Table<RedisData>
                 rowKey="key"
