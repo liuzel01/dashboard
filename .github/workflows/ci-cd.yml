@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   AWS_REGION: ${{ vars.DEPLOY_AWS_REGION }}
@@ -20,12 +19,9 @@ env:
   EC2_INSTANCE_ID: i-0534e7ed9423fff65
 
 jobs:
-  build:
-    name: Test and build
+  backend-ci:
+    name: Backend test and build
     runs-on: ubuntu-latest
-    environment: production
-    env:
-      PREVIEW_ALLOWED_HOSTS: ${{ vars.VITE_PREVIEW_ALLOWED_HOSTS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,22 +31,82 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            eks-dashboard-backend/package-lock.json
-            eks-dashboard-frontend/package-lock.json
+          cache-dependency-path: eks-dashboard-backend/package-lock.json
 
-      - name: Install and test backend
+      - name: Install dependencies
         working-directory: eks-dashboard-backend
-        run: |
-          npm ci
-          npm test -- --runInBand
-          npm run build
+        run: npm ci
 
-      - name: Install and build frontend
+      - name: Run tests
+        working-directory: eks-dashboard-backend
+        run: npm test -- --runInBand
+
+      - name: Build backend
+        working-directory: eks-dashboard-backend
+        run: npm run build
+
+      - name: Upload backend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-backend-dist-${{ github.sha }}
+          path: eks-dashboard-backend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: eks-dashboard-frontend/package-lock.json
+
+      - name: Install dependencies
         working-directory: eks-dashboard-frontend
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: eks-dashboard-frontend
+        run: npm run build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-frontend-dist-${{ github.sha }}
+          path: eks-dashboard-frontend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  package-release:
+    name: Package release
+    needs: [backend-ci, frontend-build]
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.package.outputs.release_id }}
+      archive: ${{ steps.package.outputs.archive }}
+      sha256: ${{ steps.package.outputs.sha256 }}
+      script_sha256: ${{ steps.package.outputs.script_sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download backend build
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-backend-dist-${{ github.sha }}
+          path: build-release/eks-dashboard-backend/dist
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-frontend-dist-${{ github.sha }}
+          path: build-release/eks-dashboard-frontend/dist
 
       - name: Create release archive
         id: package
@@ -58,10 +114,7 @@ jobs:
           RELEASE_ID: ${{ github.sha }}
         run: |
           set -euo pipefail
-          mkdir -p "build-release/eks-dashboard-backend" "build-release/eks-dashboard-frontend"
-          cp -a eks-dashboard-backend/dist build-release/eks-dashboard-backend/
           cp eks-dashboard-backend/package.json eks-dashboard-backend/package-lock.json build-release/eks-dashboard-backend/
-          cp -a eks-dashboard-frontend/dist build-release/eks-dashboard-frontend/
           cp eks-dashboard-frontend/package.json eks-dashboard-frontend/package-lock.json build-release/eks-dashboard-frontend/
           cp eks-dashboard-frontend/vite.config.ts build-release/eks-dashboard-frontend/
           cp ecosystem.prod.config.js build-release/
@@ -72,6 +125,38 @@ jobs:
           echo "archive=dashboard-${RELEASE_ID}.tar.gz" >> "$GITHUB_OUTPUT"
           echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
           echo "script_sha256=${SCRIPT_SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-release-${{ github.sha }}
+          path: dashboard-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Deploy through SSM
+    needs: package-release
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PREVIEW_ALLOWED_HOSTS: ${{ vars.VITE_PREVIEW_ALLOWED_HOSTS }}
+      RELEASE_ID: ${{ needs.package-release.outputs.release_id }}
+      ARCHIVE: ${{ needs.package-release.outputs.archive }}
+      SHA256: ${{ needs.package-release.outputs.sha256 }}
+      SCRIPT_SHA256: ${{ needs.package-release.outputs.script_sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-release-${{ github.sha }}
+          path: .
 
       - name: Validate production environment configuration
         run: |
@@ -87,11 +172,6 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Upload release to S3
-        env:
-          RELEASE_ID: ${{ steps.package.outputs.release_id }}
-          ARCHIVE: ${{ steps.package.outputs.archive }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
-          SCRIPT_SHA256: ${{ steps.package.outputs.script_sha256 }}
         run: |
           set -euo pipefail
           test -n "$AWS_REGION"
@@ -100,16 +180,8 @@ jobs:
           S3_BASE="s3://${DEPLOY_BUCKET}/${DEPLOY_PREFIX%/}/${RELEASE_ID}"
           aws s3 cp "$ARCHIVE" "$S3_BASE/$ARCHIVE" --sse AES256
           aws s3 cp scripts/deploy-release.sh "$S3_BASE/deploy-release.sh" --sse AES256
-          echo "$S3_BASE/$ARCHIVE" > /tmp/dashboard-artifact-uri
-          echo "$S3_BASE/deploy-release.sh" > /tmp/dashboard-script-uri
-          echo "$SHA256" > /tmp/dashboard-sha256
 
       - name: Deploy through SSM
-        env:
-          RELEASE_ID: ${{ steps.package.outputs.release_id }}
-          ARCHIVE: ${{ steps.package.outputs.archive }}
-          SHA256: ${{ steps.package.outputs.sha256 }}
-          SCRIPT_SHA256: ${{ steps.package.outputs.script_sha256 }}
         run: |
           set -euo pipefail
           PREVIEW_ALLOWED_HOSTS="${PREVIEW_ALLOWED_HOSTS:-www.pree.mg56.net}"
