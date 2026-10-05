@@ -90,7 +90,6 @@ const DataQueryPage: React.FC = () => {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [redisData, setRedisData] = useState<RedisData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [searched, setSearched] = useState(false); // 用于判断是否执行过搜索
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
@@ -178,7 +177,6 @@ const DataQueryPage: React.FC = () => {
     setActiveTabKey('1');
     setRedisPage(1);
     setLoading(true);
-    setSearched(true);
     setError(null);
 
     try {
@@ -716,11 +714,6 @@ const DataQueryPage: React.FC = () => {
 
     if (error) {
       return <Alert message="查询出错" description={error} type="error" showIcon />;
-    }
-
-    // 首次进入页面或未搜索时，显示提示信息
-    if (!searched) {
-      return <Alert message="请输入UID、手机号或邮箱等标识符进行统一查询。" type="info" showIcon />;
     }
 
     const inviteByValue =
