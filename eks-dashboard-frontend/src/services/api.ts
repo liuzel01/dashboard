@@ -32,7 +32,7 @@ export const setAuthToken = (token: string | null) => {
  * 获取应用列表
  * @param params - 包含查询参数的对象, 例如 { name: 'filter-text' }
  */
-export const getDeployments = async (params: { name?: string } = {}) => {
+export const getDeployments = async (params: { name?: string; namespace?: string } = {}) => {
   if (!_environmentId) {
     throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   }
@@ -42,16 +42,26 @@ export const getDeployments = async (params: { name?: string } = {}) => {
   return response.data;
 };
 
+export const getDeploymentNamespaces = async (): Promise<string[]> => {
+  if (!_environmentId) {
+    throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+  }
+  const response = await api.get('/deployments/namespaces');
+  return response.data;
+};
+
 /**
  * 重启一个应用
  * @param name - 需要重启的应用名称
  */
-export const restartDeployment = async (name: string): Promise<{ targetGeneration?: number | null }> => {
+export const restartDeployment = async (name: string, namespace = 'default'): Promise<{ targetGeneration?: number | null }> => {
   if (!_environmentId) {
     throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   }
   // The environmentId is passed via the 'X-Target-Environment' header, set by setApiEnvironment.
-  const response = await api.post(`/deployments/${name}/restart`);
+  const response = await api.post(`/deployments/${encodeURIComponent(name)}/restart`, undefined, {
+    params: { namespace },
+  });
   return response.data;
 };
 
@@ -90,15 +100,19 @@ export type DeploymentRolloutStatus = {
   diagnostics: DeploymentRolloutDiagnostic[];
 };
 
-export const getDeploymentImageHistory = async (name: string): Promise<DeploymentImageHistory> => {
+export const getDeploymentImageHistory = async (name: string, namespace = 'default'): Promise<DeploymentImageHistory> => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
-  const response = await api.get(`/deployments/${encodeURIComponent(name)}/image-history`);
+  const response = await api.get(`/deployments/${encodeURIComponent(name)}/image-history`, {
+    params: { namespace },
+  });
   return response.data;
 };
 
-export const rollbackDeploymentImages = async (name: string, images: DeploymentImage[]) => {
+export const rollbackDeploymentImages = async (name: string, images: DeploymentImage[], namespace = 'default') => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
-  const response = await api.post(`/deployments/${encodeURIComponent(name)}/rollback-images`, { images });
+  const response = await api.post(`/deployments/${encodeURIComponent(name)}/rollback-images`, { images }, {
+    params: { namespace },
+  });
   return response.data as {
     previousImages: DeploymentImage[];
     targetImages: DeploymentImage[];
@@ -109,10 +123,11 @@ export const rollbackDeploymentImages = async (name: string, images: DeploymentI
 export const getDeploymentRolloutStatus = async (
   name: string,
   generation?: number | null,
+  namespace = 'default',
 ): Promise<DeploymentRolloutStatus> => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   const response = await api.get(`/deployments/${encodeURIComponent(name)}/rollout-status`, {
-    params: generation ? { generation } : undefined,
+    params: { ...(generation ? { generation } : {}), namespace },
   });
   return response.data;
 };

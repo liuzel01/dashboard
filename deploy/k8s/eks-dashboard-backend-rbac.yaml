@@ -6,6 +6,11 @@ metadata:
     app.kubernetes.io/name: eks-dashboard
     app.kubernetes.io/part-of: dashboard
 rules:
+  # Namespace discovery for the EKS deployment selector.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+
   # Dashboard deployment list/restart/rollback and rollout diagnostics.
   - apiGroups: ["apps"]
     resources: ["deployments"]

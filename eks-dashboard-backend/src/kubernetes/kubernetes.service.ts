@@ -222,6 +222,15 @@ export class KubernetesService {
     return body.items;
   }
 
+  async listNamespaces(environmentId: string) {
+    const { k8sCoreV1Api } = await this.getK8sApis(environmentId);
+    const { body } = await k8sCoreV1Api.listNamespace();
+    return body.items
+      .map((item) => item.metadata?.name || '')
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right));
+  }
+
   async restartDeployment(
     environmentId: string,
     name: string,

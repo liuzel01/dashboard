@@ -8,6 +8,7 @@ import { getPublicRuntimeConfig } from '../services/runtimeConfig';
 interface LogViewerProps {
   deploymentName: string;
   environmentId: string;
+  namespace: string;
   visible: boolean;
   onClose: () => void;
 }
@@ -19,6 +20,7 @@ const ansiUp = new AnsiUp();
 export const LogViewer: React.FC<LogViewerProps> = ({
   deploymentName,
   environmentId,
+  namespace,
   visible,
   onClose,
 }) => {
@@ -42,7 +44,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
 
   useEffect(() => {
     // 确保所有必要信息都存在时才连接
-    if (visible && deploymentName && environmentId) {
+    if (visible && deploymentName && environmentId && namespace) {
   // Read Vite env in a safe way and derive configurable constants early
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | boolean | undefined> })?.env || {};
   const isDev = !!viteEnv.DEV;
@@ -122,7 +124,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
           // only update state if changed
           setIsConnected((prev) => prev ? prev : true);
           setError((prev) => (prev === null ? prev : null));
-          socket.emit('get-logs', { deploymentName, environmentId });
+          socket.emit('get-logs', { deploymentName, environmentId, namespace });
         });
 
   socket.on('connect_error', (err: unknown) => {
@@ -304,9 +306,9 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       };
     } else if (visible) {
       // 如果弹窗可见但缺少必要信息，则显示错误
-      setError('无法获取日志：缺少环境或应用名称。');
+      setError('无法获取日志：缺少环境、命名空间或应用名称。');
     }
-  }, [visible, deploymentName, environmentId]);
+  }, [visible, deploymentName, environmentId, namespace]);
 
   // 自动滚动到日志底部
   useEffect(() => {
@@ -369,7 +371,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   const modalTitle = (
     <div style={{ width: '100%', cursor: 'move' }}>
       <Space>
-        <span>{`应用日志: ${deploymentName}`}</span>
+        <span>{`应用日志: ${namespace}/${deploymentName}`}</span>
         <Button
           icon={isMaximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
           onClick={() => setIsMaximized(!isMaximized)}

@@ -15,6 +15,7 @@ import { Request } from 'request';
 interface GetLogsPayload {
   deploymentName: string;
   environmentId: string;
+  namespace?: string;
 }
 
 @WebSocketGateway({
@@ -62,17 +63,18 @@ export class LogsGateway
   @SubscribeMessage('get-logs')
   async handleGetLogs(client: Socket, payload: GetLogsPayload): Promise<void> {
     const { deploymentName, environmentId } = payload;
-    if (!deploymentName || !environmentId) {
+    const namespace = (payload.namespace || 'default').trim();
+    if (!deploymentName || !environmentId || !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace) || namespace.length > 63) {
       this.logger.error('Invalid payload for get-logs:', payload);
       client.emit(
         'log-error',
-        'Invalid payload: deploymentName and environmentId are required.',
+        'Invalid payload: deploymentName, environmentId, and a valid namespace are required.',
       );
       return;
     }
 
     this.logger.log(
-      `Received get-logs for ${deploymentName} in env ${environmentId} from ${client.id}`,
+      `Received get-logs for ${namespace}/${deploymentName} in env ${environmentId} from ${client.id}`,
     );
 
     // 如果此客户端已有日志请求，先中止旧的
@@ -85,7 +87,7 @@ export class LogsGateway
       const pods = await this.k8sService.getPodsForDeployment(
         environmentId,
         deploymentName,
-        'default',
+        namespace,
       );
       if (pods.length === 0) {
         client.emit(
@@ -136,7 +138,7 @@ export class LogsGateway
         environmentId,
         podName,
         containerName,
-        'default',
+        namespace,
         logStream,
         (err) => {
           if (err) {

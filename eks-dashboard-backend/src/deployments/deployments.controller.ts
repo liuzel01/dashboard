@@ -18,11 +18,19 @@ export class DeploymentsController {
 
   constructor(private readonly k8sService: KubernetesService) {}
 
-  @Get()
-  async getDeployments(
-    @Headers('x-target-environment') environmentId: string,
-    @Query('name') name?: string,
-  ) {
+  private normalizeNamespace(namespace?: string): string {
+    const normalized = (namespace || 'default').trim();
+    if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(normalized) || normalized.length > 63) {
+      throw new HttpException(
+        'Query parameter "namespace" must be a valid Kubernetes namespace.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return normalized;
+  }
+
+  @Get('namespaces')
+  async getNamespaces(@Headers('x-target-environment') environmentId: string) {
     if (!environmentId) {
       throw new HttpException(
         'Header "X-Target-Environment" is required.',
@@ -30,12 +38,39 @@ export class DeploymentsController {
       );
     }
     try {
+      return await this.k8sService.listNamespaces(environmentId);
+    } catch (error) {
+      this.logger.error(
+        `Failed to list namespaces for env "${environmentId}"`,
+        error.body || error,
+      );
+      throw new HttpException(
+        'Failed to fetch namespaces from Kubernetes',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Get()
+  async getDeployments(
+    @Headers('x-target-environment') environmentId: string,
+    @Query('name') name?: string,
+    @Query('namespace') namespace?: string,
+  ) {
+    if (!environmentId) {
+      throw new HttpException(
+        'Header "X-Target-Environment" is required.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const targetNamespace = this.normalizeNamespace(namespace);
+    try {
       this.logger.log(
-        `Fetching all deployments from the "default" namespace for env "${environmentId}"...`,
+        `Fetching all deployments from the "${targetNamespace}" namespace for env "${environmentId}"...`,
       );
       const deployments = await this.k8sService.getDeployments(
         environmentId,
-        'default',
+        targetNamespace,
       );
       this.logger.log(`Found ${deployments.length} total deployments.`);
 
@@ -102,6 +137,7 @@ export class DeploymentsController {
   async restartDeployment(
     @Param('name') name: string,
     @Headers('x-target-environment') environmentId: string,
+    @Query('namespace') namespace?: string,
   ) {
     if (!environmentId) {
       throw new HttpException(
@@ -109,6 +145,7 @@ export class DeploymentsController {
         HttpStatus.BAD_REQUEST,
       );
     }
+    const targetNamespace = this.normalizeNamespace(namespace);
     try {
       this.logger.log(
         `Restarting deployment: ${name} in env "${environmentId}"`,
@@ -116,7 +153,7 @@ export class DeploymentsController {
       return await this.k8sService.restartDeployment(
         environmentId,
         name,
-        'default',
+        targetNamespace,
       );
     } catch (error) {
       this.logger.error(
@@ -133,12 +170,14 @@ export class DeploymentsController {
   async getDeploymentImageHistory(
     @Param('name') name: string,
     @Headers('x-target-environment') environmentId: string,
+    @Query('namespace') namespace?: string,
   ) {
     if (!environmentId) {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
     }
+    const targetNamespace = this.normalizeNamespace(namespace);
     try {
-      return await this.k8sService.getDeploymentImageHistory(environmentId, name, 'default');
+      return await this.k8sService.getDeploymentImageHistory(environmentId, name, targetNamespace);
     } catch (error) {
       this.logger.error(`Failed to get image history for ${name} in env "${environmentId}"`, error.body || error);
       throw new HttpException('Failed to fetch deployment image history', HttpStatus.INTERNAL_SERVER_ERROR);
@@ -150,13 +189,15 @@ export class DeploymentsController {
     @Param('name') name: string,
     @Body() body: { images?: Array<{ name?: string; image?: string }> },
     @Headers('x-target-environment') environmentId: string,
+    @Query('namespace') namespace?: string,
   ) {
     if (!environmentId) {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
     }
+    const targetNamespace = this.normalizeNamespace(namespace);
     try {
       const images = body?.images?.map((item) => ({ name: String(item.name || ''), image: String(item.image || '') })) || [];
-      return await this.k8sService.rollbackDeploymentImages(environmentId, name, images, 'default');
+      return await this.k8sService.rollbackDeploymentImages(environmentId, name, images, targetNamespace);
     } catch (error) {
       this.logger.error(`Failed to roll back images for ${name} in env "${environmentId}"`, error.body || error);
       throw new HttpException(error?.message || 'Failed to roll back deployment images', HttpStatus.BAD_REQUEST);
@@ -168,6 +209,7 @@ export class DeploymentsController {
     @Param('name') name: string,
     @Headers('x-target-environment') environmentId: string,
     @Query('generation') generation?: string,
+    @Query('namespace') namespace?: string,
   ) {
     if (!environmentId) {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
@@ -176,12 +218,13 @@ export class DeploymentsController {
     if (targetGeneration !== undefined && (!Number.isInteger(targetGeneration) || targetGeneration < 1)) {
       throw new HttpException('Query parameter "generation" must be a positive integer.', HttpStatus.BAD_REQUEST);
     }
+    const targetNamespace = this.normalizeNamespace(namespace);
     try {
       return await this.k8sService.getDeploymentRolloutStatus(
         environmentId,
         name,
         targetGeneration,
-        'default',
+        targetNamespace,
       );
     } catch (error) {
       this.logger.error(

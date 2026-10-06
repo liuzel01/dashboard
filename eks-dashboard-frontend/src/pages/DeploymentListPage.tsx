@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useContext, useRef, useMemo } 
 import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
-import { getDeployments, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
+import { getDeployments, getDeploymentNamespaces, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
@@ -37,6 +37,7 @@ type RolloutOperationState = {
 type RecoveryRequest = {
   environmentId: string;
   deploymentName: string;
+  namespace: string;
   previousImages: DeploymentImage[];
   targetGeneration?: number | null;
 };
@@ -102,6 +103,10 @@ const DeploymentListPage: React.FC = () => {
   const blockedPromptedRef = useRef(new Set<string>());
 
   const [allDeployments, setAllDeployments] = useState<Deployment[]>([]);
+  const [namespaces, setNamespaces] = useState<string[]>(['default']);
+  const [namespace, setNamespace] = useState('default');
+  const [namespaceEnvironmentId, setNamespaceEnvironmentId] = useState<string | null>(null);
+  const [namespacesLoading, setNamespacesLoading] = useState(false);
   const [filterInput, setFilterInput] = useState('kylin-price-kylin-price-impl');
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
   const [searchRevision, setSearchRevision] = useState(0);
@@ -119,10 +124,10 @@ const DeploymentListPage: React.FC = () => {
 
   // 日志查看器弹窗的状态
   const [logViewerVisible, setLogViewerVisible] = useState(false);
-  const [logTarget, setLogTarget] = useState<string | null>(null);
+  const [logTarget, setLogTarget] = useState<{ name: string; namespace: string } | null>(null);
 
-  const rolloutOperationKey = (environmentId: string, deploymentName: string) =>
-    `${environmentId}:${deploymentName}`;
+  const rolloutOperationKey = (environmentId: string, targetNamespace: string, deploymentName: string) =>
+    `${environmentId}:${targetNamespace}:${deploymentName}`;
 
   useEffect(() => {
     currentEnvironmentIdRef.current = currentEnvironment?.id || null;
@@ -130,7 +135,32 @@ const DeploymentListPage: React.FC = () => {
     setRolloutOperations({});
     blockedPromptedRef.current.clear();
     setRestarting(null);
+    setNamespace('default');
+    setNamespaceEnvironmentId(currentEnvironment?.id || null);
+    setNamespaces(['default']);
+    setImageHistoryTarget(null);
+    setLogTarget(null);
   }, [currentEnvironment?.id]);
+
+  useEffect(() => {
+    if (!currentEnvironment) return;
+    let cancelled = false;
+    setNamespacesLoading(true);
+    getDeploymentNamespaces()
+      .then((items) => {
+        if (cancelled) return;
+        setNamespaces(Array.from(new Set(['default', ...items])).sort((left, right) => left.localeCompare(right)));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
+        message.error(`获取命名空间失败: ${errorMessage || '未知错误'}`);
+      })
+      .finally(() => {
+        if (!cancelled) setNamespacesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentEnvironment?.id, message]);
 
   const fetchDeployments = useCallback((name: string) => {
     if (!currentEnvironment) {
@@ -139,7 +169,7 @@ const DeploymentListPage: React.FC = () => {
     const requestSeq = ++requestSeqRef.current;
     setLoading(true);
     setLoadError(null);
-    getDeployments({ name })
+    getDeployments({ name, namespace })
       .then((data) => {
         if (requestSeq !== requestSeqRef.current) {
           return;
@@ -160,17 +190,17 @@ const DeploymentListPage: React.FC = () => {
           setLoading(false);
         }
       });
-  }, [currentEnvironment, message]);
+  }, [currentEnvironment, message, namespace]);
 
   useEffect(() => {
     // 仅在首次加载、环境切换或用户明确提交搜索时请求。
-    if (currentEnvironment) {
+    if (currentEnvironment && namespaceEnvironmentId === currentEnvironment.id) {
       fetchDeployments(filter);
       return;
     }
     setAllDeployments([]);
     setRolloutOperations({});
-  }, [fetchDeployments, currentEnvironment, filter, searchRevision]);
+  }, [fetchDeployments, currentEnvironment, filter, namespace, namespaceEnvironmentId, searchRevision]);
 
   const handleSearch = (value: string) => {
     const keyword = value.trim();
@@ -181,18 +211,19 @@ const DeploymentListPage: React.FC = () => {
   };
 
   // “查看日志”按钮点击处理
-  const handleViewLogs = (deploymentName: string | undefined) => {
+  const handleViewLogs = (deploymentName: string | undefined, deploymentNamespace?: string) => {
     if (!deploymentName) {
       message.error('无法查看日志：应用名称未知。');
       return;
     }
-    setLogTarget(deploymentName);
+    setLogTarget({ name: deploymentName, namespace: deploymentNamespace || namespace });
     setLogViewerVisible(true);
   };
 
   const trackRolloutProgress = useCallback(
     async (
       deploymentName: string,
+      targetNamespace: string,
       operationName: OperationName,
       targetGeneration?: number | null,
       previousImages?: DeploymentImage[],
@@ -205,13 +236,13 @@ const DeploymentListPage: React.FC = () => {
       let failureMessage = '';
       const intervalMs = 3000;
       let maxAttempts = 40;
-      const operationKey = `${environmentId}:${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
-      const stateKey = rolloutOperationKey(environmentId, deploymentName);
+      const operationKey = `${environmentId}:${targetNamespace}:${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
+      const stateKey = rolloutOperationKey(environmentId, targetNamespace, deploymentName);
       blockedPromptedRef.current.delete(operationKey);
 
       for (let i = 0; i < maxAttempts; i += 1) {
         if (currentEnvironmentIdRef.current !== environmentId) return;
-        const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration);
+        const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration, targetNamespace);
         if (currentEnvironmentIdRef.current !== environmentId) return;
         maxAttempts = Math.max(
           maxAttempts,
@@ -222,7 +253,7 @@ const DeploymentListPage: React.FC = () => {
           finalDeployment = target;
           setAllDeployments((prev) =>
             prev.map((item) =>
-              item.name === deploymentName ? { ...item, ...target } : item,
+              item.name === deploymentName && item.namespace === targetNamespace ? { ...item, ...target } : item,
             ),
           );
           finalPhase = status.phase;
@@ -262,6 +293,7 @@ const DeploymentListPage: React.FC = () => {
               onOk: () => setRecoveryRequest({
                 environmentId,
                 deploymentName,
+                namespace: targetNamespace,
                 previousImages,
                 targetGeneration: status.targetGeneration,
               }),
@@ -293,7 +325,7 @@ const DeploymentListPage: React.FC = () => {
             okText: '回退到发布前镜像',
             cancelText: '暂不处理',
             okButtonProps: { danger: true },
-            onOk: () => setRecoveryRequest({ environmentId, deploymentName, previousImages }),
+            onOk: () => setRecoveryRequest({ environmentId, deploymentName, namespace: targetNamespace, previousImages }),
           });
         }
       } else {
@@ -317,6 +349,7 @@ const DeploymentListPage: React.FC = () => {
         const current = await getDeploymentRolloutStatus(
           recoveryRequest.deploymentName,
           recoveryRequest.targetGeneration,
+          recoveryRequest.namespace,
         );
         if (recoveryRequest.environmentId !== currentEnvironmentIdRef.current) return;
         if (current.phase === 'completed') {
@@ -325,7 +358,7 @@ const DeploymentListPage: React.FC = () => {
         }
         setRolloutOperations((prev) => ({
           ...prev,
-          [rolloutOperationKey(recoveryRequest.environmentId, recoveryRequest.deploymentName)]: {
+          [rolloutOperationKey(recoveryRequest.environmentId, recoveryRequest.namespace, recoveryRequest.deploymentName)]: {
             phase: 'progressing',
             operationName: '故障回退',
             diagnostics: [],
@@ -334,6 +367,7 @@ const DeploymentListPage: React.FC = () => {
         const result = await rollbackDeploymentImages(
           recoveryRequest.deploymentName,
           recoveryRequest.previousImages,
+          recoveryRequest.namespace,
         );
         if (!cancelled) {
           message.loading({
@@ -342,6 +376,7 @@ const DeploymentListPage: React.FC = () => {
           });
           void trackRolloutProgress(
             recoveryRequest.deploymentName,
+            recoveryRequest.namespace,
             '故障回退',
             result.targetGeneration,
           );
@@ -360,12 +395,13 @@ const DeploymentListPage: React.FC = () => {
   }, [message, recoveryRequest, trackRolloutProgress]);
 
   // “重启”按钮点击处理
-  const handleRestart = (deploymentName: string | undefined) => {
+  const handleRestart = (deploymentName: string | undefined, deploymentNamespace?: string) => {
     if (!deploymentName) {
       message.error('无法重启：应用名称未知。');
       console.error('Attempted to restart a deployment with an undefined name.');
       return;
     }
+    const targetNamespace = deploymentNamespace || namespace;
 
     modal.confirm({
       title: '确认重启',
@@ -376,12 +412,12 @@ const DeploymentListPage: React.FC = () => {
         console.log(`[Restart] User confirmed. Restarting ${deploymentName}...`);
         setRestarting(deploymentName);
         try {
-          const result = await restartDeployment(deploymentName);
+          const result = await restartDeployment(deploymentName, targetNamespace);
           message.loading({
             content: `应用 "${deploymentName}" 已发送重启指令，正在后台跟踪重启进度...`,
             duration: 2,
           });
-          void trackRolloutProgress(deploymentName, '重启', result.targetGeneration);
+          void trackRolloutProgress(deploymentName, targetNamespace, '重启', result.targetGeneration);
         } catch (error: unknown) {
           console.error('[Restart] Caught an error:', error);
           const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
@@ -398,11 +434,11 @@ const DeploymentListPage: React.FC = () => {
     });
   };
 
-  const handleOpenImageHistory = async (deploymentName: string | undefined) => {
+  const handleOpenImageHistory = async (deploymentName: string | undefined, deploymentNamespace?: string) => {
     if (!deploymentName) { message.error('无法查看镜像历史：应用名称未知。'); return; }
     setImageHistoryTarget(deploymentName); setImageHistory(null); setSelectedImageVersionId(null); setRollbackConfirmation(''); setImageHistoryLoading(true);
     try {
-      const history = await getDeploymentImageHistory(deploymentName);
+      const history = await getDeploymentImageHistory(deploymentName, deploymentNamespace || namespace);
       setImageHistory(history);
       const recommended = history.imageVersions.find((item) => !item.isCurrent);
       setSelectedImageVersionId(recommended?.id ?? null);
@@ -418,11 +454,12 @@ const DeploymentListPage: React.FC = () => {
     if (!target) return;
     setRollingBack(true);
     try {
-      const result = await rollbackDeploymentImages(imageHistoryTarget, target.images);
+      const result = await rollbackDeploymentImages(imageHistoryTarget, target.images, imageHistory.namespace || namespace);
       message.loading({ content: `应用 "${imageHistoryTarget}" 已开始回退镜像，正在跟踪发布状态...`, duration: 2 });
       setImageHistoryTarget(null);
       void trackRolloutProgress(
         imageHistoryTarget,
+        imageHistory.namespace || namespace,
         '镜像回退',
         result.targetGeneration,
         result.previousImages,
@@ -465,7 +502,7 @@ const DeploymentListPage: React.FC = () => {
       width: 190,
       render: (_: unknown, record: Deployment) => {
         const operation = record.name && currentEnvironment?.id
-          ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, record.name)]
+          ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, record.namespace || namespace, record.name)]
           : undefined;
         if (operation?.phase === 'failed') {
           const diagnostic = operation.diagnostics[0];
@@ -517,9 +554,9 @@ const DeploymentListPage: React.FC = () => {
       align: 'center' as const,
       render: (_: unknown, record: Deployment) => (
         <Space size={4}>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name)} loading={restarting === record.name}>重启</Button>
-          <Button size="small" onClick={() => handleOpenImageHistory(record.name)}>镜像回退</Button>
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(record.name)}>日志</Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name, record.namespace)} loading={restarting === record.name}>重启</Button>
+          <Button size="small" onClick={() => handleOpenImageHistory(record.name, record.namespace)}>镜像回退</Button>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(record.name, record.namespace)}>日志</Button>
         </Space>
       ),
     },
@@ -529,7 +566,7 @@ const DeploymentListPage: React.FC = () => {
     const summary = { completed: 0, progressing: 0, blocked: 0, failed: 0 };
     allDeployments.forEach((deployment) => {
       const operation = deployment.name && currentEnvironment
-        ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, deployment.name)]
+        ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, deployment.namespace || namespace, deployment.name)]
         : undefined;
       const phase = operation?.phase === 'progressing' ? 'progressing' : operation?.phase || getRolloutPhase(deployment);
       if (phase === 'completed') summary.completed += 1;
@@ -559,6 +596,22 @@ const DeploymentListPage: React.FC = () => {
       <FilterBar
         actions={<Button onClick={() => handleSearch(filterInput)} loading={loading}>刷新</Button>}
       >
+        <Select
+          showSearch
+          optionFilterProp="label"
+          value={namespace}
+          loading={namespacesLoading}
+          onChange={(value) => {
+            setNamespace(value);
+            setAllDeployments([]);
+            setRolloutOperations({});
+            setImageHistoryTarget(null);
+            setLogTarget(null);
+          }}
+          options={namespaces.map((item) => ({ value: item, label: item }))}
+          style={{ width: 240, maxWidth: '100%' }}
+          placeholder="选择命名空间"
+        />
         <Input.Search
           placeholder="按名称模糊筛选..."
           value={filterInput}
@@ -574,7 +627,7 @@ const DeploymentListPage: React.FC = () => {
         columns={columns}
         dataSource={allDeployments}
         loading={loading}
-        rowKey="name"
+        rowKey={(record) => `${record.namespace || namespace}/${record.name || ''}`}
         tableLayout="fixed"
         scroll={{ x: 1550 }}
         pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
@@ -617,7 +670,8 @@ const DeploymentListPage: React.FC = () => {
       {logTarget && (
         <LogViewer
           environmentId={currentEnvironment!.id}
-          deploymentName={logTarget}
+          deploymentName={logTarget.name}
+          namespace={logTarget.namespace}
           visible={logViewerVisible}
           onClose={() => setLogViewerVisible(false)}
         />
