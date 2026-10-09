@@ -2,7 +2,7 @@ import React, { useContext, useState } from 'react';
 import { Select, Spin, Alert, Space, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
-import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, AlertOutlined } from '@ant-design/icons';
+import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, AlertOutlined, RocketOutlined } from '@ant-design/icons';
 import DeploymentListPage from './pages/DeploymentListPage';
 import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
 import DataQueryPage from './pages/DataQueryPage';
@@ -30,6 +30,7 @@ import SslCertificateExportPage from './pages/SslCertificateExportPage';
 import MonitoringRequestsPage from './pages/MonitoringRequestsPage';
 import KmsValuesPage from './pages/KmsValuesPage';
 import OncallPage from './pages/OncallPage';
+import CicdCatalogPage from './pages/CicdCatalogPage';
 import { EnvironmentProvider } from './contexts/EnvironmentContext';
 import { EnvironmentContext } from './contexts/EnvironmentContextValue';
 import { AuthProvider } from './contexts/AuthContext';
@@ -128,6 +129,7 @@ const AppLayout: React.FC = () => {
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
     sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
     kmsValues: { key: '/kms-values', label: 'KMS 配置加解密', icon: <SafetyCertificateOutlined />, permission: 'menu:kms-values' },
+    cicdRuns: { key: '/cicd-runs', label: 'CI/CD 执行中心', icon: <RocketOutlined />, permission: 'menu:cicd-runs' },
     oncall: { key: '/oncall', label: 'Oncall 告警', icon: <AlertOutlined />, permission: 'menu:oncall' },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
     siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
@@ -232,7 +234,7 @@ const AppLayout: React.FC = () => {
     '/ops-tools',
     '运维工具',
     <RobotOutlined />,
-    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues],
+    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues, menuItems.cicdRuns],
   );
 
   const systemManagementChildren: NonNullable<MenuProps['items']> = [
@@ -297,7 +299,7 @@ const AppLayout: React.FC = () => {
     ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
     ...(['/lines', '/line-onboarding', '/admin-site-ingress'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
     ...(['/site-monitors', '/monitoring-requests', '/oncall'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
-    ...(['/data-query', '/ai-ops'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
+    ...(['/data-query', '/ai-ops', '/ssl-certificates', '/kms-values', '/cicd-runs'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
     ...(['/environments', '/site-conf', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
@@ -344,6 +346,7 @@ const AppLayout: React.FC = () => {
               <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
               <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
               <Route path="/kms-values" element={<ProtectedRoute required={['menu:kms-values']}><KmsValuesPage /></ProtectedRoute>} />
+              <Route path="/cicd-runs" element={<ProtectedRoute required={['menu:cicd-runs']}><CicdCatalogPage /></ProtectedRoute>} />
               <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
               <Route
                 path="/cert-study/sap-c02"

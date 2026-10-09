@@ -1704,3 +1704,127 @@ export const listMonitoringJenkinsExecutions = async (requestId: string) => (awa
 export const refreshMonitoringJenkinsExecution = async (requestId: string, id: number) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions/${id}/refresh`)).data as MonitoringJenkinsExecution;
 export const mergeMonitoringWorkload = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/merge-workload`)).data as MonitoringRequest;
 export const refreshMonitoringWorkloadStatus = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/workload-status/refresh`)).data as MonitoringRequest;
+
+export type CicdActionType = 'BUILD_DEPLOY' | 'PACKAGE_PUBLISH';
+export type CicdParameterSchema = {
+  version: number;
+  parameters: Array<{ name: string; type: 'string' | 'boolean' | 'enum' | 'git_branch'; required?: boolean; default?: unknown; pattern?: string; maxLength?: number; choices?: string[] }>;
+};
+export type CicdEnvironmentBinding = {
+  environment_id: string;
+  action_type: CicdActionType;
+  provider_type: string;
+  executor_key: string | null;
+  executor_display_name?: string | null;
+  job_name_pattern?: string | null;
+  enabled: boolean;
+  read_only: boolean;
+};
+export type CicdCatalogJob = {
+  job_key: string;
+  environment_id: string;
+  action_type: CicdActionType;
+  executor_key: string;
+  jenkins_job_full_name: string;
+  display_name: string;
+  service_key: string;
+  parameter_schema: CicdParameterSchema;
+  enabled: boolean;
+  requires_approval: boolean;
+  concurrency_policy: string;
+};
+export type CicdExecutor = {
+  executor_key: string;
+  provider_type: string;
+  display_name: string;
+  enabled: boolean;
+  read_only: boolean;
+  configured: boolean;
+  host: string;
+};
+export type CicdExecutorDiagnostic = {
+  executorKey: string;
+  checkedAt: string;
+  latencyMs: number;
+  version?: string | null;
+  identity: { name?: string | null; authenticated: boolean; authorities: string[] };
+  api: { root: boolean; crumb: boolean; queue: boolean };
+  jobCount: number;
+  disabledJobCount: number;
+  readOnly: boolean;
+};
+export type CicdDiscoveredJob = {
+  name: string;
+  color?: string | null;
+  disabled: boolean;
+  registered: boolean;
+  catalog?: {
+    jobKey: string;
+    displayName: string;
+    serviceKey: string;
+    enabled: boolean;
+    requiresApproval: boolean;
+    concurrencyPolicy: string;
+  } | null;
+};
+export type CicdDiscoveredJobs = {
+  environmentId: string;
+  actionType: CicdActionType;
+  executorKey: string;
+  filterMode: 'ALL' | 'PATTERN';
+  pattern?: string | null;
+  total: number;
+  jobs: CicdDiscoveredJob[];
+};
+export type CicdDiscoveredJobDetail = {
+  environmentId: string;
+  actionType: CicdActionType;
+  executorKey: string;
+  name: string;
+  color?: string | null;
+  buildable: boolean;
+  concurrentBuild: boolean;
+  remoteParameters: Array<{ name: string; type: string; default: unknown; choices?: string[] }>;
+  registered: boolean;
+  catalog?: {
+    jobKey: string;
+    enabled: boolean;
+    requiresApproval: boolean;
+    concurrencyPolicy: string;
+    schema: CicdParameterSchema;
+    reconciliation: { matches: boolean; missing: string[]; unexpected: string[]; mismatched: Array<Record<string, unknown>> };
+  } | null;
+};
+export type CicdReconciliation = {
+  environmentId: string;
+  actionType: CicdActionType;
+  executorKey: string;
+  pattern: string;
+  checkedAt: string;
+  discoveredCount: number;
+  registeredCount: number;
+  unregisteredCount: number;
+  unregisteredJobs: Array<{ name: string; disabled: boolean }>;
+  jobs: Array<{
+    jobKey: string;
+    jobName: string;
+    exists: boolean;
+    buildable: boolean;
+    concurrentBuild?: boolean;
+    remoteParameters?: Array<{ name: string; type: string; default: unknown; choices?: string[] }>;
+    schema: { matches: boolean; missing: string[]; unexpected: string[]; mismatched: Array<Record<string, unknown>> };
+  }>;
+};
+
+export const getCicdEnvironmentBindings = async () => (await api.get('/cicd/environment-bindings')).data as CicdEnvironmentBinding[];
+export const getCicdExecutors = async () => (await api.get('/cicd/executors')).data as CicdExecutor[];
+export const getCicdJobs = async (environmentId: string, actionType: CicdActionType, keyword?: string) =>
+  (await api.get('/cicd/jobs', { params: { environmentId, actionType, ...(keyword ? { keyword } : {}) } })).data as CicdCatalogJob[];
+export const discoverCicdJobs = async (environmentId: string, actionType: CicdActionType, keyword?: string) =>
+  (await api.get('/cicd/discovered-jobs', { params: { environmentId, actionType, ...(keyword ? { keyword } : {}) } })).data as CicdDiscoveredJobs;
+export const getCicdDiscoveredJobDetail = async (environmentId: string, actionType: CicdActionType, jobName: string) =>
+  (await api.get('/cicd/job-detail', { params: { environmentId, actionType, jobName } })).data as CicdDiscoveredJobDetail;
+export const diagnoseCicdExecutor = async (executorKey: string) =>
+  (await api.get(`/cicd/executors/${encodeURIComponent(executorKey)}/diagnostics`)).data as CicdExecutorDiagnostic;
+export const reconcileCicdCatalog = async (environmentId: string, actionType: CicdActionType) =>
+  (await api.get('/cicd/reconciliation', { params: { environmentId, actionType } })).data as CicdReconciliation;
