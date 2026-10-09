@@ -6,7 +6,8 @@ import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 
 const { Text, Paragraph } = Typography;
 const DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
-const K8S_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const K8S_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const K8S_NAME_MAX_LENGTH = 63;
 
 type Tenant = { id: number; name: string };
 type Candidate = { namespace: string; name: string; namePrefix?: string; ruleHosts?: string[]; lbAddresses?: string[]; createdAt?: string | null };
@@ -143,6 +144,7 @@ const AdminSiteIngressPage: React.FC = () => {
     if (!DOMAIN_PATTERN.test(normalizedDomain)) return message.error('请输入有效的管理端域名');
     const name = ingressName.trim().toLowerCase() || buildAdminIngressName(selectedCandidate, normalizedDomain);
     if (name && !K8S_NAME_PATTERN.test(name)) return message.error('Ingress 名称只能使用小写字母、数字和中划线');
+    if (name.length > K8S_NAME_MAX_LENGTH) return message.error(`Ingress 名称长度为 ${name.length}，不能超过 ${K8S_NAME_MAX_LENGTH} 个字符`);
     setPreviewing(true); resetDownstream();
     try {
       const namePrefix = getAdminIngressNamePrefix(selectedCandidate, normalizedDomain);
@@ -213,7 +215,7 @@ const AdminSiteIngressPage: React.FC = () => {
     </Card>
     <Card title="2. 生成并编辑 Ingress YAML">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space wrap><Input value={ingressName} onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可修改；留空自动生成）" style={{ width: 320 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={operationInProgress || !selectedCandidate || !normalizedDomain}>生成 YAML 预览</Button></Space>
+        <Space wrap><Input value={ingressName} maxLength={K8S_NAME_MAX_LENGTH} showCount onChange={(event) => { setIngressName(event.target.value); resetDownstream(); }} placeholder="新 Ingress 名称（可修改；留空自动生成）" style={{ width: 360 }} /><Button type="primary" loading={previewing} onClick={() => void generatePreview()} disabled={operationInProgress || !selectedCandidate || !normalizedDomain}>生成 YAML 预览</Button></Space>
         {preview ? <Input.TextArea value={manifestYaml} onChange={(event) => { setManifestYaml(event.target.value); setDryRun(undefined); setTenantDomain(undefined); setCreated(undefined); }} rows={18} spellCheck={false} /> : <Text type="secondary">选择源站并填写域名后生成预览。</Text>}
       </Space>
     </Card>
