@@ -23,6 +23,8 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:admin-site-onboarding', name: '管理端网站 Ingress' },
   { key: 'menu:site-monitors', name: '站点监控' },
   { key: 'menu:monitoring-requests', name: '监控资源申请' },
+  { key: 'menu:cicd-runs', name: 'CI/CD 执行中心' },
+  { key: 'cicd-config:manage', name: 'CI/CD 目录与连接诊断' },
   { key: 'monitoring-requests:approve', name: '监控资源申请审批' },
   { key: 'monitoring-requests:manage', name: '监控资源申请管理' },
   { key: 'menu:access-control', name: '账号管理' },

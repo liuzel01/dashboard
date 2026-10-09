@@ -26,6 +26,7 @@ import { SslCertificatesModule } from './ssl-certificates/ssl-certificates.modul
 import { MonitoringRequestsModule } from './monitoring-requests/monitoring-requests.module';
 import { KmsValuesModule } from './kms-values/kms-values.module';
 import { OncallModule } from './oncall/oncall.module';
+import { CicdModule } from './cicd/cicd.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { OncallModule } from './oncall/oncall.module';
     MonitoringRequestsModule,
     KmsValuesModule,
     OncallModule,
+    CicdModule,
   ],
   controllers: [AppController],
   providers: [AppService],
