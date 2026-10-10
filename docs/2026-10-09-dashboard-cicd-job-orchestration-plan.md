@@ -1,6 +1,6 @@
 # Dashboard CI/CD Job 编排与执行中心开发计划
 
-> 状态：Phase 0 已完成首轮真实链路盘点；Phase 1 本地实现与数据库迁移已完成，待录入专用机器凭据后进行页面连接验收
+> 状态：Phase 0-4 功能已落地；Phase 5 按已接受的外部系统能力边界完成；真实链路验收、自动化覆盖和遗留项见各 Phase 状态
 > 日期：2026-10-09
 > 适用范围：Dashboard、各环境 Jenkins、业务构建/部署 Job、Jenkins 内制品发布 Job，以及后续外部推包系统
 
@@ -303,7 +303,7 @@ sequenceDiagram
 | `menu:cicd-runs` | 查看 CI/CD 执行中心 |
 | `cicd-runs:execute-build` | 发起构建部署 |
 | `cicd-runs:execute-publish` | 发起制品推包 |
-| `cicd-runs:approve` | 审批需要审批的任务 |
+| `cicd-runs:approve` | 后续增强占位：审批需要审批的任务（当前尚未实现） |
 | `cicd-runs:view-all` | 查看其他用户的执行 |
 | `cicd-runs:cancel` | 取消排队或运行中的构建 |
 | `cicd-config:manage` | 管理执行器绑定与 Job Catalog |
@@ -311,8 +311,8 @@ sequenceDiagram
 建议风险规则：
 
 - 构建部署和制品推包分开授权；
-- 生产环境默认需要非申请人审批；
-- 用户不能审批自己的请求；
+- 后续接入正式审批时，生产环境默认需要非申请人审批；
+- 后续审批状态机必须禁止申请人审批自己的请求，审批通过后签发一次性、有限时效的执行授权，不直接自动发布；
 - 推包到正式 Maven/Nexus 仓库默认需要确认说明；
 - 一期不接受自由文本 Job、任意参数和“重放原始 HTTP 请求”；Job 必须来自后端实时发现目录；
 - 可选的 MFA 应放在高风险审批/执行确认处，而不是普通日志查看处；
@@ -380,6 +380,11 @@ interface CicdExecutionProvider {
 
 验收：每个首批 Job 都有环境、执行器、action type、参数 Schema、权限和测试证据，且没有占位 Job 名或参数。
 
+- **功能完成：** 已完成 hashex/hashdev、mgbx、icoin、tb 的 Jenkins、机器身份、Job 范围与参数契约盘点。
+- **人工验收状态：** whoAmI、crumb、queue、Job 读取和权限范围均已按环境验证；Phase 0 不触发业务 Job。
+- **已接受边界：** 目录发现按 binding 控制；hashex/hashdev、mgbx、tb 展示对应 Jenkins 全部 Job，icoin 使用锚定前缀过滤。
+- **遗留项：** 正式审批状态机作为后续增强占位；当前由独立执行权限与明确确认承担风险控制，不阻塞现阶段验收。
+
 ### Phase 1：只读目录与连接诊断
 
 - 新增 executor、environment binding、Job catalog 数据模型；
@@ -389,6 +394,11 @@ interface CicdExecutionProvider {
 - 页面完成环境、动作、Job 受控选择和缺失配置提示。
 
 验收：Dashboard 能准确展示各 binding 允许的远端 Job；选中 Job 后读取真实参数。未在远端发现或不满足 icoin 前缀规则的 Job 不可执行。
+
+- **功能完成：** executor、environment binding、catalog、敏感 SiteConf、连接诊断和参数对账均已落地。
+- **人工验收状态：** 四套 Jenkins 的目录与参数读取已验证，未发现或越过环境过滤规则的 Job 会被后端拒绝。
+- **已接受边界：** catalog 是展示、审批和并发策略增强，不是唯一 Job 白名单；最终范围由环境 binding 与远端发现共同决定。
+- **遗留项：** Jenkins 请求逻辑仍分布在 catalog 与 runs service，尚未抽取成单一通用 Jenkins Client。
 
 当前实现（2026-10-09）：
 
@@ -414,6 +424,11 @@ interface CicdExecutionProvider {
 
 验收：从 Dashboard 触发一次受控试点构建，queue、build number、日志、结果、耗时和 Jenkins URL 全链路一致；重复提交不会产生两次构建。
 
+- **功能完成：** 触发、queue/build 同步、后台自动追踪、WebSocket 日志、取消、`clientRequestId` 幂等和同 Job 并发阻断已实现。
+- **人工验收状态：** 用户已反馈真实 Jenkins 构建链路测试通过；仓库不保存真实业务构建的 queue/build/log 内容，后续仍以 Jenkins 审计记录为准。
+- **已接受边界：** 自动化测试只使用 mock，不触发真实业务 Job；真实 Jenkins 身份、构建和产物验证保留为人工验收。
+- **遗留项：** 通用 Jenkins Client、独立运行详情页和重新执行关联模型作为后续架构与体验增强；完整错误分类仍可继续从 ServiceUnavailable 文案演进为结构化错误码，不阻塞当前构建链路验收。
+
 当前实现（2026-10-10）：
 
 - 新增 `cicd_runs`、`cicd_run_events` 和构建执行、推包执行、取消三项独立权限；迁移已在本地数据库连续执行两次验证幂等；
@@ -421,24 +436,29 @@ interface CicdExecutionProvider {
 - 使用 `clientRequestId` 防止前端重复提交，并阻止同环境、同执行器、同 Job 的活跃任务并发；
 - 支持 crumb、`buildWithParameters`/`build`、queue 到 build number、构建结果、progressive log 和 queue/build 取消；
 - 页面基于真实 Jenkins 参数渲染表单，提供执行记录、人工刷新、日志查看和取消入口；
-- 自动化测试不会触发业务 Job。首次真实构建仍需管理员在页面核对环境、Job 和参数后人工执行，并对照 Jenkins queue/build/log 完成人工验收。
+- 自动化测试不会触发业务 Job。用户已反馈首次真实构建链路测试通过；后续发布仍需操作者在页面核对环境、Job 和参数，并以 Jenkins queue/build/log 作为真实执行审计依据。
 
 ### Phase 3：Jenkins 内制品推包
 
 - 增加 `PACKAGE_PUBLISH` action type 和独立权限；
-- 为 Hash/Hashdev 推包 Job 增加 catalog 风险和审批策略；
+- 为 Hash/Hashdev 推包 Job 增加 catalog 风险策略；正式申请审批状态机保留为后续增强占位；
 - 根据 Job Schema 使用 `BRANCH_NAME` 等真实参数；
-- 增加正式仓库确认说明/审批策略；
+- 增加正式仓库确认说明；审批策略暂以独立权限和固定确认短语实现；
 - 列表和详情明确区分“构建部署”和“制品推包”。
 
-验收：试点公共包可以安全推送到目标 Nexus；构建结果和仓库侧制品版本可关联验证。
+当前范围验收：试点公共包能够通过独立发布权限和固定确认短语触发受控 Jenkins 推包；Dashboard 的 queue、build、日志和最终结果与 Jenkins 一致，Nexus 产物版本由人工核对。正式“申请 → 非申请人审批 → 一次性执行授权 → 再次确认发布”状态机为后续增强，不作为当前 Phase 3 验收阻塞。
+
+- **功能完成：** `PACKAGE_PUBLISH` 独立权限、固定确认短语、运行状态、日志、取消和审计复用已完成。
+- **人工验收状态：** 用户已反馈 Jenkins 推包链路测试通过；Nexus 产物版本仍由人工到仓库侧核对。
+- **已接受边界：** 当前使用“权限 + 明确确认”控制发布风险，不把制品仓库凭据或任意参数暴露给 Dashboard 用户；正式审批已明确延期为后续增强。
+- **遗留项：** `requires_approval`、`cicd-runs:approve` 和非申请人审批状态机目前仅保留模型/权限设计占位；Nexus 目标产物仍由人工核对。
 
 当前实现（2026-10-10）：
 
 - `PACKAGE_PUBLISH` 使用独立的 `cicd-runs:execute-publish` 权限；
 - 触发前显示高风险提示，并要求输入固定确认短语“确认推包”；
 - 推包复用相同的运行状态、幂等、并发、日志和取消模型，但在页面和记录中与构建部署明确区分；
-- 尚未自动校验 Nexus 产物，首次真实推包仍按本节验收条件人工执行和核对。
+- 尚未自动校验 Nexus 产物；用户已反馈真实推包链路测试通过，后续仍按本节当前验收条件人工核对目标仓库产物。
 
 ### Phase 4：多 Jenkins 环境
 
@@ -447,6 +467,11 @@ interface CicdExecutionProvider {
 - 不复制前端页面逻辑，只新增 executor/binding/catalog 数据。
 
 验收：切换环境后只能看到该环境允许的 Job；请求不会发送到其他环境 Jenkins。
+
+- **功能完成：** hashex/hashdev、mgbx、icoin、tb 已通过独立 executor/binding 接入同一页面与后端路由。
+- **人工验收状态：** 各 Jenkins 的身份、crumb、queue、目录范围与 Build/Cancel 权限已验证；TB 可见 121 个 Job。
+- **已接受边界：** hashex/hashdev、mgbx、tb 不做名称过滤；icoin 同时使用 Dashboard 正则和 Jenkins 项目角色限制。
+- **遗留项：** 暂无功能阻塞；新增环境时仍需人工完成机器账号、SiteConf、binding 与真实链路验收。
 
 当前实现（2026-10-10）：
 
@@ -464,6 +489,11 @@ interface CicdExecutionProvider {
 - 做跨系统幂等、回调验签或轮询退避。
 
 验收：外部任务 ID、状态、日志和 Dashboard run 一一对应，未知结果不会被误判成功。
+
+- **功能完成：** `icoin + IMAGE_BUILD_PUBLISH` 的目录读取、受控参数、异步 Worker、幂等、串行领取和结果落库已完成。
+- **人工验收状态：** 用户已反馈外部现货推包链路测试通过；目录只读验证得到 26 个服务和 1 个 Registry。
+- **已接受边界：** 当前外部系统没有任务 ID、状态、日志、取消或回调 API；未知响应严格落为 `UNKNOWN`，不自动重试、不误判成功。本轮不改造该外部系统。
+- **遗留项：** 完整异步 Provider 能力列入未来升级项，不作为当前 Phase 5 已接受范围的阻塞条件。
 
 当前实现（2026-10-10）：
 
@@ -491,15 +521,17 @@ interface CicdExecutionProvider {
 
 ### 自动化测试
 
-- 参数 Schema 校验、未知参数拒绝、默认值处理；
-- 环境 -> action -> executor/provider 路由；
-- Job 路径编码；
-- Jenkins 302/401/403/404、crumb 失败、queue 丢失、构建取消、超时；
-- queue -> build 状态机和幂等更新；
-- progressive log cursor；
-- 权限、自审禁止、并发策略、重复请求；
-- 日志脱敏；
-- Provider contract tests。
+当前 CI/CD 自动化测试共 6 个 Suite、34 个用例，全部使用 mock，不触发真实 Jenkins Job 或外部推包。
+
+- **已覆盖：** 参数 Schema、未知参数、默认值、choice、标量与长度校验；
+- **已覆盖：** 环境 Job 前缀规则、Job folder 分段编码与路径穿越拒绝；
+- **已覆盖：** Jenkins 401/403/404/500、crumb 失败、queue 响应缺失和取消失败；
+- **已覆盖：** 重复 `clientRequestId`、同 Job 活跃任务并发阻断、queue -> build -> success 状态机；
+- **已覆盖：** progressive log cursor、WebSocket 身份与日志分段、日志脱敏和 ConsoleNote 清理；
+- **已覆盖：** 后台 reconciler 分布式锁与事件去重；
+- **已覆盖：** 当前外部 Provider 的目录解析/缓存、Worker 成功落库和异常转 `UNKNOWN`；
+- **部分覆盖：** executor/provider 路由由 Service 测试覆盖关键分支，尚无真实数据库集成测试；
+- **待后续：** 浏览器组件自动化、真实 Jenkins 超时/302 差异；非申请人审批/禁止自审和未来完整异步 Provider contract tests 均属于已明确延期的增强项。
 
 ### 真实链路测试
 
