@@ -58,9 +58,9 @@ ALTER TABLE `cicd_job_catalog` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_
 INSERT INTO `cicd_executors`
   (`executor_key`, `provider_type`, `display_name`, `base_url_conf_key`, `username_conf_key`, `token_conf_key`, `timeout_conf_key`, `enabled`, `read_only`)
 VALUES
-  ('hash-jenkins', 'JENKINS', 'Hash Jenkins', 'cicd.executors.hash-jenkins.base_url', 'cicd.executors.hash-jenkins.username', 'cicd.executors.hash-jenkins.api_token', 'cicd.executors.hash-jenkins.timeout_ms', 1, 1),
-  ('mgbx-jenkins', 'JENKINS', 'MGBX Jenkins', 'cicd.executors.mgbx-jenkins.base_url', 'cicd.executors.mgbx-jenkins.username', 'cicd.executors.mgbx-jenkins.api_token', 'cicd.executors.mgbx-jenkins.timeout_ms', 1, 1),
-  ('icoin-jenkins', 'JENKINS', 'iCoin Jenkins', 'cicd.executors.icoin-jenkins.base_url', 'cicd.executors.icoin-jenkins.username', 'cicd.executors.icoin-jenkins.api_token', 'cicd.executors.icoin-jenkins.timeout_ms', 1, 1)
+  ('hash-jenkins', 'JENKINS', 'Hash Jenkins', 'cicd.executors.hash-jenkins.base_url', 'cicd.executors.hash-jenkins.username', 'cicd.executors.hash-jenkins.api_token', 'cicd.executors.hash-jenkins.timeout_ms', 1, 0),
+  ('mgbx-jenkins', 'JENKINS', 'MGBX Jenkins', 'cicd.executors.mgbx-jenkins.base_url', 'cicd.executors.mgbx-jenkins.username', 'cicd.executors.mgbx-jenkins.api_token', 'cicd.executors.mgbx-jenkins.timeout_ms', 1, 0),
+  ('icoin-jenkins', 'JENKINS', 'iCoin Jenkins', 'cicd.executors.icoin-jenkins.base_url', 'cicd.executors.icoin-jenkins.username', 'cicd.executors.icoin-jenkins.api_token', 'cicd.executors.icoin-jenkins.timeout_ms', 1, 0)
 ON DUPLICATE KEY UPDATE
   `provider_type` = VALUES(`provider_type`),
   `display_name` = VALUES(`display_name`),
