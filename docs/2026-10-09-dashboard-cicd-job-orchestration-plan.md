@@ -465,9 +465,18 @@ interface CicdExecutionProvider {
 
 验收：外部任务 ID、状态、日志和 Dashboard run 一一对应，未知结果不会被误判成功。
 
-进入条件评估（2026-10-10）：暂不具备真实接入条件。当前仓库和已提供配置中没有外部推包网站的 API 地址、认证方式、参数 Schema、任务 ID、状态/日志接口、取消语义或回调验签信息。现有数据模型可以复用，但在这些契约确认前直接开发只会把网页操作流程硬编码进 Dashboard。
+当前实现（2026-10-10）：
 
-Phase 5 开工前至少需要：
+- 首个 Provider 为 `EXTERNAL_SPOT_PUBLISH`，绑定 `icoin + IMAGE_BUILD_PUBLISH`，与 Jenkins 的 Maven/Nexus `PACKAGE_PUBLISH` 明确区分；
+- Dashboard 后端使用敏感 SiteConf 中的登录地址、账号和密码调用 `/signin`，解析真实 HTML 服务目录；前端只能选择目录中的服务、Registry 和受格式限制的 Git Ref，不能修改 repo；
+- 当前线上目录只读验证成功：HTTP 200，解析出 26 个可用服务和 1 个 Registry；
+- 触发操作先写入 `cicd_runs` 和 `cicd_external_tasks`，后台 Worker 串行领取任务，再调用外部 `/build`；浏览器请求不等待长时间构建；
+- 本地 UUID 提供防双击幂等；同服务存在 `QUEUED/RUNNING/UNKNOWN` 时禁止再次触发；
+- 外部系统不提供任务 ID、状态查询、日志或取消接口。因此网络超时、Dashboard Worker 中断和无法识别的响应一律标记 `UNKNOWN`，不自动重试；页面明确显示无实时日志且禁用取消；
+- 成功时保存并展示外部系统返回的镜像 Tag。账号、密码和 repo 不返回浏览器，也不写入运行参数；
+- 已接受当前外部系统的能力边界，本阶段不修改其代码和安全机制。
+
+未来若要升级为完整异步 Provider，仍需要：
 
 1. 外部系统基础 URL、测试环境和稳定机器身份认证方式；
 2. 创建推包任务的请求/响应示例，以及业务幂等键；
