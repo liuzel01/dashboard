@@ -1,7 +1,13 @@
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
-import { PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
+import { BellOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
+import {
+  DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
+  desktopNotificationPermission,
+  requestDesktopNotificationPermission,
+} from '../services/desktopNotifications';
 import { AuthContext } from '../contexts/AuthContextValue';
+import { CicdRealtimeContext } from '../contexts/CicdRealtimeContextValue';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import {
   diagnoseCicdExecutor,
@@ -39,6 +45,7 @@ const CicdCatalogPage: React.FC = () => {
   const { message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
   const { permissions } = useContext(AuthContext);
+  const { socket, connected: realtimeConnected } = useContext(CicdRealtimeContext);
   const canManage = permissions.includes('cicd-config:manage');
   const canExecuteBuild = permissions.includes('cicd-runs:execute-build');
   const canExecutePublish = permissions.includes('cicd-runs:execute-publish');
@@ -61,6 +68,13 @@ const CicdCatalogPage: React.FC = () => {
   const [executing, setExecuting] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logText, setLogText] = useState('');
+  const [logRunId, setLogRunId] = useState<string>();
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+    desktopNotificationPermission,
+  );
+  const logRunIdRef = useRef<string | undefined>(undefined);
+  const logOffsetRef = useRef(0);
+  const logContainerRef = useRef<HTMLPreElement | null>(null);
 
   useEffect(() => {
     Promise.all([getCicdEnvironmentBindings(), getCicdExecutors()])
@@ -88,6 +102,59 @@ const CicdCatalogPage: React.FC = () => {
   }, [currentEnvironment?.id, message]);
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
+
+  useEffect(() => {
+    const sync = () => setNotificationPermission(desktopNotificationPermission());
+    window.addEventListener(DESKTOP_NOTIFICATION_PERMISSION_CHANGED, sync);
+    return () => window.removeEventListener(DESKTOP_NOTIFICATION_PERMISSION_CHANGED, sync);
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleRunUpdated = (run: CicdRun) => {
+      if (run.environment_id === currentEnvironment?.id) {
+        setRuns((previous) => {
+          const found = previous.some((item) => item.run_id === run.run_id);
+          return found
+            ? previous.map((item) => item.run_id === run.run_id ? run : item)
+            : [run, ...previous].slice(0, 100);
+        });
+      }
+    };
+    const handleLogChunk = (payload: { runId: string; text: string; nextStart?: number }) => {
+      if (payload.runId === logRunIdRef.current) {
+        logOffsetRef.current = Math.max(logOffsetRef.current, Number(payload.nextStart) || 0);
+        setLogText((previous) => previous + payload.text);
+      }
+    };
+    const handleLogError = (payload: { runId: string; message: string }) => {
+      if (payload.runId === logRunIdRef.current) message.error(payload.message || 'Jenkins 日志追踪失败');
+    };
+    const handleLogEnd = (payload: { runId: string; nextStart?: number }) => {
+      if (payload.runId === logRunIdRef.current) {
+        logOffsetRef.current = Math.max(logOffsetRef.current, Number(payload.nextStart) || 0);
+        setLogText((previous) => `${previous}\n--- 日志追踪已结束 ---\n`);
+      }
+    };
+    socket.on('cicd-run-updated', handleRunUpdated);
+    socket.on('cicd-log-chunk', handleLogChunk);
+    socket.on('cicd-log-error', handleLogError);
+    socket.on('cicd-log-end', handleLogEnd);
+    if (realtimeConnected && logRunIdRef.current) {
+      socket.emit('cicd-log-subscribe', { runId: logRunIdRef.current, start: logOffsetRef.current });
+    }
+    return () => {
+      if (logRunIdRef.current) socket.emit('cicd-log-unsubscribe', { runId: logRunIdRef.current });
+      socket.off('cicd-run-updated', handleRunUpdated);
+      socket.off('cicd-log-chunk', handleLogChunk);
+      socket.off('cicd-log-error', handleLogError);
+      socket.off('cicd-log-end', handleLogEnd);
+    };
+  }, [currentEnvironment?.id, message, realtimeConnected, socket]);
+
+  useEffect(() => {
+    if (logOpen && logContainerRef.current) logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+  }, [logOpen, logText]);
 
   const binding = useMemo(
     () => bindings.find((item) => item.environment_id === currentEnvironment?.id && item.action_type === actionType),
@@ -140,8 +207,50 @@ const CicdCatalogPage: React.FC = () => {
   };
 
   const showLog = async (runId: string) => {
-    try { const result = await getCicdRunLog(runId); setLogText(result.text || '暂无日志'); setLogOpen(true); }
+    logRunIdRef.current = runId;
+    logOffsetRef.current = 0;
+    setLogRunId(runId);
+    setLogText('');
+    setLogOpen(true);
+    if (socket?.connected && realtimeConnected) {
+      socket.emit('cicd-log-subscribe', { runId, start: 0 });
+      return;
+    }
+    try { const result = await getCicdRunLog(runId); setLogText(result.text || '暂无日志'); }
     catch (error) { message.error(errorMessage(error, 'Jenkins 日志读取失败')); }
+  };
+
+  const closeLog = () => {
+    if (logRunId) socket?.emit('cicd-log-unsubscribe', { runId: logRunId });
+    setLogOpen(false);
+    setLogRunId(undefined);
+    logRunIdRef.current = undefined;
+    logOffsetRef.current = 0;
+  };
+
+  const enableNotifications = async () => {
+    const result = await requestDesktopNotificationPermission();
+    setNotificationPermission(result.permission);
+    if (result.reason === 'unsupported') {
+      message.warning('当前浏览器不支持桌面通知');
+      return;
+    }
+    if (result.reason === 'insecure') {
+      message.warning('当前地址不支持桌面通知，请使用 HTTPS 访问 Dashboard');
+      return;
+    }
+    if (result.reason === 'denied') {
+      Modal.info({
+        title: '桌面通知已被浏览器阻止',
+        content: '请点击浏览器地址栏左侧的站点设置，将“通知”改为“允许”，然后刷新页面。',
+      });
+      return;
+    }
+    if (result.permission === 'granted') {
+      new Notification('Dashboard 通知已开启', { body: 'CI/CD 任务完成后将在此处提醒。', tag: 'cicd-notification-test' });
+    } else if (result.permission === 'denied') {
+      message.warning('浏览器已拒绝通知，请在站点设置中重新允许');
+    }
   };
 
   const runDiagnostic = async () => {
@@ -191,6 +300,21 @@ const CicdCatalogPage: React.FC = () => {
             style={{ width: 360 }}
             options={jobs.map((job) => ({ value: job.name, label: `${job.name}${job.disabled ? '（已禁用）' : ''}` , disabled: job.disabled }))}
           />
+        </Space>
+        <Space direction="vertical" size={4}>
+          <Text type="secondary">桌面通知</Text>
+          <Button
+            icon={<BellOutlined />}
+            onClick={enableNotifications}
+            disabled={notificationPermission === 'granted'}
+            type={notificationPermission === 'default' ? 'primary' : 'default'}
+          >
+            {notificationPermission === 'granted'
+              ? '已开启'
+              : notificationPermission === 'denied'
+                ? '已被阻止'
+                : '开启通知'}
+          </Button>
         </Space>
       </Space>
     </Card>
@@ -254,7 +378,10 @@ const CicdCatalogPage: React.FC = () => {
       >{actionType === 'BUILD_DEPLOY' ? '触发构建部署' : actionType === 'IMAGE_BUILD_PUBLISH' ? '触发现货镜像构建推包' : '触发制品推包'}</Button>
     </Card>}
 
-    <Card title="最近执行" extra={<Button icon={<ReloadOutlined />} onClick={loadRuns}>刷新列表</Button>}>
+    <Card title="最近执行" extra={<Space>
+      <Tag color={realtimeConnected ? 'success' : 'default'}>{realtimeConnected ? '实时追踪已连接' : '实时追踪未连接'}</Tag>
+      <Button icon={<ReloadOutlined />} onClick={loadRuns}>刷新列表</Button>
+    </Space>}>
       <Table size="small" rowKey="run_id" dataSource={runs} pagination={{ pageSize: 10 }} columns={[
         { title: '时间', dataIndex: 'created_at', width: 170 },
         { title: '类型', dataIndex: 'action_type', render: (value) => value === 'PACKAGE_PUBLISH' ? '制品推包' : value === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署' },
@@ -269,8 +396,8 @@ const CicdCatalogPage: React.FC = () => {
       ]} />
     </Card>
 
-    <Modal title="Jenkins 控制台日志" open={logOpen} onCancel={() => setLogOpen(false)} footer={<Button onClick={() => setLogOpen(false)}>关闭</Button>} width={900}>
-      <pre style={{ maxHeight: 560, overflow: 'auto', whiteSpace: 'pre-wrap', background: '#111', color: '#ddd', padding: 16 }}>{logText}</pre>
+    <Modal title="Jenkins 控制台日志（实时）" open={logOpen} onCancel={closeLog} footer={<Button onClick={closeLog}>关闭</Button>} width={900} destroyOnHidden>
+      <pre ref={logContainerRef} style={{ height: 560, overflow: 'auto', whiteSpace: 'pre-wrap', background: '#111', color: '#ddd', padding: 16 }}>{logText || '正在等待日志...'}</pre>
     </Modal>
 
     {diagnostic && <Alert

@@ -38,6 +38,8 @@ import { AuthContext } from './contexts/AuthContextValue';
 import './App.css';
 import Home from './pages/Home';
 import AppShell from './components/AppShell';
+import { DesktopNotificationPrompt } from './components/DesktopNotificationPrompt';
+import { CicdRealtimeProvider } from './contexts/CicdRealtimeContext';
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, refreshEnvironments, loading, error } = useContext(EnvironmentContext);
@@ -307,7 +309,8 @@ const AppLayout: React.FC = () => {
   ];
 
   return (
-    <AppShell
+    <CicdRealtimeProvider>
+      <AppShell
       collapsed={siderCollapsed}
       onCollapsedChange={handleSiderCollapse}
       menuItems={visibleMenuItems}
@@ -318,6 +321,10 @@ const AppLayout: React.FC = () => {
       onLogout={handleLogout}
       authError={authError}
     >
+      <DesktopNotificationPrompt
+        userKey={String(me?.id || me?.username || 'unknown')}
+        visible={permissions.includes('menu:cicd-runs')}
+      />
       <Routes>
               <Route path="/deployments" element={<ProtectedRoute required={['menu:deployments']}><DeploymentListPage /></ProtectedRoute>} />
               <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
@@ -367,7 +374,8 @@ const AppLayout: React.FC = () => {
               <Route path="/403" element={<ForbiddenPage />} />
               <Route path="/" element={<Home />} />
       </Routes>
-    </AppShell>
+      </AppShell>
+    </CicdRealtimeProvider>
   );
 };
 
