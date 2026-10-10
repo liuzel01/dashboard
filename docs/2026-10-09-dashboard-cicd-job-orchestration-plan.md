@@ -452,9 +452,9 @@ interface CicdExecutionProvider {
 
 - Hashex/Hashdev、MGBX、iCoin 已分别绑定独立执行器；MGBX 与 iCoin 使用专用机器账号，并完成身份、crumb、queue、Job 范围和 Build/Cancel 权限验证；
 - iCoin 继续使用 `^(icoin-|icoinweb)` 服务端过滤和 Jenkins 项目角色双重限制；MGBX 使用该 Jenkins 的全部 Job；
-- VLink 已新增 `vlink-jenkins` 执行器、SiteConf 配置和 `vlink` 环境两类动作绑定，但执行器和绑定默认禁用；
-- 2026-10-10 从本机和 macmini 访问 `ci.common.vlink1ops.icu:443` 均连接超时。完成网络放行、创建 `dashboard-cicd-bot`、写入专用 Token，并验证 whoAmI/root/crumb/queue 后才允许启用；管理员 Token 不写入 SiteConf；
-- Phase 4 因 VLink 网络不可达处于“部分完成”，不能将禁用占位视为验收通过。
+- VLink 对应 Dashboard 实际环境 ID 为 `tb`。已新增并启用 `tb-jenkins` 执行器、SiteConf 配置和 `tb` 环境的构建部署/制品推包绑定，旧的错误 `vlink` 占位会由迁移清理；
+- TB Jenkins 已创建 `dashboard-cicd-bot` 专用机器账号和独立 Token，whoAmI/root/crumb/queue 均返回 200，可见 121 个 Job；管理员 Token 未写入 SiteConf；
+- TB Jenkins 当前采用 `FullControlOnceLoggedInAuthorizationStrategy`，任何已登录账号都继承全局完全权限，无法单独授予 Build/Cancel。Dashboard 仍执行环境绑定约束；Jenkins 最小权限需要后续单独迁移其全局授权策略。
 
 ### Phase 5：外部推包 Provider
 
