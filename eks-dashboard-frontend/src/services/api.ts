@@ -1828,3 +1828,40 @@ export const diagnoseCicdExecutor = async (executorKey: string) =>
   (await api.get(`/cicd/executors/${encodeURIComponent(executorKey)}/diagnostics`)).data as CicdExecutorDiagnostic;
 export const reconcileCicdCatalog = async (environmentId: string, actionType: CicdActionType) =>
   (await api.get('/cicd/reconciliation', { params: { environmentId, actionType } })).data as CicdReconciliation;
+
+export type CicdRun = {
+  run_id: string;
+  client_request_id: string;
+  action_type: CicdActionType;
+  environment_id: string;
+  executor_key: string;
+  job_name: string;
+  parameters: Record<string, string>;
+  status: string;
+  queue_id?: number | null;
+  build_number?: number | null;
+  build_url?: string | null;
+  duration_ms?: number | null;
+  error_summary?: string | null;
+  requested_by_username: string;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string | null;
+};
+
+export const triggerCicdRun = async (data: {
+  environmentId: string;
+  actionType: CicdActionType;
+  jobName: string;
+  clientRequestId: string;
+  parameters: Record<string, unknown>;
+  confirmation?: string;
+}) => (await api.post('/cicd/runs', data)).data as CicdRun;
+export const listCicdRuns = async (environmentId?: string) =>
+  (await api.get('/cicd/runs', { params: environmentId ? { environmentId } : {} })).data as CicdRun[];
+export const refreshCicdRun = async (runId: string) =>
+  (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/refresh`)).data as CicdRun;
+export const cancelCicdRun = async (runId: string) =>
+  (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/cancel`)).data as CicdRun;
+export const getCicdRunLog = async (runId: string, start = 0) =>
+  (await api.get(`/cicd/runs/${encodeURIComponent(runId)}/log`, { params: { start } })).data as { text: string; nextStart: number; hasMore: boolean };
