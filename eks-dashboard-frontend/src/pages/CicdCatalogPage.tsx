@@ -29,6 +29,7 @@ const { Text, Title } = Typography;
 const actionOptions = [
   { value: 'BUILD_DEPLOY', label: '构建部署' },
   { value: 'PACKAGE_PUBLISH', label: '制品推包' },
+  { value: 'IMAGE_BUILD_PUBLISH', label: '现货镜像构建推包' },
 ] as const;
 
 const errorMessage = (error: unknown, fallback: string) =>
@@ -41,6 +42,7 @@ const CicdCatalogPage: React.FC = () => {
   const canManage = permissions.includes('cicd-config:manage');
   const canExecuteBuild = permissions.includes('cicd-runs:execute-build');
   const canExecutePublish = permissions.includes('cicd-runs:execute-publish');
+  const canExecuteImagePublish = permissions.includes('cicd-runs:execute-image-publish');
   const canCancel = permissions.includes('cicd-runs:cancel');
   const [form] = Form.useForm();
   const [actionType, setActionType] = useState<CicdActionType>('BUILD_DEPLOY');
@@ -110,7 +112,7 @@ const CicdCatalogPage: React.FC = () => {
   const execute = async () => {
     if (!selectedJob || !currentEnvironment?.id) return;
     const values = await form.validateFields();
-    const confirmation = actionType === 'PACKAGE_PUBLISH'
+    const confirmation = actionType !== 'BUILD_DEPLOY'
       ? await new Promise<string | undefined>((resolve) => {
           let value = '';
           Modal.confirm({
@@ -125,7 +127,7 @@ const CicdCatalogPage: React.FC = () => {
     if (!confirmation) return;
     setExecuting(true);
     try {
-      const run = await triggerCicdRun({ environmentId: currentEnvironment.id, actionType, jobName: selectedJob.name, clientRequestId: crypto.randomUUID(), parameters: values, ...(actionType === 'PACKAGE_PUBLISH' ? { confirmation } : {}) });
+      const run = await triggerCicdRun({ environmentId: currentEnvironment.id, actionType, jobName: selectedJob.name, clientRequestId: crypto.randomUUID(), parameters: values, ...(actionType !== 'BUILD_DEPLOY' ? { confirmation } : {}) });
       message.success(`已进入 Jenkins 队列 #${run.queue_id || '-'}`);
       loadRuns();
     } catch (error) { message.error(errorMessage(error, 'Jenkins 触发失败')); }
@@ -205,15 +207,22 @@ const CicdCatalogPage: React.FC = () => {
             <Descriptions.Item label="目录数量">{jobs.length}</Descriptions.Item>
           </Descriptions>
           <Space style={{ marginTop: 16 }}>
-            <Button icon={<SafetyCertificateOutlined />} loading={diagnosing} disabled={!canManage || !executor?.configured} onClick={runDiagnostic}>连接检查</Button>
-            <Button icon={<ReloadOutlined />} loading={reconciling} disabled={!canManage || !executor?.configured} onClick={runReconciliation}>Job / 参数对账</Button>
+            <Button icon={<SafetyCertificateOutlined />} loading={diagnosing} disabled={!canManage || !executor?.configured || binding.provider_type !== 'JENKINS'} onClick={runDiagnostic}>连接检查</Button>
+            <Button icon={<ReloadOutlined />} loading={reconciling} disabled={!canManage || !executor?.configured || binding.provider_type !== 'JENKINS'} onClick={runReconciliation}>Job / 参数对账</Button>
             {!canManage && <Text type="secondary">需要 cicd-config:manage 权限</Text>}
           </Space>
         </Card>}
 
     {selectedJob && <Card title="Job 参数契约">
+      {actionType === 'IMAGE_BUILD_PUBLISH' && <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="外部系统能力受限"
+        description="该系统不提供实时日志、进度查询或取消接口。网络超时或 Dashboard 中断会标记为 UNKNOWN，系统不会自动重试，需要人工确认远端结果。"
+      />}
       <Descriptions size="small" column={{ xs: 1, md: 2 }}>
-        <Descriptions.Item label="Jenkins Job"><Text code>{selectedJob.name}</Text></Descriptions.Item>
+        <Descriptions.Item label={actionType === 'IMAGE_BUILD_PUBLISH' ? '外部服务' : 'Jenkins Job'}><Text code>{selectedJob.name}</Text></Descriptions.Item>
         <Descriptions.Item label="Buildable">{selectedJob.buildable ? '是' : '否'}</Descriptions.Item>
         <Descriptions.Item label="Jenkins 并发">{selectedJob.concurrentBuild ? '允许' : '禁止'}</Descriptions.Item>
         <Descriptions.Item label="Catalog">{selectedJob.registered ? <Tag color="success">已登记增强策略</Tag> : <Tag>远端动态发现</Tag>}</Descriptions.Item>
@@ -237,25 +246,25 @@ const CicdCatalogPage: React.FC = () => {
       </Form>
       <Button
         type="primary"
-        danger={actionType === 'PACKAGE_PUBLISH'}
+        danger={actionType !== 'BUILD_DEPLOY'}
         icon={<PlayCircleOutlined />}
         loading={executing}
-        disabled={!selectedJob.buildable || !!executor?.read_only || (actionType === 'BUILD_DEPLOY' ? !canExecuteBuild : !canExecutePublish)}
+        disabled={!selectedJob.buildable || !!executor?.read_only || (actionType === 'BUILD_DEPLOY' ? !canExecuteBuild : actionType === 'IMAGE_BUILD_PUBLISH' ? !canExecuteImagePublish : !canExecutePublish)}
         onClick={execute}
-      >{actionType === 'BUILD_DEPLOY' ? '触发构建部署' : '触发制品推包'}</Button>
+      >{actionType === 'BUILD_DEPLOY' ? '触发构建部署' : actionType === 'IMAGE_BUILD_PUBLISH' ? '触发现货镜像构建推包' : '触发制品推包'}</Button>
     </Card>}
 
     <Card title="最近执行" extra={<Button icon={<ReloadOutlined />} onClick={loadRuns}>刷新列表</Button>}>
       <Table size="small" rowKey="run_id" dataSource={runs} pagination={{ pageSize: 10 }} columns={[
         { title: '时间', dataIndex: 'created_at', width: 170 },
-        { title: '类型', dataIndex: 'action_type', render: (value) => value === 'PACKAGE_PUBLISH' ? '制品推包' : '构建部署' },
+        { title: '类型', dataIndex: 'action_type', render: (value) => value === 'PACKAGE_PUBLISH' ? '制品推包' : value === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署' },
         { title: 'Job', dataIndex: 'job_name' },
         { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'SUCCESS' ? 'success' : value === 'FAILURE' || value === 'ABORTED' ? 'error' : value === 'RUNNING' ? 'processing' : 'default'}>{value}</Tag> },
-        { title: '队列 / Build', render: (_, row) => `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
+        { title: '队列 / Build / 镜像', render: (_, row) => row.action_type === 'IMAGE_BUILD_PUBLISH' ? (row.external_result_tag || '-') : `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
         { title: '操作', render: (_, row) => <Space>
           <Button size="small" onClick={() => refreshRun(row.run_id)}>刷新</Button>
-          <Button size="small" disabled={!row.build_number} onClick={() => showLog(row.run_id)}>日志</Button>
-          <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); loadRuns(); } })}>取消</Button>
+          <Button size="small" disabled={!row.build_number && row.action_type !== 'IMAGE_BUILD_PUBLISH'} onClick={() => showLog(row.run_id)}>日志</Button>
+          <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || row.action_type === 'IMAGE_BUILD_PUBLISH' || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); loadRuns(); } })}>取消</Button>
         </Space> },
       ]} />
     </Card>

@@ -1705,7 +1705,7 @@ export const refreshMonitoringJenkinsExecution = async (requestId: string, id: n
 export const mergeMonitoringWorkload = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/merge-workload`)).data as MonitoringRequest;
 export const refreshMonitoringWorkloadStatus = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/workload-status/refresh`)).data as MonitoringRequest;
 
-export type CicdActionType = 'BUILD_DEPLOY' | 'PACKAGE_PUBLISH';
+export type CicdActionType = 'BUILD_DEPLOY' | 'PACKAGE_PUBLISH' | 'IMAGE_BUILD_PUBLISH';
 export type CicdParameterSchema = {
   version: number;
   parameters: Array<{ name: string; type: 'string' | 'boolean' | 'enum' | 'git_branch'; required?: boolean; default?: unknown; pattern?: string; maxLength?: number; choices?: string[] }>;
@@ -1843,6 +1843,7 @@ export type CicdRun = {
   build_url?: string | null;
   duration_ms?: number | null;
   error_summary?: string | null;
+  external_result_tag?: string | null;
   requested_by_username: string;
   created_at: string;
   updated_at: string;
