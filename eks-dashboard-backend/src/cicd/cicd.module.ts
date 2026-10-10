@@ -6,10 +6,11 @@ import { CicdCatalogController } from './cicd-catalog.controller';
 import { CicdCatalogService } from './cicd-catalog.service';
 import { CicdRunsController } from './cicd-runs.controller';
 import { CicdRunsService } from './cicd-runs.service';
+import { CicdSpotPublishService } from './cicd-spot-publish.service';
 
 @Module({
   imports: [AccessControlModule, AuthModule, SiteConfModule],
   controllers: [CicdCatalogController, CicdRunsController],
-  providers: [CicdCatalogService, CicdRunsService],
+  providers: [CicdCatalogService, CicdRunsService, CicdSpotPublishService],
 })
 export class CicdModule {}

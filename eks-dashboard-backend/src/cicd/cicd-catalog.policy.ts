@@ -1,4 +1,8 @@
-export const CICD_ACTION_TYPES = ['BUILD_DEPLOY', 'PACKAGE_PUBLISH'] as const;
+export const CICD_ACTION_TYPES = [
+  'BUILD_DEPLOY',
+  'PACKAGE_PUBLISH',
+  'IMAGE_BUILD_PUBLISH',
+] as const;
 export type CicdActionType = (typeof CICD_ACTION_TYPES)[number];
 
 export type CatalogParameter = {

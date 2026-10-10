@@ -26,10 +26,12 @@ import {
   TERMINAL_CICD_STATUSES,
   validateJenkinsParameters,
 } from './cicd-run.policy';
+import { CicdSpotPublishService } from './cicd-spot-publish.service';
 
 const VIEW = 'menu:cicd-runs';
 const EXECUTE_BUILD = 'cicd-runs:execute-build';
 const EXECUTE_PUBLISH = 'cicd-runs:execute-publish';
+const EXECUTE_IMAGE_PUBLISH = 'cicd-runs:execute-image-publish';
 const CANCEL = 'cicd-runs:cancel';
 const TERMINAL = new Set<string>(TERMINAL_CICD_STATUSES);
 
@@ -43,6 +45,7 @@ export class CicdRunsService {
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
     private readonly siteConf: SiteConfService,
+    private readonly spotPublish: CicdSpotPublishService,
   ) {}
 
   private async actor(
@@ -84,10 +87,6 @@ export class CicdRunsService {
     const row = rows[0];
     if (!row || !row.binding_enabled || !row.executor_enabled)
       throw new ServiceUnavailableException('当前环境的 CI/CD 执行绑定不可用');
-    if (row.provider_type !== 'JENKINS')
-      throw new ServiceUnavailableException(
-        `当前 Provider ${String(row.provider_type)} 尚未实现执行适配器`,
-      );
     const [baseUrlValue, username, apiToken, timeoutValue] = await Promise.all([
       this.siteConf.getString(row.base_url_conf_key, ''),
       this.siteConf.getString(row.username_conf_key, ''),
@@ -153,7 +152,9 @@ export class CicdRunsService {
 
   private async getRun(runId: string) {
     const rows = await this.db.query<RunRow[]>(
-      'SELECT * FROM cicd_runs WHERE run_id=? LIMIT 1',
+      `SELECT r.*,t.result_tag AS external_result_tag
+       FROM cicd_runs r LEFT JOIN cicd_external_tasks t ON t.run_id=r.run_id
+       WHERE r.run_id=? LIMIT 1`,
       [runId],
     );
     if (!rows[0]) throw new NotFoundException('CI/CD 执行记录不存在');
@@ -183,10 +184,14 @@ export class CicdRunsService {
     },
   ) {
     const required =
-      input.actionType === 'PACKAGE_PUBLISH' ? EXECUTE_PUBLISH : EXECUTE_BUILD;
+      input.actionType === 'IMAGE_BUILD_PUBLISH'
+        ? EXECUTE_IMAGE_PUBLISH
+        : input.actionType === 'PACKAGE_PUBLISH'
+          ? EXECUTE_PUBLISH
+          : EXECUTE_BUILD;
     const actor = await this.actor(authorization, required);
     if (
-      input.actionType === 'PACKAGE_PUBLISH' &&
+      ['PACKAGE_PUBLISH', 'IMAGE_BUILD_PUBLISH'].includes(input.actionType) &&
       input.confirmation !== '确认推包'
     )
       throw new BadRequestException('制品推包必须输入“确认推包”');
@@ -200,6 +205,12 @@ export class CicdRunsService {
       input.actionType,
     );
     const jobName = input.jobName.trim();
+    if (context.provider_type === 'EXTERNAL_SPOT_PUBLISH')
+      return this.triggerSpotPublish(actor, input, context, jobName);
+    if (context.provider_type !== 'JENKINS')
+      throw new ServiceUnavailableException(
+        `当前 Provider ${String(context.provider_type)} 尚未实现执行适配器`,
+      );
     if (
       context.job_name_pattern &&
       !compileJobDiscoveryPattern(context.job_name_pattern).test(jobName)
@@ -301,13 +312,74 @@ export class CicdRunsService {
     }
   }
 
+  private async triggerSpotPublish(
+    actor: Actor,
+    input: {
+      environmentId: string;
+      actionType: CicdActionType;
+      jobName: string;
+      clientRequestId: string;
+      parameters?: Record<string, unknown>;
+    },
+    context: any,
+    jobName: string,
+  ) {
+    const item = (await this.spotPublish.catalog()).find(
+      (entry) => entry.name === jobName,
+    );
+    if (!item) throw new BadRequestException('服务不在 iCoin 现货推包目录中');
+    const gitRefRaw = input.parameters?.GIT_REF ?? item.defaultRef;
+    const registryRaw = input.parameters?.REGISTRY ?? item.registries[0] ?? '';
+    if (typeof gitRefRaw !== 'string' || typeof registryRaw !== 'string')
+      throw new BadRequestException('外部推包参数必须是字符串');
+    const gitRef = gitRefRaw.trim();
+    const registry = registryRaw.trim();
+    if (!/^[A-Za-z0-9._/-]{1,128}$/.test(gitRef))
+      throw new BadRequestException('GIT_REF 格式无效');
+    if (!item.registries.includes(registry))
+      throw new BadRequestException('REGISTRY 不在外部系统允许范围内');
+    const running = await this.db.query<any[]>(
+      `SELECT run_id FROM cicd_runs WHERE environment_id=? AND executor_key=? AND job_name=?
+       AND status IN ('QUEUED','RUNNING','UNKNOWN') LIMIT 1`,
+      [input.environmentId, context.executor_key, jobName],
+    );
+    if (running[0])
+      throw new ConflictException('该服务已有执行中或结果未知的现货推包任务');
+    const runId = randomUUID();
+    await this.db.query(
+      `INSERT INTO cicd_runs
+       (run_id,client_request_id,action_type,environment_id,executor_key,job_name,parameters_json,status,requested_by_user_id,requested_by_username,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,'QUEUED',?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
+      [
+        runId,
+        input.clientRequestId,
+        input.actionType,
+        input.environmentId,
+        context.executor_key,
+        jobName,
+        JSON.stringify({ GIT_REF: gitRef, REGISTRY: registry }),
+        actor.userId,
+        actor.username,
+      ],
+    );
+    await this.db.query(
+      `INSERT INTO cicd_external_tasks
+       (run_id,provider_type,service_key,git_ref,registry,status,created_at,updated_at)
+       VALUES (?,'EXTERNAL_SPOT_PUBLISH',?,?,?,'QUEUED',UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
+      [runId, jobName, gitRef, registry],
+    );
+    return this.view(await this.getRun(runId));
+  }
+
   async list(authorization: string | undefined, environmentId?: string) {
     await this.actor(authorization);
     const params: unknown[] = [];
     const where = environmentId ? 'WHERE environment_id=?' : '';
     if (environmentId) params.push(environmentId);
     const rows = await this.db.query<RunRow[]>(
-      `SELECT * FROM cicd_runs ${where} ORDER BY id DESC LIMIT 100`,
+      `SELECT r.*,t.result_tag AS external_result_tag
+       FROM cicd_runs r LEFT JOIN cicd_external_tasks t ON t.run_id=r.run_id
+       ${where ? 'WHERE r.environment_id=?' : ''} ORDER BY r.id DESC LIMIT 100`,
       params,
     );
     return rows.map((row) => this.view(row));
@@ -321,6 +393,8 @@ export class CicdRunsService {
       row.environment_id,
       row.action_type,
     );
+    if (context.provider_type === 'EXTERNAL_SPOT_PUBLISH')
+      return this.view(row);
     if (!row.build_number && row.queue_id) {
       const queue = await this.request(
         context,
@@ -369,11 +443,17 @@ export class CicdRunsService {
   async log(authorization: string | undefined, runId: string, start = 0) {
     await this.actor(authorization);
     const row = await this.getRun(runId);
-    if (!row.build_number) return { text: '', nextStart: start, hasMore: true };
     const context = await this.executionContext(
       row.environment_id,
       row.action_type,
     );
+    if (context.provider_type === 'EXTERNAL_SPOT_PUBLISH')
+      return {
+        text: '该外部推包系统不提供实时日志接口。请等待最终状态；UNKNOWN 状态需要人工确认。',
+        nextStart: start,
+        hasMore: false,
+      };
+    if (!row.build_number) return { text: '', nextStart: start, hasMore: true };
     const response = await this.request(
       context,
       'get',
@@ -399,6 +479,8 @@ export class CicdRunsService {
       row.environment_id,
       row.action_type,
     );
+    if (context.provider_type === 'EXTERNAL_SPOT_PUBLISH')
+      throw new BadRequestException('该外部推包系统不支持取消任务');
     const crumb = await this.request(context, 'get', '/crumbIssuer/api/json');
     if (crumb.status !== 200)
       throw new ServiceUnavailableException('Jenkins crumb 获取失败');

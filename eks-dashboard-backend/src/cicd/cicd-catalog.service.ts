@@ -19,6 +19,7 @@ import {
   JenkinsParameter,
   parseParameterSchema,
 } from './cicd-catalog.policy';
+import { CicdSpotPublishService } from './cicd-spot-publish.service';
 
 const MENU_PERMISSION = 'menu:cicd-runs';
 const MANAGE_PERMISSION = 'cicd-config:manage';
@@ -46,6 +47,7 @@ type JenkinsConfig = ExecutorRow & {
 type BindingRow = {
   environment_id: string;
   action_type: CicdActionType;
+  provider_type: string;
   executor_key: string | null;
   job_name_pattern: string | null;
   enabled: number;
@@ -58,6 +60,7 @@ export class CicdCatalogService {
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
     private readonly siteConf: SiteConfService,
+    private readonly spotPublish: CicdSpotPublishService,
   ) {}
 
   private async actor(authorization?: string, manage = false): Promise<Actor> {
@@ -189,7 +192,7 @@ export class CicdCatalogService {
     actionType: CicdActionType,
   ): Promise<BindingRow & { executor_key: string }> {
     const rows = await this.db.query<BindingRow[]>(
-      `SELECT environment_id,action_type,executor_key,job_name_pattern,enabled
+      `SELECT environment_id,action_type,provider_type,executor_key,job_name_pattern,enabled
        FROM cicd_environment_bindings WHERE environment_id=? AND action_type=? LIMIT 1`,
       [environmentId, actionType],
     );
@@ -218,6 +221,38 @@ export class CicdCatalogService {
     await this.actor(authorization);
     const binding = await this.binding(environmentId, actionType);
     const matcher = this.bindingMatcher(binding);
+    if (binding.provider_type === 'EXTERNAL_SPOT_PUBLISH') {
+      const normalizedKeyword = String(keyword || '')
+        .trim()
+        .toLowerCase();
+      const items = (await this.spotPublish.catalog()).filter(
+        (item) =>
+          !normalizedKeyword ||
+          item.name.toLowerCase().includes(normalizedKeyword),
+      );
+      return {
+        environmentId,
+        actionType,
+        executorKey: binding.executor_key,
+        filterMode: 'ALL' as const,
+        pattern: null,
+        total: items.length,
+        jobs: items.map((item) => ({
+          name: item.name,
+          color: 'external',
+          disabled: false,
+          registered: true,
+          catalog: {
+            jobKey: `icoin-spot-${item.name}`,
+            displayName: item.name,
+            serviceKey: item.name,
+            enabled: true,
+            requiresApproval: true,
+            concurrencyPolicy: 'FORBID_SAME_JOB',
+          },
+        })),
+      };
+    }
     const config = await this.jenkinsConfig(binding.executor_key);
     const root = await this.jenkinsGet<any>(
       config,
@@ -283,6 +318,65 @@ export class CicdCatalogService {
     const binding = await this.binding(environmentId, actionType);
     const matcher = this.bindingMatcher(binding);
     const normalizedJobName = String(jobName || '').trim();
+    if (binding.provider_type === 'EXTERNAL_SPOT_PUBLISH') {
+      const item = (await this.spotPublish.catalog()).find(
+        (entry) => entry.name === normalizedJobName,
+      );
+      if (!item) throw new NotFoundException('服务不在 iCoin 现货推包目录中');
+      return {
+        environmentId,
+        actionType,
+        executorKey: binding.executor_key,
+        name: item.name,
+        color: 'external',
+        buildable: true,
+        concurrentBuild: false,
+        remoteParameters: [
+          {
+            name: 'GIT_REF',
+            type: 'StringParameterDefinition',
+            default: item.defaultRef,
+          },
+          {
+            name: 'REGISTRY',
+            type: 'ChoiceParameterDefinition',
+            default: item.registries[0] || '',
+            choices: item.registries,
+          },
+        ],
+        registered: true,
+        catalog: {
+          jobKey: `icoin-spot-${item.name}`,
+          enabled: true,
+          requiresApproval: true,
+          concurrencyPolicy: 'FORBID_SAME_JOB',
+          schema: {
+            version: 1,
+            parameters: [
+              {
+                name: 'GIT_REF',
+                type: 'git_branch',
+                required: true,
+                default: item.defaultRef,
+              },
+              {
+                name: 'REGISTRY',
+                type: 'enum',
+                required: true,
+                default: item.registries[0] || '',
+                choices: item.registries,
+              },
+            ],
+          },
+          reconciliation: {
+            matches: true,
+            missing: [],
+            unexpected: [],
+            mismatched: [],
+          },
+        },
+      };
+    }
     if (matcher && !matcher.test(normalizedJobName)) {
       throw new ForbiddenException('该 Job 不属于当前环境允许的发现范围');
     }
