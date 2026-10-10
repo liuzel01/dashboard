@@ -84,6 +84,10 @@ export class CicdRunsService {
     const row = rows[0];
     if (!row || !row.binding_enabled || !row.executor_enabled)
       throw new ServiceUnavailableException('当前环境的 CI/CD 执行绑定不可用');
+    if (row.provider_type !== 'JENKINS')
+      throw new ServiceUnavailableException(
+        `当前 Provider ${String(row.provider_type)} 尚未实现执行适配器`,
+      );
     const [baseUrlValue, username, apiToken, timeoutValue] = await Promise.all([
       this.siteConf.getString(row.base_url_conf_key, ''),
       this.siteConf.getString(row.username_conf_key, ''),
