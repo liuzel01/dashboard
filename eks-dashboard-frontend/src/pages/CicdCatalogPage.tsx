@@ -66,6 +66,8 @@ const CicdCatalogPage: React.FC = () => {
   const [diagnostic, setDiagnostic] = useState<CicdExecutorDiagnostic>();
   const [reconciliation, setReconciliation] = useState<CicdReconciliation>();
   const [runs, setRuns] = useState<CicdRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [refreshingRunIds, setRefreshingRunIds] = useState<Set<string>>(new Set());
   const [executing, setExecuting] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logText, setLogText] = useState('');
@@ -123,12 +125,19 @@ const CicdCatalogPage: React.FC = () => {
       .finally(() => setLoading(false));
   }, [currentEnvironment?.id, actionType, catalogConfigLoaded, imagePublishAvailable, message]);
 
-  const loadRuns = React.useCallback(() => {
+  const loadRuns = React.useCallback(async () => {
     if (!currentEnvironment?.id) return;
-    listCicdRuns(currentEnvironment.id).then(setRuns).catch((error) => message.error(errorMessage(error, '执行记录加载失败')));
+    setRunsLoading(true);
+    try {
+      setRuns(await listCicdRuns(currentEnvironment.id));
+    } catch (error) {
+      message.error(errorMessage(error, '执行记录加载失败'));
+    } finally {
+      setRunsLoading(false);
+    }
   }, [currentEnvironment?.id, message]);
 
-  useEffect(() => { loadRuns(); }, [loadRuns]);
+  useEffect(() => { void loadRuns(); }, [loadRuns]);
 
   useEffect(() => {
     const sync = () => setNotificationPermission(desktopNotificationPermission());
@@ -223,14 +232,25 @@ const CicdCatalogPage: React.FC = () => {
     try {
       const run = await triggerCicdRun({ environmentId: currentEnvironment.id, actionType, jobName: selectedJob.name, clientRequestId: crypto.randomUUID(), parameters: values, ...(actionType !== 'BUILD_DEPLOY' ? { confirmation } : {}) });
       message.success(`已进入 Jenkins 队列 #${run.queue_id || '-'}`);
-      loadRuns();
+      void loadRuns();
     } catch (error) { message.error(errorMessage(error, 'Jenkins 触发失败')); }
     finally { setExecuting(false); }
   };
 
   const refreshRun = async (runId: string) => {
-    try { await refreshCicdRun(runId); loadRuns(); }
+    setRefreshingRunIds((previous) => new Set(previous).add(runId));
+    try {
+      const refreshedRun = await refreshCicdRun(runId);
+      setRuns((previous) => previous.map((item) => item.run_id === runId ? refreshedRun : item));
+    }
     catch (error) { message.error(errorMessage(error, '执行状态刷新失败')); }
+    finally {
+      setRefreshingRunIds((previous) => {
+        const next = new Set(previous);
+        next.delete(runId);
+        return next;
+      });
+    }
   };
 
   const showLog = async (runId: string) => {
@@ -407,18 +427,18 @@ const CicdCatalogPage: React.FC = () => {
 
     <Card title="最近执行" extra={<Space>
       <Tag color={realtimeConnected ? 'success' : 'default'}>{realtimeConnected ? '实时追踪已连接' : '实时追踪未连接'}</Tag>
-      <Button icon={<ReloadOutlined />} onClick={loadRuns}>刷新列表</Button>
+      <Button icon={<ReloadOutlined />} loading={runsLoading} onClick={() => void loadRuns()}>刷新列表</Button>
     </Space>}>
-      <Table size="small" rowKey="run_id" dataSource={runs} pagination={{ pageSize: 10 }} columns={[
+      <Table size="small" rowKey="run_id" loading={runsLoading} dataSource={runs} pagination={{ pageSize: 10 }} columns={[
         { title: '时间', dataIndex: 'created_at', width: 170 },
         { title: '类型', dataIndex: 'action_type', render: (value) => value === 'PACKAGE_PUBLISH' ? '制品推包' : value === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署' },
         { title: 'Job', dataIndex: 'job_name' },
         { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'SUCCESS' ? 'success' : value === 'FAILURE' || value === 'ABORTED' ? 'error' : value === 'RUNNING' ? 'processing' : 'default'}>{value}</Tag> },
         { title: '队列 / Build / 镜像', render: (_, row) => row.action_type === 'IMAGE_BUILD_PUBLISH' ? (row.external_result_tag || '-') : `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
         { title: '操作', render: (_, row) => <Space>
-          <Button size="small" onClick={() => refreshRun(row.run_id)}>刷新</Button>
+          <Button size="small" loading={refreshingRunIds.has(row.run_id)} disabled={runsLoading} onClick={() => void refreshRun(row.run_id)}>刷新</Button>
           <Button size="small" disabled={!row.build_number && row.action_type !== 'IMAGE_BUILD_PUBLISH'} onClick={() => showLog(row.run_id)}>日志</Button>
-          <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || row.action_type === 'IMAGE_BUILD_PUBLISH' || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); loadRuns(); } })}>取消</Button>
+          <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || row.action_type === 'IMAGE_BUILD_PUBLISH' || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); await loadRuns(); } })}>取消</Button>
         </Space> },
       ]} />
     </Card>
