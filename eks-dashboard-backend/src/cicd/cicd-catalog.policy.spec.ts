@@ -107,8 +107,20 @@ describe('CI/CD catalog policy', () => {
     ).toBe(false);
     expect(
       matchesJobActionFilter(
-        { excludeAnyTokens: ['npmpublish'] },
+        { includeAnyTokens: ['npmpublish', 'publish'] },
         'megaweb-npmpublish-mega-pack',
+      ),
+    ).toBe(true);
+    expect(
+      matchesJobActionFilter(
+        { includeAnyTokens: ['npmpublish', 'publish'] },
+        'mega-kylin-tenant-common-publish',
+      ),
+    ).toBe(true);
+    expect(
+      matchesJobActionFilter(
+        { excludeAnyTokens: ['npmpublish', 'publish'] },
+        'mega-kylin-tenant-common-publish',
       ),
     ).toBe(false);
   });
