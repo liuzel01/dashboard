@@ -401,6 +401,7 @@ interface CicdExecutionProvider {
 - 连接检查和对账要求 `cicd-config:manage`，普通目录查看要求 `menu:cicd-runs`；迁移默认授权给 admin 角色；
 - 本地数据库迁移已应用并二次执行验证幂等：3 个 executor、8 个 binding、6 个 catalog Job、2 个权限；
 - Phase 0 使用的管理员 Token 没有写入 SiteConf。hashex 已改用 `dashboard-cicd-bot` 专用 API Token并写入敏感 SiteConf；机器账号可读取全部 Job，但只有 Read/Discover/Build/Cancel 权限，whoAmI、Crumb、Queue 均验证通过。
+- MGBX、iCoin 也已创建同名专用机器账号并写入各自敏感 SiteConf。MGBX 可见 137 个 Job；iCoin 的 Jenkins 项目角色只允许 `^(icoin-|icoinweb).*$`，实测 109 个匹配 Job 具备 Read/Build/Cancel，非匹配 Job 无上述权限。
 
 ### Phase 2：Hashex/Hashdev Jenkins 构建部署
 
@@ -413,6 +414,15 @@ interface CicdExecutionProvider {
 
 验收：从 Dashboard 触发一次受控试点构建，queue、build number、日志、结果、耗时和 Jenkins URL 全链路一致；重复提交不会产生两次构建。
 
+当前实现（2026-10-10）：
+
+- 新增 `cicd_runs`、`cicd_run_events` 和构建执行、推包执行、取消三项独立权限；迁移已在本地数据库连续执行两次验证幂等；
+- Job 在触发前重新从 Jenkins 读取 `buildable` 和参数定义，拒绝未声明参数、非法 choice、非标量值以及超长值；
+- 使用 `clientRequestId` 防止前端重复提交，并阻止同环境、同执行器、同 Job 的活跃任务并发；
+- 支持 crumb、`buildWithParameters`/`build`、queue 到 build number、构建结果、progressive log 和 queue/build 取消；
+- 页面基于真实 Jenkins 参数渲染表单，提供执行记录、人工刷新、日志查看和取消入口；
+- 自动化测试不会触发业务 Job。首次真实构建仍需管理员在页面核对环境、Job 和参数后人工执行，并对照 Jenkins queue/build/log 完成人工验收。
+
 ### Phase 3：Jenkins 内制品推包
 
 - 增加 `PACKAGE_PUBLISH` action type 和独立权限；
@@ -422,6 +432,13 @@ interface CicdExecutionProvider {
 - 列表和详情明确区分“构建部署”和“制品推包”。
 
 验收：试点公共包可以安全推送到目标 Nexus；构建结果和仓库侧制品版本可关联验证。
+
+当前实现（2026-10-10）：
+
+- `PACKAGE_PUBLISH` 使用独立的 `cicd-runs:execute-publish` 权限；
+- 触发前显示高风险提示，并要求输入固定确认短语“确认推包”；
+- 推包复用相同的运行状态、幂等、并发、日志和取消模型，但在页面和记录中与构建部署明确区分；
+- 尚未自动校验 Nexus 产物，首次真实推包仍按本节验收条件人工执行和核对。
 
 ### Phase 4：多 Jenkins 环境
 
