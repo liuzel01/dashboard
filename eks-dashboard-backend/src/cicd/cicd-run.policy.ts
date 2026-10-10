@@ -81,8 +81,13 @@ export const maskPersistedParameters = (
   );
 };
 
+const JENKINS_CONSOLE_NOTE = /\u001b\[8mha:[A-Za-z0-9+/_=-]+\u001b\[0m/g;
+
+export const stripJenkinsConsoleNotes = (value: string) =>
+  value.replace(JENKINS_CONSOLE_NOTE, '');
+
 export const redactJenkinsLog = (value: string) =>
-  value
+  stripJenkinsConsoleNotes(value)
     .replace(/\bAKIA[A-Z0-9]{16}\b/g, '[REDACTED_AWS_ACCESS_KEY]')
     .replace(
       /((?:password|passwd|token|secret|credential|access.?key)\s*[=:]\s*)([^\s"']+)/gi,
