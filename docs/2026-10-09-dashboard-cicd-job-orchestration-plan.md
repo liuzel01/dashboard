@@ -517,6 +517,29 @@ interface CicdExecutionProvider {
 
 后端已增加 Provider 类型保护：非 `JENKINS` 绑定会明确返回“尚未实现执行适配器”，不会误用 Jenkins Client 发起请求。
 
+### 后续增强：Catalog 强制执行门禁
+
+> 状态：已确认设计方向，暂不实施。当前实现仍允许 binding 发现范围内的远端 Jenkins Job 执行；“Job / 参数对账”仅为管理员诊断工具，不是执行前置条件。
+
+当前执行前会重新读取 Jenkins 的 Job 状态和真实参数定义，并校验环境 binding、发现范围、构建状态与参数输入；但不会要求 Job 已登记在 `cicd_job_catalog`，也不会因参数对账不一致而阻断。这个模式便于逐步接入大量既有 Job，但 `Catalog` 的审批、并发和参数契约增强策略无法成为强制安全边界。
+
+后续切换为强制门禁时，目标规则如下：
+
+1. 只允许 `cicd_job_catalog` 中已登记且 `enabled=1` 的 Job 触发；未登记、已停用、环境/action/executor 不匹配的 Job 必须拒绝。
+2. 每次触发仍须从 Jenkins 读取实时 Job 定义；若远端不存在、不可构建、超出 binding 发现范围或参数契约与 Catalog 不一致，必须拒绝触发。
+3. 参数漂移不得由普通执行用户绕过。拥有 `cicd-config:manage` 的管理员应先在“Job / 参数对账结果”审核差异，再使用“同步远端参数”更新已登记 Job 的契约；疑似密码、Token、Secret、Credential、Access Key 等敏感参数仍禁止自动同步。
+4. 执行阻断信息需要区分“未登记”“已停用”“超出环境范围”“远端参数漂移”和“远端读取失败”，并指向可操作的管理员处理路径，不能笼统显示 Jenkins 触发失败。
+5. 审计记录必须保留触发时实际采用的 Catalog Job key、契约版本/摘要与远端参数定义摘要；敏感参数值不得写入审计或运行记录。
+
+建议采用渐进式迁移，避免直接启用后意外阻断现有业务 Job：
+
+1. 为每个 environment/action binding 引入明确的执行策略，例如默认 `DISCOVERY_ALLOWED`，目标状态为 `CATALOG_REQUIRED`；迁移初期保持现有行为。
+2. 先通过全量 Job 巡检读取远端目录与参数，未登记 Job 展示为“待纳管”，而不是“参数不一致”；管理员只登记需要由 Dashboard 执行的 Job。
+3. 对准备切换的 binding 完成 Catalog 覆盖、参数对账和真实构建验收，再单独切换到 `CATALOG_REQUIRED`。
+4. 切换后保留只读发现与巡检能力，但界面必须明确标记未登记 Job 不可执行；不得用前端禁用代替后端强制校验。
+
+验收条件：在 `CATALOG_REQUIRED` binding 下，直接调用执行 API 也无法触发未登记或契约漂移的 Job；已登记且对账一致的 Job 可正常触发；管理员同步契约后需重新对账通过才恢复执行。回退策略是将该 binding 明确切回 `DISCOVERY_ALLOWED`，并记录审计，不通过删除 Catalog 数据实现回退。
+
 ## 10. 测试策略
 
 ### 自动化测试
