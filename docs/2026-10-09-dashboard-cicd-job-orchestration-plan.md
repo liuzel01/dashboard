@@ -448,6 +448,14 @@ interface CicdExecutionProvider {
 
 验收：切换环境后只能看到该环境允许的 Job；请求不会发送到其他环境 Jenkins。
 
+当前实现（2026-10-10）：
+
+- Hashex/Hashdev、MGBX、iCoin 已分别绑定独立执行器；MGBX 与 iCoin 使用专用机器账号，并完成身份、crumb、queue、Job 范围和 Build/Cancel 权限验证；
+- iCoin 继续使用 `^(icoin-|icoinweb)` 服务端过滤和 Jenkins 项目角色双重限制；MGBX 使用该 Jenkins 的全部 Job；
+- VLink 已新增 `vlink-jenkins` 执行器、SiteConf 配置和 `vlink` 环境两类动作绑定，但执行器和绑定默认禁用；
+- 2026-10-10 从本机和 macmini 访问 `ci.common.vlink1ops.icu:443` 均连接超时。完成网络放行、创建 `dashboard-cicd-bot`、写入专用 Token，并验证 whoAmI/root/crumb/queue 后才允许启用；管理员 Token 不写入 SiteConf；
+- Phase 4 因 VLink 网络不可达处于“部分完成”，不能将禁用占位视为验收通过。
+
 ### Phase 5：外部推包 Provider
 
 - 根据真实系统 API 设计认证、任务 ID、状态和日志适配；
@@ -456,6 +464,19 @@ interface CicdExecutionProvider {
 - 做跨系统幂等、回调验签或轮询退避。
 
 验收：外部任务 ID、状态、日志和 Dashboard run 一一对应，未知结果不会被误判成功。
+
+进入条件评估（2026-10-10）：暂不具备真实接入条件。当前仓库和已提供配置中没有外部推包网站的 API 地址、认证方式、参数 Schema、任务 ID、状态/日志接口、取消语义或回调验签信息。现有数据模型可以复用，但在这些契约确认前直接开发只会把网页操作流程硬编码进 Dashboard。
+
+Phase 5 开工前至少需要：
+
+1. 外部系统基础 URL、测试环境和稳定机器身份认证方式；
+2. 创建推包任务的请求/响应示例，以及业务幂等键；
+3. 环境、项目、分支、版本、目标仓库等参数定义和服务端校验规则；
+4. 任务状态枚举、查询和日志 API，以及失败、未知、超时、取消语义；
+5. 回调签名协议，或允许的轮询频率、超时和退避规则；
+6. 哪些 Dashboard 环境的 `PACKAGE_PUBLISH` 应切换到外部 Provider，以及审批负责人。
+
+后端已增加 Provider 类型保护：非 `JENKINS` 绑定会明确返回“尚未实现执行适配器”，不会误用 Jenkins Client 发起请求。
 
 ## 10. 测试策略
 
