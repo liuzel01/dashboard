@@ -18,7 +18,9 @@ import {
   compareParameterSchema,
   compileJobDiscoveryPattern,
   JenkinsParameter,
+  matchesJobActionFilter,
   parseParameterSchema,
+  parseJobActionFilter,
   sensitiveJenkinsParameterNames,
 } from './cicd-catalog.policy';
 import { CicdSpotPublishService } from './cicd-spot-publish.service';
@@ -52,6 +54,7 @@ type BindingRow = {
   provider_type: string;
   executor_key: string | null;
   job_name_pattern: string | null;
+  job_action_filter_json: unknown;
   enabled: number;
 };
 
@@ -194,7 +197,7 @@ export class CicdCatalogService {
     actionType: CicdActionType,
   ): Promise<BindingRow & { executor_key: string }> {
     const rows = await this.db.query<BindingRow[]>(
-      `SELECT environment_id,action_type,provider_type,executor_key,job_name_pattern,enabled
+      `SELECT environment_id,action_type,provider_type,executor_key,job_name_pattern,job_action_filter_json,enabled
        FROM cicd_environment_bindings WHERE environment_id=? AND action_type=? LIMIT 1`,
       [environmentId, actionType],
     );
@@ -212,6 +215,14 @@ export class CicdCatalogService {
     return binding.job_name_pattern
       ? compileJobDiscoveryPattern(binding.job_name_pattern)
       : null;
+  }
+
+  private matchesBindingJob(binding: BindingRow, jobName: string) {
+    const matcher = this.bindingMatcher(binding);
+    return (
+      (!matcher || matcher.test(jobName)) &&
+      matchesJobActionFilter(binding.job_action_filter_json, jobName)
+    );
   }
 
   async discoverJobs(
@@ -238,6 +249,7 @@ export class CicdCatalogService {
         executorKey: binding.executor_key,
         filterMode: 'ALL' as const,
         pattern: null,
+        actionFilter: {},
         total: items.length,
         jobs: items.map((item) => ({
           name: item.name,
@@ -264,7 +276,9 @@ export class CicdCatalogService {
       .trim()
       .toLowerCase();
     const discovered = (root.data?.jobs || [])
-      .filter((job: any) => !matcher || matcher.test(String(job.name || '')))
+      .filter((job: any) =>
+        this.matchesBindingJob(binding, String(job.name || '')),
+      )
       .filter(
         (job: any) =>
           !normalizedKeyword ||
@@ -287,6 +301,7 @@ export class CicdCatalogService {
       executorKey: binding.executor_key,
       filterMode: matcher ? 'PATTERN' : 'ALL',
       pattern: binding.job_name_pattern,
+      actionFilter: parseJobActionFilter(binding.job_action_filter_json),
       total: discovered.length,
       jobs: discovered.map((job: any) => {
         const registeredJob = catalog.get(job.name);
@@ -318,7 +333,6 @@ export class CicdCatalogService {
   ) {
     await this.actor(authorization);
     const binding = await this.binding(environmentId, actionType);
-    const matcher = this.bindingMatcher(binding);
     const normalizedJobName = String(jobName || '').trim();
     if (binding.provider_type === 'EXTERNAL_SPOT_PUBLISH') {
       const item = (await this.spotPublish.catalog()).find(
@@ -379,7 +393,7 @@ export class CicdCatalogService {
         },
       };
     }
-    if (matcher && !matcher.test(normalizedJobName)) {
+    if (!this.matchesBindingJob(binding, normalizedJobName)) {
       throw new ForbiddenException('该 Job 不属于当前环境允许的发现范围');
     }
     const config = await this.jenkinsConfig(binding.executor_key);
@@ -425,7 +439,7 @@ export class CicdCatalogService {
   async listEnvironmentBindings(authorization?: string) {
     await this.actor(authorization);
     const rows = await this.db.query<any[]>(
-      `SELECT b.environment_id,b.action_type,b.provider_type,b.executor_key,b.job_name_pattern,b.enabled,
+      `SELECT b.environment_id,b.action_type,b.provider_type,b.executor_key,b.job_name_pattern,b.job_action_filter_json,b.enabled,
               e.display_name AS executor_display_name,e.read_only
        FROM cicd_environment_bindings b
        LEFT JOIN cicd_executors e ON e.executor_key=b.executor_key
@@ -435,6 +449,8 @@ export class CicdCatalogService {
       ...row,
       enabled: !!row.enabled,
       read_only: !!row.read_only,
+      action_filter: parseJobActionFilter(row.job_action_filter_json),
+      job_action_filter_json: undefined,
     }));
   }
 
@@ -551,8 +567,7 @@ export class CicdCatalogService {
     if (binding.provider_type !== 'JENKINS')
       throw new BadRequestException('仅 Jenkins Job 支持同步远端参数契约');
     const jobName = String(input.jobName || '').trim();
-    const matcher = this.bindingMatcher(binding);
-    if (!jobName || (matcher && !matcher.test(jobName)))
+    if (!jobName || !this.matchesBindingJob(binding, jobName))
       throw new ForbiddenException('该 Job 不属于当前环境允许的发现范围');
 
     const catalog = await this.db.query<any[]>(
@@ -628,8 +643,8 @@ export class CicdCatalogService {
       config,
       '/api/json?tree=jobs[name,color,_class]',
     );
-    const discovered = (root.data?.jobs || []).filter(
-      (job: any) => !matcher || matcher.test(String(job.name || '')),
+    const discovered = (root.data?.jobs || []).filter((job: any) =>
+      this.matchesBindingJob(binding, String(job.name || '')),
     );
     const catalog = await this.listJobs(
       authorization,
@@ -684,6 +699,7 @@ export class CicdCatalogService {
       executorKey: binding.executor_key,
       pattern: binding.job_name_pattern,
       checkedAt: new Date().toISOString(),
+      actionFilter: parseJobActionFilter(binding.job_action_filter_json),
       discoveredCount: discovered.length,
       registeredCount: catalog.length,
       unregisteredCount: discovered.filter(

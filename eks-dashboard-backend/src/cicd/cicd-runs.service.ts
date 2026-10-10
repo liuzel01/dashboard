@@ -18,6 +18,7 @@ import {
   CicdActionType,
   compileJobDiscoveryPattern,
   JenkinsParameter,
+  matchesJobActionFilter,
 } from './cicd-catalog.policy';
 import {
   maskPersistedParameters,
@@ -78,7 +79,7 @@ export class CicdRunsService {
     actionType: CicdActionType,
   ) {
     const rows = await this.db.query<any[]>(
-      `SELECT b.environment_id,b.action_type,b.executor_key,b.job_name_pattern,b.enabled AS binding_enabled,
+      `SELECT b.environment_id,b.action_type,b.executor_key,b.job_name_pattern,b.job_action_filter_json,b.enabled AS binding_enabled,
               e.enabled AS executor_enabled,e.provider_type,e.base_url_conf_key,e.username_conf_key,e.token_conf_key,e.timeout_conf_key
        FROM cicd_environment_bindings b JOIN cicd_executors e ON e.executor_key=b.executor_key
        WHERE b.environment_id=? AND b.action_type=? LIMIT 1`,
@@ -212,8 +213,9 @@ export class CicdRunsService {
         `当前 Provider ${String(context.provider_type)} 尚未实现执行适配器`,
       );
     if (
-      context.job_name_pattern &&
-      !compileJobDiscoveryPattern(context.job_name_pattern).test(jobName)
+      (context.job_name_pattern &&
+        !compileJobDiscoveryPattern(context.job_name_pattern).test(jobName)) ||
+      !matchesJobActionFilter(context.job_action_filter_json, jobName)
     )
       throw new ForbiddenException('该 Job 不属于当前环境允许的执行范围');
     const jobPath = this.jobPath(jobName);

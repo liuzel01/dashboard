@@ -1717,6 +1717,7 @@ export type CicdEnvironmentBinding = {
   executor_key: string | null;
   executor_display_name?: string | null;
   job_name_pattern?: string | null;
+  action_filter?: { includeAnyTokens?: string[]; excludeAnyTokens?: string[] };
   enabled: boolean;
   read_only: boolean;
 };
@@ -1773,6 +1774,7 @@ export type CicdDiscoveredJobs = {
   executorKey: string;
   filterMode: 'ALL' | 'PATTERN';
   pattern?: string | null;
+  actionFilter?: { includeAnyTokens?: string[]; excludeAnyTokens?: string[] };
   total: number;
   jobs: CicdDiscoveredJob[];
 };
@@ -1800,6 +1802,7 @@ export type CicdReconciliation = {
   actionType: CicdActionType;
   executorKey: string;
   pattern: string;
+  actionFilter?: { includeAnyTokens?: string[]; excludeAnyTokens?: string[] };
   checkedAt: string;
   discoveredCount: number;
   registeredCount: number;

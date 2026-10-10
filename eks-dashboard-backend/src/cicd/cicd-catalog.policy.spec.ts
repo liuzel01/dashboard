@@ -2,6 +2,8 @@ import {
   buildParameterSchemaFromRemote,
   compareParameterSchema,
   compileJobDiscoveryPattern,
+  matchesJobActionFilter,
+  parseJobActionFilter,
   sensitiveJenkinsParameterNames,
 } from './cicd-catalog.policy';
 
@@ -88,5 +90,30 @@ describe('CI/CD catalog policy', () => {
         { name: 'PASSWORD', type: 'PasswordParameterDefinition', default: '' },
       ]),
     ).toEqual(['API_TOKEN', 'PASSWORD']);
+  });
+
+  it('separates action types with safe job-name tokens', () => {
+    expect(
+      matchesJobActionFilter(
+        { includeAnyTokens: ['publish'] },
+        'hash-kylin-common-publish',
+      ),
+    ).toBe(true);
+    expect(
+      matchesJobActionFilter(
+        { includeAnyTokens: ['publish'] },
+        'hash-kylin-price-kylin-price-impl',
+      ),
+    ).toBe(false);
+    expect(
+      matchesJobActionFilter(
+        { excludeAnyTokens: ['npmpublish'] },
+        'megaweb-npmpublish-mega-pack',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects unbounded regular-expression-like action filters', () => {
+    expect(() => parseJobActionFilter({ includeAnyTokens: ['.*publish.*'] })).toThrow();
   });
 });

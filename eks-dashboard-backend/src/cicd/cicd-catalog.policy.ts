@@ -26,7 +26,13 @@ export type JenkinsParameter = {
   choices?: string[];
 };
 
+export type JobActionFilter = {
+  includeAnyTokens?: string[];
+  excludeAnyTokens?: string[];
+};
+
 const SAFE_DISCOVERY_PATTERN = /^\^\([A-Za-z0-9_.|^-]+\)$/;
+const SAFE_JOB_TOKEN = /^[a-z0-9]{1,64}$/;
 
 export const compileJobDiscoveryPattern = (value: string) => {
   const pattern = String(value || '').trim();
@@ -36,6 +42,57 @@ export const compileJobDiscoveryPattern = (value: string) => {
     );
   }
   return new RegExp(pattern);
+};
+
+const normalizeJobFilterTokens = (value: unknown, field: string) => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 32)
+    throw new Error(`${field} must be an array with at most 32 tokens`);
+  const tokens = value.map((item) => String(item || '').trim().toLowerCase());
+  if (tokens.some((token) => !SAFE_JOB_TOKEN.test(token)))
+    throw new Error(`${field} contains an invalid job-name token`);
+  return [...new Set(tokens)];
+};
+
+export const parseJobActionFilter = (value: unknown): JobActionFilter => {
+  if (value === null || value === undefined || value === '') return {};
+  let parsed: unknown = value;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      throw new Error('Invalid job action filter JSON');
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('Job action filter must be an object');
+  const raw = parsed as Record<string, unknown>;
+  const keys = Object.keys(raw);
+  if (keys.some((key) => !['includeAnyTokens', 'excludeAnyTokens'].includes(key)))
+    throw new Error('Job action filter has unsupported fields');
+  const includeAnyTokens = normalizeJobFilterTokens(raw.includeAnyTokens, 'includeAnyTokens');
+  const excludeAnyTokens = normalizeJobFilterTokens(raw.excludeAnyTokens, 'excludeAnyTokens');
+  return {
+    ...(includeAnyTokens?.length ? { includeAnyTokens } : {}),
+    ...(excludeAnyTokens?.length ? { excludeAnyTokens } : {}),
+  };
+};
+
+export const matchesJobActionFilter = (
+  filterValue: unknown,
+  jobName: string,
+) => {
+  const filter = parseJobActionFilter(filterValue);
+  const tokens = String(jobName || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (
+    filter.includeAnyTokens?.length &&
+    !filter.includeAnyTokens.some((token) => tokens.includes(token))
+  )
+    return false;
+  return !filter.excludeAnyTokens?.some((token) => tokens.includes(token));
 };
 
 export const parseParameterSchema = (value: unknown): ParameterSchema => {

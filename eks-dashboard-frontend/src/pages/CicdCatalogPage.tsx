@@ -42,6 +42,14 @@ const actionOptions = [
 const errorMessage = (error: unknown, fallback: string) =>
   (error as ApiError)?.response?.data?.message || (error as ApiError)?.message || fallback;
 
+const actionFilterLabel = (filter?: { includeAnyTokens?: string[]; excludeAnyTokens?: string[] }) => {
+  const parts = [
+    filter?.includeAnyTokens?.length ? `包含：${filter.includeAnyTokens.join(' / ')}` : '',
+    filter?.excludeAnyTokens?.length ? `排除：${filter.excludeAnyTokens.join(' / ')}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join('；') : '全部';
+};
+
 const CicdCatalogPage: React.FC = () => {
   const { message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
@@ -416,6 +424,7 @@ const CicdCatalogPage: React.FC = () => {
             <Descriptions.Item label="Executor">{binding.executor_display_name || binding.executor_key}</Descriptions.Item>
             <Descriptions.Item label="Provider">{binding.provider_type}</Descriptions.Item>
             <Descriptions.Item label="Job 发现范围">{filterMode === 'ALL' ? <Tag color="blue">全部可读 Job</Tag> : <Text code>{binding.job_name_pattern}</Text>}</Descriptions.Item>
+            <Descriptions.Item label="操作类型筛选"><Text>{actionFilterLabel(binding.action_filter)}</Text></Descriptions.Item>
             <Descriptions.Item label="连接配置">{executor?.configured ? <Tag color="success">已配置</Tag> : <Tag color="warning">未配置</Tag>}</Descriptions.Item>
             <Descriptions.Item label="Jenkins Host">{executor?.host || '-'}</Descriptions.Item>
             <Descriptions.Item label="目录数量">{jobs.length}</Descriptions.Item>
@@ -497,7 +506,7 @@ const CicdCatalogPage: React.FC = () => {
       description={`身份 ${diagnostic.identity.name || '-'}；Job ${diagnostic.jobCount}；禁用 ${diagnostic.disabledJobCount}；耗时 ${diagnostic.latencyMs}ms；Crumb ${diagnostic.api.crumb ? '正常' : '异常'}；Queue ${diagnostic.api.queue ? '正常' : '异常'}`}
     />}
 
-    {reconciliation && <Card title="Job / 参数对账结果" extra={<Text type="secondary">规则 {reconciliation.pattern}</Text>}>
+    {reconciliation && <Card title="Job / 参数对账结果" extra={<Text type="secondary">范围 {reconciliation.pattern || '全部'}；类型 {actionFilterLabel(reconciliation.actionFilter)}</Text>}>
       <Space wrap style={{ marginBottom: 12 }}>
         <Tag color="blue">远端匹配 {reconciliation.discoveredCount}</Tag>
         <Tag color="green">已登记 {reconciliation.registeredCount}</Tag>

@@ -160,6 +160,8 @@ flowchart LR
 | `action_type` | `BUILD_DEPLOY` 或 `PACKAGE_PUBLISH` |
 | `provider_type` | `JENKINS` / `EXTERNAL_PROMOTION` |
 | `executor_key` | 绑定执行器；外部 Provider 可为空或绑定其他配置 |
+| `job_name_pattern` | 环境级远端发现范围，例如 iCoin 的受控前缀；不是操作类型分类规则 |
+| `job_action_filter_json` | 操作类型级安全 token 筛选；构建部署排除、制品推包包含对应 token，并在发现、详情、对账和触发时统一校验 |
 | `enabled` | 当前环境是否开放该动作 |
 
 这样可以表达：
@@ -479,7 +481,8 @@ interface CicdExecutionProvider {
 - iCoin 继续使用 `^(icoin-|icoinweb)` 服务端过滤和 Jenkins 项目角色双重限制；MGBX 使用该 Jenkins 的全部 Job；
 - VLink 对应 Dashboard 实际环境 ID 为 `tb`。已新增并启用 `tb-jenkins` 执行器、SiteConf 配置和 `tb` 环境的构建部署/制品推包绑定，旧的错误 `vlink` 占位会由迁移清理；
 - TB Jenkins 已创建 `dashboard-cicd-bot` 专用机器账号和独立 Token，whoAmI/root/crumb/queue 均返回 200，可见 121 个 Job；管理员 Token 未写入 SiteConf；
-- TB Jenkins 已从 `FullControlOnceLoggedInAuthorizationStrategy` 切换为 `RoleBasedAuthorizationStrategy`，复用既有 `role-strategy` 插件，无需安装插件或重启。`admin` 仅绑定 `jenkins-admin` 管理角色；`dashboard-cicd-bot` 仅绑定覆盖全部 TB Job 的 `dashboard-cicd-tb` 角色，权限限定为 Overall Read、View Read、Job Discover/Read/Build/Cancel，不包含 Configure、Credentials 或 Administer。切换后验证管理员可见 121 个 Job，机器账号对 121 个 Job 均具备受控权限且匿名 API 返回 403；Dashboard 继续按环境 binding 路由，TB 不做 Job 名称筛选。
+- TB Jenkins 已从 `FullControlOnceLoggedInAuthorizationStrategy` 切换为 `RoleBasedAuthorizationStrategy`，复用既有 `role-strategy` 插件，无需安装插件或重启。`admin` 仅绑定 `jenkins-admin` 管理角色；`dashboard-cicd-bot` 仅绑定覆盖全部 TB Job 的 `dashboard-cicd-tb` 角色，权限限定为 Overall Read、View Read、Job Discover/Read/Build/Cancel，不包含 Configure、Credentials 或 Administer。切换后验证管理员可见 121 个 Job，机器账号对 121 个 Job 均具备受控权限且匿名 API 返回 403；Dashboard 继续按环境 binding 路由，TB 不做环境级 Job 名称筛选。
+- 已新增 `job_action_filter_json`，与环境级 `job_name_pattern` 分离。Hash/Hashdev/TB/iCoin 使用 `publish` token，MGBX 使用真实命名 `npmpublish` token；构建部署排除、制品推包含对应 token。筛选同时应用于目录发现、Job 详情、参数对账和实际触发，不能通过直接调用 API 绕过。
 
 ### Phase 5：外部推包 Provider
 

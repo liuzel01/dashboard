@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS `cicd_environment_bindings` (
   `provider_type` varchar(32) NOT NULL DEFAULT 'JENKINS',
   `executor_key` varchar(128) DEFAULT NULL,
   `job_name_pattern` varchar(255) DEFAULT NULL,
+  `job_action_filter_json` json DEFAULT NULL,
   `enabled` tinyint(1) NOT NULL DEFAULT 0,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
