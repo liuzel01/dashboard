@@ -14,10 +14,12 @@ import { AuthService } from '../auth/auth.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import {
   CicdActionType,
+  buildParameterSchemaFromRemote,
   compareParameterSchema,
   compileJobDiscoveryPattern,
   JenkinsParameter,
   parseParameterSchema,
+  sensitiveJenkinsParameterNames,
 } from './cicd-catalog.policy';
 import { CicdSpotPublishService } from './cicd-spot-publish.service';
 
@@ -532,6 +534,84 @@ export class CicdCatalogService {
       disabledJobCount: jobs.filter((job: any) => job.color === 'disabled')
         .length,
       readOnly: !!config.read_only,
+    };
+  }
+
+  async syncRemoteParameterSchema(
+    authorization: string | undefined,
+    input: {
+      environmentId: string;
+      actionType: CicdActionType;
+      jobName: string;
+      confirmation: 'SYNC_REMOTE_PARAMETERS';
+    },
+  ) {
+    await this.actor(authorization, true);
+    const binding = await this.binding(input.environmentId, input.actionType);
+    if (binding.provider_type !== 'JENKINS')
+      throw new BadRequestException('仅 Jenkins Job 支持同步远端参数契约');
+    const jobName = String(input.jobName || '').trim();
+    const matcher = this.bindingMatcher(binding);
+    if (!jobName || (matcher && !matcher.test(jobName)))
+      throw new ForbiddenException('该 Job 不属于当前环境允许的发现范围');
+
+    const catalog = await this.db.query<any[]>(
+      `SELECT job_key,parameter_schema_json
+       FROM cicd_job_catalog
+       WHERE environment_id=? AND action_type=? AND jenkins_job_full_name=?
+       LIMIT 1`,
+      [input.environmentId, input.actionType, jobName],
+    );
+    const registered = catalog[0];
+    if (!registered)
+      throw new NotFoundException('只能同步已登记到 Catalog 的 Jenkins Job');
+
+    const config = await this.jenkinsConfig(binding.executor_key);
+    const detail = await this.jenkinsGet<any>(
+      config,
+      `${this.jobPath(jobName)}/api/json?tree=name,property[_class,parameterDefinitions[name,type,_class,defaultParameterValue[value],choices]]`,
+    );
+    const remoteParameters = this.parseRemoteParameters(
+      detail.data?.property || [],
+    );
+    const sensitiveNames = sensitiveJenkinsParameterNames(remoteParameters);
+    if (sensitiveNames.length) {
+      throw new BadRequestException(
+        `远端 Job 包含敏感参数，禁止自动同步：${sensitiveNames.join(', ')}`,
+      );
+    }
+
+    const schema = buildParameterSchemaFromRemote(
+      registered.parameter_schema_json,
+      remoteParameters,
+    );
+    const previous = compareParameterSchema(
+      registered.parameter_schema_json,
+      remoteParameters,
+    );
+    if (!previous.matches) {
+      await this.db.query(
+        `UPDATE cicd_job_catalog
+         SET parameter_schema_json=?,updated_at=UTC_TIMESTAMP()
+         WHERE job_key=? AND environment_id=? AND action_type=? AND jenkins_job_full_name=?`,
+        [
+          JSON.stringify(schema),
+          registered.job_key,
+          input.environmentId,
+          input.actionType,
+          jobName,
+        ],
+      );
+    }
+    return {
+      jobKey: registered.job_key,
+      environmentId: input.environmentId,
+      actionType: input.actionType,
+      jobName,
+      updated: !previous.matches,
+      schema,
+      remoteParameters,
+      reconciliation: compareParameterSchema(schema, remoteParameters),
     };
   }
 

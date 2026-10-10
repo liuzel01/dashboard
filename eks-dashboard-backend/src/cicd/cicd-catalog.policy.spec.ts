@@ -1,6 +1,8 @@
 import {
+  buildParameterSchemaFromRemote,
   compareParameterSchema,
   compileJobDiscoveryPattern,
+  sensitiveJenkinsParameterNames,
 } from './cicd-catalog.policy';
 
 describe('CI/CD catalog policy', () => {
@@ -47,5 +49,44 @@ describe('CI/CD catalog policy', () => {
       missing: ['GIT_BRANCH'],
       unexpected: ['BRANCH_NAME'],
     });
+  });
+
+  it('builds a safe catalog schema from remote Jenkins parameters', () => {
+    const result = buildParameterSchemaFromRemote(
+      {
+        version: 1,
+        parameters: [
+          {
+            name: 'GIT_BRANCH',
+            type: 'git_branch',
+            required: true,
+            pattern: '^[A-Za-z0-9._/-]{1,128}$',
+          },
+          { name: 'MEEGLE_ID', type: 'string', maxLength: 128 },
+        ],
+      },
+      [
+        { name: 'GIT_BRANCH', type: 'StringParameterDefinition', default: 'saas_test' },
+        { name: 'MEEGLE_ID', type: 'StringParameterDefinition', default: '' },
+        { name: 'COVERAGE_CALLBACK_ENABLED', type: 'BooleanParameterDefinition', default: false },
+      ],
+    );
+    expect(result).toMatchObject({
+      version: 1,
+      parameters: [
+        { name: 'GIT_BRANCH', type: 'git_branch', required: true, default: 'saas_test' },
+        { name: 'MEEGLE_ID', type: 'string', maxLength: 128, default: '' },
+        { name: 'COVERAGE_CALLBACK_ENABLED', type: 'boolean', required: false, default: false },
+      ],
+    });
+  });
+
+  it('does not allow sensitive Jenkins parameters to be auto-synced', () => {
+    expect(
+      sensitiveJenkinsParameterNames([
+        { name: 'API_TOKEN', type: 'StringParameterDefinition', default: '' },
+        { name: 'PASSWORD', type: 'PasswordParameterDefinition', default: '' },
+      ]),
+    ).toEqual(['API_TOKEN', 'PASSWORD']);
   });
 });

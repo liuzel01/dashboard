@@ -1828,6 +1828,24 @@ export const diagnoseCicdExecutor = async (executorKey: string) =>
   (await api.get(`/cicd/executors/${encodeURIComponent(executorKey)}/diagnostics`)).data as CicdExecutorDiagnostic;
 export const reconcileCicdCatalog = async (environmentId: string, actionType: CicdActionType) =>
   (await api.get('/cicd/reconciliation', { params: { environmentId, actionType } })).data as CicdReconciliation;
+export type CicdRemoteParameterSync = {
+  jobKey: string;
+  environmentId: string;
+  actionType: CicdActionType;
+  jobName: string;
+  updated: boolean;
+  schema: CicdParameterSchema;
+  remoteParameters: Array<{ name: string; type: string; default: unknown; choices?: string[] }>;
+  reconciliation: { matches: boolean; missing: string[]; unexpected: string[]; mismatched: Array<Record<string, unknown>> };
+};
+export const syncCicdRemoteParameterSchema = async (data: {
+  environmentId: string;
+  actionType: CicdActionType;
+  jobName: string;
+}) => (await api.post('/cicd/catalog/sync-remote-parameters', {
+  ...data,
+  confirmation: 'SYNC_REMOTE_PARAMETERS',
+})).data as CicdRemoteParameterSync;
 
 export type CicdRun = {
   run_id: string;

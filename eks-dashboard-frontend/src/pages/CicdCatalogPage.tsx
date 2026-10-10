@@ -16,6 +16,7 @@ import {
   getCicdEnvironmentBindings,
   getCicdExecutors,
   reconcileCicdCatalog,
+  syncCicdRemoteParameterSchema,
   cancelCicdRun,
   getCicdRunLog,
   listCicdRuns,
@@ -63,6 +64,7 @@ const CicdCatalogPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [syncingJobKey, setSyncingJobKey] = useState<string>();
   const [diagnostic, setDiagnostic] = useState<CicdExecutorDiagnostic>();
   const [reconciliation, setReconciliation] = useState<CicdReconciliation>();
   const [runs, setRuns] = useState<CicdRun[]>([]);
@@ -318,6 +320,47 @@ const CicdCatalogPage: React.FC = () => {
     finally { setReconciling(false); }
   };
 
+  const syncRemoteParameters = (job: CicdReconciliation['jobs'][number]) => {
+    if (!currentEnvironment?.id) return;
+    Modal.confirm({
+      title: '同步 Jenkins 参数契约？',
+      width: 620,
+      okText: '确认同步',
+      cancelText: '取消',
+      content: <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Alert
+          type="warning"
+          showIcon
+          message="将以当前 Jenkins Job 的真实参数覆盖此已登记 Job 的 Catalog 参数契约。"
+          description="不会创建 Job、修改 Jenkins 配置、启用执行器或写入敏感参数；包含密码、令牌、密钥等名称的参数会被服务端拒绝同步。"
+        />
+        <Descriptions size="small" column={1} bordered>
+          <Descriptions.Item label="环境 / 操作">{currentEnvironment.id} / {actionType}</Descriptions.Item>
+          <Descriptions.Item label="Jenkins Job"><Text code>{job.jobName}</Text></Descriptions.Item>
+          <Descriptions.Item label="新增参数">{job.schema.unexpected.length ? job.schema.unexpected.join(', ') : '-'}</Descriptions.Item>
+          <Descriptions.Item label="缺失参数">{job.schema.missing.length ? job.schema.missing.join(', ') : '-'}</Descriptions.Item>
+          <Descriptions.Item label="类型或默认值变化">{job.schema.mismatched.length ? job.schema.mismatched.map((item) => String(item.name)).join(', ') : '-'}</Descriptions.Item>
+        </Descriptions>
+      </Space>,
+      onOk: async () => {
+        setSyncingJobKey(job.jobKey);
+        try {
+          const result = await syncCicdRemoteParameterSchema({
+            environmentId: currentEnvironment.id,
+            actionType,
+            jobName: job.jobName,
+          });
+          message.success(result.updated ? 'Jenkins 参数契约已同步并记录审计日志' : '参数契约已是最新');
+          setReconciliation(await reconcileCicdCatalog(currentEnvironment.id, actionType));
+        } catch (error) {
+          message.error(errorMessage(error, 'Jenkins 参数契约同步失败'));
+        } finally {
+          setSyncingJobKey(undefined);
+        }
+      },
+    });
+  };
+
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     <div>
       <Title level={3} style={{ marginBottom: 4 }}>CI/CD 执行中心</Title>
@@ -470,6 +513,14 @@ const CicdCatalogPage: React.FC = () => {
           { title: '远端存在', dataIndex: 'exists', render: (value) => value ? <Tag color="success">是</Tag> : <Tag color="error">否</Tag> },
           { title: 'Buildable', dataIndex: 'buildable', render: (value) => value ? '是' : '否' },
           { title: '参数契约', dataIndex: ['schema', 'matches'], render: (value) => value ? <Tag color="success">一致</Tag> : <Tag color="error">不一致</Tag> },
+          {
+            title: '操作',
+            render: (_, job) => !job.exists || job.schema.matches ? '-' : canManage ? <Button
+              size="small"
+              loading={syncingJobKey === job.jobKey}
+              onClick={() => syncRemoteParameters(job)}
+            >同步远端参数</Button> : <Text type="secondary">需要管理权限</Text>,
+          },
         ]}
       />}
     </Card>}

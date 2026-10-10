@@ -61,10 +61,70 @@ const comparableValue = (value: unknown) => {
   return JSON.stringify(value);
 };
 
-const normalizeJenkinsType = (type: string): CatalogParameter['type'] => {
+export const normalizeJenkinsType = (
+  type: string,
+): Exclude<CatalogParameter['type'], 'git_branch'> => {
   if (type.includes('Boolean')) return 'boolean';
   if (type.includes('Choice')) return 'enum';
   return 'string';
+};
+
+const SENSITIVE_PARAMETER_NAME = /(?:password|passwd|secret|token|credential|access.?key)/i;
+
+export const sensitiveJenkinsParameterNames = (remote: JenkinsParameter[]) =>
+  remote
+    .filter(
+      (parameter) =>
+        parameter.type.toLowerCase().includes('password') ||
+        SENSITIVE_PARAMETER_NAME.test(parameter.name),
+    )
+    .map((parameter) => parameter.name);
+
+const normalizedDefault = (
+  parameter: JenkinsParameter,
+  type: Exclude<CatalogParameter['type'], 'git_branch'>,
+) => {
+  if (type === 'boolean')
+    return parameter.default === true || String(parameter.default).toLowerCase() === 'true';
+  if (parameter.default === null || parameter.default === undefined) return '';
+  return String(parameter.default);
+};
+
+/**
+ * Builds a catalog schema from Jenkins' live parameter definitions. Existing
+ * validation metadata remains in place for parameters that Jenkins still
+ * exposes; Jenkins never provides enough information to reconstruct it safely.
+ */
+export const buildParameterSchemaFromRemote = (
+  currentSchemaValue: unknown,
+  remote: JenkinsParameter[],
+): ParameterSchema => {
+  const current = parseParameterSchema(currentSchemaValue);
+  const previous = new Map(
+    current.parameters.map((parameter) => [parameter.name, parameter]),
+  );
+  return {
+    version: 1,
+    parameters: remote.map((remoteParameter) => {
+      const existing = previous.get(remoteParameter.name);
+      const normalizedType = normalizeJenkinsType(remoteParameter.type);
+      const type =
+        existing?.type === 'git_branch' && normalizedType === 'string'
+          ? 'git_branch'
+          : normalizedType;
+      const next: CatalogParameter = {
+        name: remoteParameter.name,
+        type,
+        required: existing?.required ?? false,
+        default: normalizedDefault(remoteParameter, normalizedType),
+      };
+      if (type === 'enum' && remoteParameter.choices?.length)
+        next.choices = remoteParameter.choices.map(String);
+      if (existing?.pattern && type === 'git_branch') next.pattern = existing.pattern;
+      if (existing?.maxLength && type === 'string') next.maxLength = existing.maxLength;
+      return next;
+    }),
+  };
 };
 
 export const compareParameterSchema = (

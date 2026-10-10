@@ -1,8 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
   Headers,
   Param,
+  Post,
   Query,
   ValidationPipe,
 } from '@nestjs/common';
@@ -28,6 +30,10 @@ class CatalogQueryDto {
 
 class JobDetailQueryDto extends CatalogQueryDto {
   @IsString() @MaxLength(255) jobName!: string;
+}
+
+class SyncRemoteParametersDto extends JobDetailQueryDto {
+  @IsIn(['SYNC_REMOTE_PARAMETERS']) confirmation!: 'SYNC_REMOTE_PARAMETERS';
 }
 
 @Controller('cicd')
@@ -101,5 +107,13 @@ export class CicdCatalogController {
       query.environmentId,
       query.actionType,
     );
+  }
+
+  @Post('catalog/sync-remote-parameters')
+  syncRemoteParameters(
+    @Headers('authorization') authorization: string | undefined,
+    @Body(validation) body: SyncRemoteParametersDto,
+  ) {
+    return this.service.syncRemoteParameterSchema(authorization, body);
   }
 }
