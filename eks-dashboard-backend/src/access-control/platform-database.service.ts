@@ -56,4 +56,16 @@ export class PlatformDatabaseService {
       conn.release();
     }
   }
+
+  async withConnection<T>(
+    fn: (conn: mysql.PoolConnection) => Promise<T>,
+  ): Promise<T> {
+    this.ensurePool();
+    const conn = await this.pool!.getConnection();
+    try {
+      return await fn(conn);
+    } finally {
+      conn.release();
+    }
+  }
 }

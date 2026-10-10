@@ -48,7 +48,7 @@ export class CicdRunsService {
     private readonly spotPublish: CicdSpotPublishService,
   ) {}
 
-  private async actor(
+  async actor(
     authorization?: string,
     permission = VIEW,
   ): Promise<Actor> {
@@ -161,7 +161,7 @@ export class CicdRunsService {
     return rows[0];
   }
 
-  private view(row: RunRow) {
+  private view(row: RunRow): RunRow {
     return {
       ...row,
       parameters:
@@ -387,6 +387,10 @@ export class CicdRunsService {
 
   async refresh(authorization: string | undefined, runId: string) {
     await this.actor(authorization);
+    return this.refreshInternal(runId);
+  }
+
+  async refreshInternal(runId: string) {
     let row = await this.getRun(runId);
     if (TERMINAL.has(String(row.status))) return this.view(row);
     const context = await this.executionContext(
@@ -438,6 +442,25 @@ export class CicdRunsService {
       }
     }
     return this.view(await this.getRun(runId));
+  }
+
+  async activeRunIds() {
+    const rows = await this.db.query<Array<{ run_id: string }>>(
+      `SELECT run_id FROM cicd_runs
+       WHERE status IN ('TRIGGERING','QUEUED','RUNNING')
+       ORDER BY id ASC LIMIT 100`,
+    );
+    return rows.map((row) => String(row.run_id));
+  }
+
+  async recentlyUpdatedRuns() {
+    const rows = await this.db.query<RunRow[]>(
+      `SELECT r.*,t.result_tag AS external_result_tag
+       FROM cicd_runs r LEFT JOIN cicd_external_tasks t ON t.run_id=r.run_id
+       WHERE r.updated_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 15 SECOND)
+       ORDER BY r.id DESC LIMIT 100`,
+    );
+    return rows.map((row) => this.view(row));
   }
 
   async log(authorization: string | undefined, runId: string, start = 0) {
