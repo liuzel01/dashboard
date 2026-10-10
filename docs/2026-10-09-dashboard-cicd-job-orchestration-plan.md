@@ -454,7 +454,7 @@ interface CicdExecutionProvider {
 - iCoin 继续使用 `^(icoin-|icoinweb)` 服务端过滤和 Jenkins 项目角色双重限制；MGBX 使用该 Jenkins 的全部 Job；
 - VLink 对应 Dashboard 实际环境 ID 为 `tb`。已新增并启用 `tb-jenkins` 执行器、SiteConf 配置和 `tb` 环境的构建部署/制品推包绑定，旧的错误 `vlink` 占位会由迁移清理；
 - TB Jenkins 已创建 `dashboard-cicd-bot` 专用机器账号和独立 Token，whoAmI/root/crumb/queue 均返回 200，可见 121 个 Job；管理员 Token 未写入 SiteConf；
-- TB Jenkins 当前采用 `FullControlOnceLoggedInAuthorizationStrategy`，任何已登录账号都继承全局完全权限，无法单独授予 Build/Cancel。Dashboard 仍执行环境绑定约束；Jenkins 最小权限需要后续单独迁移其全局授权策略。
+- TB Jenkins 已从 `FullControlOnceLoggedInAuthorizationStrategy` 切换为 `RoleBasedAuthorizationStrategy`，复用既有 `role-strategy` 插件，无需安装插件或重启。`admin` 仅绑定 `jenkins-admin` 管理角色；`dashboard-cicd-bot` 仅绑定覆盖全部 TB Job 的 `dashboard-cicd-tb` 角色，权限限定为 Overall Read、View Read、Job Discover/Read/Build/Cancel，不包含 Configure、Credentials 或 Administer。切换后验证管理员可见 121 个 Job，机器账号对 121 个 Job 均具备受控权限且匿名 API 返回 403；Dashboard 继续按环境 binding 路由，TB 不做 Job 名称筛选。
 
 ### Phase 5：外部推包 Provider
 
