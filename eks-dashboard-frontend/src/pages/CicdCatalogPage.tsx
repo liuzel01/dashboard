@@ -55,6 +55,7 @@ const CicdCatalogPage: React.FC = () => {
   const [actionType, setActionType] = useState<CicdActionType>('BUILD_DEPLOY');
   const [bindings, setBindings] = useState<CicdEnvironmentBinding[]>([]);
   const [executors, setExecutors] = useState<CicdExecutor[]>([]);
+  const [catalogConfigLoaded, setCatalogConfigLoaded] = useState(false);
   const [jobs, setJobs] = useState<CicdDiscoveredJob[]>([]);
   const [selectedJobName, setSelectedJobName] = useState<string>();
   const [selectedJob, setSelectedJob] = useState<CicdDiscoveredJobDetail>();
@@ -79,8 +80,33 @@ const CicdCatalogPage: React.FC = () => {
   useEffect(() => {
     Promise.all([getCicdEnvironmentBindings(), getCicdExecutors()])
       .then(([nextBindings, nextExecutors]) => { setBindings(nextBindings); setExecutors(nextExecutors); })
-      .catch((error) => message.error(errorMessage(error, 'CI/CD 目录配置加载失败')));
+      .catch((error) => message.error(errorMessage(error, 'CI/CD 目录配置加载失败')))
+      .finally(() => setCatalogConfigLoaded(true));
   }, [message]);
+
+  const imagePublishAvailable = useMemo(() => {
+    const imagePublishBinding = bindings.find((item) =>
+      item.environment_id === currentEnvironment?.id
+      && item.action_type === 'IMAGE_BUILD_PUBLISH'
+      && item.provider_type === 'EXTERNAL_SPOT_PUBLISH'
+      && item.enabled,
+    );
+    if (!imagePublishBinding?.executor_key) return false;
+    const imagePublishExecutor = executors.find((item) => item.executor_key === imagePublishBinding.executor_key);
+    return imagePublishExecutor?.provider_type === 'EXTERNAL_SPOT_PUBLISH'
+      && imagePublishExecutor.enabled
+      && imagePublishExecutor.configured;
+  }, [bindings, currentEnvironment?.id, executors]);
+  const visibleActionOptions = useMemo(
+    () => actionOptions.filter((item) => item.value !== 'IMAGE_BUILD_PUBLISH' || imagePublishAvailable),
+    [imagePublishAvailable],
+  );
+
+  useEffect(() => {
+    if (catalogConfigLoaded && actionType === 'IMAGE_BUILD_PUBLISH' && !imagePublishAvailable) {
+      setActionType('BUILD_DEPLOY');
+    }
+  }, [actionType, catalogConfigLoaded, imagePublishAvailable]);
 
   useEffect(() => {
     setJobs([]);
@@ -88,13 +114,14 @@ const CicdCatalogPage: React.FC = () => {
     setSelectedJob(undefined);
     setDiagnostic(undefined);
     setReconciliation(undefined);
-    if (!currentEnvironment?.id) return;
+    if (!currentEnvironment?.id || !catalogConfigLoaded) return;
+    if (actionType === 'IMAGE_BUILD_PUBLISH' && !imagePublishAvailable) return;
     setLoading(true);
     discoverCicdJobs(currentEnvironment.id, actionType)
       .then((result) => { setJobs(result.jobs); setFilterMode(result.filterMode); })
       .catch((error) => message.error(errorMessage(error, 'CI/CD Job 目录加载失败')))
       .finally(() => setLoading(false));
-  }, [currentEnvironment?.id, actionType, message]);
+  }, [currentEnvironment?.id, actionType, catalogConfigLoaded, imagePublishAvailable, message]);
 
   const loadRuns = React.useCallback(() => {
     if (!currentEnvironment?.id) return;
@@ -285,7 +312,7 @@ const CicdCatalogPage: React.FC = () => {
         </Space>
         <Space direction="vertical" size={4}>
           <Text type="secondary">操作类型</Text>
-          <Select<CicdActionType> value={actionType} onChange={setActionType} options={[...actionOptions]} style={{ width: 180 }} />
+          <Select<CicdActionType> value={actionType} onChange={setActionType} options={visibleActionOptions} style={{ width: 180 }} />
         </Space>
         <Space direction="vertical" size={4}>
           <Text type="secondary">受控 Job</Text>
