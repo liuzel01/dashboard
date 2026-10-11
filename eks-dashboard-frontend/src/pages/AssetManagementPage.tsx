@@ -880,7 +880,7 @@ const AccountManagementTab: React.FC = () => {
     { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (value) => statusTag(String(value || 'unknown')) },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 170, render: (value: string | null) => formatDateTime(value) },
     {
-      title: '操作', key: 'actions', fixed: 'right', width: 280,
+      title: '操作', key: 'actions', fixed: 'right', width: 190,
       render: (_, record) => {
         const provider = String(record.provider || '').trim().toLowerCase();
         const isAliyun = provider === 'aliyun';
@@ -925,32 +925,51 @@ const AccountManagementTab: React.FC = () => {
         const renderAccountAction = (disabled: boolean, action: React.ReactNode) => (
           accountInactive && disabled ? <Tooltip title={accountInactiveReason}><span>{action}</span></Tooltip> : action
         );
+        const moreItems = [
+          ...previewItems.map((item) => ({ ...item, disabled: previewDisabled })),
+          ...dryRunItems.map((item) => ({ ...item, disabled: dryRunDisabled })),
+          { type: 'divider' as const },
+          record.deleted_at
+            ? {
+                key: 'restore',
+                label: '恢复账号',
+                onClick: async () => {
+                  await restoreAssetAccount(record.id);
+                  message.success('已恢复');
+                  await load();
+                },
+              }
+            : {
+                key: 'delete',
+                label: '删除账号',
+                danger: true,
+                onClick: () => modal.confirm({
+                  title: '确认删除这条资产？',
+                  content: `将删除账号“${record.account_name || record.id}”。`,
+                  okText: '删除',
+                  okButtonProps: { danger: true },
+                  cancelText: '取消',
+                  onOk: async () => {
+                    await deleteAssetAccount(record.id);
+                    message.success('已删除');
+                    await load();
+                  },
+                }),
+              },
+        ];
         return (
-          <Space size={8} wrap>
+          <Space size={4}>
             <Button size="small" onClick={() => void openEdit(record)}>编辑</Button>
-            {renderAccountAction(previewDisabled,
-              <Dropdown menu={{ items: previewItems }} disabled={previewDisabled}>
-                <Button size="small" disabled={previewDisabled}>预览域名</Button>
-              </Dropdown>,
-            )}
-            {renderAccountAction(dryRunDisabled,
-              <Dropdown menu={{ items: dryRunItems }} disabled={dryRunDisabled}>
-                <Button size="small" disabled={dryRunDisabled}>Dry Run</Button>
-              </Dropdown>,
-            )}
             {renderAccountAction(syncActionDisabled,
               <Dropdown menu={{ items: syncItems }} disabled={syncActionDisabled}>
                 <Button size="small" type="primary" loading={syncLoading} disabled={syncActionDisabled}>同步域名</Button>
               </Dropdown>,
             )}
-            {unsupportedReason && !record.deleted_at && <Tag color="warning">{unsupportedReason}</Tag>}
-            {record.deleted_at ? (
-              <Button size="small" onClick={async () => { await restoreAssetAccount(record.id); message.success('已恢复'); await load(); }}>恢复</Button>
-            ) : (
-              <Popconfirm title="确认删除这条资产？" onConfirm={async () => { await deleteAssetAccount(record.id); message.success('已删除'); await load(); }}>
-                <Button size="small" danger>删除</Button>
-              </Popconfirm>
-            )}
+            <Tooltip title={unsupportedReason || (accountInactive ? accountInactiveReason : undefined)}>
+              <Dropdown menu={{ items: moreItems }}>
+                <Button size="small">更多</Button>
+              </Dropdown>
+            </Tooltip>
           </Space>
         );
       },
