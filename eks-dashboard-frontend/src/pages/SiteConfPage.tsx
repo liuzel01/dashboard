@@ -220,6 +220,7 @@ const SiteConfPage: React.FC = () => {
         title: renderResizableTitle('confKey', 'Key'),
         dataIndex: 'confKey',
         width: columnWidths.confKey,
+        fixed: 'left' as const,
         render: (v: string) => <Text code copyable>{v}</Text>,
       },
       {
