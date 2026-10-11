@@ -25,6 +25,20 @@ describe('MenuOrderService', () => {
     ]);
   });
 
+  it('reads the JSON object shape returned by mysql2 without falling back to defaults', async () => {
+    const custom = Object.fromEntries(Object.entries(DEFAULT_MENU_ORDERS).map(([group, entries]) => [group, [...entries]]));
+    custom['/cloud-resources'] = ['/deployments', '/jump-servers', '/s3-upload', '/security-groups'];
+    db.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith('SELECT order_json')) return [{ order_json: custom }];
+      return [];
+    });
+
+    await expect(service.get()).resolves.toMatchObject({
+      isDefault: false,
+      groups: { '/cloud-resources': custom['/cloud-resources'] },
+    });
+  });
+
   it('does not persist a custom order when reset', async () => {
     await service.reset();
     expect(db.query).toHaveBeenCalledWith('DELETE FROM dashboard_menu_order WHERE scope = ?', ['global']);

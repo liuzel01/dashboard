@@ -27,13 +27,14 @@ export class MenuOrderService implements OnModuleInit {
 
   async get() {
     await this.ensureTable();
-    const rows = await this.db.query<Array<{ order_json: string }>>(
+    const rows = await this.db.query<Array<{ order_json: unknown }>>(
       'SELECT order_json FROM dashboard_menu_order WHERE scope = ? LIMIT 1',
       [CONFIG_SCOPE],
     );
     if (!rows[0]?.order_json) return { groups: this.defaultOrders(), isDefault: true };
     try {
-      const stored = JSON.parse(rows[0].order_json) as Record<string, unknown>;
+      const raw = rows[0].order_json;
+      const stored = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
       // New nested menus keep their default order until an administrator saves
       // the expanded tree once.
       return { groups: this.validate({ ...this.defaultOrders(), ...stored }), isDefault: false };
