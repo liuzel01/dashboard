@@ -3,6 +3,7 @@ import { Button, Card, List, Modal, Space, Spin, Tag, Tooltip, Typography, messa
 import { ArrowDownOutlined, ArrowUpOutlined, CaretDownOutlined, CaretRightOutlined, HolderOutlined, InfoCircleOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { getMenuOrder, type MenuOrderMap, resetMenuOrder, saveMenuOrder } from '../services/api';
 import { PageHeader } from '../components/ops';
+import { writeCachedMenuOrder } from '../utils/menuOrderCache';
 
 const { Text } = Typography;
 
@@ -87,6 +88,7 @@ const MenuOrderManagementPage: React.FC = () => {
       setGroups(next);
       setSavedGroups(cloneGroups(next));
       setIsDefault(false);
+      writeCachedMenuOrder(next);
       message.success('菜单排序已保存；刷新页面后对所有用户生效');
     } catch (error: any) {
       message.error(error?.message || '保存菜单排序失败');
@@ -105,6 +107,7 @@ const MenuOrderManagementPage: React.FC = () => {
       setGroups(next);
       setSavedGroups(cloneGroups(next));
       setIsDefault(true);
+      writeCachedMenuOrder(next);
       message.success('已恢复默认菜单排序');
     },
   });

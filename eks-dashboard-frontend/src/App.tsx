@@ -42,6 +42,7 @@ import AppShell from './components/AppShell';
 import { DesktopNotificationPrompt } from './components/DesktopNotificationPrompt';
 import { CicdRealtimeProvider } from './contexts/CicdRealtimeContext';
 import { getMenuOrder, type MenuOrderMap } from './services/api';
+import { readCachedMenuOrder, writeCachedMenuOrder } from './utils/menuOrderCache';
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, refreshEnvironments, loading, error } = useContext(EnvironmentContext);
@@ -101,8 +102,8 @@ const AppLayout: React.FC = () => {
       return false;
     }
   });
-  const [menuOrderGroups, setMenuOrderGroups] = useState<MenuOrderMap>({});
-  const [menuOrderLoaded, setMenuOrderLoaded] = useState(false);
+  const [menuOrderGroups, setMenuOrderGroups] = useState<MenuOrderMap>(() => readCachedMenuOrder() || {});
+  const [menuOrderLoaded, setMenuOrderLoaded] = useState(() => Boolean(readCachedMenuOrder()));
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -111,8 +112,17 @@ const AppLayout: React.FC = () => {
       return;
     }
     let active = true;
+    const cached = readCachedMenuOrder();
+    if (cached) {
+      setMenuOrderGroups(cached);
+      setMenuOrderLoaded(true);
+    }
     void getMenuOrder()
-      .then((data) => { if (active) setMenuOrderGroups(data.groups || {}); })
+      .then((data) => {
+        const groups = data.groups || {};
+        writeCachedMenuOrder(groups);
+        if (active) setMenuOrderGroups(groups);
+      })
       .catch(() => { if (active) setMenuOrderGroups({}); })
       .finally(() => { if (active) setMenuOrderLoaded(true); });
     return () => { active = false; };
