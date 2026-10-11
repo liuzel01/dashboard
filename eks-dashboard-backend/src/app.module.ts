@@ -27,6 +27,7 @@ import { MonitoringRequestsModule } from './monitoring-requests/monitoring-reque
 import { KmsValuesModule } from './kms-values/kms-values.module';
 import { OncallModule } from './oncall/oncall.module';
 import { CicdModule } from './cicd/cicd.module';
+import { MenuOrderModule } from './menu-order/menu-order.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { CicdModule } from './cicd/cicd.module';
     KmsValuesModule,
     OncallModule,
     CicdModule,
+    MenuOrderModule,
   ],
   controllers: [AppController],
   providers: [AppService],

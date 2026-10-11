@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Select, Spin, Alert, Space, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
@@ -31,6 +31,7 @@ import MonitoringRequestsPage from './pages/MonitoringRequestsPage';
 import KmsValuesPage from './pages/KmsValuesPage';
 import OncallPage from './pages/OncallPage';
 import CicdCatalogPage from './pages/CicdCatalogPage';
+import MenuOrderManagementPage from './pages/MenuOrderManagementPage';
 import { EnvironmentProvider } from './contexts/EnvironmentContext';
 import { EnvironmentContext } from './contexts/EnvironmentContextValue';
 import { AuthProvider } from './contexts/AuthContext';
@@ -40,6 +41,7 @@ import Home from './pages/Home';
 import AppShell from './components/AppShell';
 import { DesktopNotificationPrompt } from './components/DesktopNotificationPrompt';
 import { CicdRealtimeProvider } from './contexts/CicdRealtimeContext';
+import { getMenuOrder, type MenuOrderMap } from './services/api';
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, refreshEnvironments, loading, error } = useContext(EnvironmentContext);
@@ -99,6 +101,19 @@ const AppLayout: React.FC = () => {
       return false;
     }
   });
+  const [menuOrderGroups, setMenuOrderGroups] = useState<MenuOrderMap>({});
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setMenuOrderGroups({});
+      return;
+    }
+    let active = true;
+    void getMenuOrder()
+      .then((data) => { if (active) setMenuOrderGroups(data.groups || {}); })
+      .catch(() => { if (active) setMenuOrderGroups({}); });
+    return () => { active = false; };
+  }, [isAuthenticated]);
 
   const handleSiderCollapse = (collapsed: boolean) => {
     setSiderCollapsed(collapsed);
@@ -138,15 +153,28 @@ const AppLayout: React.FC = () => {
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops', order: 50 },
     environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments', order: 20 },
     siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf', order: 30 },
+    menuManagement: { key: '/menu-management', label: '菜单排序管理', icon: <SettingOutlined />, permission: 'menu:menu-management', order: 40 },
   };
 
   const createMenuLink = (item: { key: string; label: string }) => <Link to={item.key}>{item.label}</Link>;
 
-  const sortByMenuOrder = <T extends { key: string; order: number }>(items: T[]) =>
-    [...items].sort((left, right) => left.order - right.order || left.key.localeCompare(right.key));
+  const sortByMenuOrder = <T extends { key: string; order: number }>(groupKey: string, items: T[]) => {
+    const configured = menuOrderGroups[groupKey] || [];
+    const positions = new Map(configured.map((key, index) => [key, index]));
+    return [...items].sort((left, right) => {
+      const leftPosition = positions.get(left.key);
+      const rightPosition = positions.get(right.key);
+      if (leftPosition !== undefined || rightPosition !== undefined) {
+        if (leftPosition === undefined) return 1;
+        if (rightPosition === undefined) return -1;
+        if (leftPosition !== rightPosition) return leftPosition - rightPosition;
+      }
+      return left.order - right.order || left.key.localeCompare(right.key);
+    });
+  };
 
-  const createOrderedChildren = <T extends { key: string; order: number }>(items: T[]) =>
-    sortByMenuOrder(items).map(({ order: _order, ...item }) => item);
+  const createOrderedChildren = <T extends { key: string; order: number }>(groupKey: string, items: T[]) =>
+    sortByMenuOrder(groupKey, items).map(({ order: _order, ...item }) => item);
 
   const createMenuGroup = (
     key: string,
@@ -154,7 +182,7 @@ const AppLayout: React.FC = () => {
     icon: React.ReactNode,
     items: Array<{ key: string; label: string; icon: React.ReactNode; permission: string; order: number }>,
   ): NonNullable<MenuProps['items']>[number] | null => {
-    const visibleItems = sortByMenuOrder(items.filter((item) => hasPermission(item.permission)));
+    const visibleItems = sortByMenuOrder(key, items.filter((item) => hasPermission(item.permission)));
     if (visibleItems.length === 0) return null;
     return {
       key,
@@ -172,7 +200,7 @@ const AppLayout: React.FC = () => {
   const accessControlGroup: NonNullable<MenuProps['items']>[number] = {
     key: '/access-control',
     label: '账号管理',
-    children: createOrderedChildren([
+    children: createOrderedChildren('/access-control', [
       { key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link>, order: 10 },
       { key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link>, order: 20 },
     ]),
@@ -184,7 +212,7 @@ const AppLayout: React.FC = () => {
     key: '/signal-monitor',
     label: 'Signal Monitor',
     icon: <LineChartOutlined />,
-    children: createOrderedChildren([
+    children: createOrderedChildren('/signal-monitor', [
       { key: '/signal-monitor/realtime', label: <Link to="/signal-monitor/realtime">实时</Link>, order: 10 },
       { key: '/signal-monitor/history', label: <Link to="/signal-monitor/history">触发记录</Link>, order: 20 },
       { key: '/signal-monitor/stats', label: <Link to="/signal-monitor/stats">统计</Link>, order: 30 },
@@ -197,7 +225,7 @@ const AppLayout: React.FC = () => {
     key: '/cert-study',
     label: '证书题库',
     icon: <BookOutlined />,
-    children: createOrderedChildren([
+    children: createOrderedChildren('/cert-study', [
       { key: '/cert-study/sap-c02', label: <Link to="/cert-study/sap-c02">SAP-C02</Link>, order: 10 },
       { key: '/cert-study/dop-c02', label: <Link to="/cert-study/dop-c02">DOP-C02</Link>, order: 20 },
       { key: '/cert-study/scs-c03', label: <Link to="/cert-study/scs-c03">SCS-C03</Link>, order: 30 },
@@ -210,7 +238,7 @@ const AppLayout: React.FC = () => {
     key: '/asset-management',
     label: '资产管理',
     icon: <DatabaseOutlined />,
-    children: createOrderedChildren([
+    children: createOrderedChildren('/asset-management', [
       { key: '/asset-management/overview', label: <Link to="/asset-management/overview">资产总览</Link>, order: 10 },
       { key: '/asset-management/resources', label: <Link to="/asset-management/resources">服务资源</Link>, order: 20 },
       { key: '/asset-management/domains', label: <Link to="/asset-management/domains">域名管理</Link>, order: 30 },
@@ -248,7 +276,7 @@ const AppLayout: React.FC = () => {
     [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues, menuItems.cicdRuns],
   );
 
-  const systemManagementChildren: NonNullable<MenuProps['items']> = createOrderedChildren([
+  const systemManagementChildren: NonNullable<MenuProps['items']> = createOrderedChildren('/system-management', [
     ...(hasPermission(accessControlPermission) ? [{ ...accessControlGroup, order: 10 }] : []),
     ...(hasPermission(menuItems.environments.permission)
       ? [{
@@ -262,6 +290,13 @@ const AppLayout: React.FC = () => {
           key: menuItems.siteConf.key,
           label: createMenuLink(menuItems.siteConf),
           order: menuItems.siteConf.order,
+        }]
+      : []),
+    ...(hasPermission(menuItems.menuManagement.permission)
+      ? [{
+          key: menuItems.menuManagement.key,
+          label: createMenuLink(menuItems.menuManagement),
+          order: menuItems.menuManagement.order,
         }]
       : []),
   ]);
@@ -314,7 +349,7 @@ const AppLayout: React.FC = () => {
     ...(['/site-monitors', '/monitoring-requests', '/oncall'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
     ...(['/data-query', '/ai-ops', '/ssl-certificates', '/kms-values', '/cicd-runs'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
-    ...(['/environments', '/site-conf', '/access-control'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
+    ...(['/environments', '/site-conf', '/access-control', '/menu-management'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
     ...(location.pathname.startsWith('/signal-monitor/') ? ['/signal-monitor'] : []),
   ];
@@ -357,6 +392,7 @@ const AppLayout: React.FC = () => {
               <Route path="/oncall" element={<ProtectedRoute required={['menu:oncall']}><OncallPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />
               <Route path="/site-conf" element={<ProtectedRoute required={['menu:site-conf']}><SiteConfPage /></ProtectedRoute>} />
+              <Route path="/menu-management" element={<ProtectedRoute required={['menu:menu-management']}><MenuOrderManagementPage /></ProtectedRoute>} />
               <Route path="/s3-upload" element={<ProtectedRoute required={['menu:s3-upload']}><S3UploadPage /></ProtectedRoute>} />
               <Route path="/access-control" element={<Navigate to="/access-control/users" replace />} />
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />

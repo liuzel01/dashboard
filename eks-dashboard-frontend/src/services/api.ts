@@ -406,6 +406,23 @@ export const deleteDashboardSiteConf = async (confKey: string) => {
   return response.data;
 };
 
+export type MenuOrderMap = Record<string, string[]>;
+
+export const getMenuOrder = async (): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
+  const response = await api.get('/menu-order');
+  return response.data;
+};
+
+export const saveMenuOrder = async (groups: MenuOrderMap): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
+  const response = await api.put('/menu-order', { groups });
+  return response.data;
+};
+
+export const resetMenuOrder = async (): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
+  const response = await api.delete('/menu-order');
+  return response.data;
+};
+
 // S3 Upload
 export const getS3Buckets = async () => {
   const response = await api.get('/s3/buckets');

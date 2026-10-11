@@ -13,6 +13,8 @@ export type AuditPatternRuleConfig = AuditRuleConfig & { regex: RegExp };
 export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
   { method: 'POST', path: '/auth/login', action: 'auth.login', actionName: '登录' },
   { method: 'POST', path: '/auth/logout', action: 'auth.logout', actionName: '登出' },
+  { method: 'PUT', path: '/menu-order', action: 'menuOrder.update', actionName: '修改菜单排序', menuKey: 'menu:menu-management', targetType: 'menu_order', getResourceId: () => 'global' },
+  { method: 'DELETE', path: '/menu-order', action: 'menuOrder.reset', actionName: '恢复默认菜单排序', menuKey: 'menu:menu-management', targetType: 'menu_order', getResourceId: () => 'global' },
   { method: 'POST', path: '/lines/ingress/manifest/apply', action: 'lines.applyIngressManifest', actionName: '预检或创建 Ingress YAML', menuKey: 'menu:line-onboarding', targetType: 'ingress_manifest' },
   { method: 'GET', path: '/s3/buckets', action: 's3.listBuckets', actionName: '查询 S3 Bucket', menuKey: 'menu:s3-upload', targetType: 's3_bucket' },
   { method: 'GET', path: '/s3/prefixes', action: 's3.listPrefixes', actionName: '查询 S3 路径', menuKey: 'menu:s3-upload', targetType: 's3_prefix', getResourceId: ({ query }) => [query?.bucket, query?.prefix].filter(Boolean).join(':') || null },

@@ -33,6 +33,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:kms-values', name: 'KMS 配置加解密' },
   { key: 'menu:oncall', name: 'Oncall 告警' },
   { key: 'menu:signal-monitor', name: 'Signal Monitor' },
+  { key: 'menu:menu-management', name: '菜单排序管理' },
   { key: 'aiops:qa', name: 'AI 问答' },
   { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
   { key: 'aiops:incident:analyze', name: '故障定位分析' },
