@@ -1,10 +1,10 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Alert, App, Button, Card, Descriptions, Form, Input, Popconfirm, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
+import { App, Button, Card, Descriptions, Form, Input, Popconfirm, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { acknowledgeOncallAlert, deleteOncallRoster, getOncallAlert, listOncallAlerts, listOncallRoster, saveOncallRoster, type OncallAlert, type OncallAlertStatus, type OncallRosterBinding, type OncallRosterLevel } from '../services/api';
-import { DetailDrawer, FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
+import { DetailDrawer, FilterBar, InlineHelpTooltip, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
 const { Text } = Typography;
 
@@ -136,15 +136,9 @@ const OncallPage: React.FC = () => {
 
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     <PageHeader
-      title="Oncall 告警"
+      title={<Space size={6} align="center"><span>Oncall 告警</span><InlineHelpTooltip ariaLabel="Oncall 告警使用说明" content="仅接收 Alertmanager 通过专用 Webhook 投递的告警，负责记录、通知、ACK、审计和生命周期展示。firing/resolved 以 Alertmanager 为准；resolved 由 Alertmanager 扇出，Dashboard 仅同步状态，不重复发送恢复消息。电话加急当前停用。" /></Space>}
       description="接收 Alertmanager 专用 Webhook 的告警生命周期；确认、升级和通知记录均以现有后端状态为准。"
       environmentName={currentEnvironment?.name}
-    />
-    <Alert
-      type="info"
-      showIcon
-      message="Oncall 告警"
-      description="仅接收 Alertmanager 通过专用 Webhook 投递的告警，负责记录、通知、ACK、审计和生命周期展示。firing/resolved 以 Alertmanager 为准；resolved 由 Alertmanager 扇出，Dashboard 仅同步状态，不重复发送恢复消息。电话加急当前停用。"
     />
     <Card title="值班升级配置" size="small" extra={<Button size="small" icon={<ReloadOutlined />} onClick={() => void loadRoster()} loading={rosterLoading}>刷新</Button>}>
       <Form form={rosterForm} layout="inline" onFinish={saveRoster} style={{ marginBottom: 12 }}>

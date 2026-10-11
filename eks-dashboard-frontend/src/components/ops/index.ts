@@ -1,5 +1,6 @@
 export { default as DetailDrawer } from './DetailDrawer';
 export { default as FilterBar } from './FilterBar';
+export { default as InlineHelpTooltip } from './InlineHelpTooltip';
 export { default as MetricGrid } from './MetricGrid';
 export type { MetricItem } from './MetricGrid';
 export { default as OpsTable } from './OpsTable';

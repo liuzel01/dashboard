@@ -4,6 +4,7 @@ import {
   getAiOpsSqlAudit,
   previewAiOpsSql,
 } from '../services/api';
+import { InlineHelpTooltip } from '../components/ops';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -73,14 +74,17 @@ const AiOpsPage: React.FC = () => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
-        type="info"
-        showIcon
-        message="当前仅支持 SQL 预览与分析，不在 dashboard 内执行 SQL。"
-        description="页面中的 SQL 结果仅作为草稿建议，未在本系统执行。任何真实变更请在外部系统（如 abd.com）完成，并执行人工复核。"
-      />
-
-      <Card title="AI SQL 助手（受控）">
+      <Card
+        title={(
+          <Space size={6} align="center">
+            <span>AI SQL 助手（受控）</span>
+            <InlineHelpTooltip
+              ariaLabel="AI SQL 使用说明"
+              content="当前仅支持 SQL 预览与分析，不在 dashboard 内执行 SQL。页面中的 SQL 结果仅作为草稿建议；任何真实变更请在外部系统（如 abd.com）完成，并执行人工复核。"
+            />
+          </Space>
+        )}
+      >
         <Form form={form} layout="vertical" requiredMark={false}>
           <Form.Item
             label="自然语言问题"

@@ -24,6 +24,7 @@ import {
 import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { InfoCircleOutlined, SettingOutlined } from '@ant-design/icons';
+import { InlineHelpTooltip } from '../components/ops';
 import {
   createAssetAccount,
   createAssetDomain,
@@ -1274,13 +1275,8 @@ const WangsuCdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
-        type="info"
-        showIcon
-        message="网宿 CDN 域名预览"
-        description="从网宿 OpenAPI 拉取域名列表，可 Dry Run 或同步到资产域名表。优先使用 siteconf 的 cdn.wangsu.access_key_id/access_key_secret 走 AKSK 鉴权。"
-      />
       <Space wrap>
+        <Space size={6} align="center"><Text strong>网宿 CDN 域名预览</Text><InlineHelpTooltip ariaLabel="网宿 CDN 域名预览说明" content="从网宿 OpenAPI 拉取域名列表，可 Dry Run 或同步到资产域名表。优先使用 siteconf 的 cdn.wangsu.access_key_id/access_key_secret 走 AKSK 鉴权。" /></Space>
         <Button type="primary" loading={loading} onClick={load}>加载网宿域名预览</Button>
         <Button loading={dryRunLoading} disabled={syncLoading} onClick={() => runSync(true)}>Dry Run 同步预检</Button>
         <Popconfirm title="确认同步网宿 CDN 域名到域名管理？" description="将按域名 upsert 到资产域名表，已有域名会更新状态和 remark。" onConfirm={() => runSync(false)}>
@@ -1427,13 +1423,8 @@ const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
-        type="info"
-        showIcon
-        message="阿里云 DCDN 域名预览"
-        description="从阿里云 DCDN OpenAPI 拉取域名列表。若域名已存在且 cdn_provider 不同，同步会标记 provider_conflict 并跳过覆盖，避免覆盖网宿等已有来源。"
-      />
       <Space wrap>
+        <Space size={6} align="center"><Text strong>阿里云 DCDN 域名预览</Text><InlineHelpTooltip ariaLabel="阿里云 DCDN 域名预览说明" content="从阿里云 DCDN OpenAPI 拉取域名列表。若域名已存在且 cdn_provider 不同，同步会标记 provider_conflict 并跳过覆盖，避免覆盖网宿等已有来源。" /></Space>
         <Button type="primary" loading={loading} onClick={load}>加载阿里云 DCDN 域名预览</Button>
         <Button loading={dryRunLoading} disabled={syncLoading} onClick={() => runSync(true)}>Dry Run 同步预检</Button>
         <Popconfirm title="确认同步阿里云 DCDN 域名到域名管理？" description="将按域名 upsert 到资产域名表；不同 CDN provider 的已有域名会标记冲突并跳过覆盖。" onConfirm={() => runSync(false)}>

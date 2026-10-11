@@ -9,6 +9,7 @@ import {
   getSslCertificates,
   requestSslCertificate,
 } from '../services/api';
+import { InlineHelpTooltip } from '../components/ops';
 
 const { Text } = Typography;
 
@@ -305,14 +306,17 @@ const SslCertificateExportPage: React.FC = () => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Alert
-        type="warning"
-        showIcon
-        message="该页面涉及证书私钥高敏操作"
-        description="解密下载会直接把证书文件包下载到本地,内含证书正文、证书链、解密后的私钥等文件。需要输入 Google 验证码 + passphrase。"
-      />
-
-      <Card title="SSL证书申请与导出(AWS ACM)">
+      <Card
+        title={(
+          <Space size={6} align="center">
+            <span>SSL证书申请与导出(AWS ACM)</span>
+            <InlineHelpTooltip
+              ariaLabel="证书导出安全说明"
+              content="解密下载会直接把证书文件包下载到本地，内含证书正文、证书链、解密后的私钥等文件。该高敏操作需要输入 Google 验证码和 passphrase。"
+            />
+          </Space>
+        )}
+      >
         <Space style={{ marginBottom: 16 }} wrap>
           <Select
             placeholder="选择 AWS 环境 / 账号"

@@ -8,6 +8,7 @@ import {
   updateEnvironmentConfig,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
+import { InlineHelpTooltip } from '../components/ops';
 
 type EnvConfig = {
   id: string;
@@ -199,7 +200,7 @@ const EnvironmentManagementPage: React.FC = () => {
       </Spin>
 
       <Modal
-        title={editingId ? '编辑环境' : '新增环境'}
+        title={<Space size={6} align="center"><span>{editingId ? '编辑环境' : '新增环境'}</span><InlineHelpTooltip ariaLabel="环境凭证填写说明" content="AWS 访问使用 Dashboard 所在 EC2 的实例角色。需要访问其他 AWS 账户时，填写允许该实例角色 AssumeRole 的目标 Role ARN；不再保存 AK/SK 或服务器 AWS Profile。Kube Context 仍需按实际集群配置。" /></Space>}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSubmit}
@@ -207,13 +208,6 @@ const EnvironmentManagementPage: React.FC = () => {
         destroyOnClose
         width={900}
       >
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message="凭证填写建议"
-          description="AWS 访问使用 Dashboard 所在 EC2 的实例角色。需要访问其他 AWS 账户时，填写允许该实例角色 AssumeRole 的目标 Role ARN；不再保存 AK/SK 或服务器 AWS Profile。Kube Context 仍需按实际集群配置。"
-        />
         <Form form={form} layout="vertical">
           <Form.Item
             label="环境ID"
