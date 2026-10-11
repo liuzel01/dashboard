@@ -278,7 +278,7 @@ const SslCertificateExportPage: React.FC = () => {
   };
 
   const columns: ColumnsType<SslCertificateItem> = [
-    { title: '域名', dataIndex: 'domain', width: 220 },
+    { title: '域名', dataIndex: 'domain', width: 200, fixed: 'left', ellipsis: true },
     {
       title: 'SAN',
       dataIndex: 'sans',
@@ -292,7 +292,7 @@ const SslCertificateExportPage: React.FC = () => {
     { title: '最近导出人', dataIndex: 'lastExportedBy', width: 140, render: (v) => v || '-' },
     {
       title: '操作',
-      width: 260,
+      width: 180,
       fixed: 'right',
       render: (_, row) => (
         <Space wrap>

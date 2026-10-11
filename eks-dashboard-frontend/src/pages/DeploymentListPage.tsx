@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext, useRef, useMemo } from 'react';
-import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, Tooltip, Typography } from 'antd';
+import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, Tooltip, Typography, Dropdown } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
 import { getDeployments, getDeploymentNamespaces, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
@@ -475,16 +475,15 @@ const DeploymentListPage: React.FC = () => {
       title: '服务名称',
       dataIndex: 'name',
       key: 'name',
-      width: 290,
+      width: 220,
       fixed: 'left' as const,
       ellipsis: true,
-      render: (value?: string) => <Tooltip title={value}><Text ellipsis style={{ maxWidth: 270, display: 'block' }}>{value || '-'}</Text></Tooltip>,
+      render: (value?: string) => <Tooltip title={value}><Text ellipsis style={{ maxWidth: 200, display: 'block' }}>{value || '-'}</Text></Tooltip>,
     },
     {
       title: '运行副本',
       key: 'replicas',
-      width: 100,
-      fixed: 'left' as const,
+      width: 88,
       align: 'center' as const,
       render: (_: unknown, record: Deployment) => `${record.availableReplicas || 0}/${record.replicas ?? 0}`,
     },
@@ -549,14 +548,18 @@ const DeploymentListPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 230,
+      width: 160,
       fixed: 'right' as const,
       align: 'center' as const,
       render: (_: unknown, record: Deployment) => (
         <Space size={4}>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name, record.namespace)} loading={restarting === record.name}>重启</Button>
-          <Button size="small" onClick={() => handleOpenImageHistory(record.name, record.namespace)}>镜像回退</Button>
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(record.name, record.namespace)}>日志</Button>
+          <Dropdown menu={{ items: [
+            { key: 'rollback', label: '镜像回退', onClick: () => handleOpenImageHistory(record.name, record.namespace) },
+            { key: 'logs', label: '查看日志', icon: <FileTextOutlined />, onClick: () => handleViewLogs(record.name, record.namespace) },
+          ] }}>
+            <Button size="small">更多</Button>
+          </Dropdown>
         </Space>
       ),
     },

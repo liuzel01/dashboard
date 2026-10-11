@@ -471,14 +471,13 @@ function EntityTab<T extends AssetEntity>({
       dataIndex: 'id',
       key: 'id',
       width: 90,
-      fixed: 'left',
       render: (value: unknown) => renderValue(value),
     },
     ...tableFields.map((field) => ({
       title: field.label,
       dataIndex: field.name,
       key: field.name,
-      width: field.name === firstTableFieldName ? 220 : field.name === 'status' ? 110 : 180,
+      width: field.name === firstTableFieldName ? 200 : field.name === 'status' ? 110 : 180,
       fixed: field.name === firstTableFieldName ? ('left' as const) : undefined,
       ellipsis: true,
       render: (value: unknown, record: T) => field.render ? field.render(value, record) : (field.name === 'status' ? statusTag(String(value || 'unknown')) : renderValue(value)),
@@ -500,7 +499,7 @@ function EntityTab<T extends AssetEntity>({
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 150,
+      width: 130,
       render: (_, record) => (
         <Space size={8}>
           <Button size="small" onClick={() => openEdit(record)}>编辑</Button>
@@ -856,8 +855,8 @@ const AccountManagementTab: React.FC = () => {
   const selectedCredentialRef = editing?.credential_ref_id ? credentialRefMap.get(editing.credential_ref_id) : null;
 
   const columns: ColumnsType<AssetAccount> = [
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 90, fixed: 'left', render: renderValue },
-    { title: '账号名称', dataIndex: 'account_name', key: 'account_name', width: 220, ellipsis: true, fixed: 'left' },
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 76, render: renderValue },
+    { title: '账号名称', dataIndex: 'account_name', key: 'account_name', width: 190, ellipsis: true, fixed: 'left' },
     { title: '账号类型', dataIndex: 'account_type', key: 'account_type', width: 140 },
     { title: '服务商', dataIndex: 'provider', key: 'provider', width: 100 },
     { title: '域名服务能力', dataIndex: 'domain_service_types', key: 'domain_service_types', width: 180, render: (_value, record) => renderAccountServiceTypes(record) },
@@ -881,7 +880,7 @@ const AccountManagementTab: React.FC = () => {
     { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: (value) => statusTag(String(value || 'unknown')) },
     { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 170, render: (value: string | null) => formatDateTime(value) },
     {
-      title: '操作', key: 'actions', fixed: 'right', width: 350,
+      title: '操作', key: 'actions', fixed: 'right', width: 280,
       render: (_, record) => {
         const provider = String(record.provider || '').trim().toLowerCase();
         const isAliyun = provider === 'aliyun';

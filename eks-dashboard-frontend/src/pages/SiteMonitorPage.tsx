@@ -308,13 +308,12 @@ const SiteMonitorPage: React.FC = () => {
           {
             title: "名称",
             dataIndex: "name",
-            width: 200,
+            width: 180,
             fixed: "left",
             ellipsis: true,
           },
           {
             title: "类型",
-            fixed: "left",
             dataIndex: "monitor_type",
             width: 100,
             render: (v) =>
@@ -405,7 +404,7 @@ const SiteMonitorPage: React.FC = () => {
           {
             title: "操作",
             fixed: "right",
-            width: 240,
+            width: 180,
             render: (_, r) => (
               <Space>
                 {r.monitor_source !== "line_inventory" && (
