@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, List, Modal, Space, Spin, Tag, Typography, message } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, CaretDownOutlined, CaretRightOutlined, HolderOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
+import { Button, Card, List, Modal, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
+import { ArrowDownOutlined, ArrowUpOutlined, CaretDownOutlined, CaretRightOutlined, HolderOutlined, InfoCircleOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { getMenuOrder, type MenuOrderMap, resetMenuOrder, saveMenuOrder } from '../services/api';
 import { PageHeader } from '../components/ops';
 
@@ -150,10 +150,9 @@ const MenuOrderManagementPage: React.FC = () => {
   return <div>
     <PageHeader
       title="菜单排序管理"
-      description="仅调整各一级菜单内的显示顺序；点击可展开的父菜单可继续调整其子菜单。"
-      actions={<Space><Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button><Button danger disabled={loading || isDefault} onClick={reset}>恢复默认</Button><Button type="primary" icon={<SaveOutlined />} disabled={!dirty || loading} loading={saving} onClick={() => void save()}>保存排序</Button></Space>}
+      description={<Space size={6} align="center"><span>仅调整各一级菜单内的显示顺序；点击可展开的父菜单可继续调整其子菜单。</span><Tooltip placement="bottomLeft" overlayStyle={{ maxWidth: 620 }} title={<div style={{ width: 460, lineHeight: 1.8, whiteSpace: 'normal' }}><div>支持拖拽或上下箭头调整同级菜单顺序。</div><div>调整只会立即更新当前预览；点击“保存排序”后才会写入全局配置并记录审计日志。</div></div>}><InfoCircleOutlined aria-label="菜单排序使用说明" style={{ color: '#1677ff', cursor: 'help' }} /></Tooltip></Space>}
+      actions={<Space>{dirty && <Tag color="gold">排序已调整，尚未保存</Tag>}<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button><Button danger disabled={loading || isDefault} onClick={reset}>恢复默认</Button><Button type="primary" icon={<SaveOutlined />} disabled={!dirty || loading} loading={saving} onClick={() => void save()}>保存排序</Button></Space>}
     />
-    <Alert type={dirty ? 'warning' : 'info'} showIcon message={dirty ? '排序已调整，尚未保存' : '使用拖拽或上下箭头调整顺序'} description="拖拽和箭头只会立即更新当前预览；点击“保存排序”后才会写入全局配置并记录审计日志。" style={{ marginBottom: 16 }} />
     {loading ? <Spin /> : <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {ROOT_GROUPS.map((group) => <Card key={group.key} title={group.label} size="small">{renderEntries(group.key)}</Card>)}
     </Space>}
