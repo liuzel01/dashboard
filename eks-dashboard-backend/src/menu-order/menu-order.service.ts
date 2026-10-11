@@ -10,6 +10,7 @@ export const DEFAULT_MENU_ORDERS: MenuOrderMap = {
   '/monitoring': ['/site-monitors', '/monitoring-requests', '/oncall'],
   '/ops-tools': ['/data-query', '/cicd-runs', '/ssl-certificates', '/kms-values', '/ai-ops'],
   '/system-management': ['/access-control', '/environments', '/site-conf', '/menu-management'],
+  '/access-control': ['/access-control/users', '/access-control/audit-logs'],
   '/cert-study': ['/cert-study/sap-c02', '/cert-study/dop-c02', '/cert-study/scs-c03'],
   '/signal-monitor': ['/signal-monitor/realtime', '/signal-monitor/history', '/signal-monitor/stats', '/signal-monitor/daily'],
 };
@@ -32,7 +33,10 @@ export class MenuOrderService implements OnModuleInit {
     );
     if (!rows[0]?.order_json) return { groups: this.defaultOrders(), isDefault: true };
     try {
-      return { groups: this.validate(rows[0].order_json), isDefault: false };
+      const stored = JSON.parse(rows[0].order_json) as Record<string, unknown>;
+      // New nested menus keep their default order until an administrator saves
+      // the expanded tree once.
+      return { groups: this.validate({ ...this.defaultOrders(), ...stored }), isDefault: false };
     } catch {
       return { groups: this.defaultOrders(), isDefault: true };
     }

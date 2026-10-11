@@ -18,6 +18,13 @@ describe('MenuOrderService', () => {
     expect(() => (service as any).validate(input)).toThrow(BadRequestException);
   });
 
+  it('includes nested submenu orders in the default configuration', () => {
+    expect(DEFAULT_MENU_ORDERS['/access-control']).toEqual([
+      '/access-control/users',
+      '/access-control/audit-logs',
+    ]);
+  });
+
   it('does not persist a custom order when reset', async () => {
     await service.reset();
     expect(db.query).toHaveBeenCalledWith('DELETE FROM dashboard_menu_order WHERE scope = ?', ['global']);
