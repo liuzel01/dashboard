@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Button, Layout, Menu, Space, Typography } from 'antd';
+import { Alert, Button, Layout, Menu, Space, Spin, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 
@@ -10,6 +10,7 @@ type AppShellProps = {
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   menuItems: MenuProps['items'];
+  navigationLoading?: boolean;
   selectedKey: string;
   defaultOpenKeys: string[];
   headerStart: React.ReactNode;
@@ -24,6 +25,7 @@ const AppShell: React.FC<AppShellProps> = ({
   collapsed,
   onCollapsedChange,
   menuItems,
+  navigationLoading = false,
   selectedKey,
   defaultOpenKeys,
   headerStart,
@@ -52,13 +54,13 @@ const AppShell: React.FC<AppShellProps> = ({
         />
       </div>
       <nav className="app-shell__navigation" aria-label="主导航">
-        <Menu
+        {navigationLoading ? <div aria-label="正在加载菜单排序" style={{ display: 'grid', placeItems: 'center', minHeight: 96 }}><Spin size="small" /></div> : <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
           defaultOpenKeys={defaultOpenKeys}
           items={menuItems}
-        />
+        />}
       </nav>
     </Sider>
     <Layout className="app-shell__main-layout">

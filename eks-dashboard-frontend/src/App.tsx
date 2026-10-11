@@ -102,16 +102,19 @@ const AppLayout: React.FC = () => {
     }
   });
   const [menuOrderGroups, setMenuOrderGroups] = useState<MenuOrderMap>({});
+  const [menuOrderLoaded, setMenuOrderLoaded] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
       setMenuOrderGroups({});
+      setMenuOrderLoaded(false);
       return;
     }
     let active = true;
     void getMenuOrder()
       .then((data) => { if (active) setMenuOrderGroups(data.groups || {}); })
-      .catch(() => { if (active) setMenuOrderGroups({}); });
+      .catch(() => { if (active) setMenuOrderGroups({}); })
+      .finally(() => { if (active) setMenuOrderLoaded(true); });
     return () => { active = false; };
   }, [isAuthenticated]);
 
@@ -360,6 +363,7 @@ const AppLayout: React.FC = () => {
       collapsed={siderCollapsed}
       onCollapsedChange={handleSiderCollapse}
       menuItems={visibleMenuItems}
+      navigationLoading={!menuOrderLoaded}
       selectedKey={selectedKey}
       defaultOpenKeys={openKeys}
       headerStart={<EnvironmentSwitcher />}
