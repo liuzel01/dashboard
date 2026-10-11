@@ -117,35 +117,44 @@ const AppLayout: React.FC = () => {
     return permissions.includes(key);
   };
 
+  // Keep second-level navigation ordered by operational workflow, not creation
+  // time or translated labels. Leave gaps so new entries can be placed without
+  // renumbering the whole group.
   const menuItems = {
-    s3Upload: { key: '/s3-upload', label: 'S3 上传', icon: <CloudUploadOutlined />, permission: 'menu:s3-upload' },
-    deployments: { key: '/deployments', label: 'EKS 部署', icon: <DeploymentUnitOutlined />, permission: 'menu:deployments' },
-    jumpServers: { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers' },
-    dataQuery: { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query' },
-    securityGroups: { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups' },
-    lines: { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines' },
-    lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding' },
-    adminSiteOnboarding: { key: '/admin-site-ingress', label: '管理端网站 Ingress', icon: <GlobalOutlined />, permission: 'menu:admin-site-onboarding' },
-    siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors' },
-    monitoringRequests: { key: '/monitoring-requests', label: '监控资源申请', icon: <FileProtectOutlined />, permission: 'menu:monitoring-requests' },
-    aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops' },
-    sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates' },
-    kmsValues: { key: '/kms-values', label: 'KMS 配置加解密', icon: <SafetyCertificateOutlined />, permission: 'menu:kms-values' },
-    cicdRuns: { key: '/cicd-runs', label: 'CI/CD 执行中心', icon: <RocketOutlined />, permission: 'menu:cicd-runs' },
-    oncall: { key: '/oncall', label: 'Oncall 告警', icon: <AlertOutlined />, permission: 'menu:oncall' },
-    environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments' },
-    siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf' },
+    deployments: { key: '/deployments', label: 'EKS 部署', icon: <DeploymentUnitOutlined />, permission: 'menu:deployments', order: 10 },
+    jumpServers: { key: '/jump-servers', label: 'Windows跳板机', icon: <DeploymentUnitOutlined />, permission: 'menu:jump-servers', order: 20 },
+    securityGroups: { key: '/security-groups', label: '安全组管理', icon: <SafetyCertificateOutlined />, permission: 'menu:security-groups', order: 30 },
+    s3Upload: { key: '/s3-upload', label: 'S3 上传', icon: <CloudUploadOutlined />, permission: 'menu:s3-upload', order: 40 },
+    lines: { key: '/lines', label: '线路总览', icon: <GlobalOutlined />, permission: 'menu:lines', order: 10 },
+    lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding', order: 20 },
+    adminSiteOnboarding: { key: '/admin-site-ingress', label: '管理端网站 Ingress', icon: <GlobalOutlined />, permission: 'menu:admin-site-onboarding', order: 30 },
+    siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors', order: 10 },
+    monitoringRequests: { key: '/monitoring-requests', label: '监控资源申请', icon: <FileProtectOutlined />, permission: 'menu:monitoring-requests', order: 20 },
+    oncall: { key: '/oncall', label: 'Oncall 告警', icon: <AlertOutlined />, permission: 'menu:oncall', order: 30 },
+    dataQuery: { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query', order: 10 },
+    cicdRuns: { key: '/cicd-runs', label: 'CI/CD 执行中心', icon: <RocketOutlined />, permission: 'menu:cicd-runs', order: 20 },
+    sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates', order: 30 },
+    kmsValues: { key: '/kms-values', label: 'KMS 配置加解密', icon: <SafetyCertificateOutlined />, permission: 'menu:kms-values', order: 40 },
+    aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops', order: 50 },
+    environments: { key: '/environments', label: '环境管理', icon: <SettingOutlined />, permission: 'menu:environments', order: 20 },
+    siteConf: { key: '/site-conf', label: 'siteconf 配置', icon: <SettingOutlined />, permission: 'menu:site-conf', order: 30 },
   };
 
   const createMenuLink = (item: { key: string; label: string }) => <Link to={item.key}>{item.label}</Link>;
+
+  const sortByMenuOrder = <T extends { key: string; order: number }>(items: T[]) =>
+    [...items].sort((left, right) => left.order - right.order || left.key.localeCompare(right.key));
+
+  const createOrderedChildren = <T extends { key: string; order: number }>(items: T[]) =>
+    sortByMenuOrder(items).map(({ order: _order, ...item }) => item);
 
   const createMenuGroup = (
     key: string,
     label: string,
     icon: React.ReactNode,
-    items: Array<{ key: string; label: string; icon: React.ReactNode; permission: string }>,
+    items: Array<{ key: string; label: string; icon: React.ReactNode; permission: string; order: number }>,
   ): NonNullable<MenuProps['items']>[number] | null => {
-    const visibleItems = items.filter((item) => hasPermission(item.permission));
+    const visibleItems = sortByMenuOrder(items.filter((item) => hasPermission(item.permission)));
     if (visibleItems.length === 0) return null;
     return {
       key,
@@ -163,10 +172,10 @@ const AppLayout: React.FC = () => {
   const accessControlGroup: NonNullable<MenuProps['items']>[number] = {
     key: '/access-control',
     label: '账号管理',
-    children: [
-      { key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link> },
-      { key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link> },
-    ],
+    children: createOrderedChildren([
+      { key: '/access-control/users', label: <Link to="/access-control/users">账号与权限</Link>, order: 10 },
+      { key: '/access-control/audit-logs', label: <Link to="/access-control/audit-logs">审计日志</Link>, order: 20 },
+    ]),
   };
 
   const signalMonitorPermission = 'menu:signal-monitor';
@@ -175,12 +184,12 @@ const AppLayout: React.FC = () => {
     key: '/signal-monitor',
     label: 'Signal Monitor',
     icon: <LineChartOutlined />,
-    children: [
-      { key: '/signal-monitor/realtime', label: <Link to="/signal-monitor/realtime">实时</Link> },
-      { key: '/signal-monitor/history', label: <Link to="/signal-monitor/history">触发记录</Link> },
-      { key: '/signal-monitor/stats', label: <Link to="/signal-monitor/stats">统计</Link> },
-      { key: '/signal-monitor/daily', label: <Link to="/signal-monitor/daily">日报</Link> },
-    ],
+    children: createOrderedChildren([
+      { key: '/signal-monitor/realtime', label: <Link to="/signal-monitor/realtime">实时</Link>, order: 10 },
+      { key: '/signal-monitor/history', label: <Link to="/signal-monitor/history">触发记录</Link>, order: 20 },
+      { key: '/signal-monitor/stats', label: <Link to="/signal-monitor/stats">统计</Link>, order: 30 },
+      { key: '/signal-monitor/daily', label: <Link to="/signal-monitor/daily">日报</Link>, order: 40 },
+    ]),
   };
 
   const certStudyPermission = 'menu:cert-study';
@@ -188,11 +197,11 @@ const AppLayout: React.FC = () => {
     key: '/cert-study',
     label: '证书题库',
     icon: <BookOutlined />,
-    children: [
-      { key: '/cert-study/sap-c02', label: <Link to="/cert-study/sap-c02">SAP-C02</Link> },
-      { key: '/cert-study/dop-c02', label: <Link to="/cert-study/dop-c02">DOP-C02</Link> },
-      { key: '/cert-study/scs-c03', label: <Link to="/cert-study/scs-c03">SCS-C03</Link> },
-    ],
+    children: createOrderedChildren([
+      { key: '/cert-study/sap-c02', label: <Link to="/cert-study/sap-c02">SAP-C02</Link>, order: 10 },
+      { key: '/cert-study/dop-c02', label: <Link to="/cert-study/dop-c02">DOP-C02</Link>, order: 20 },
+      { key: '/cert-study/scs-c03', label: <Link to="/cert-study/scs-c03">SCS-C03</Link>, order: 30 },
+    ]),
   };
 
 
@@ -201,14 +210,14 @@ const AppLayout: React.FC = () => {
     key: '/asset-management',
     label: '资产管理',
     icon: <DatabaseOutlined />,
-    children: [
-      { key: '/asset-management/overview', label: <Link to="/asset-management/overview">资产总览</Link> },
-      { key: '/asset-management/accounts', label: <Link to="/asset-management/accounts">账号管理</Link> },
-      { key: '/asset-management/resources', label: <Link to="/asset-management/resources">服务资源</Link> },
-      { key: '/asset-management/domains', label: <Link to="/asset-management/domains">域名管理</Link> },
-      { key: '/asset-management/credential-refs', label: <Link to="/asset-management/credential-refs">凭证索引</Link> },
-      { key: '/asset-management/change-logs', label: <Link to="/asset-management/change-logs">变更记录</Link> },
-    ],
+    children: createOrderedChildren([
+      { key: '/asset-management/overview', label: <Link to="/asset-management/overview">资产总览</Link>, order: 10 },
+      { key: '/asset-management/resources', label: <Link to="/asset-management/resources">服务资源</Link>, order: 20 },
+      { key: '/asset-management/domains', label: <Link to="/asset-management/domains">域名管理</Link>, order: 30 },
+      { key: '/asset-management/accounts', label: <Link to="/asset-management/accounts">账号管理</Link>, order: 40 },
+      { key: '/asset-management/credential-refs', label: <Link to="/asset-management/credential-refs">凭证索引</Link>, order: 50 },
+      { key: '/asset-management/change-logs', label: <Link to="/asset-management/change-logs">变更记录</Link>, order: 60 },
+    ]),
   };
 
   const cloudResourceGroup = createMenuGroup(
@@ -239,21 +248,23 @@ const AppLayout: React.FC = () => {
     [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues, menuItems.cicdRuns],
   );
 
-  const systemManagementChildren: NonNullable<MenuProps['items']> = [
+  const systemManagementChildren: NonNullable<MenuProps['items']> = createOrderedChildren([
+    ...(hasPermission(accessControlPermission) ? [{ ...accessControlGroup, order: 10 }] : []),
     ...(hasPermission(menuItems.environments.permission)
       ? [{
           key: menuItems.environments.key,
           label: createMenuLink(menuItems.environments),
+          order: menuItems.environments.order,
         }]
       : []),
     ...(hasPermission(menuItems.siteConf.permission)
       ? [{
           key: menuItems.siteConf.key,
           label: createMenuLink(menuItems.siteConf),
+          order: menuItems.siteConf.order,
         }]
       : []),
-    ...(hasPermission(accessControlPermission) ? [accessControlGroup] : []),
-  ];
+  ]);
 
   const systemManagementGroup: NonNullable<MenuProps['items']>[number] | null =
     systemManagementChildren.length === 0
