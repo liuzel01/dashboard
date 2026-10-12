@@ -329,17 +329,17 @@ export const getAiOpsLogSources = async () => {
   return response.data;
 };
 
-export const searchAiOpsLogs = async (data: {
+export const investigateAiOpsLogs = async (data: {
   projectId: string;
   sourceId: string;
   namespace: string;
+  question: string;
   serviceName?: string;
   queryText?: string;
-  from?: string;
-  to?: string;
+  rangeMinutes?: number;
   limit?: number;
 }) => {
-  const response = await api.post('/ai-ops/logs/search', data);
+  const response = await api.post('/ai-ops/logs/investigate', data);
   return response.data;
 };
 

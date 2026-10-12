@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Alert, Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, App } from 'antd';
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, App } from 'antd';
 import {
   getAiOpsLogSources,
   getAiOpsSqlAudit,
+  investigateAiOpsLogs,
   previewAiOpsSql,
-  searchAiOpsLogs,
 } from '../services/api';
 import { InlineHelpTooltip } from '../components/ops';
 
@@ -53,20 +53,41 @@ type LogEvidence = {
   line: string;
 };
 
+type InvestigationResult = {
+  planVersion: string;
+  model: string;
+  plan: {
+    intent: string;
+    namespace: string;
+    serviceName: string | null;
+    queryTexts: string[];
+    rangeMinutes: number;
+    limit: number;
+  };
+  answer: {
+    summary: string;
+    findings: Array<{ text: string; evidenceIds: string[] }>;
+    evidenceIds: string[];
+    confidence: 'low' | 'medium' | 'high';
+    insufficientEvidence: boolean;
+  };
+  evidence: LogEvidence[];
+  exploreUrls: string[];
+};
+
 const AiOpsPage: React.FC = () => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
   const [logSourceLoading, setLogSourceLoading] = useState(false);
-  const [logSearchLoading, setLogSearchLoading] = useState(false);
   const [logSources, setLogSources] = useState<LogSource[]>([]);
-  const [logEvidence, setLogEvidence] = useState<LogEvidence[]>([]);
-  const [exploreUrl, setExploreUrl] = useState('');
+  const [investigationLoading, setInvestigationLoading] = useState(false);
+  const [investigationResult, setInvestigationResult] = useState<InvestigationResult | null>(null);
 
   const [form] = Form.useForm();
-  const [logForm] = Form.useForm();
-  const selectedLogSourceId = Form.useWatch('sourceId', logForm);
+  const [investigationForm] = Form.useForm();
+  const selectedInvestigationSourceId = Form.useWatch('sourceId', investigationForm);
 
   const loadLogSources = async () => {
     setLogSourceLoading(true);
@@ -75,9 +96,10 @@ const AiOpsPage: React.FC = () => {
       const items = Array.isArray(response?.items) ? response.items : [];
       setLogSources(items);
       if (items.length === 1) {
-        logForm.setFieldsValue({
+        investigationForm.setFieldsValue({
           sourceId: items[0].sourceId,
           namespace: items[0].allowedNamespaces?.[0],
+          rangeMinutes: 15,
           limit: Math.min(100, items[0].maxLines || 100),
         });
       }
@@ -90,40 +112,33 @@ const AiOpsPage: React.FC = () => {
     }
   };
 
-  const onSearchLogs = async () => {
-    const values = await logForm.validateFields();
+  const onInvestigate = async () => {
+    const values = await investigationForm.validateFields();
     const source = logSources.find((item) => item.sourceId === values.sourceId);
     if (!source) {
       message.error('请先加载并选择当前环境的日志源');
       return;
     }
-    if (!values.serviceName?.trim() && !values.queryText?.trim()) {
-      message.error('请至少填写服务名称或调查线索');
-      return;
-    }
-    setLogSearchLoading(true);
-    setLogEvidence([]);
-    setExploreUrl('');
+    setInvestigationLoading(true);
+    setInvestigationResult(null);
     try {
-      const range = values.timeRange;
-      const response = await searchAiOpsLogs({
+      const response = await investigateAiOpsLogs({
         projectId: source.projectId,
         sourceId: source.sourceId,
         namespace: values.namespace,
+        question: values.question.trim(),
         serviceName: values.serviceName?.trim() || undefined,
         queryText: values.queryText?.trim() || undefined,
-        from: range?.[0]?.toISOString(),
-        to: range?.[1]?.toISOString(),
+        rangeMinutes: values.rangeMinutes,
         limit: values.limit,
       });
-      setLogEvidence(Array.isArray(response?.evidence) ? response.evidence : []);
-      setExploreUrl(response?.exploreUrl || '');
-      message.success(`日志查询完成，共 ${response?.evidence?.length || 0} 条脱敏证据`);
+      setInvestigationResult(response);
+      message.success(response?.answer?.insufficientEvidence ? '调查完成，但当前证据不足' : 'AI 日志调查完成');
     } catch (error) {
       const err = error as ApiError;
-      message.error(err.response?.data?.message || err.message || '日志查询失败');
+      message.error(err.response?.data?.message || err.message || 'AI 日志调查失败');
     } finally {
-      setLogSearchLoading(false);
+      setInvestigationLoading(false);
     }
   };
 
@@ -161,67 +176,117 @@ const AiOpsPage: React.FC = () => {
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card
-        title="项目日志调查（Phase 1，只读）"
+        title="AI 项目日志调查（Phase 2）"
         extra={<Button onClick={loadLogSources} loading={logSourceLoading}>加载当前环境日志源</Button>}
       >
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="环境隔离的受控日志检索"
-          description="查询只使用左上角当前环境对应的 Dashboard 专用 Grafana SA。可按服务或任意日志线索检索，UID、positionId、orderId、traceId 只是可选提示；后端限制 namespace、时间范围和返回数量，并在展示前脱敏。本阶段不会让模型自动生成 LogQL。"
+          message="自然语言问题，受控计划，证据引用"
+          description="模型只负责生成结构化调查计划和总结脱敏证据；后端固定当前环境、日志源和 Namespace，并限制服务、时间范围、查询数量。模型不能直接提交 LogQL，也不会关联发布或告警。"
         />
-        <Form form={logForm} layout="vertical" requiredMark={false}>
+        <Form form={investigationForm} layout="vertical" requiredMark={false}>
+          <Form.Item
+            label="调查问题"
+            name="question"
+            rules={[{ required: true, whitespace: true, message: '请输入需要调查的问题' }]}
+          >
+            <TextArea
+              rows={3}
+              maxLength={2000}
+              showCount
+              placeholder="例如：orders 服务最近为什么出现 connection refused？也可以包含 UID、positionId、orderId 或 traceId。"
+            />
+          </Form.Item>
           <Space wrap align="start" style={{ width: '100%' }}>
-            <Form.Item label="日志源" name="sourceId" rules={[{ required: true, message: '请先加载并选择日志源' }]}>
+            <Form.Item label="日志源" name="sourceId" rules={[{ required: true, message: '请先加载日志源' }]}>
               <Select style={{ width: 220 }} options={logSources.map((item) => ({ value: item.sourceId, label: `${item.projectId} / ${item.sourceId}` }))} />
             </Form.Item>
             <Form.Item label="Namespace" name="namespace" rules={[{ required: true }]}>
               <Select
                 showSearch
                 style={{ width: 180 }}
-                options={(logSources.find((item) => item.sourceId === selectedLogSourceId)?.allowedNamespaces || []).map((value) => ({ value, label: value }))}
+                options={(logSources.find((item) => item.sourceId === selectedInvestigationSourceId)?.allowedNamespaces || []).map((value) => ({ value, label: value }))}
               />
             </Form.Item>
-            <Form.Item label="服务（可选）" name="serviceName">
-              <Input style={{ width: 260 }} placeholder="精确匹配 service_name" />
+            <Form.Item label="服务约束（可选）" name="serviceName">
+              <Input style={{ width: 260 }} placeholder="精确 service_name" />
+            </Form.Item>
+            <Form.Item label="必须包含的日志线索（可选）" name="queryText">
+              <Input style={{ width: 340 }} placeholder="错误文本、错误码、UID、traceId 等" />
             </Form.Item>
             <Form.Item
-              label="调查线索（与服务至少填写一项）"
-              name="queryText"
-              tooltip="当前阶段按日志原文进行受控匹配；可以填写错误信息、错误码、接口路径、UID、positionId、orderId、traceId 等。宽泛关键字建议同时选择服务，以降低 Loki 扫描成本。"
+              label="调查范围（分钟）"
+              name="rangeMinutes"
+              initialValue={15}
+              tooltip="未指定服务时后端最多允许 15 分钟；指定服务后可在日志源上限内扩大。"
             >
-              <Input style={{ width: 420 }} placeholder="例如：connection refused、errorCode=500、uid=...、positionId=...、traceId=...（建议同时填写服务）" />
+              <InputNumber min={1} max={1440} />
             </Form.Item>
-            <Form.Item label="时间范围（默认最近 1 小时）" name="timeRange">
-              <DatePicker.RangePicker showTime style={{ width: 360 }} />
-            </Form.Item>
-            <Form.Item label="最多返回" name="limit" initialValue={100}>
-              <InputNumber min={1} max={1000} />
+            <Form.Item label="最多证据" name="limit" initialValue={100}>
+              <InputNumber min={1} max={200} />
             </Form.Item>
           </Space>
-          <Space>
-            <Button type="primary" onClick={onSearchLogs} loading={logSearchLoading}>查询脱敏日志</Button>
-            {exploreUrl && <Button href={exploreUrl} target="_blank" rel="noreferrer">在 Grafana Explore 查看</Button>}
-          </Space>
+          <Button type="primary" onClick={onInvestigate} loading={investigationLoading}>
+            开始受控调查
+          </Button>
         </Form>
       </Card>
 
-      <Card title={`日志证据（${logEvidence.length}）`}>
-        <Table
-          size="small"
-          rowKey="evidenceId"
-          dataSource={logEvidence}
-          pagination={{ pageSize: 20, showSizeChanger: false }}
-          columns={[
-            { title: '时间', dataIndex: 'timestamp', width: 210 },
-            { title: '服务', width: 220, render: (_: unknown, row: LogEvidence) => row.labels.service_name || row.labels.app || '-' },
-            { title: 'Pod', width: 240, render: (_: unknown, row: LogEvidence) => row.labels.pod || '-' },
-            { title: 'Evidence ID', dataIndex: 'evidenceId', width: 190 },
-            { title: '脱敏日志', dataIndex: 'line', render: (value: string) => <Text code style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{value}</Text> },
-          ]}
-        />
-      </Card>
+      {investigationResult && (
+        <Card title="AI 调查结论">
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue">{investigationResult.model}</Tag>
+              <Tag>{investigationResult.planVersion}</Tag>
+              <Tag color={investigationResult.answer.confidence === 'high' ? 'green' : investigationResult.answer.confidence === 'medium' ? 'gold' : 'default'}>
+                置信度 {investigationResult.answer.confidence}
+              </Tag>
+              <Tag color="purple">{investigationResult.plan.rangeMinutes} 分钟</Tag>
+              <Tag>{investigationResult.plan.serviceName || '未限定服务'}</Tag>
+            </Space>
+            <Alert
+              type={investigationResult.answer.insufficientEvidence ? 'warning' : 'success'}
+              showIcon
+              message={investigationResult.answer.summary}
+              description={investigationResult.answer.insufficientEvidence ? '当前结论不能作为故障根因判断，请缩小范围、补充服务或调查线索后重试。' : undefined}
+            />
+            {investigationResult.answer.findings.length > 0 && (
+              <div>
+                <Text strong>证据发现：</Text>
+                <ul>
+                  {investigationResult.answer.findings.map((finding, index) => (
+                    <li key={`${index}-${finding.text}`}>
+                      {finding.text} <Text type="secondary">[{finding.evidenceIds.join('、')}]</Text>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <Text type="secondary">
+              调查意图：{investigationResult.plan.intent}；线索：{investigationResult.plan.queryTexts.join('、') || '-'}；引用证据：{investigationResult.answer.evidenceIds.join('、') || '-'}
+            </Text>
+            <Space wrap>
+              {investigationResult.exploreUrls.map((url, index) => (
+                <Button key={url} href={url} target="_blank" rel="noreferrer">在 Grafana 查看查询 {index + 1}</Button>
+              ))}
+            </Space>
+            <Table
+              size="small"
+              rowKey="evidenceId"
+              dataSource={investigationResult.evidence}
+              pagination={{ pageSize: 20, showSizeChanger: false }}
+              columns={[
+                { title: '时间', dataIndex: 'timestamp', width: 210 },
+                { title: '服务', width: 220, render: (_: unknown, row: LogEvidence) => row.labels.service_name || row.labels.app || '-' },
+                { title: 'Evidence ID', dataIndex: 'evidenceId', width: 190 },
+                { title: '脱敏日志', dataIndex: 'line', render: (value: string) => <Text code style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{value}</Text> },
+              ]}
+            />
+          </Space>
+        </Card>
+      )}
 
       <Card
         title={(
