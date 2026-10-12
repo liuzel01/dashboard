@@ -307,4 +307,35 @@ describe('AiOpsService previewSql security', () => {
       confValue: 'gpt-5.6-terra',
     }));
   });
+
+  it('requests structured log investigation output through cliproxy', async () => {
+    mockedAxios.post.mockResolvedValue({
+      data: { choices: [{ message: { content: '{"intent":"inspect"}' } }] },
+    } as any);
+    const { service } = createService();
+    const logActor = {
+      ...actor,
+      permissions: [...actor.permissions, 'aiops:log-investigate'],
+    };
+
+    const result = await service.completeLogInvestigationJson(logActor as any, {
+      systemPrompt: 'system rules',
+      userPrompt: '{"question":"why"}',
+      sessionId: 'dashboard:aiops:logs:test-env:1',
+    });
+
+    expect(result.model).toBe('gpt-5.6-terra');
+    expect(result.text).toBe('{"intent":"inspect"}');
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      'http://cliproxy.local/v1/chat/completions',
+      expect.objectContaining({
+        model: 'gpt-5.6-terra',
+        response_format: { type: 'json_object' },
+        temperature: 0,
+      }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer test-api-key' }),
+      }),
+    );
+  });
 });

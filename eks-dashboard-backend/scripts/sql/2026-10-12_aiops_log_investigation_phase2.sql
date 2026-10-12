@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `aiops_log_investigation_audit` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `environment_id` varchar(64) NOT NULL,
+  `project_id` varchar(64) NOT NULL,
+  `source_id` varchar(128) NOT NULL,
+  `actor_user_id` bigint DEFAULT NULL,
+  `actor_username` varchar(128) NOT NULL,
+  `question_hash` char(64) NOT NULL,
+  `plan_hash` char(64) DEFAULT NULL,
+  `plan_version` varchar(32) NOT NULL DEFAULT 'phase2-v1',
+  `model` varchar(128) DEFAULT NULL,
+  `status` varchar(32) NOT NULL,
+  `query_count` int unsigned NOT NULL DEFAULT 0,
+  `evidence_count` int unsigned NOT NULL DEFAULT 0,
+  `error_message` varchar(1000) DEFAULT NULL,
+  `duration_ms` int unsigned NOT NULL DEFAULT 0,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_aiops_log_investigation_env_created` (`environment_id`, `created_at`),
+  KEY `idx_aiops_log_investigation_actor_created` (`actor_user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

@@ -16,10 +16,16 @@ import { CloudWatchEventDto } from './dto/cloudwatch-event.dto';
 import { SlowQueryEventDto } from './dto/slow-query-event.dto';
 import { LogSearchDto } from './dto/log-search.dto';
 import { AiOpsLogService } from './ai-ops-log.service';
+import { AiOpsInvestigationService } from './ai-ops-investigation.service';
+import { LogInvestigationDto } from './dto/log-investigation.dto';
 
 @Controller('ai-ops')
 export class AiOpsController {
-  constructor(private readonly service: AiOpsService, private readonly logService: AiOpsLogService) {}
+  constructor(
+    private readonly service: AiOpsService,
+    private readonly logService: AiOpsLogService,
+    private readonly investigationService: AiOpsInvestigationService,
+  ) {}
 
   private ensureEnvironmentHeader(environmentId: string | undefined) {
     if (!environmentId) {
@@ -116,6 +122,18 @@ export class AiOpsController {
     this.ensureEnvironmentHeader(environmentId);
     const actor = await this.service.resolveActorFromAuthorization(authorization);
     return this.logService.search(environmentId, actor, body);
+  }
+
+  @Post('logs/investigate')
+  async investigateLogs(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: LogInvestigationDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.investigate(environmentId, actor, body);
   }
 
   @Post('events/cloudwatch')

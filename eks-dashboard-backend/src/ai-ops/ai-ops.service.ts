@@ -383,6 +383,52 @@ export class AiOpsService {
     return { provider: 'cliproxy', model, updated: true };
   }
 
+  async completeLogInvestigationJson(
+    actor: ActorContext,
+    input: {
+      systemPrompt: string;
+      userPrompt: string;
+      sessionId: string;
+      maxTokens?: number;
+    },
+  ) {
+    this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:log-investigate']);
+    const llm = await this.getCliproxyConfig();
+    const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const timeoutMs = await this.getCliproxyRequestTimeoutMs();
+    try {
+      const response = await axios.post(
+        endpoint,
+        {
+          model: llm.model,
+          user: input.sessionId,
+          messages: [
+            { role: 'system', content: input.systemPrompt },
+            { role: 'user', content: input.userPrompt },
+          ],
+          temperature: 0,
+          max_tokens: Math.min(2000, Math.max(200, input.maxTokens || 1000)),
+          response_format: { type: 'json_object' },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${llm.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: timeoutMs,
+        },
+      );
+      const text = this.extractCliproxyText(response.data);
+      if (!text) throw new BadGatewayException('cliproxy returned an empty response');
+      return { provider: llm.provider, model: llm.model, text };
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      throw new BadGatewayException(
+        `cliproxy log investigation request failed: ${this.errorMessage(error)}`,
+      );
+    }
+  }
+
   async ingestCloudWatchEvent(
     environmentIdHeader: string | undefined,
     tokenHeader: string | undefined,
