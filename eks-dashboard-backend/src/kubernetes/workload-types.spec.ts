@@ -21,7 +21,7 @@ describe('workload type registry', () => {
         }),
         expect.objectContaining({
           value: 'daemonset',
-          capabilities: expect.objectContaining({ logs: true, restart: false }),
+          capabilities: expect.objectContaining({ logs: true, restart: true }),
         }),
       ]),
     );

@@ -18,8 +18,28 @@ describe('DeploymentsController workload listing', () => {
       name: 'ledger',
       workloadType: 'statefulset',
       workloadKind: 'StatefulSet',
-      capabilities: expect.objectContaining({ logs: true, restart: false, imageRollback: false }),
+      capabilities: expect.objectContaining({ logs: true, restart: true, imageRollback: false }),
     })]);
+  });
+
+  it('does not offer automatic restart for partial or OnDelete StatefulSet updates', async () => {
+    const k8sService = {
+      getWorkloads: jest.fn().mockResolvedValue([{
+        metadata: { name: 'ledger', namespace: 'default' },
+        spec: {
+          replicas: 2,
+          updateStrategy: { type: 'RollingUpdate', rollingUpdate: { partition: 1 } },
+          template: { spec: { containers: [{ image: 'example/ledger:v1' }] } },
+        },
+        status: {},
+      }]),
+    };
+    const controller = new DeploymentsController(k8sService as any);
+
+    const [result] = await controller.getDeployments('test', undefined, 'default', 'statefulset');
+
+    expect(result.capabilities).toMatchObject({ restart: false });
+    expect(result.capabilities.restartReason).toContain('partition=1');
   });
 
   it('rejects a resource type outside the registry', async () => {

@@ -106,6 +106,17 @@ export class DeploymentsController {
 
       const definition = WORKLOAD_TYPE_DEFINITIONS[workloadType];
       return filteredWorkloads.map((d: any) => {
+        const updateStrategyType = workloadType === 'deployment'
+          ? 'RollingUpdate'
+          : d.spec?.updateStrategy?.type || 'RollingUpdate';
+        const partition = workloadType === 'statefulset'
+          ? Number(d.spec?.updateStrategy?.rollingUpdate?.partition || 0)
+          : 0;
+        const restartReason = updateStrategyType !== 'RollingUpdate'
+          ? `${definition.kind} 使用 ${updateStrategyType} 策略，无法自动滚动重启。`
+          : partition > 0
+            ? `StatefulSet 配置了 partition=${partition}，自动重启只会覆盖部分副本。`
+            : undefined;
         const isDaemonSet = workloadType === 'daemonset';
         const desiredReplicas = isDaemonSet
           ? Number(d.status?.desiredNumberScheduled || 0)
@@ -136,7 +147,11 @@ export class DeploymentsController {
         return {
           workloadType,
           workloadKind: definition.kind,
-          capabilities: definition.capabilities,
+          capabilities: {
+            ...definition.capabilities,
+            restart: definition.capabilities.restart && !restartReason,
+            restartReason,
+          },
           name: d.metadata?.name,
           namespace: d.metadata?.namespace,
           replicas: desiredReplicas,
@@ -198,6 +213,7 @@ export class DeploymentsController {
     @Param('name') name: string,
     @Headers('x-target-environment') environmentId: string,
     @Query('namespace') namespace?: string,
+    @Query('type') type?: string,
   ) {
     if (!environmentId) {
       throw new HttpException(
@@ -206,13 +222,20 @@ export class DeploymentsController {
       );
     }
     const targetNamespace = this.normalizeNamespace(namespace);
+    let workloadType: ReturnType<typeof resolveWorkloadType>;
+    try {
+      workloadType = resolveWorkloadType(type);
+    } catch (error) {
+      throw new HttpException((error as Error).message, HttpStatus.BAD_REQUEST);
+    }
     try {
       this.logger.log(
-        `Restarting deployment: ${name} in env "${environmentId}"`,
+        `Restarting ${workloadType}: ${name} in env "${environmentId}"`,
       );
-      return await this.k8sService.restartDeployment(
+      return await this.k8sService.restartWorkload(
         environmentId,
         name,
+        workloadType,
         targetNamespace,
       );
     } catch (error) {
@@ -221,8 +244,8 @@ export class DeploymentsController {
         error.body || error,
       );
       throw new HttpException(
-        'Failed to restart deployment',
-        HttpStatus.INTERNAL_SERVER_ERROR,
+        (error as Error).message || 'Failed to restart workload',
+        HttpStatus.BAD_REQUEST,
       );
     }
   }
@@ -270,6 +293,7 @@ export class DeploymentsController {
     @Headers('x-target-environment') environmentId: string,
     @Query('generation') generation?: string,
     @Query('namespace') namespace?: string,
+    @Query('type') type?: string,
   ) {
     if (!environmentId) {
       throw new HttpException('Header "X-Target-Environment" is required.', HttpStatus.BAD_REQUEST);
@@ -279,10 +303,17 @@ export class DeploymentsController {
       throw new HttpException('Query parameter "generation" must be a positive integer.', HttpStatus.BAD_REQUEST);
     }
     const targetNamespace = this.normalizeNamespace(namespace);
+    let workloadType: ReturnType<typeof resolveWorkloadType>;
     try {
-      return await this.k8sService.getDeploymentRolloutStatus(
+      workloadType = resolveWorkloadType(type);
+    } catch (error) {
+      throw new HttpException((error as Error).message, HttpStatus.BAD_REQUEST);
+    }
+    try {
+      return await this.k8sService.getWorkloadRolloutStatus(
         environmentId,
         name,
+        workloadType,
         targetGeneration,
         targetNamespace,
       );

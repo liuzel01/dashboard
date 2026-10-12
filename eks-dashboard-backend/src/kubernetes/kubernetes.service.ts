@@ -251,45 +251,72 @@ export class KubernetesService {
     name: string,
     namespace = 'default',
   ) {
+    return this.restartWorkload(environmentId, name, 'deployment', namespace);
+  }
+
+  async restartWorkload(
+    environmentId: string,
+    name: string,
+    workloadType: WorkloadType,
+    namespace = 'default',
+  ) {
     const { k8sAppsV1Api } = await this.getK8sApis(environmentId);
+    const type = resolveWorkloadType(workloadType);
     try {
       this.logger.log(
-        `Restarting deployment "${name}" in namespace "${namespace}" by updating annotations.`,
+        `Restarting ${type} "${name}" in namespace "${namespace}" by updating annotations.`,
       );
-      const { body: deployment } = await k8sAppsV1Api.readNamespacedDeployment(
-        name,
-        namespace,
-      );
+      const workload = type === 'deployment'
+        ? (await k8sAppsV1Api.readNamespacedDeployment(name, namespace)).body
+        : type === 'statefulset'
+          ? (await k8sAppsV1Api.readNamespacedStatefulSet(name, namespace)).body
+          : (await k8sAppsV1Api.readNamespacedDaemonSet(name, namespace)).body;
 
-      if (!deployment.spec?.template) {
+      if (!workload.spec?.template) {
         throw new Error(
-          `Deployment "${name}" is invalid: missing spec.template.`,
+          `${type} "${name}" is invalid: missing spec.template.`,
         );
       }
 
-      deployment.spec.template.metadata =
-        deployment.spec.template.metadata ?? {};
-      deployment.spec.template.metadata.annotations =
-        deployment.spec.template.metadata.annotations ?? {};
+      const updateStrategyType = type === 'deployment'
+        ? 'RollingUpdate'
+        : (workload as k8s.V1StatefulSet | k8s.V1DaemonSet).spec?.updateStrategy?.type || 'RollingUpdate';
+      if (updateStrategyType !== 'RollingUpdate') {
+        throw new Error(
+          `${type} "${name}" uses ${updateStrategyType}; automatic restart requires RollingUpdate.`,
+        );
+      }
+      const partition = type === 'statefulset'
+        ? Number((workload as k8s.V1StatefulSet).spec?.updateStrategy?.rollingUpdate?.partition || 0)
+        : 0;
+      if (partition > 0) {
+        throw new Error(
+          `StatefulSet "${name}" uses rollingUpdate.partition=${partition}; automatic restart would update only part of the replicas.`,
+        );
+      }
 
-      deployment.spec.template.metadata.annotations[RESTART_ANNOTATION] =
+      workload.spec.template.metadata = workload.spec.template.metadata ?? {};
+      workload.spec.template.metadata.annotations =
+        workload.spec.template.metadata.annotations ?? {};
+
+      workload.spec.template.metadata.annotations[RESTART_ANNOTATION] =
         new Date().toISOString();
 
-      const { body: updatedDeployment } = await k8sAppsV1Api.replaceNamespacedDeployment(
-        name,
-        namespace,
-        deployment,
-      );
+      const updatedWorkload = type === 'deployment'
+        ? (await k8sAppsV1Api.replaceNamespacedDeployment(name, namespace, workload as k8s.V1Deployment)).body
+        : type === 'statefulset'
+          ? (await k8sAppsV1Api.replaceNamespacedStatefulSet(name, namespace, workload as k8s.V1StatefulSet)).body
+          : (await k8sAppsV1Api.replaceNamespacedDaemonSet(name, namespace, workload as k8s.V1DaemonSet)).body;
       this.logger.log(
-        `Deployment ${name} in namespace ${namespace} restarted.`,
+        `${type} ${name} in namespace ${namespace} restarted.`,
       );
       return {
-        message: `Deployment ${name} restarted successfully.`,
-        targetGeneration: Number(updatedDeployment.metadata?.generation || 0) || null,
+        message: `${type} ${name} restarted successfully.`,
+        targetGeneration: Number(updatedWorkload.metadata?.generation || 0) || null,
       };
     } catch (e) {
       const errorDetails = e.response ? e.response.body : e.body || e;
-      this.logger.error(`Error restarting deployment ${name}:`, errorDetails);
+      this.logger.error(`Error restarting ${type} ${name}:`, errorDetails);
       throw e;
     }
   }
@@ -643,6 +670,79 @@ export class KubernetesService {
         availableReason: availableCondition?.reason || null,
       },
       diagnostics,
+    };
+  }
+
+  async getWorkloadRolloutStatus(
+    environmentId: string,
+    name: string,
+    workloadType: WorkloadType,
+    targetGeneration?: number,
+    namespace = 'default',
+  ) {
+    const type = resolveWorkloadType(workloadType);
+    if (type === 'deployment') {
+      return this.getDeploymentRolloutStatus(
+        environmentId,
+        name,
+        targetGeneration,
+        namespace,
+      );
+    }
+
+    const { k8sAppsV1Api } = await this.getK8sApis(environmentId);
+    const isDaemonSet = type === 'daemonset';
+    const workload = isDaemonSet
+      ? (await k8sAppsV1Api.readNamespacedDaemonSet(name, namespace)).body
+      : (await k8sAppsV1Api.readNamespacedStatefulSet(name, namespace)).body;
+    const daemonSet = isDaemonSet ? workload as k8s.V1DaemonSet : undefined;
+    const statefulSet = isDaemonSet ? undefined : workload as k8s.V1StatefulSet;
+    const generation = Number(workload.metadata?.generation || 0);
+    const observedGeneration = Number(workload.status?.observedGeneration || 0);
+    const desired = isDaemonSet
+      ? Number(daemonSet?.status?.desiredNumberScheduled || 0)
+      : Number(statefulSet?.spec?.replicas || 0);
+    const updated = isDaemonSet
+      ? Number(daemonSet?.status?.updatedNumberScheduled || 0)
+      : Number(statefulSet?.status?.updatedReplicas || 0);
+    const ready = isDaemonSet
+      ? Number(daemonSet?.status?.numberReady || 0)
+      : Number(statefulSet?.status?.readyReplicas || 0);
+    const available = isDaemonSet
+      ? Number(daemonSet?.status?.numberAvailable || 0)
+      : ready;
+    const unavailable = isDaemonSet
+      ? Number(daemonSet?.status?.numberUnavailable || 0)
+      : Math.max(0, desired - ready);
+    const expectedGeneration = targetGeneration || generation;
+    const completed = desired === 0 || (
+      observedGeneration >= expectedGeneration &&
+      updated >= desired &&
+      ready >= desired &&
+      available >= desired &&
+      unavailable === 0
+    );
+
+    return {
+      phase: completed ? 'completed' : 'progressing',
+      targetGeneration: expectedGeneration,
+      progressDeadlineSeconds: 600,
+      deployment: {
+        name: workload.metadata?.name,
+        namespace: workload.metadata?.namespace,
+        generation,
+        observedGeneration,
+        replicas: desired,
+        updatedReplicas: updated,
+        readyReplicas: ready,
+        availableReplicas: available,
+        unavailableReplicas: unavailable,
+        progressingStatus: null,
+        progressingReason: null,
+        availableStatus: completed ? 'True' : 'False',
+        availableReason: completed ? null : 'NotReady',
+      },
+      diagnostics: [],
     };
   }
 

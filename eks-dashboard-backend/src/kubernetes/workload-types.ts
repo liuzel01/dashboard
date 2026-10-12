@@ -9,6 +9,7 @@ export type WorkloadType = (typeof WORKLOAD_TYPES)[number];
 export type WorkloadCapabilities = {
   logs: boolean;
   restart: boolean;
+  restartReason?: string;
   imageHistory: boolean;
   imageRollback: boolean;
   rolloutTracking: boolean;
@@ -40,10 +41,10 @@ export const WORKLOAD_TYPE_DEFINITIONS: Record<
     kind: 'StatefulSet',
     capabilities: {
       logs: true,
-      restart: false,
+      restart: true,
       imageHistory: false,
       imageRollback: false,
-      rolloutTracking: false,
+      rolloutTracking: true,
     },
   },
   daemonset: {
@@ -51,10 +52,10 @@ export const WORKLOAD_TYPE_DEFINITIONS: Record<
     kind: 'DaemonSet',
     capabilities: {
       logs: true,
-      restart: false,
+      restart: true,
       imageHistory: false,
       imageRollback: false,
-      rolloutTracking: false,
+      rolloutTracking: true,
     },
   },
 };
