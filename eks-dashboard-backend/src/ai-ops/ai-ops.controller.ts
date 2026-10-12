@@ -14,10 +14,12 @@ import { SqlPreviewDto } from './dto/sql-preview.dto';
 import { SqlExecuteDto } from './dto/sql-execute.dto';
 import { CloudWatchEventDto } from './dto/cloudwatch-event.dto';
 import { SlowQueryEventDto } from './dto/slow-query-event.dto';
+import { LogSearchDto } from './dto/log-search.dto';
+import { AiOpsLogService } from './ai-ops-log.service';
 
 @Controller('ai-ops')
 export class AiOpsController {
-  constructor(private readonly service: AiOpsService) {}
+  constructor(private readonly service: AiOpsService, private readonly logService: AiOpsLogService) {}
 
   private ensureEnvironmentHeader(environmentId: string | undefined) {
     if (!environmentId) {
@@ -76,6 +78,27 @@ export class AiOpsController {
     this.ensureEnvironmentHeader(environmentId);
     const actor = await this.service.resolveActorFromAuthorization(authorization);
     return this.service.checkLlmHealth(environmentId, actor);
+  }
+
+  @Get('log-sources')
+  async getLogSources(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.logService.listSources(environmentId, actor);
+  }
+
+  @Post('logs/search')
+  async searchLogs(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: LogSearchDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.logService.search(environmentId, actor, body);
   }
 
   @Post('events/cloudwatch')

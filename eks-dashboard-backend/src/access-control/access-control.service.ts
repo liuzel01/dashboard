@@ -38,6 +38,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'aiops:sql:generate', name: 'AI SQL 生成' },
   { key: 'aiops:incident:analyze', name: '故障定位分析' },
   { key: 'aiops:slowlog:analyze', name: '慢查询分析' },
+  { key: 'aiops:log-investigate', name: 'AI 日志只读调查' },
   { key: 'aiops:notify:lark', name: 'AI 告警推送 Lark' },
 ];
 

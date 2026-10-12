@@ -314,6 +314,25 @@ export const getAiOpsSqlAudit = async (page = 1, size = 20) => {
   return response.data;
 };
 
+export const getAiOpsLogSources = async () => {
+  const response = await api.get('/ai-ops/log-sources');
+  return response.data;
+};
+
+export const searchAiOpsLogs = async (data: {
+  projectId: string;
+  sourceId: string;
+  namespace: string;
+  serviceName?: string;
+  queryText?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}) => {
+  const response = await api.post('/ai-ops/logs/search', data);
+  return response.data;
+};
+
 /**
  * 获取当前环境的所有可管理平台
  */
