@@ -5,6 +5,7 @@ import type { Environment } from '../environments/environment.types';
 import request, { Request } from 'request';
 import { PassThrough } from 'node:stream';
 import { spawn } from 'node:child_process';
+import { resolveWorkloadType, type WorkloadType } from './workload-types';
 
 const RESTART_ANNOTATION = 'kubectl.kubernetes.io/restartedAt';
 const DEPLOYMENT_REVISION_ANNOTATION = 'deployment.kubernetes.io/revision';
@@ -216,10 +217,24 @@ export class KubernetesService {
     return conflicts;
   }
 
-  async getDeployments(environmentId: string, namespace = 'default') {
+  async getWorkloads(
+    environmentId: string,
+    workloadType: WorkloadType,
+    namespace = 'default',
+  ) {
     const { k8sAppsV1Api } = await this.getK8sApis(environmentId);
-    const { body } = await k8sAppsV1Api.listNamespacedDeployment(namespace);
-    return body.items;
+    switch (workloadType) {
+      case 'deployment':
+        return (await k8sAppsV1Api.listNamespacedDeployment(namespace)).body.items;
+      case 'statefulset':
+        return (await k8sAppsV1Api.listNamespacedStatefulSet(namespace)).body.items;
+      case 'daemonset':
+        return (await k8sAppsV1Api.listNamespacedDaemonSet(namespace)).body.items;
+    }
+  }
+
+  async getDeployments(environmentId: string, namespace = 'default') {
+    return this.getWorkloads(environmentId, 'deployment', namespace);
   }
 
   async listNamespaces(environmentId: string) {
@@ -675,20 +690,23 @@ export class KubernetesService {
     };
   }
 
-  async getPodsForDeployment(
+  async getPodsForWorkload(
     environmentId: string,
-    deploymentName: string,
+    workloadName: string,
+    workloadType: WorkloadType,
     namespace = 'default',
   ) {
     const { k8sAppsV1Api, k8sCoreV1Api } = await this.getK8sApis(environmentId);
-    const { body: deployment } = await k8sAppsV1Api.readNamespacedDeployment(
-      deploymentName,
-      namespace,
-    );
-    const matchLabels = deployment.spec?.selector?.matchLabels;
+    const type = resolveWorkloadType(workloadType);
+    const workload = type === 'deployment'
+      ? (await k8sAppsV1Api.readNamespacedDeployment(workloadName, namespace)).body
+      : type === 'statefulset'
+        ? (await k8sAppsV1Api.readNamespacedStatefulSet(workloadName, namespace)).body
+        : (await k8sAppsV1Api.readNamespacedDaemonSet(workloadName, namespace)).body;
+    const matchLabels = workload.spec?.selector?.matchLabels;
 
     if (!matchLabels) {
-      throw new Error(`No selector found for deployment ${deploymentName}`);
+      throw new Error(`No selector found for ${type} ${workloadName}`);
     }
 
     const labelSelector = Object.entries(matchLabels)
@@ -705,6 +723,14 @@ export class KubernetesService {
     );
 
     return podList.items;
+  }
+
+  async getPodsForDeployment(
+    environmentId: string,
+    deploymentName: string,
+    namespace = 'default',
+  ) {
+    return this.getPodsForWorkload(environmentId, deploymentName, 'deployment', namespace);
   }
 
   async streamPodLogs(

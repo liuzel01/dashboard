@@ -11,6 +11,7 @@ import {
   Body,
 } from '@nestjs/common';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { listWorkloadTypes, resolveWorkloadType, WORKLOAD_TYPE_DEFINITIONS } from '../kubernetes/workload-types';
 
 @Controller('deployments')
 export class DeploymentsController {
@@ -51,11 +52,17 @@ export class DeploymentsController {
     }
   }
 
+  @Get('types')
+  getWorkloadTypes() {
+    return listWorkloadTypes();
+  }
+
   @Get()
   async getDeployments(
     @Headers('x-target-environment') environmentId: string,
     @Query('name') name?: string,
     @Query('namespace') namespace?: string,
+    @Query('type') type?: string,
   ) {
     if (!environmentId) {
       throw new HttpException(
@@ -64,63 +71,116 @@ export class DeploymentsController {
       );
     }
     const targetNamespace = this.normalizeNamespace(namespace);
+    let workloadType: ReturnType<typeof resolveWorkloadType>;
+    try {
+      workloadType = resolveWorkloadType(type);
+    } catch (error) {
+      throw new HttpException((error as Error).message, HttpStatus.BAD_REQUEST);
+    }
     try {
       this.logger.log(
-        `Fetching all deployments from the "${targetNamespace}" namespace for env "${environmentId}"...`,
+        `Fetching ${workloadType} workloads from the "${targetNamespace}" namespace for env "${environmentId}"...`,
       );
-      const deployments = await this.k8sService.getDeployments(
+      const workloads = await this.k8sService.getWorkloads(
         environmentId,
+        workloadType,
         targetNamespace,
       );
-      this.logger.log(`Found ${deployments.length} total deployments.`);
+      this.logger.log(`Found ${workloads.length} total ${workloadType} workloads.`);
 
-      let filteredDeployments = deployments;
+      let filteredWorkloads = workloads;
       if (name && name.trim() !== '') {
         const filterName = name.toLowerCase();
         this.logger.log(
-          `Filtering deployments with name containing: "${filterName}"`,
+          `Filtering ${workloadType} workloads with name containing: "${filterName}"`,
         );
         // 支持模糊、不区分大小写的筛选
-        filteredDeployments = deployments.filter((d) =>
+        filteredWorkloads = workloads.filter((d) =>
           (d.metadata?.name || '').toLowerCase().includes(filterName),
         );
       }
 
       this.logger.log(
-        `Returning ${filteredDeployments.length} filtered deployments.`,
+        `Returning ${filteredWorkloads.length} filtered ${workloadType} workloads.`,
       );
 
-      return filteredDeployments.map((d) => ({
-        name: d.metadata?.name,
-        namespace: d.metadata?.namespace,
-        replicas: d.spec?.replicas,
-        availableReplicas: d.status?.availableReplicas || 0,
-        readyReplicas: d.status?.readyReplicas || 0,
-        updatedReplicas: d.status?.updatedReplicas || 0,
-        unavailableReplicas: d.status?.unavailableReplicas || 0,
-        generation: d.metadata?.generation || 0,
-        observedGeneration: d.status?.observedGeneration || 0,
-        progressingStatus:
-          d.status?.conditions?.find((c) => c.type === 'Progressing')?.status ||
-          null,
-        progressingReason:
-          d.status?.conditions?.find((c) => c.type === 'Progressing')?.reason ||
-          null,
-        availableStatus:
-          d.status?.conditions?.find((c) => c.type === 'Available')?.status ||
-          null,
-        availableReason:
-          d.status?.conditions?.find((c) => c.type === 'Available')?.reason ||
-          null,
-        lastRestartAt:
-          d.spec?.template?.metadata?.annotations?.[
-            'kubectl.kubernetes.io/restartedAt'
-          ] || null,
-        creationTimestamp: d.metadata?.creationTimestamp,
-        images:
-          d.spec?.template?.spec?.containers?.map((c) => c.image).join(', ') ??
-          '',
-      }));
+      const definition = WORKLOAD_TYPE_DEFINITIONS[workloadType];
+      return filteredWorkloads.map((d: any) => {
+        const isDaemonSet = workloadType === 'daemonset';
+        const desiredReplicas = isDaemonSet
+          ? Number(d.status?.desiredNumberScheduled || 0)
+          : Number(d.spec?.replicas || 0);
+        const readyReplicas = Number(
+          isDaemonSet ? d.status?.numberReady : d.status?.readyReplicas || 0,
+        );
+        const updatedReplicas = Number(
+          isDaemonSet
+            ? d.status?.updatedNumberScheduled
+            : d.status?.updatedReplicas || 0,
+        );
+        const availableReplicas = Number(
+          isDaemonSet
+            ? d.status?.numberAvailable
+            : d.status?.availableReplicas || readyReplicas,
+        );
+        const unavailableReplicas = Number(
+          isDaemonSet
+            ? d.status?.numberUnavailable
+            : d.status?.unavailableReplicas || 0,
+        );
+        const isAvailable =
+          desiredReplicas === 0 ||
+          (readyReplicas >= desiredReplicas &&
+            updatedReplicas >= desiredReplicas &&
+            unavailableReplicas === 0);
+        return {
+          workloadType,
+          workloadKind: definition.kind,
+          capabilities: definition.capabilities,
+          name: d.metadata?.name,
+          namespace: d.metadata?.namespace,
+          replicas: desiredReplicas,
+          availableReplicas,
+          readyReplicas,
+          updatedReplicas,
+          unavailableReplicas,
+          generation: d.metadata?.generation || 0,
+          observedGeneration: d.status?.observedGeneration || 0,
+          progressingStatus:
+            workloadType === 'deployment'
+              ? d.status?.conditions?.find((c: any) => c.type === 'Progressing')
+                  ?.status || null
+              : null,
+          progressingReason:
+            workloadType === 'deployment'
+              ? d.status?.conditions?.find((c: any) => c.type === 'Progressing')
+                  ?.reason || null
+              : null,
+          availableStatus:
+            workloadType === 'deployment'
+              ? d.status?.conditions?.find((c: any) => c.type === 'Available')
+                  ?.status || null
+              : isAvailable
+                ? 'True'
+                : 'False',
+          availableReason:
+            workloadType === 'deployment'
+              ? d.status?.conditions?.find((c: any) => c.type === 'Available')
+                  ?.reason || null
+              : isAvailable
+                ? null
+                : 'NotReady',
+          lastRestartAt:
+            d.spec?.template?.metadata?.annotations?.[
+              'kubectl.kubernetes.io/restartedAt'
+            ] || null,
+          creationTimestamp: d.metadata?.creationTimestamp,
+          images:
+            d.spec?.template?.spec?.containers
+              ?.map((c: any) => c.image)
+              .join(', ') ?? '',
+        };
+      });
     } catch (error) {
       this.logger.error(
         `Failed to get deployments for env "${environmentId}"`,

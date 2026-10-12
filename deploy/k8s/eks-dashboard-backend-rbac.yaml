@@ -15,6 +15,11 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "patch", "update"]
+  # StatefulSet / DaemonSet are query-and-log only in the Dashboard.  Their
+  # rollout and image rollback semantics are deliberately not exposed here.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["list"]
