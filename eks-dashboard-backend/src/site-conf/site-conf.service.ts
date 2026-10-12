@@ -98,6 +98,41 @@ export class SiteConfService implements OnModuleInit {
     defaultValue?: string;
     validationJson?: string;
   }) {
+    const requestedKey = input.confKey.trim();
+    if (requestedKey === 'aiops.cliproxy.model') {
+      throw new BadRequestException('aiops.cliproxy.model 必须通过受控模型接口更新');
+    }
+    if (requestedKey.startsWith('aiops.openclaw.')) {
+      throw new BadRequestException('aiops.openclaw.* 为只读兼容配置，请使用 aiops.cliproxy.*');
+    }
+    return this.persist(input);
+  }
+
+  async upsertControlled(input: {
+    confKey: string;
+    confValue: string;
+    valueType: SiteConfValueType;
+    category?: string;
+    description?: string;
+    isSensitive?: boolean;
+    isRuntimeEditable?: boolean;
+    defaultValue?: string;
+    validationJson?: string;
+  }) {
+    return this.persist(input);
+  }
+
+  private async persist(input: {
+    confKey: string;
+    confValue: string;
+    valueType: SiteConfValueType;
+    category?: string;
+    description?: string;
+    isSensitive?: boolean;
+    isRuntimeEditable?: boolean;
+    defaultValue?: string;
+    validationJson?: string;
+  }) {
     await this.ensureTableAndDefaults();
     const confKey = input.confKey.trim();
     if (!confKey) throw new BadRequestException('confKey is required');

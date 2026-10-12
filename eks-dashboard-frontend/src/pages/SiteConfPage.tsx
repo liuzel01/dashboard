@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { deleteDashboardSiteConf, getDashboardSiteConfCategories, getDashboardSiteConfList, saveDashboardSiteConf } from '../services/api';
+import { deleteDashboardSiteConf, getAiOpsLlmModels, getDashboardSiteConfCategories, getDashboardSiteConfList, saveAiOpsLlmModel, saveDashboardSiteConf } from '../services/api';
 import { FilterBar, PageHeader, RiskConfirm } from '../components/ops';
 
 const { Text, Paragraph } = Typography;
@@ -64,6 +64,9 @@ const SiteConfPage: React.FC = () => {
   const [editing, setEditing] = useState<SiteConfItem | null>(null);
   const [form] = Form.useForm();
   const valueType = Form.useWatch('valueType', form) as ValueType | undefined;
+  const formConfKey = Form.useWatch('confKey', form) as string | undefined;
+  const [llmModels, setLlmModels] = useState<string[]>([]);
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false);
   const [columnWidths, setColumnWidths] = useState<Record<SiteConfColumnKey, number>>(defaultColumnWidths);
 
   const fetchCategories = async () => {
@@ -103,6 +106,23 @@ const SiteConfPage: React.FC = () => {
     setModalOpen(true);
   };
 
+  const loadLlmModels = async () => {
+    setLlmModelsLoading(true);
+    try {
+      const data = await getAiOpsLlmModels();
+      const models = Array.isArray(data?.models) ? data.models.filter((item: unknown) => typeof item === 'string' && item.trim()) : [];
+      setLlmModels(models);
+      if (!data?.modelAvailable && data?.configuredModel) {
+        message.warning(`当前模型 ${data.configuredModel} 不在 cliproxy 可用模型列表中`);
+      }
+    } catch (e: unknown) {
+      message.error((e as ApiError)?.response?.data?.message || (e as ApiError)?.message || 'cliproxy 模型列表加载失败');
+      setLlmModels([]);
+    } finally {
+      setLlmModelsLoading(false);
+    }
+  };
+
   const openEdit = (record: SiteConfItem) => {
     setEditing(record);
     form.resetFields();
@@ -118,6 +138,7 @@ const SiteConfPage: React.FC = () => {
       validationJson: record.validationJson,
     });
     setModalOpen(true);
+    if (record.confKey === 'aiops.cliproxy.model') void loadLlmModels();
   };
 
   const handleSubmit = async () => {
@@ -133,17 +154,21 @@ const SiteConfPage: React.FC = () => {
     }
     try {
       setSaving(true);
-      await saveDashboardSiteConf({
-        confKey: values.confKey,
-        confValue: values.confValue,
-        valueType: values.valueType,
-        category: values.category || undefined,
-        description: values.description || undefined,
-        isSensitive: values.isSensitive,
-        isRuntimeEditable: values.isRuntimeEditable,
-        defaultValue: values.defaultValue || undefined,
-        validationJson: values.validationJson || undefined,
-      });
+      if (values.confKey === 'aiops.cliproxy.model') {
+        await saveAiOpsLlmModel(values.confValue);
+      } else {
+        await saveDashboardSiteConf({
+          confKey: values.confKey,
+          confValue: values.confValue,
+          valueType: values.valueType,
+          category: values.category || undefined,
+          description: values.description || undefined,
+          isSensitive: values.isSensitive,
+          isRuntimeEditable: values.isRuntimeEditable,
+          defaultValue: values.defaultValue || undefined,
+          validationJson: values.validationJson || undefined,
+        });
+      }
       setModalOpen(false);
       message.success('siteconf 配置已保存，正在刷新列表');
       void fetchCategories();
@@ -257,7 +282,7 @@ const SiteConfPage: React.FC = () => {
         align: 'center' as const,
         render: (_: unknown, record: SiteConfItem) => (
           <Space size={4}>
-            <Button aria-label="编辑" title="编辑" type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+            <Button aria-label="编辑" title={record.isRuntimeEditable ? '编辑' : '该配置不可在运行期编辑'} type="text" size="small" icon={<EditOutlined />} disabled={!record.isRuntimeEditable} onClick={() => openEdit(record)} />
             <Button aria-label="删除" title="删除" type="text" size="small" danger icon={<DeleteOutlined />} loading={deletingKey === record.confKey} disabled={Boolean(deletingKey)} onClick={() => setDeleteTarget(record)} />
           </Space>
         ),
@@ -349,8 +374,21 @@ const SiteConfPage: React.FC = () => {
           <Form.Item label="类型" name="valueType" rules={[{ required: true, message: '请选择类型' }]}>
             <Select options={['string', 'number', 'boolean', 'json'].map((v) => ({ label: v, value: v }))} />
           </Form.Item>
-          <Form.Item label="Value" name="confValue" rules={[{ required: true, message: '请输入 value' }]}>
-            {valueType === 'json' ? <Input.TextArea rows={8} placeholder='{"enabled":true}' /> : <Input.TextArea rows={4} />}
+          <Form.Item
+            label={formConfKey === 'aiops.cliproxy.model' ? 'Value（cliproxy 受控模型）' : 'Value'}
+            name="confValue"
+            rules={[{ required: true, message: '请输入 value' }]}
+            extra={formConfKey === 'aiops.cliproxy.model' ? '模型列表由 Dashboard 后端使用专用 API key 从 cliproxy 实时读取，不能自由输入。' : undefined}
+          >
+            {formConfKey === 'aiops.cliproxy.model' ? (
+              <Select
+                showSearch
+                loading={llmModelsLoading}
+                placeholder="请选择 cliproxy 可用模型"
+                options={llmModels.map((model) => ({ value: model, label: model }))}
+                notFoundContent={llmModelsLoading ? <Spin size="small" /> : '未读取到可用模型'}
+              />
+            ) : valueType === 'json' ? <Input.TextArea rows={8} placeholder='{"enabled":true}' /> : <Input.TextArea rows={4} />}
           </Form.Item>
           <Form.Item label="分类" name="category"><Input placeholder="例如：sso / line / aiops" /></Form.Item>
           <Form.Item label="说明" name="description"><Input.TextArea rows={3} /></Form.Item>

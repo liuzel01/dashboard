@@ -31,10 +31,10 @@ const envConfig = {
 
 const createService = (overrides?: Record<string, string>) => {
   const configValues: Record<string, string> = {
-    AIOPS_LLM_PROVIDER: 'openclaw',
-    AIOPS_OPENCLAW_BASE_URL: 'http://openclaw.local/v1',
-    AIOPS_OPENCLAW_TOKEN: 'test-token',
-    AIOPS_OPENCLAW_MODEL: 'openclaw/default',
+    AIOPS_LLM_PROVIDER: 'cliproxy',
+    AIOPS_CLIPROXY_BASE_URL: 'http://cliproxy.local/v1',
+    AIOPS_CLIPROXY_API_KEY: 'test-api-key',
+    AIOPS_CLIPROXY_MODEL: 'gpt-5.6-terra',
     ...(overrides || {}),
   };
   const config = {
@@ -78,6 +78,9 @@ const createService = (overrides?: Record<string, string>) => {
     getString: jest.fn(async (key: string, fallback: string) => {
       const envKeyBySiteConfKey: Record<string, string> = {
         'aiops.llm.provider': 'AIOPS_LLM_PROVIDER',
+        'aiops.cliproxy.base_url': 'AIOPS_CLIPROXY_BASE_URL',
+        'aiops.cliproxy.api_key': 'AIOPS_CLIPROXY_API_KEY',
+        'aiops.cliproxy.model': 'AIOPS_CLIPROXY_MODEL',
         'aiops.openclaw.base_url': 'AIOPS_OPENCLAW_BASE_URL',
         'aiops.openclaw.token': 'AIOPS_OPENCLAW_TOKEN',
         'aiops.openclaw.model': 'AIOPS_OPENCLAW_MODEL',
@@ -86,6 +89,7 @@ const createService = (overrides?: Record<string, string>) => {
       return configValues[envKeyBySiteConfKey[key]] ?? fallback;
     }),
     getNumber: jest.fn(async (key: string, fallback: number) => fallback),
+    upsertControlled: jest.fn(async () => ({ saved: true })),
   };
 
   const service = new AiOpsService(
@@ -282,5 +286,25 @@ describe('AiOpsService previewSql security', () => {
     expect(listCall[1]).toEqual(['test-env', 20, 0]);
     expect(String(totalCall[0])).toContain('WHERE environment_id = ?');
     expect(totalCall[1]).toEqual(['test-env']);
+  });
+
+  it('lists cliproxy models and only saves a model from the live catalog', async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: { data: [{ id: 'gpt-5.6-terra' }, { id: 'gpt-6.1-sol' }] },
+    } as any);
+    const { service, siteConf } = createService();
+    const adminActor = { ...actor, permissions: [...actor.permissions, 'menu:site-conf'] };
+
+    const catalog = await service.listLlmModels(adminActor as any);
+    expect(catalog.provider).toBe('cliproxy');
+    expect(catalog.configuredModel).toBe('gpt-5.6-terra');
+    expect(catalog.modelAvailable).toBe(true);
+
+    await expect(service.updateLlmModel(adminActor as any, 'unknown-model')).rejects.toThrow(BadRequestException);
+    await service.updateLlmModel(adminActor as any, 'gpt-5.6-terra');
+    expect(siteConf.upsertControlled).toHaveBeenCalledWith(expect.objectContaining({
+      confKey: 'aiops.cliproxy.model',
+      confValue: 'gpt-5.6-terra',
+    }));
   });
 });

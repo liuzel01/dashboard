@@ -80,6 +80,23 @@ export class AiOpsController {
     return this.service.checkLlmHealth(environmentId, actor);
   }
 
+  @Get('llm/models')
+  async getLlmModels(
+    @Headers('authorization') authorization: string,
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.listLlmModels(actor);
+  }
+
+  @Post('llm/model')
+  async updateLlmModel(
+    @Headers('authorization') authorization: string,
+    @Body() body: { model?: string },
+  ) {
+    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    return this.service.updateLlmModel(actor, String(body?.model || ''));
+  }
+
   @Get('log-sources')
   async getLogSources(
     @Headers('x-target-environment') environmentId: string,

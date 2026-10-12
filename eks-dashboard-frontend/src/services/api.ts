@@ -314,6 +314,16 @@ export const getAiOpsSqlAudit = async (page = 1, size = 20) => {
   return response.data;
 };
 
+export const getAiOpsLlmModels = async () => {
+  const response = await api.get('/ai-ops/llm/models');
+  return response.data;
+};
+
+export const saveAiOpsLlmModel = async (model: string) => {
+  const response = await api.post('/ai-ops/llm/model', { model });
+  return response.data;
+};
+
 export const getAiOpsLogSources = async () => {
   const response = await api.get('/ai-ops/log-sources');
   return response.data;

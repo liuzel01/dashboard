@@ -46,10 +46,10 @@ type PreparedSql = {
   generatedFromQuestion: boolean;
 };
 
-type OpenClawConfig = {
-  provider: 'openclaw';
+type CliproxyConfig = {
+  provider: 'cliproxy';
   baseUrl: string;
-  token: string;
+  apiKey: string;
   model: string;
 };
 
@@ -310,19 +310,19 @@ export class AiOpsService {
 
   async checkLlmHealth(environmentId: string, actor: ActorContext) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
-    const llm = await this.getOpenClawConfig();
+    const llm = await this.getCliproxyConfig();
     const startedAt = Date.now();
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/models`;
 
     try {
       const resp = await axios.get(endpoint, {
         headers: {
-          Authorization: `Bearer ${llm.token}`,
+          Authorization: `Bearer ${llm.apiKey}`,
         },
         timeout: 10000,
       });
 
-      const models = this.extractOpenClawModels(resp.data);
+      const models = this.extractCliproxyModels(resp.data);
       return {
         ok: true,
         environmentId,
@@ -336,9 +336,51 @@ export class AiOpsService {
       };
     } catch (error) {
       throw new BadGatewayException(
-        `LLM health check failed: ${this.errorMessage(error)}`,
+        `cliproxy health check failed: ${this.errorMessage(error)}`,
       );
     }
+  }
+
+  async listLlmModels(actor: ActorContext) {
+    this.ensurePermissions(actor, ['menu:site-conf']);
+    const llm = await this.getCliproxyConfig();
+    const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/models`;
+    try {
+      const resp = await axios.get(endpoint, {
+        headers: { Authorization: `Bearer ${llm.apiKey}` },
+        timeout: 10000,
+      });
+      const models = this.extractCliproxyModels(resp.data);
+      return {
+        provider: llm.provider,
+        configuredModel: llm.model,
+        modelAvailable: models.includes(llm.model),
+        models,
+      };
+    } catch (error) {
+      throw new BadGatewayException(`cliproxy model list failed: ${this.errorMessage(error)}`);
+    }
+  }
+
+  async updateLlmModel(actor: ActorContext, modelRaw: string) {
+    this.ensurePermissions(actor, ['menu:site-conf']);
+    const model = String(modelRaw || '').trim();
+    if (!model) throw new BadRequestException('model is required');
+    const catalog = await this.listLlmModels(actor);
+    if (!catalog.models.includes(model)) {
+      throw new BadRequestException(`模型 ${model} 不在当前 cliproxy 可用模型列表中`);
+    }
+    await this.siteConf.upsertControlled({
+      confKey: 'aiops.cliproxy.model',
+      confValue: model,
+      valueType: 'string',
+      category: 'aiops',
+      description: 'AI Ops cliproxy 受控模型',
+      isSensitive: false,
+      isRuntimeEditable: true,
+      defaultValue: 'gpt-5.6-terra',
+    });
+    return { provider: 'cliproxy', model, updated: true };
   }
 
   async ingestCloudWatchEvent(
@@ -916,7 +958,7 @@ export class AiOpsService {
       throw new BadRequestException('question is empty.');
     }
 
-    const llm = await this.getOpenClawConfig();
+    const llm = await this.getCliproxyConfig();
 
     const tableHint = policy.whitelistTables.length > 0
       ? `Allowed tables: ${policy.whitelistTables.join(', ')}`
@@ -992,21 +1034,20 @@ export class AiOpsService {
         },
         {
           headers: {
-            Authorization: `Bearer ${llm.token}`,
+            Authorization: `Bearer ${llm.apiKey}`,
             'Content-Type': 'application/json',
-            'x-openclaw-session-key': llmSessionKey,
           },
-          timeout: await this.getOpenClawRequestTimeoutMs(),
+          timeout: await this.getCliproxyRequestTimeoutMs(),
         },
       );
     } catch (error) {
       const elapsedMs = Date.now() - requestStartedAt;
       throw new BadGatewayException(
-        `OpenClaw request failed (endpoint=${endpoint}, model=${llm.model}, timeoutMs=${await this.getOpenClawRequestTimeoutMs()}, elapsedMs=${elapsedMs}): ${this.errorMessage(error)}`,
+        `cliproxy request failed (endpoint=${endpoint}, model=${llm.model}, timeoutMs=${await this.getCliproxyRequestTimeoutMs()}, elapsedMs=${elapsedMs}): ${this.errorMessage(error)}`,
       );
     }
 
-    const outputText = this.extractOpenClawText(resp.data);
+    const outputText = this.extractCliproxyText(resp.data);
     if (!outputText) {
       throw new BadRequestException('Model returned empty SQL output.');
     }
@@ -1310,9 +1351,10 @@ export class AiOpsService {
     return this.fewshotPromptMaxCases;
   }
 
-  private async getOpenClawRequestTimeoutMs(): Promise<number> {
-    const openClawTimeoutMs = await this.siteConf.getNumber('aiops.openclaw.timeout_ms', 20000);
-    return this.boundNumber(openClawTimeoutMs, 1000, 120000, 20000);
+  private async getCliproxyRequestTimeoutMs(): Promise<number> {
+    const legacyTimeoutMs = await this.siteConf.getNumber('aiops.openclaw.timeout_ms', 20000);
+    const timeoutMs = await this.siteConf.getNumber('aiops.cliproxy.timeout_ms', legacyTimeoutMs);
+    return this.boundNumber(timeoutMs, 1000, 120000, 20000);
   }
 
   private async getFewshotRows(): Promise<FewshotCaseRow[]> {
@@ -1643,37 +1685,38 @@ export class AiOpsService {
     return normalized || 'default';
   }
 
-  private async getOpenClawConfig(): Promise<OpenClawConfig> {
-    const provider = (await this.siteConf.getString('aiops.llm.provider', 'openclaw'))
+  private async getCliproxyConfig(): Promise<CliproxyConfig> {
+    const provider = (await this.siteConf.getString('aiops.llm.provider', 'cliproxy'))
       .trim()
       .toLowerCase();
-    if (provider !== 'openclaw') {
+    if (!['cliproxy', 'openclaw'].includes(provider)) {
       throw new BadRequestException(
-        `Unsupported AIOPS_LLM_PROVIDER "${provider}". Only "openclaw" is supported.`,
+        `Unsupported AIOPS_LLM_PROVIDER "${provider}". Only "cliproxy" is supported.`,
       );
     }
 
-    const baseUrl = (await this.siteConf.getString('aiops.openclaw.base_url', '')).trim();
+    const legacyBaseUrl = (await this.siteConf.getString('aiops.openclaw.base_url', '')).trim();
+    const baseUrl = (await this.siteConf.getString('aiops.cliproxy.base_url', legacyBaseUrl)).trim();
     if (!baseUrl) {
-      throw new BadRequestException('AIOPS_OPENCLAW_BASE_URL is not configured.');
+      throw new BadRequestException('AIOPS_CLIPROXY_BASE_URL is not configured.');
     }
-    const token = (await this.siteConf.getString('aiops.openclaw.token', '')).trim();
-    if (!token) {
-      throw new BadRequestException('AIOPS_OPENCLAW_TOKEN is not configured.');
+    const legacyApiKey = (await this.siteConf.getString('aiops.openclaw.token', '')).trim();
+    const apiKey = (await this.siteConf.getString('aiops.cliproxy.api_key', legacyApiKey)).trim();
+    if (!apiKey) {
+      throw new BadRequestException('AIOPS_CLIPROXY_API_KEY is not configured.');
     }
-    const model =
-      (await this.siteConf.getString('aiops.openclaw.model', 'openclaw/default')).trim() ||
-      'openclaw/default';
+    const legacyModel = (await this.siteConf.getString('aiops.openclaw.model', '')).trim();
+    const model = (await this.siteConf.getString('aiops.cliproxy.model', legacyModel || 'gpt-5.6-terra')).trim() || 'gpt-5.6-terra';
 
     return {
-      provider: 'openclaw',
+      provider: 'cliproxy',
       baseUrl,
-      token,
+      apiKey,
       model,
     };
   }
 
-  private extractOpenClawText(responseData: any): string {
+  private extractCliproxyText(responseData: any): string {
     const choices = Array.isArray(responseData?.choices) ? responseData.choices : [];
     const first = choices[0];
     const content = first?.message?.content;
@@ -1690,7 +1733,7 @@ export class AiOpsService {
     return '';
   }
 
-  private extractOpenClawModels(responseData: any): string[] {
+  private extractCliproxyModels(responseData: any): string[] {
     const data = Array.isArray(responseData?.data) ? responseData.data : [];
     return data
       .map((item) => String(item?.id || '').trim())
