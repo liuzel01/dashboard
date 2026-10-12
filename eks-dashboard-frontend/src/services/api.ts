@@ -33,7 +33,7 @@ export const setAuthToken = (token: string | null) => {
  * @param params - 包含查询参数的对象, 例如 { name: 'filter-text' }
  */
 export type WorkloadType = 'deployment' | 'statefulset' | 'daemonset';
-export type WorkloadCapabilities = { logs: boolean; restart: boolean; imageHistory: boolean; imageRollback: boolean; rolloutTracking: boolean };
+export type WorkloadCapabilities = { logs: boolean; restart: boolean; restartReason?: string; imageHistory: boolean; imageRollback: boolean; rolloutTracking: boolean };
 export type WorkloadTypeOption = { value: WorkloadType; label: string; kind: string; capabilities: WorkloadCapabilities };
 
 export const getDeployments = async (params: { name?: string; namespace?: string; type?: WorkloadType } = {}) => {
@@ -64,13 +64,13 @@ export const getDeploymentNamespaces = async (): Promise<string[]> => {
  * 重启一个应用
  * @param name - 需要重启的应用名称
  */
-export const restartDeployment = async (name: string, namespace = 'default'): Promise<{ targetGeneration?: number | null }> => {
+export const restartDeployment = async (name: string, namespace = 'default', type: WorkloadType = 'deployment'): Promise<{ targetGeneration?: number | null }> => {
   if (!_environmentId) {
     throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   }
   // The environmentId is passed via the 'X-Target-Environment' header, set by setApiEnvironment.
   const response = await api.post(`/deployments/${encodeURIComponent(name)}/restart`, undefined, {
-    params: { namespace },
+    params: { namespace, type },
   });
   return response.data;
 };
@@ -134,10 +134,11 @@ export const getDeploymentRolloutStatus = async (
   name: string,
   generation?: number | null,
   namespace = 'default',
+  type: WorkloadType = 'deployment',
 ): Promise<DeploymentRolloutStatus> => {
   if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   const response = await api.get(`/deployments/${encodeURIComponent(name)}/rollout-status`, {
-    params: { ...(generation ? { generation } : {}), namespace },
+    params: { ...(generation ? { generation } : {}), namespace, type },
   });
   return response.data;
 };

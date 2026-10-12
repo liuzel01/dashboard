@@ -131,8 +131,8 @@ const DeploymentListPage: React.FC = () => {
   const [logViewerVisible, setLogViewerVisible] = useState(false);
   const [logTarget, setLogTarget] = useState<{ name: string; namespace: string; workloadType: WorkloadType } | null>(null);
 
-  const rolloutOperationKey = (environmentId: string, targetNamespace: string, deploymentName: string) =>
-    `${environmentId}:${targetNamespace}:${deploymentName}`;
+  const rolloutOperationKey = (environmentId: string, targetNamespace: string, targetWorkloadType: WorkloadType, deploymentName: string) =>
+    `${environmentId}:${targetNamespace}:${targetWorkloadType}:${deploymentName}`;
 
   useEffect(() => {
     currentEnvironmentIdRef.current = currentEnvironment?.id || null;
@@ -248,6 +248,7 @@ const DeploymentListPage: React.FC = () => {
       targetGeneration?: number | null,
       previousImages?: DeploymentImage[],
       offerRecovery = false,
+      targetWorkloadType: WorkloadType = 'deployment',
     ) => {
       const environmentId = currentEnvironment?.id;
       if (!environmentId) return;
@@ -256,13 +257,13 @@ const DeploymentListPage: React.FC = () => {
       let failureMessage = '';
       const intervalMs = 3000;
       let maxAttempts = 40;
-      const operationKey = `${environmentId}:${targetNamespace}:${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
-      const stateKey = rolloutOperationKey(environmentId, targetNamespace, deploymentName);
+      const operationKey = `${environmentId}:${targetNamespace}:${targetWorkloadType}:${deploymentName}:${targetGeneration || 'current'}:${operationName}`;
+      const stateKey = rolloutOperationKey(environmentId, targetNamespace, targetWorkloadType, deploymentName);
       blockedPromptedRef.current.delete(operationKey);
 
       for (let i = 0; i < maxAttempts; i += 1) {
         if (currentEnvironmentIdRef.current !== environmentId) return;
-        const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration, targetNamespace);
+        const status = await getDeploymentRolloutStatus(deploymentName, targetGeneration, targetNamespace, targetWorkloadType);
         if (currentEnvironmentIdRef.current !== environmentId) return;
         maxAttempts = Math.max(
           maxAttempts,
@@ -273,7 +274,7 @@ const DeploymentListPage: React.FC = () => {
           finalDeployment = target;
           setAllDeployments((prev) =>
             prev.map((item) =>
-              item.name === deploymentName && item.namespace === targetNamespace ? { ...item, ...target } : item,
+              item.name === deploymentName && item.namespace === targetNamespace && item.workloadType === targetWorkloadType ? { ...item, ...target } : item,
             ),
           );
           finalPhase = status.phase;
@@ -378,7 +379,7 @@ const DeploymentListPage: React.FC = () => {
         }
         setRolloutOperations((prev) => ({
           ...prev,
-          [rolloutOperationKey(recoveryRequest.environmentId, recoveryRequest.namespace, recoveryRequest.deploymentName)]: {
+            [rolloutOperationKey(recoveryRequest.environmentId, recoveryRequest.namespace, 'deployment', recoveryRequest.deploymentName)]: {
             phase: 'progressing',
             operationName: '故障回退',
             diagnostics: [],
@@ -415,7 +416,7 @@ const DeploymentListPage: React.FC = () => {
   }, [message, recoveryRequest, trackRolloutProgress]);
 
   // “重启”按钮点击处理
-  const handleRestart = (deploymentName: string | undefined, deploymentNamespace?: string) => {
+  const handleRestart = (deploymentName: string | undefined, deploymentNamespace?: string, targetWorkloadType: WorkloadType = 'deployment') => {
     if (!deploymentName) {
       message.error('无法重启：应用名称未知。');
       console.error('Attempted to restart a deployment with an undefined name.');
@@ -432,12 +433,12 @@ const DeploymentListPage: React.FC = () => {
         console.log(`[Restart] User confirmed. Restarting ${deploymentName}...`);
         setRestarting(deploymentName);
         try {
-          const result = await restartDeployment(deploymentName, targetNamespace);
+          const result = await restartDeployment(deploymentName, targetNamespace, targetWorkloadType);
           message.loading({
             content: `应用 "${deploymentName}" 已发送重启指令，正在后台跟踪重启进度...`,
             duration: 2,
           });
-          void trackRolloutProgress(deploymentName, targetNamespace, '重启', result.targetGeneration);
+          void trackRolloutProgress(deploymentName, targetNamespace, '重启', result.targetGeneration, undefined, false, targetWorkloadType);
         } catch (error: unknown) {
           console.error('[Restart] Caught an error:', error);
           const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
@@ -528,7 +529,7 @@ const DeploymentListPage: React.FC = () => {
       width: 190,
       render: (_: unknown, record: Deployment) => {
         const operation = record.name && currentEnvironment?.id
-          ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, record.namespace || namespace, record.name)]
+          ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, record.namespace || namespace, record.workloadType || 'deployment', record.name)]
           : undefined;
         if (operation?.phase === 'failed') {
           const diagnostic = operation.diagnostics[0];
@@ -582,7 +583,7 @@ const DeploymentListPage: React.FC = () => {
         const canRestart = record.capabilities?.restart !== false;
         const canRollback = record.capabilities?.imageRollback !== false;
         return <Space size={4}>
-          <Tooltip title={canRestart ? undefined : '当前仅支持 Deployment 重启；此类型暂仅支持查看日志。'}><span><Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name, record.namespace)} loading={restarting === record.name} disabled={!canRestart}>重启</Button></span></Tooltip>
+          <Tooltip title={canRestart ? undefined : record.capabilities?.restartReason || '当前工作负载不支持自动滚动重启。'}><span><Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name, record.namespace, record.workloadType)} loading={restarting === record.name} disabled={!canRestart}>重启</Button></span></Tooltip>
           <Dropdown menu={{ items: [
             { key: 'rollback', label: canRollback ? '镜像回退' : '镜像回退（仅 Deployment）', disabled: !canRollback, onClick: () => handleOpenImageHistory(record.name, record.namespace) },
             { key: 'logs', label: '查看日志', icon: <FileTextOutlined />, onClick: () => handleViewLogs(record.name, record.namespace, record.workloadType) },
@@ -598,7 +599,7 @@ const DeploymentListPage: React.FC = () => {
     const summary = { completed: 0, progressing: 0, blocked: 0, failed: 0 };
     allDeployments.forEach((deployment) => {
       const operation = deployment.name && currentEnvironment
-        ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, deployment.namespace || namespace, deployment.name)]
+        ? rolloutOperations[rolloutOperationKey(currentEnvironment.id, deployment.namespace || namespace, deployment.workloadType || 'deployment', deployment.name)]
         : undefined;
       const phase = operation?.phase === 'progressing' ? 'progressing' : operation?.phase || getRolloutPhase(deployment);
       if (phase === 'completed') summary.completed += 1;
