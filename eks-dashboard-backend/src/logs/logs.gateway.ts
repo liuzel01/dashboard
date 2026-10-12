@@ -11,9 +11,12 @@ import { Server, Socket } from 'socket.io';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
 import { PassThrough } from 'node:stream';
 import { Request } from 'request';
+import { resolveWorkloadType, type WorkloadType } from '../kubernetes/workload-types';
 
 interface GetLogsPayload {
-  deploymentName: string;
+  deploymentName?: string;
+  workloadName?: string;
+  workloadType?: WorkloadType;
   environmentId: string;
   namespace?: string;
 }
@@ -62,19 +65,27 @@ export class LogsGateway
 
   @SubscribeMessage('get-logs')
   async handleGetLogs(client: Socket, payload: GetLogsPayload): Promise<void> {
-    const { deploymentName, environmentId } = payload;
+    const workloadName = String(payload.workloadName || payload.deploymentName || '').trim();
+    const { environmentId } = payload;
     const namespace = (payload.namespace || 'default').trim();
-    if (!deploymentName || !environmentId || !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace) || namespace.length > 63) {
+    let workloadType: WorkloadType;
+    try {
+      workloadType = resolveWorkloadType(payload.workloadType);
+    } catch {
+      client.emit('log-error', 'Invalid payload: unsupported workload type.');
+      return;
+    }
+    if (!workloadName || !environmentId || !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace) || namespace.length > 63) {
       this.logger.error('Invalid payload for get-logs:', payload);
       client.emit(
         'log-error',
-        'Invalid payload: deploymentName, environmentId, and a valid namespace are required.',
+        'Invalid payload: workloadName, environmentId, and a valid namespace are required.',
       );
       return;
     }
 
     this.logger.log(
-      `Received get-logs for ${namespace}/${deploymentName} in env ${environmentId} from ${client.id}`,
+      `Received get-logs for ${workloadType} ${namespace}/${workloadName} in env ${environmentId} from ${client.id}`,
     );
 
     // 如果此客户端已有日志请求，先中止旧的
@@ -84,15 +95,16 @@ export class LogsGateway
     }
 
     try {
-      const pods = await this.k8sService.getPodsForDeployment(
+      const pods = await this.k8sService.getPodsForWorkload(
         environmentId,
-        deploymentName,
+        workloadName,
+        workloadType,
         namespace,
       );
       if (pods.length === 0) {
         client.emit(
           'log-error',
-          `No pods found for deployment ${deploymentName}`,
+          `No pods found for ${workloadType} ${workloadName}`,
         );
         return;
       }
@@ -114,9 +126,9 @@ export class LogsGateway
 
       if (!podName || !containerName) {
         this.logger.error(
-          `Could not determine pod name or container name for deployment ${deploymentName}`,
+          `Could not determine pod name or container name for ${workloadType} ${workloadName}`,
         );
-        client.emit('log-error', `Invalid pod data for ${deploymentName}.`);
+        client.emit('log-error', `Invalid pod data for ${workloadName}.`);
         return;
       }
 
@@ -154,7 +166,7 @@ export class LogsGateway
       this.logRequests.set(client.id, req);
     } catch (error) {
       this.logger.error(
-        `Error getting logs for ${deploymentName}: ${String(error)}`,
+        `Error getting logs for ${workloadType} ${workloadName}: ${String(error)}`,
       );
       // Safely log error.body if present on an object
       if (error && typeof error === 'object' && 'body' in error) {
@@ -164,7 +176,7 @@ export class LogsGateway
           // ignore stringify errors
         }
       }
-      client.emit('log-error', `Failed to get logs for ${deploymentName}.`);
+      client.emit('log-error', `Failed to get logs for ${workloadType} ${workloadName}.`);
     }
   }
 }

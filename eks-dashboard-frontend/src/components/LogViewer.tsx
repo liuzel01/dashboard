@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Modal, Spin, Alert, Button, Space } from 'antd';
 import { io, Socket } from 'socket.io-client';
+import type { WorkloadType } from '../services/api';
 import { FullscreenOutlined, FullscreenExitOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { AnsiUp } from 'ansi_up';
 import { getPublicRuntimeConfig } from '../services/runtimeConfig';
 
 interface LogViewerProps {
   deploymentName: string;
+  workloadType?: WorkloadType;
   environmentId: string;
   namespace: string;
   visible: boolean;
@@ -19,6 +21,7 @@ const ansiUp = new AnsiUp();
 
 export const LogViewer: React.FC<LogViewerProps> = ({
   deploymentName,
+  workloadType = 'deployment',
   environmentId,
   namespace,
   visible,
@@ -124,7 +127,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
           // only update state if changed
           setIsConnected((prev) => prev ? prev : true);
           setError((prev) => (prev === null ? prev : null));
-          socket.emit('get-logs', { deploymentName, environmentId, namespace });
+          socket.emit('get-logs', { workloadName: deploymentName, workloadType, environmentId, namespace });
         });
 
   socket.on('connect_error', (err: unknown) => {
@@ -308,7 +311,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
       // 如果弹窗可见但缺少必要信息，则显示错误
       setError('无法获取日志：缺少环境、命名空间或应用名称。');
     }
-  }, [visible, deploymentName, environmentId, namespace]);
+  }, [visible, deploymentName, workloadType, environmentId, namespace]);
 
   // 自动滚动到日志底部
   useEffect(() => {
@@ -371,7 +374,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({
   const modalTitle = (
     <div style={{ width: '100%', cursor: 'move' }}>
       <Space>
-        <span>{`应用日志: ${namespace}/${deploymentName}`}</span>
+        <span>{`${workloadType} 日志: ${namespace}/${deploymentName}`}</span>
         <Button
           icon={isMaximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
           onClick={() => setIsMaximized(!isMaximized)}

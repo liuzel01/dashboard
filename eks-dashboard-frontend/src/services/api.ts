@@ -32,13 +32,23 @@ export const setAuthToken = (token: string | null) => {
  * 获取应用列表
  * @param params - 包含查询参数的对象, 例如 { name: 'filter-text' }
  */
-export const getDeployments = async (params: { name?: string; namespace?: string } = {}) => {
+export type WorkloadType = 'deployment' | 'statefulset' | 'daemonset';
+export type WorkloadCapabilities = { logs: boolean; restart: boolean; imageHistory: boolean; imageRollback: boolean; rolloutTracking: boolean };
+export type WorkloadTypeOption = { value: WorkloadType; label: string; kind: string; capabilities: WorkloadCapabilities };
+
+export const getDeployments = async (params: { name?: string; namespace?: string; type?: WorkloadType } = {}) => {
   if (!_environmentId) {
     throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
   }
   // axios 会自动将 `params` 对象序列化为 URL 查询字符串.
   // The environmentId is passed via the 'X-Target-Environment' header, set by setApiEnvironment.
   const response = await api.get('/deployments', { params });
+  return response.data;
+};
+
+export const getDeploymentWorkloadTypes = async (): Promise<WorkloadTypeOption[]> => {
+  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+  const response = await api.get('/deployments/types');
   return response.data;
 };
 

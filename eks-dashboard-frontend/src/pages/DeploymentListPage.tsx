@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback, useContext, useRef, useMemo } from 'react';
-import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, Tooltip, Typography, Dropdown } from 'antd';
+import { Input, Button, App, Spin, Space, Alert, Modal, Select, Descriptions, Tooltip, Typography, Dropdown, Tag } from 'antd';
 import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
-import { getDeployments, getDeploymentNamespaces, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic } from '../services/api';
+import { getDeployments, getDeploymentNamespaces, getDeploymentWorkloadTypes, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic, type WorkloadCapabilities, type WorkloadType, type WorkloadTypeOption } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
 // 定义 Deployment 对象的接口
 interface Deployment {
+  workloadType?: WorkloadType;
+  workloadKind?: string;
+  capabilities?: WorkloadCapabilities;
   name?: string;
   namespace?: string;
   replicas?: number;
@@ -103,6 +106,8 @@ const DeploymentListPage: React.FC = () => {
   const blockedPromptedRef = useRef(new Set<string>());
 
   const [allDeployments, setAllDeployments] = useState<Deployment[]>([]);
+  const [workloadTypes, setWorkloadTypes] = useState<WorkloadTypeOption[]>([]);
+  const [workloadType, setWorkloadType] = useState<WorkloadType>('deployment');
   const [namespaces, setNamespaces] = useState<string[]>(['default']);
   const [namespace, setNamespace] = useState('default');
   const [namespaceEnvironmentId, setNamespaceEnvironmentId] = useState<string | null>(null);
@@ -124,7 +129,7 @@ const DeploymentListPage: React.FC = () => {
 
   // 日志查看器弹窗的状态
   const [logViewerVisible, setLogViewerVisible] = useState(false);
-  const [logTarget, setLogTarget] = useState<{ name: string; namespace: string } | null>(null);
+  const [logTarget, setLogTarget] = useState<{ name: string; namespace: string; workloadType: WorkloadType } | null>(null);
 
   const rolloutOperationKey = (environmentId: string, targetNamespace: string, deploymentName: string) =>
     `${environmentId}:${targetNamespace}:${deploymentName}`;
@@ -136,6 +141,7 @@ const DeploymentListPage: React.FC = () => {
     blockedPromptedRef.current.clear();
     setRestarting(null);
     setNamespace('default');
+    setWorkloadType('deployment');
     setNamespaceEnvironmentId(currentEnvironment?.id || null);
     setNamespaces(['default']);
     setImageHistoryTarget(null);
@@ -162,6 +168,20 @@ const DeploymentListPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [currentEnvironment?.id, message]);
 
+  useEffect(() => {
+    if (!currentEnvironment) return;
+    let cancelled = false;
+    getDeploymentWorkloadTypes()
+      .then((items) => { if (!cancelled) setWorkloadTypes(items); })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
+        message.warning(`获取工作负载类型失败，暂仅展示 Deployment：${errorMessage || '未知错误'}`);
+        setWorkloadTypes([]);
+      });
+    return () => { cancelled = true; };
+  }, [currentEnvironment?.id, message]);
+
   const fetchDeployments = useCallback((name: string) => {
     if (!currentEnvironment) {
       return;
@@ -169,7 +189,7 @@ const DeploymentListPage: React.FC = () => {
     const requestSeq = ++requestSeqRef.current;
     setLoading(true);
     setLoadError(null);
-    getDeployments({ name, namespace })
+    getDeployments({ name, namespace, type: workloadType })
       .then((data) => {
         if (requestSeq !== requestSeqRef.current) {
           return;
@@ -190,7 +210,7 @@ const DeploymentListPage: React.FC = () => {
           setLoading(false);
         }
       });
-  }, [currentEnvironment, message, namespace]);
+  }, [currentEnvironment, message, namespace, workloadType]);
 
   useEffect(() => {
     // 仅在首次加载、环境切换或用户明确提交搜索时请求。
@@ -211,12 +231,12 @@ const DeploymentListPage: React.FC = () => {
   };
 
   // “查看日志”按钮点击处理
-  const handleViewLogs = (deploymentName: string | undefined, deploymentNamespace?: string) => {
+  const handleViewLogs = (deploymentName: string | undefined, deploymentNamespace?: string, targetWorkloadType: WorkloadType = 'deployment') => {
     if (!deploymentName) {
       message.error('无法查看日志：应用名称未知。');
       return;
     }
-    setLogTarget({ name: deploymentName, namespace: deploymentNamespace || namespace });
+    setLogTarget({ name: deploymentName, namespace: deploymentNamespace || namespace, workloadType: targetWorkloadType });
     setLogViewerVisible(true);
   };
 
@@ -481,6 +501,13 @@ const DeploymentListPage: React.FC = () => {
       render: (value?: string) => <Tooltip title={value}><Text ellipsis style={{ maxWidth: 200, display: 'block' }}>{value || '-'}</Text></Tooltip>,
     },
     {
+      title: '类型',
+      dataIndex: 'workloadKind',
+      key: 'workloadKind',
+      width: 130,
+      render: (value?: string) => <Tag color="blue">{value || 'Deployment'}</Tag>,
+    },
+    {
       title: '运行副本',
       key: 'replicas',
       width: 88,
@@ -551,17 +578,19 @@ const DeploymentListPage: React.FC = () => {
       width: 160,
       fixed: 'right' as const,
       align: 'center' as const,
-      render: (_: unknown, record: Deployment) => (
-        <Space size={4}>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name, record.namespace)} loading={restarting === record.name}>重启</Button>
+      render: (_: unknown, record: Deployment) => {
+        const canRestart = record.capabilities?.restart !== false;
+        const canRollback = record.capabilities?.imageRollback !== false;
+        return <Space size={4}>
+          <Tooltip title={canRestart ? undefined : '当前仅支持 Deployment 重启；此类型暂仅支持查看日志。'}><span><Button size="small" icon={<ReloadOutlined />} onClick={() => handleRestart(record.name, record.namespace)} loading={restarting === record.name} disabled={!canRestart}>重启</Button></span></Tooltip>
           <Dropdown menu={{ items: [
-            { key: 'rollback', label: '镜像回退', onClick: () => handleOpenImageHistory(record.name, record.namespace) },
-            { key: 'logs', label: '查看日志', icon: <FileTextOutlined />, onClick: () => handleViewLogs(record.name, record.namespace) },
+            { key: 'rollback', label: canRollback ? '镜像回退' : '镜像回退（仅 Deployment）', disabled: !canRollback, onClick: () => handleOpenImageHistory(record.name, record.namespace) },
+            { key: 'logs', label: '查看日志', icon: <FileTextOutlined />, onClick: () => handleViewLogs(record.name, record.namespace, record.workloadType) },
           ] }}>
             <Button size="small">更多</Button>
           </Dropdown>
-        </Space>
-      ),
+        </Space>;
+      },
     },
   ];
 
@@ -614,6 +643,13 @@ const DeploymentListPage: React.FC = () => {
           options={namespaces.map((item) => ({ value: item, label: item }))}
           style={{ width: 240, maxWidth: '100%' }}
           placeholder="选择命名空间"
+        />
+        <Select
+          value={workloadType}
+          onChange={(value: WorkloadType) => { setWorkloadType(value); setAllDeployments([]); setRolloutOperations({}); setImageHistoryTarget(null); setLogTarget(null); }}
+          options={(workloadTypes.length ? workloadTypes : [{ value: 'deployment', label: 'Deployment' }]).map((item) => ({ value: item.value, label: item.label }))}
+          style={{ width: 180, maxWidth: '100%' }}
+          aria-label="工作负载类型"
         />
         <Input.Search
           placeholder="按名称模糊筛选..."
@@ -674,6 +710,7 @@ const DeploymentListPage: React.FC = () => {
         <LogViewer
           environmentId={currentEnvironment!.id}
           deploymentName={logTarget.name}
+          workloadType={logTarget.workloadType}
           namespace={logTarget.namespace}
           visible={logViewerVisible}
           onClose={() => setLogViewerVisible(false)}
