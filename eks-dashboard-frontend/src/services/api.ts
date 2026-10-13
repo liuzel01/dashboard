@@ -382,6 +382,14 @@ export type AiOpsInvestigation = {
   feedback?: Array<{ id: number; actor_username?: string | null; rating: string; comment?: string | null; created_at: string }>;
 };
 
+export type AiOpsReplayCase = {
+  key: string;
+  name: string;
+  environmentId: string;
+  description: string;
+  expectedClassification: string;
+};
+
 const aiOpsEnvironmentHeaders = (environmentId: string) => ({
   'X-Target-Environment': environmentId,
 });
@@ -402,6 +410,16 @@ export const getAiOpsInvestigation = async (environmentId: string, id: number) =
 
 export const addAiOpsInvestigationFeedback = async (environmentId: string, id: number, rating: string, comment?: string) =>
   (await api.post(`/ai-ops/investigations/${id}/feedback`, { rating, comment }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { ok: boolean };
+
+export const listAiOpsReplayCases = async (environmentId: string) =>
+  (await api.get('/ai-ops/replay-cases', { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { items: AiOpsReplayCase[] };
+
+export const replayAiOpsCase = async (environmentId: string, caseKey: string) =>
+  (await api.post('/ai-ops/replays', { caseKey }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as {
+    caseKey: string;
+    investigationId: number;
+    created: boolean;
+  };
 
 /**
  * 获取当前环境的所有可管理平台
