@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-blackbox-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: dashboard-blackbox-exporter
+    app.kubernetes.io/part-of: dashboard
+spec:
+  ports:
+    - name: http
+      port: 9115
+      protocol: TCP
+      targetPort: 9115
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: dashboard-blackbox-exporter
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: dashboard-blackbox-exporter
+    app.kubernetes.io/name: dashboard-blackbox-exporter
+    app.kubernetes.io/part-of: dashboard
+addressType: IPv4
+endpoints:
+  - addresses:
+      - 10.100.166.109
+ports:
+  - name: http
+    protocol: TCP
+    port: 9115
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: dashboard-external-dependencies
+  namespace: monitoring
+  labels:
+    role: probe
+    app.kubernetes.io/name: dashboard-external-dependencies
+    app.kubernetes.io/part-of: dashboard
+spec:
+  jobName: dashboard-external-dependencies
+  interval: 60s
+  scrapeTimeout: 10s
+  module: http_2xx
+  prober:
+    url: dashboard-blackbox-exporter.monitoring.svc.cluster.local:9115
+  targets:
+    staticConfig:
+      labels:
+        owner: dashboard
+        probe_location: mgbx-prometheus
+      static:
+        - http://10.100.166.109:5173/
+        - http://10.100.166.109:3000/api/oncall/health
+        - http://10.2.0.116:8080/login
+        - http://10.100.174.192:8080/login
+        - http://172.31.18.229:8080/login
+        - http://10.80.160.79:8080/login
+        - http://172.31.29.3:3000/api/probes/latest
