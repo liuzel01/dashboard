@@ -206,6 +206,33 @@ export class AiOpsController {
     });
   }
 
+  @Get('replay-cases')
+  async listReplayCases(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.listReplayCases(environmentId, actor);
+  }
+
+  @Post('replays')
+  async replayCase(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Body() body: { caseKey?: string },
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.replay(
+      environmentId,
+      actor,
+      String(body.caseKey || '').trim(),
+    );
+  }
+
   @Get('investigations/:id')
   async getInvestigation(
     @Headers('x-target-environment') environmentId: string,

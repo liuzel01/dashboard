@@ -60,6 +60,12 @@ const makeService = (existingId?: number) => {
 };
 
 describe('AiOpsAlertInvestigationService', () => {
+  const actor = {
+    userId: 1,
+    username: 'operator',
+    permissions: ['menu:ai-ops'],
+  };
+
   it('rejects an invalid webhook token', async () => {
     const { service } = makeService();
     await expect(
@@ -134,5 +140,33 @@ describe('AiOpsAlertInvestigationService', () => {
       service.receiveAlertmanager('Bearer test-token', oversized),
     ).rejects.toThrow('payload exceeds');
     expect(db.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('lists only replay cases belonging to the current environment', () => {
+    const { service } = makeService();
+    expect(service.listReplayCases('mgbx', actor).items).toHaveLength(2);
+    expect(service.listReplayCases('hashex', actor).items).toHaveLength(0);
+  });
+
+  it('replays a fixed historical case without requiring the webhook token', async () => {
+    const { service, execute } = makeService();
+    const result = await service.replay(
+      'mgbx',
+      actor,
+      'kylin-backend-http-latency-high-20261013',
+    );
+    expect(result).toMatchObject({ investigationId: 7, created: true });
+    const select = execute.mock.calls.find(([sql]) =>
+      String(sql).includes('SELECT id FROM aiops_investigations'),
+    );
+    expect(select?.[1]).toContain('HISTORICAL_REPLAY');
+    expect(
+      execute.mock.calls.some(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO aiops_investigation_steps') &&
+          Array.isArray(params) &&
+          params.includes('historical.replay'),
+      ),
+    ).toBe(true);
   });
 });

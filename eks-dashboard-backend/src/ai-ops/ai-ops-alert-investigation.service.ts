@@ -15,6 +15,7 @@ import type {
   AlertmanagerPayload,
 } from '../oncall/oncall.types';
 import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.service';
+import { AIOPS_REPLAY_CASES } from './ai-ops-replay.fixtures';
 
 type ActorContext = {
   userId: number | null;
@@ -64,6 +65,7 @@ export class AiOpsAlertInvestigationService {
         alert,
         labels,
         alertName,
+        'ALERTMANAGER_ALERT',
       );
       result.accepted += 1;
       result.created += outcome.created ? 1 : 0;
@@ -71,6 +73,52 @@ export class AiOpsAlertInvestigationService {
       result.investigationIds.push(outcome.id);
     }
     return result;
+  }
+
+  listReplayCases(environmentId: string, actor: ActorContext) {
+    this.assertMenu(actor);
+    return {
+      items: AIOPS_REPLAY_CASES.filter(
+        (item) => item.environmentId === environmentId,
+      ).map((item) => ({
+        key: item.key,
+        name: item.name,
+        environmentId: item.environmentId,
+        description: item.description,
+        expectedClassification: item.expectedClassification,
+      })),
+    };
+  }
+
+  async replay(environmentId: string, actor: ActorContext, caseKey: string) {
+    this.assertMenu(actor);
+    const replayCase = AIOPS_REPLAY_CASES.find(
+      (item) => item.key === caseKey && item.environmentId === environmentId,
+    );
+    if (!replayCase)
+      throw new NotFoundException(
+        'Historical replay case not found for current environment',
+      );
+    const alert = replayCase.payload.alerts?.[0];
+    if (!alert)
+      throw new BadRequestException('Historical replay case has no alert');
+    const labels = {
+      ...(replayCase.payload.commonLabels || {}),
+      ...(alert.labels || {}),
+    };
+    const alertName = this.text(labels.alertname, 255) || 'UnknownAlert';
+    const outcome = await this.persistAlert(
+      replayCase.payload,
+      alert,
+      labels,
+      alertName,
+      'HISTORICAL_REPLAY',
+    );
+    return {
+      caseKey: replayCase.key,
+      investigationId: outcome.id,
+      created: outcome.created,
+    };
   }
 
   async list(
@@ -176,6 +224,7 @@ export class AiOpsAlertInvestigationService {
     alert: AlertmanagerAlert,
     labels: Record<string, unknown>,
     alertName: string,
+    sourceType: 'ALERTMANAGER_ALERT' | 'HISTORICAL_REPLAY',
   ) {
     const annotations = {
       ...(payload.commonAnnotations || {}),
@@ -229,6 +278,7 @@ export class AiOpsAlertInvestigationService {
         );
     const report = {
       kind: 'generic-alert-report',
+      replay: sourceType === 'HISTORICAL_REPLAY',
       facts: {
         alertName,
         severity,
@@ -258,9 +308,9 @@ export class AiOpsAlertInvestigationService {
       const [existing] = await conn.execute<
         Array<mysql.RowDataPacket & { id: number }>
       >(
-        `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type='ALERTMANAGER_ALERT'
+        `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type=?
          AND source_fingerprint=? AND source_started_at=? AND playbook_version=? LIMIT 1 FOR UPDATE`,
-        [environmentId, fingerprint, startedAt, playbookVersion],
+        [environmentId, sourceType, fingerprint, startedAt, playbookVersion],
       );
       let id = Number(existing[0]?.id || 0);
       const created = !id;
@@ -270,10 +320,11 @@ export class AiOpsAlertInvestigationService {
            (environment_id, source_type, source_fingerprint, source_started_at, source_status, alert_name, severity,
             namespace, service_name, resource_name, status, playbook_key, playbook_version, summary, classification,
             confidence, insufficient_evidence, report_json, started_at, completed_at, resolved_at, created_at, updated_at)
-           VALUES (?, 'ALERTMANAGER_ALERT', ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?,
                    ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
           [
             environmentId,
+            sourceType,
             fingerprint,
             startedAt,
             sourceStatus,
@@ -295,12 +346,14 @@ export class AiOpsAlertInvestigationService {
         id = Number(insert.insertId);
       } else {
         await conn.execute(
-          `UPDATE aiops_investigations SET source_status=?, summary=?, classification=?, report_json=?,
+          `UPDATE aiops_investigations SET source_status=?, summary=?, classification=?, confidence=?, insufficient_evidence=?, report_json=?,
            resolved_at=IF(?='RESOLVED', COALESCE(?, UTC_TIMESTAMP()), resolved_at), updated_at=UTC_TIMESTAMP() WHERE id=?`,
           [
             sourceStatus,
             summary,
             classification,
+            specialized?.confidence || 'LOW',
+            specialized?.insufficientEvidence === false ? 0 : 1,
             JSON.stringify(report),
             sourceStatus,
             this.mysqlDate(alert.endsAt),
@@ -311,9 +364,18 @@ export class AiOpsAlertInvestigationService {
       await conn.execute(
         `INSERT INTO aiops_investigation_steps
          (investigation_id, step_key, tool_name, status, result_count, summary, started_at, completed_at, created_at)
-         VALUES (?, 'alertmanager.ingest', 'alertmanager', 'COMPLETED', 1, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+         VALUES (?, ?, ?, 'COMPLETED', 1, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
          ON DUPLICATE KEY UPDATE status='COMPLETED', result_count=result_count+1, summary=VALUES(summary), completed_at=UTC_TIMESTAMP()`,
-        [id, `${sourceStatus} ${alertName}`],
+        [
+          id,
+          sourceType === 'HISTORICAL_REPLAY'
+            ? 'historical.replay'
+            : 'alertmanager.ingest',
+          sourceType === 'HISTORICAL_REPLAY'
+            ? 'fixture-replay'
+            : 'alertmanager',
+          `${sourceStatus} ${alertName}`,
+        ],
       );
       for (const item of specialized?.evidence || []) {
         await conn.execute(
@@ -353,17 +415,21 @@ export class AiOpsAlertInvestigationService {
       await conn.execute(
         `INSERT INTO aiops_investigation_evidence
          (investigation_id, evidence_id, evidence_type, source_system, observed_at, title, content_json, source_url, created_at)
-         VALUES (?, ?, 'ALERT_EVENT', 'alertmanager', ?, ?, ?, ?, UTC_TIMESTAMP())
+         VALUES (?, ?, 'ALERT_EVENT', ?, ?, ?, ?, ?, UTC_TIMESTAMP())
          ON DUPLICATE KEY UPDATE content_json=VALUES(content_json), observed_at=VALUES(observed_at)`,
         [
           id,
           evidenceId,
+          sourceType === 'HISTORICAL_REPLAY'
+            ? 'fixture-replay'
+            : 'alertmanager',
           resolved ? this.mysqlDate(alert.endsAt) : startedAt,
-          `${sourceStatus} ${alertName}`,
+          `${sourceType === 'HISTORICAL_REPLAY' ? 'REPLAY' : sourceStatus} ${alertName}`,
           JSON.stringify({
             labels: this.limitObject(labels),
             annotations: this.limitObject(annotations),
             status: sourceStatus,
+            replay: sourceType === 'HISTORICAL_REPLAY',
           }),
           this.safeUrl(alert.generatorURL || payload.externalURL),
         ],
