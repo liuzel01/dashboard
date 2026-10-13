@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dashboard-aiops-smoke-test
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: dashboard.aiops.smoke
+      rules:
+        - alert: DashboardAiOpsSmokeTest
+          # Disabled by default. Change 0 to 1 only during an approved smoke test.
+          expr: vector(0) == 1
+          for: 1m
+          labels:
+            severity: info
+            environment: mgbx
+            test_type: aiops_smoke
+            route_scope: aiops_only
+          annotations:
+            summary: Dashboard AIOps end-to-end smoke test
+            description: Synthetic alert for validating the Alertmanager to Dashboard AIOps receiver path. Do not route to Oncall or the production alert group.

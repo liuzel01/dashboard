@@ -22,6 +22,8 @@ Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 - `CPUThrottlingHigh` 会关联 throttling、CPU usage、CPU limit 和重启次数；影响证据不完整时保持 `OBSERVE`，不会直接建议扩容；
 - 已使用隔离的本地 MySQL 8.4 和本地后端完成 webhook 创建、重复投递幂等、Prometheus 历史证据落库、列表、详情和反馈 API 验证；
 - 2026-10-13 重启常规开发服务后，已在当前后端 `.env` 指向的开发数据库执行四张 AIOps 调查表迁移；生产数据库仍未迁移。
+- 已在“AI 运维”增加受控历史案例回放：后端仅暴露两个内置脱敏案例，按环境过滤，回放记录使用 `HISTORICAL_REPLAY` 标识，不触发 Oncall 或告警群通知；重复回放保持幂等。
+- 已准备默认不触发的 `DashboardAiOpsSmokeTest` PrometheusRule 模板；只有历史案例人工验收通过并完成独立 AIOps receiver/route 审核后才允许应用到集群。
 
 Phase 3 暂不提前开启。原因不是代码或环境阻塞，而是本计划明确要求先由人工核对两条真实案例的证据与判断，再接入 Kubernetes、发布记录及告警群回传。群回传属于外部可见行为，继续保持关闭。
 
