@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthTargets, updateDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
@@ -124,26 +124,31 @@ const DependencyHealthPage: React.FC = () => {
   );
 
   const columns = useMemo(() => [
-    { title: '依赖', dataIndex: 'name', key: 'name', render: (value: string) => <Typography.Text strong>{value}</Typography.Text> },
+    {
+      title: '依赖', dataIndex: 'name', key: 'name', width: 230, fixed: 'left' as const, ellipsis: true,
+      render: (value: string) => <Tooltip title={value}><Typography.Text strong ellipsis style={{ display: 'block' }}>{value}</Typography.Text></Tooltip>,
+    },
     {
       title: '所属环境',
       dataIndex: 'environmentId',
       key: 'environmentId',
-      width: 160,
+      width: 130,
       filters: environmentFilters,
       onFilter: (value: React.Key | boolean, row: DependencyHealthItem) => row.environmentId === value,
       render: (value: string) => value === 'global'
         ? <Tag color="blue">全局</Tag>
-        : <Space direction="vertical" size={0}><Typography.Text>{environmentNameById.get(value) || value}</Typography.Text><Typography.Text type="secondary">{value}</Typography.Text></Space>,
+        : <Typography.Text code>{value}</Typography.Text>,
     },
-    { title: '类型', dataIndex: 'category', key: 'category', render: (value: string) => <Tag>{value}</Tag> },
-    { title: '状态', dataIndex: 'overallStatus', key: 'overallStatus', render: (value: DependencyHealthItem['overallStatus']) => <Space><Tag color={overallLabels[value].color}>{overallLabels[value].text}</Tag><Typography.Text type="secondary">{overallLabels[value].detail}</Typography.Text></Space> },
+    { title: '类型', dataIndex: 'category', key: 'category', width: 150, ellipsis: true, render: (value: string) => <Tag>{value}</Tag> },
+    {
+      title: '状态', dataIndex: 'overallStatus', key: 'overallStatus', width: 120,
+      render: (value: DependencyHealthItem['overallStatus']) => <Tooltip title={overallLabels[value].detail}><Tag color={overallLabels[value].color}>{overallLabels[value].text}</Tag></Tooltip>,
+    },
     { title: '验证深度', dataIndex: 'verificationDepth', key: 'verificationDepth', width: 100, render: (value: DependencyHealthItem['verificationDepth']) => <Tag color={value === 'L1' ? 'default' : value === 'L2' ? 'blue' : 'purple'}>{value}</Tag> },
     { title: 'HTTP', dataIndex: 'httpStatus', key: 'httpStatus', width: 90, render: (value: number | null) => value ?? '-' },
     { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 100, render: (value: number | null) => value === null ? '-' : `${value} ms` },
-    { title: '探测目标', dataIndex: 'url', key: 'url', ellipsis: true },
-    { title: '检查时间', dataIndex: 'checkedAt', key: 'checkedAt', width: 190, render: (value: string) => new Date(value).toLocaleString() },
-    { title: '操作', key: 'actions', width: 80, render: (_: unknown, row: DependencyHealthItem) => <Button type="link" onClick={() => setSelectedItem(row)}>详情</Button> },
+    { title: '探测目标', dataIndex: 'url', key: 'url', width: 360, ellipsis: true, render: (value: string) => <Tooltip title={value}><Typography.Text ellipsis style={{ display: 'block' }}>{value}</Typography.Text></Tooltip> },
+    { title: '操作', key: 'actions', width: 90, fixed: 'right' as const, align: 'center' as const, render: (_: unknown, row: DependencyHealthItem) => <Button type="link" onClick={() => setSelectedItem(row)}>详情</Button> },
   ], [environmentFilters, environmentNameById]);
 
   return <>
@@ -165,7 +170,15 @@ const DependencyHealthPage: React.FC = () => {
       { key: 'unhealthy', label: '异常', value: data?.summary.unhealthy ?? 0, valueStyle: (data?.summary.unhealthy || 0) > 0 ? { color: '#cf1322' } : undefined },
       { key: 'checking', label: '检查中', value: data?.summary.checking ?? 0 },
     ]} />
-    <OpsTable rowKey="key" loading={initialLoading && !data} columns={columns as any} dataSource={data?.items || []} pagination={false} />
+    <OpsTable
+      rowKey="key"
+      loading={initialLoading && !data}
+      columns={columns as any}
+      dataSource={data?.items || []}
+      tableLayout="fixed"
+      scroll={{ x: 1370 }}
+      pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+    />
     <Modal
       title={selectedItem?.name || '依赖详情'}
       open={Boolean(selectedItem)}
