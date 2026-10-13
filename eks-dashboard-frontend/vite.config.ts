@@ -7,6 +7,7 @@ const previewAllowedHosts = (process.env.VITE_PREVIEW_ALLOWED_HOSTS || 'www.pree
   .split(',')
   .map((host: string) => host.trim())
   .filter(Boolean);
+const backendProxyTarget = process.env.VITE_BACKEND_PROXY_TARGET || 'http://localhost:3000';
 
 const proxy = {
   // Signal Monitor（price-alert）接口走独立后端
@@ -16,12 +17,12 @@ const proxy = {
   },
   // 其他 /api 仍走现有后端
   '/api': {
-    target: 'http://localhost:3000',
+    target: backendProxyTarget,
     changeOrigin: true,
   },
   // 为 WebSocket 连接添加代理
   '/socket.io': {
-    target: 'http://localhost:3000',
+    target: backendProxyTarget,
     ws: true,
   },
 };
