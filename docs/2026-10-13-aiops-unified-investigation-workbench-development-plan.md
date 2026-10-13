@@ -2,13 +2,13 @@
 
 > 日期：2026-10-13
 >
-> 状态：方案确认，待开发
+> 状态：Phase 0～2 已完成本地实现与隔离链路验证；待人工验收后进入 Phase 3
 >
 > 适用仓库：`/Users/liuzelin/github/dashboard`
 
 ## 0. 实施状态（2026-10-13）
 
-Phase 0 和 Phase 1 的本地代码已经完成：
+Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 
 - `/ai-ops` 已改为告警调查任务首页；调查详情、主动日志调查和 SQL 助手使用独立内部路由；
 - 新增 Alertmanager 结构化 webhook、专用 Bearer Token、告警白名单、payload/标签数量限制；
@@ -17,6 +17,12 @@ Phase 0 和 Phase 1 的本地代码已经完成：
 - 用户页面权限统一沿用 `menu:ai-ops`；
 - Oncall 页面和运行时代码未改动；
 - 后端全量 135 条测试、后端构建、前端构建以及本次新增文件的定向 lint 已通过。
+- 已保存两条脱敏回放 fixture，并实现固定、不可由模型改写的 PromQL 专项证据采集；
+- `KylinBackendServiceHttpLatencyHigh` 会关联服务延迟、服务请求速率、慢 URI 和 URI 请求速率，能够单独标记 `LOW_TRAFFIC_SLOW_URI`；
+- `CPUThrottlingHigh` 会关联 throttling、CPU usage、CPU limit 和重启次数；影响证据不完整时保持 `OBSERVE`，不会直接建议扩容；
+- 已使用隔离的本地 MySQL 8.4 和本地后端完成 webhook 创建、重复投递幂等、Prometheus 历史证据落库、列表、详情和反馈 API 验证；未写入共享数据库。
+
+Phase 3 暂不提前开启。原因不是代码或环境阻塞，而是本计划明确要求先由人工核对两条真实案例的证据与判断，再接入 Kubernetes、发布记录及告警群回传。群回传属于外部可见行为，继续保持关闭。
 
 尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行迁移，并将两条白名单告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。
 
