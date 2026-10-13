@@ -42,6 +42,19 @@ const makeService = (existingId?: number) => {
     db as any,
     siteConf as any,
     { get: jest.fn() } as any,
+    {
+      collect: jest.fn(async () => ({
+        playbookKey: 'KYLIN_BACKEND_HTTP_LATENCY_HIGH',
+        playbookVersion: 'latency-v1',
+        classification: 'LOW_TRAFFIC_SLOW_URI',
+        confidence: 'MEDIUM',
+        insufficientEvidence: false,
+        findings: ['low traffic'],
+        recommendations: ['inspect logs'],
+        missingEvidence: ['release'],
+        evidence: [],
+      })),
+    } as any,
   );
   return { service, db, execute };
 };

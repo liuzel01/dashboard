@@ -9,6 +9,7 @@ import { SiteConfModule } from '../site-conf/site-conf.module';
 import { AiOpsLogService } from './ai-ops-log.service';
 import { AiOpsInvestigationService } from './ai-ops-investigation.service';
 import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.service';
+import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.service';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.ser
     AiOpsLogService,
     AiOpsInvestigationService,
     AiOpsAlertInvestigationService,
+    AiOpsPrometheusEvidenceService,
   ],
 })
 export class AiOpsModule {}

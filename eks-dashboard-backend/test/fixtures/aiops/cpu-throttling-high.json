@@ -1,0 +1,31 @@
+{
+  "version": "4",
+  "status": "firing",
+  "receiver": "dashboard-aiops",
+  "groupLabels": { "alertname": "CPUThrottlingHigh" },
+  "commonLabels": { "alertname": "CPUThrottlingHigh", "environment": "mgbx", "severity": "info" },
+  "commonAnnotations": { "summary": "Processes experience elevated CPU throttling." },
+  "externalURL": "https://prometheus.pre.mg56.net/alerts",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "CPUThrottlingHigh",
+        "environment": "mgbx",
+        "severity": "info",
+        "namespace": "monitoring",
+        "pod": "node-exporter-qn6kk",
+        "container": "node-exporter",
+        "instance": "10.100.168.55:10250"
+      },
+      "annotations": {
+        "summary": "Processes experience elevated CPU throttling.",
+        "description": "28% throttling of CPU in namespace monitoring for container node-exporter"
+      },
+      "startsAt": "2026-10-13T02:00:52.400Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.pre.mg56.net/graph",
+      "fingerprint": "fixture-cpu-throttling-20261013"
+    }
+  ]
+}

@@ -14,6 +14,7 @@ import type {
   AlertmanagerAlert,
   AlertmanagerPayload,
 } from '../oncall/oncall.types';
+import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.service';
 
 type ActorContext = {
   userId: number | null;
@@ -24,14 +25,13 @@ type ActorContext = {
 const MAX_ALERTS = 50;
 const MAX_LABELS = 64;
 const MAX_PAYLOAD_BYTES = 256 * 1024;
-const PLAYBOOK_VERSION = 'generic-v1';
-
 @Injectable()
 export class AiOpsAlertInvestigationService {
   constructor(
     private readonly db: PlatformDatabaseService,
     private readonly siteConf: SiteConfService,
     private readonly config: ConfigService,
+    private readonly prometheus: AiOpsPrometheusEvidenceService,
   ) {}
 
   async receiveAlertmanager(
@@ -108,8 +108,8 @@ export class AiOpsAlertInvestigationService {
       `SELECT id, environment_id, source_type, source_status, alert_name, severity, namespace, service_name,
               status, playbook_key, summary, classification, confidence, insufficient_evidence,
               source_started_at, completed_at, resolved_at, created_at, updated_at
-       FROM aiops_investigations WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
-      [...params, pageSize, (page - 1) * pageSize] as any[],
+       FROM aiops_investigations WHERE ${where} ORDER BY id DESC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+      params as any[],
     );
     return { items, total: Number(total[0]?.total || 0), page, pageSize };
   }
@@ -207,11 +207,20 @@ export class AiOpsAlertInvestigationService {
       annotations.description || annotations.summary,
       1000,
     );
+    const specialized = resolved
+      ? null
+      : await this.prometheus.collect({
+          environmentId,
+          alertName,
+          startedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
+          labels,
+        });
+    const playbookKey = specialized?.playbookKey || 'GENERIC_PROMETHEUS_ALERT';
+    const playbookVersion = specialized?.playbookVersion || 'generic-v1';
     const classification = resolved
       ? 'RESOLVED'
-      : severity === 'info'
-        ? 'OBSERVE'
-        : 'NEEDS_INVESTIGATION';
+      : specialized?.classification ||
+        (severity === 'info' ? 'OBSERVE' : 'NEEDS_INVESTIGATION');
     const summary = resolved
       ? `${alertName} 已恢复；保留历史证据供回看。`
       : `${alertName} 已进入通用告警调查。${description ? ` ${description}` : ''}`.slice(
@@ -230,16 +239,19 @@ export class AiOpsAlertInvestigationService {
         sourceStatus,
         startedAt,
       },
-      findings: [
+      findings: specialized?.findings || [
         '已接收 Alertmanager 结构化事件并完成去重。',
-        '当前阶段仅依据告警元数据生成初步报告，尚未证明根因。',
+        '当前仅依据告警元数据生成通用报告，尚未证明根因。',
       ],
-      missingEvidence: [
+      evidenceIds: specialized?.evidence.map((item) => item.evidenceId) || [],
+      missingEvidence: specialized?.missingEvidence || [
         'Prometheus 源指标趋势',
         'Kubernetes 当前与历史状态',
         '日志与发布记录',
       ],
-      recommendations: ['进入调查详情核对原始指标与关联证据。'],
+      recommendations: specialized?.recommendations || [
+        '进入调查详情核对原始指标与关联证据。',
+      ],
     };
 
     return this.db.withTransaction(async (conn) => {
@@ -248,7 +260,7 @@ export class AiOpsAlertInvestigationService {
       >(
         `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type='ALERTMANAGER_ALERT'
          AND source_fingerprint=? AND source_started_at=? AND playbook_version=? LIMIT 1 FOR UPDATE`,
-        [environmentId, fingerprint, startedAt, PLAYBOOK_VERSION],
+        [environmentId, fingerprint, startedAt, playbookVersion],
       );
       let id = Number(existing[0]?.id || 0);
       const created = !id;
@@ -258,8 +270,8 @@ export class AiOpsAlertInvestigationService {
            (environment_id, source_type, source_fingerprint, source_started_at, source_status, alert_name, severity,
             namespace, service_name, resource_name, status, playbook_key, playbook_version, summary, classification,
             confidence, insufficient_evidence, report_json, started_at, completed_at, resolved_at, created_at, updated_at)
-           VALUES (?, 'ALERTMANAGER_ALERT', ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', 'GENERIC_PROMETHEUS_ALERT', ?, ?, ?,
-                   'LOW', 1, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+           VALUES (?, 'ALERTMANAGER_ALERT', ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?, ?, ?, ?,
+                   ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
           [
             environmentId,
             fingerprint,
@@ -270,9 +282,12 @@ export class AiOpsAlertInvestigationService {
             namespace,
             service,
             resource,
-            PLAYBOOK_VERSION,
+            playbookKey,
+            playbookVersion,
             summary,
             classification,
+            specialized?.confidence || 'LOW',
+            specialized?.insufficientEvidence === false ? 0 : 1,
             JSON.stringify(report),
             resolved ? this.mysqlDate(alert.endsAt) : null,
           ],
@@ -300,6 +315,40 @@ export class AiOpsAlertInvestigationService {
          ON DUPLICATE KEY UPDATE status='COMPLETED', result_count=result_count+1, summary=VALUES(summary), completed_at=UTC_TIMESTAMP()`,
         [id, `${sourceStatus} ${alertName}`],
       );
+      for (const item of specialized?.evidence || []) {
+        await conn.execute(
+          `INSERT INTO aiops_investigation_evidence
+           (investigation_id, evidence_id, evidence_type, source_system, observed_at, title, content_json, source_url, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+           ON DUPLICATE KEY UPDATE content_json=VALUES(content_json), observed_at=VALUES(observed_at), source_url=VALUES(source_url)`,
+          [
+            id,
+            item.evidenceId,
+            item.evidenceType,
+            item.sourceSystem,
+            this.mysqlDate(item.observedAt),
+            item.title,
+            JSON.stringify(item.content),
+            item.sourceUrl,
+          ],
+        );
+      }
+      if (specialized) {
+        await conn.execute(
+          `INSERT INTO aiops_investigation_steps
+           (investigation_id, step_key, tool_name, status, result_count, summary, started_at, completed_at, created_at)
+           VALUES (?, 'prometheus.collect', 'prometheus', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+           ON DUPLICATE KEY UPDATE status=VALUES(status), result_count=VALUES(result_count), summary=VALUES(summary), completed_at=UTC_TIMESTAMP()`,
+          [
+            id,
+            specialized.evidence.length ? 'COMPLETED' : 'PARTIAL',
+            specialized.evidence.length,
+            specialized.evidence.length
+              ? `已保存 ${specialized.evidence.length} 组指标证据`
+              : '未取得 Prometheus 指标证据',
+          ],
+        );
+      }
       const evidenceId = `alert-${this.hash(`${fingerprint}:${sourceStatus}:${alert.endsAt || alert.startsAt || ''}`).slice(0, 16)}`;
       await conn.execute(
         `INSERT INTO aiops_investigation_evidence

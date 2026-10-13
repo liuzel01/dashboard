@@ -1,0 +1,30 @@
+{
+  "version": "4",
+  "status": "firing",
+  "receiver": "dashboard-aiops",
+  "groupLabels": { "alertname": "KylinBackendServiceHttpLatencyHigh" },
+  "commonLabels": { "alertname": "KylinBackendServiceHttpLatencyHigh", "environment": "mgbx", "severity": "warning" },
+  "commonAnnotations": { "summary": "Kylin backend service HTTP latency is high" },
+  "externalURL": "https://prometheus.pre.mg56.net/alerts",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "KylinBackendServiceHttpLatencyHigh",
+        "environment": "mgbx",
+        "severity": "warning",
+        "namespace": "default",
+        "job": "kylin-tenant-kylin-tenant-impl",
+        "service": "kylin-tenant-kylin-tenant-impl"
+      },
+      "annotations": {
+        "summary": "Kylin backend service HTTP latency is high",
+        "description": "kylin-tenant-kylin-tenant-impl average non-actuator HTTP latency is above 9s for 5 minutes. Current value: 10.79s"
+      },
+      "startsAt": "2026-10-13T03:50:43.873Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.pre.mg56.net/graph",
+      "fingerprint": "fixture-kylin-latency-20261013"
+    }
+  ]
+}

@@ -104,6 +104,9 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'aiops.alertmanager.bearer_token', envKey: 'AIOPS_ALERTMANAGER_BEARER_TOKEN', valueType: 'string', category: 'aiops-alerts', description: 'Alertmanager 调用 AIOps webhook 的专用 Bearer Token', defaultValue: '', sensitive: true },
   { key: 'aiops.alertmanager.default_environment', envKey: 'AIOPS_ALERTMANAGER_DEFAULT_ENVIRONMENT', valueType: 'string', category: 'aiops-alerts', description: '告警缺少 environment 标签时的环境', defaultValue: 'mgbx' },
   { key: 'aiops.alertmanager.allowed_alerts', envKey: 'AIOPS_ALERTMANAGER_ALLOWED_ALERTS', valueType: 'string', category: 'aiops-alerts', description: '自动创建 AI 调查的告警名白名单，逗号分隔', defaultValue: 'KylinBackendServiceHttpLatencyHigh,CPUThrottlingHigh' },
+  { key: 'aiops.prometheus.environments.mgbx.enabled', valueType: 'boolean', category: 'aiops-prometheus', description: '是否允许 AIOps 对 mgbx 执行内置只读 PromQL', defaultValue: 'true' },
+  { key: 'aiops.prometheus.environments.mgbx.base_url', valueType: 'string', category: 'aiops-prometheus', description: 'mgbx Prometheus 只读地址', defaultValue: 'https://prometheus.pre.mg56.net' },
+  { key: 'aiops.prometheus.environments.mgbx.timeout_ms', valueType: 'number', category: 'aiops-prometheus', description: 'mgbx Prometheus 单次查询超时（毫秒）', defaultValue: '8000', validation: { min: 1000, max: 20000 } },
 
   { key: 'query_center.agent.k8s_namespace', envKey: 'QUERY_CENTER_AGENT_K8S_NAMESPACE', valueType: 'string', category: 'query-center', description: 'Query Center Agent Kubernetes namespace', defaultValue: 'default' },
   { key: 'query_center.agent.k8s_service', envKey: 'QUERY_CENTER_AGENT_K8S_SERVICE', valueType: 'string', category: 'query-center', description: 'Query Center Agent Kubernetes service name', defaultValue: 'dashboard-db-gateway-agent' },
