@@ -27,6 +27,14 @@ Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 
 Phase 3 已按人工确认进入本地开发。首要顺序调整为 Kubernetes 状态/Event/previous log、Grafana/Loki 日志和跨来源时间线；CI/CD 记录不再作为每条告警的必备证据，只在项目/服务可可靠映射且时间窗口内存在记录时作为可选变更上下文。群回传属于外部可见行为，本地阶段只实现默认关闭的受控配置，不发送真实群消息。
 
+Phase 3 当前本地实现进度：
+
+- 已接入 Kubernetes 当前快照、关联 Event，以及容器发生重启时的 previous log；历史回放报告会明确标记当前快照不等同于告警发生时状态；
+- 已复用现有受控 Grafana/Loki 日志查询，固定采集告警前后 10 分钟；零命中保存查询范围与命中数，数据源不可用时记录部分失败；
+- 已把告警事件、Prometheus 指标、Loki 日志、Kubernetes Event/快照和可选 CI/CD 记录汇入同一时间线；
+- CI/CD 记录只在环境、服务名称和告警时间窗口均可匹配时加入，并标记 `causality: UNPROVEN`；
+- 已增加群回传 `enabled=false` 和摘要长度配置，尚未实现或启用真实消息发送。
+
 尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行生产迁移，并将两条白名单告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。
 
 ## 1. 决策结论
