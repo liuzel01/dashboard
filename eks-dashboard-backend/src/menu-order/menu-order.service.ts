@@ -7,7 +7,7 @@ export const DEFAULT_MENU_ORDERS: MenuOrderMap = {
   '/cloud-resources': ['/deployments', '/jump-servers', '/security-groups', '/s3-upload'],
   '/asset-management': ['/asset-management/overview', '/asset-management/resources', '/asset-management/domains', '/asset-management/accounts', '/asset-management/credential-refs', '/asset-management/change-logs'],
   '/line-management': ['/lines', '/line-onboarding', '/admin-site-ingress'],
-  '/monitoring': ['/site-monitors', '/monitoring-requests', '/oncall'],
+  '/monitoring': ['/site-monitors', '/dependency-health', '/monitoring-requests', '/oncall'],
   '/ops-tools': ['/data-query', '/cicd-runs', '/ssl-certificates', '/kms-values', '/ai-ops'],
   '/system-management': ['/access-control', '/environments', '/site-conf', '/menu-management'],
   '/access-control': ['/access-control/users', '/access-control/audit-logs'],

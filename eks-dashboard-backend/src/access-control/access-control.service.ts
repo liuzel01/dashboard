@@ -22,6 +22,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:line-onboarding', name: '新增线路向导' },
   { key: 'menu:admin-site-onboarding', name: '管理端网站 Ingress' },
   { key: 'menu:site-monitors', name: '站点监控' },
+  { key: 'menu:dependency-health', name: '外部依赖健康' },
   { key: 'menu:monitoring-requests', name: '监控资源申请' },
   { key: 'menu:cicd-runs', name: 'CI/CD 执行中心' },
   { key: 'cicd-config:manage', name: 'CI/CD 目录与连接诊断' },

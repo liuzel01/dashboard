@@ -28,6 +28,7 @@ import { KmsValuesModule } from './kms-values/kms-values.module';
 import { OncallModule } from './oncall/oncall.module';
 import { CicdModule } from './cicd/cicd.module';
 import { MenuOrderModule } from './menu-order/menu-order.module';
+import { DependencyHealthModule } from './dependency-health/dependency-health.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { MenuOrderModule } from './menu-order/menu-order.module';
     OncallModule,
     CicdModule,
     MenuOrderModule,
+    DependencyHealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

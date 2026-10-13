@@ -13,6 +13,9 @@ export type SiteConfDefault = {
 };
 
 export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
+  { key: 'dependency_health.blackbox_base_url', valueType: 'string', category: 'dependency-health', description: 'Dashboard 后端访问 Blackbox Exporter 的地址', defaultValue: 'http://127.0.0.1:9115' },
+  { key: 'dependency_health.timeout_ms', valueType: 'number', category: 'dependency-health', description: '单个外部依赖探测超时（毫秒）', defaultValue: '12000', validation: { min: 1000, max: 30000 } },
+  { key: 'dependency_health.targets_json', valueType: 'json', category: 'dependency-health', description: '受控外部依赖探测目录；禁止包含凭据', defaultValue: '[]' },
   { key: 'frontend.logs.socket_url', valueType: 'string', category: 'frontend', description: '前端日志 Socket.IO 服务地址；留空时使用当前页面同源地址', defaultValue: '' },
   { key: 'monitoring.requests.jenkins_approval_token', valueType: 'string', category: 'monitoring', description: 'Jenkins 调用监控审批授权接口的共享令牌', defaultValue: '', sensitive: true },
   { key: 'monitoring.requests.jenkins.enabled', valueType: 'boolean', category: 'monitoring', description: '是否允许 Dashboard 触发受控 Jenkins 监控资源执行', defaultValue: 'false' },
