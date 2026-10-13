@@ -4,10 +4,11 @@ import { AuthModule } from '../auth/auth.module';
 import { SiteConfModule } from '../site-conf/site-conf.module';
 import { DependencyHealthController } from './dependency-health.controller';
 import { DependencyHealthService } from './dependency-health.service';
+import { DependencyProviderHealthService } from './dependency-provider-health.service';
 
 @Module({
   imports: [SiteConfModule, AccessControlModule, forwardRef(() => AuthModule)],
   controllers: [DependencyHealthController],
-  providers: [DependencyHealthService],
+  providers: [DependencyHealthService, DependencyProviderHealthService],
 })
 export class DependencyHealthModule {}
