@@ -354,6 +354,43 @@ export const investigateAiOpsLogs = async (data: {
   return response.data;
 };
 
+export type AiOpsInvestigationStatus = 'PENDING' | 'COLLECTING' | 'ANALYZING' | 'COMPLETED' | 'INSUFFICIENT_EVIDENCE' | 'FAILED';
+export type AiOpsInvestigation = {
+  id: number;
+  environment_id: string;
+  source_type: string;
+  source_status: string;
+  alert_name?: string | null;
+  severity?: string | null;
+  namespace?: string | null;
+  service_name?: string | null;
+  resource_name?: string | null;
+  status: AiOpsInvestigationStatus;
+  playbook_key: string;
+  summary?: string | null;
+  classification?: string | null;
+  confidence?: string | null;
+  insufficient_evidence: number | boolean;
+  source_started_at: string;
+  completed_at?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  report_json?: Record<string, unknown> | string | null;
+  steps?: Array<{ id: number; step_key: string; tool_name?: string | null; status: string; result_count?: number | null; summary?: string | null; error_summary?: string | null; started_at?: string | null; completed_at?: string | null }>;
+  evidence?: Array<{ id: number; evidence_id: string; evidence_type: string; source_system: string; observed_at?: string | null; title: string; content_json: Record<string, unknown> | string; source_url?: string | null }>;
+  feedback?: Array<{ id: number; actor_username?: string | null; rating: string; comment?: string | null; created_at: string }>;
+};
+
+export const listAiOpsInvestigations = async (params: { status?: string; keyword?: string; page?: number; pageSize?: number } = {}) =>
+  (await api.get('/ai-ops/investigations', { params })).data as { items: AiOpsInvestigation[]; total: number; page: number; pageSize: number };
+
+export const getAiOpsInvestigation = async (id: number) =>
+  (await api.get(`/ai-ops/investigations/${id}`)).data as AiOpsInvestigation;
+
+export const addAiOpsInvestigationFeedback = async (id: number, rating: string, comment?: string) =>
+  (await api.post(`/ai-ops/investigations/${id}/feedback`, { rating, comment })).data as { ok: boolean };
+
 /**
  * 获取当前环境的所有可管理平台
  */

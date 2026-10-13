@@ -75,7 +75,7 @@ type InvestigationResult = {
   exploreUrls: string[];
 };
 
-const AiOpsPage: React.FC = () => {
+const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
@@ -175,6 +175,7 @@ const AiOpsPage: React.FC = () => {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      {mode === 'logs' && <>
       <Card
         title="AI 项目日志调查（Phase 2）"
         extra={<Button onClick={loadLogSources} loading={logSourceLoading}>加载当前环境日志源</Button>}
@@ -287,7 +288,9 @@ const AiOpsPage: React.FC = () => {
           </Space>
         </Card>
       )}
+      </>}
 
+      {mode === 'sql' && <>
       <Card
         title={(
           <Space size={6} align="center">
@@ -412,6 +415,7 @@ const AiOpsPage: React.FC = () => {
           ]}
         />
       </Card>
+      </>}
     </Space>
   );
 };

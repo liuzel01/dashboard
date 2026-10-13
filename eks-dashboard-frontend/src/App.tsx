@@ -19,6 +19,8 @@ import ForbiddenPage from './pages/ForbiddenPage';
 import LoginPage from './pages/LoginPage';
 import SsoCallbackPage from './pages/SsoCallbackPage';
 import AiOpsPage from './pages/AiOpsPage';
+import AiOpsWorkbenchPage from './pages/AiOpsWorkbenchPage';
+import AiOpsInvestigationDetailPage from './pages/AiOpsInvestigationDetailPage';
 import SignalMonitorRealtimePage from './pages/SignalMonitorRealtimePage';
 import SignalMonitorHistoryPage from './pages/SignalMonitorHistoryPage';
 import SignalMonitorStatsPage from './pages/SignalMonitorStatsPage';
@@ -414,7 +416,10 @@ const AppLayout: React.FC = () => {
               <Route path="/access-control" element={<Navigate to="/access-control/users" replace />} />
               <Route path="/access-control/users" element={<ProtectedRoute required={[accessControlPermission]}><AccountManagementPage /></ProtectedRoute>} />
               <Route path="/access-control/audit-logs" element={<ProtectedRoute required={[accessControlPermission]}><AuditLogPage /></ProtectedRoute>} />
-              <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage /></ProtectedRoute>} />
+              <Route path="/ai-ops" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsWorkbenchPage /></ProtectedRoute>} />
+              <Route path="/ai-ops/investigations/:id" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsInvestigationDetailPage /></ProtectedRoute>} />
+              <Route path="/ai-ops/tools/logs" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage mode="logs" /></ProtectedRoute>} />
+              <Route path="/ai-ops/tools/sql" element={<ProtectedRoute required={['menu:ai-ops']}><AiOpsPage mode="sql" /></ProtectedRoute>} />
               <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
               <Route path="/kms-values" element={<ProtectedRoute required={['menu:kms-values']}><KmsValuesPage /></ProtectedRoute>} />
               <Route path="/cicd-runs" element={<ProtectedRoute required={['menu:cicd-runs']}><CicdCatalogPage /></ProtectedRoute>} />
