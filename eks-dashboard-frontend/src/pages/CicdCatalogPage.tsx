@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import { BellOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
 import {
   DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
@@ -49,6 +49,9 @@ const actionFilterLabel = (filter?: { includeAnyTokens?: string[]; excludeAnyTok
   ].filter(Boolean);
   return parts.length ? parts.join('；') : '全部';
 };
+
+const parameterDefaultLabel = (value: unknown) =>
+  value === undefined || value === '' ? '（空）' : String(value);
 
 const CicdCatalogPage: React.FC = () => {
   const { message } = App.useApp();
@@ -216,7 +219,6 @@ const CicdCatalogPage: React.FC = () => {
       const detail = await getCicdDiscoveredJobDetail(currentEnvironment.id, actionType, jobName);
       setSelectedJob(detail);
       form.resetFields();
-      form.setFieldsValue(Object.fromEntries(detail.remoteParameters.map((item) => [item.name, item.default])));
     }
     catch (error) { message.error(errorMessage(error, 'Jenkins Job 参数加载失败')); }
     finally { setLoading(false); }
@@ -460,22 +462,31 @@ const CicdCatalogPage: React.FC = () => {
         <Descriptions.Item label="Jenkins 并发">{selectedJob.concurrentBuild ? '允许' : '禁止'}</Descriptions.Item>
         <Descriptions.Item label="Catalog">{selectedJob.registered ? <Tag color="success">已登记增强策略</Tag> : <Tag>远端动态发现</Tag>}</Descriptions.Item>
       </Descriptions>
-      <Table
-        style={{ marginTop: 16 }}
-        size="small"
-        pagination={false}
-        rowKey="name"
-        dataSource={selectedJob.remoteParameters}
-        columns={[
-          { title: '参数', dataIndex: 'name' },
-          { title: '类型', dataIndex: 'type' },
-          { title: '默认值', dataIndex: 'default', render: (value) => value === undefined || value === '' ? '-' : String(value) },
-        ]}
-      />
-      <Form form={form} layout="vertical" style={{ marginTop: 20 }}>
-        {selectedJob.remoteParameters.map((parameter) => <Form.Item key={parameter.name} name={parameter.name} label={parameter.name} tooltip={parameter.type} valuePropName={String(parameter.type).includes('Boolean') ? 'checked' : 'value'}>
-          {String(parameter.type).includes('Boolean') ? <Switch /> : parameter.choices?.length ? <Select options={parameter.choices.map((value) => ({ value, label: value }))} /> : <Input />}
-        </Form.Item>)}
+      <Form form={form} component={false}>
+        <Table
+          style={{ marginTop: 16 }}
+          size="small"
+          pagination={false}
+          rowKey="name"
+          dataSource={selectedJob.remoteParameters}
+          columns={[
+            { title: '参数', dataIndex: 'name', width: '28%' },
+            { title: '类型', dataIndex: 'type', width: '24%' },
+            {
+              title: '本次执行值',
+              key: 'value',
+              render: (_value, parameter) => {
+                const isBoolean = String(parameter.type).includes('Boolean');
+                const field = isBoolean
+                  ? <Select placeholder={`默认：${parameterDefaultLabel(parameter.default)}`} options={[{ value: true, label: 'true' }, { value: false, label: 'false' }]} />
+                  : parameter.choices?.length
+                    ? <Select placeholder={`默认：${parameterDefaultLabel(parameter.default)}`} options={parameter.choices.map((value) => ({ value, label: value }))} />
+                    : <Input placeholder={`默认：${parameterDefaultLabel(parameter.default)}`} />;
+                return <Form.Item name={parameter.name} noStyle>{field}</Form.Item>;
+              },
+            },
+          ]}
+        />
       </Form>
     </Card>}
 
