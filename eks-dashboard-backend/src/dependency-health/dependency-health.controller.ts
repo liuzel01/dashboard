@@ -1,4 +1,4 @@
-import { Controller, ForbiddenException, Get, Headers } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Headers, Query } from '@nestjs/common';
 import { AuthService } from '../auth/auth.service';
 import { AccessControlService } from '../access-control/access-control.service';
 import { DependencyHealthService } from './dependency-health.service';
@@ -14,6 +14,7 @@ export class DependencyHealthController {
   @Get()
   async list(
     @Headers('authorization') authorization?: string,
+    @Query('refresh') refresh?: string,
   ) {
     const raw = String(authorization || '');
     if (!raw.toLowerCase().startsWith('bearer ')) throw new ForbiddenException('Missing dependency health permission');
@@ -25,6 +26,6 @@ export class DependencyHealthController {
     if (!(me.permissions || []).includes('menu:dependency-health')) {
       throw new ForbiddenException('Missing permissions: menu:dependency-health');
     }
-    return this.service.list();
+    return this.service.list({ force: refresh === 'true' });
   }
 }

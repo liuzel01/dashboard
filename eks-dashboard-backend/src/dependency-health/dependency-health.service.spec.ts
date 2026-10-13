@@ -7,11 +7,14 @@ describe('DependencyHealthService', () => {
   const siteConf = {
     getJson: jest.fn(),
     getString: jest.fn(async () => 'http://127.0.0.1:9115'),
-    getNumber: jest.fn(async () => 12000),
+    getNumber: jest.fn(async (key: string) => key === 'dependency_health.cache_ttl_ms' ? 55000 : 12000),
   };
-  const service = new DependencyHealthService(siteConf as never);
+  let service: DependencyHealthService;
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new DependencyHealthService(siteConf as never);
+  });
 
   it('returns targets from every environment and parses blackbox metrics', async () => {
     siteConf.getJson.mockResolvedValue([
@@ -42,5 +45,32 @@ describe('DependencyHealthService', () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: 'probe_duration_seconds 0.25\nprobe_http_status_code 401\nprobe_success 1\n' });
     const result = await service.list();
     expect(result.items[0]).toMatchObject({ key: 'gitlab-api', module: 'http_reachable', healthy: true, httpStatus: 401 });
+  });
+
+  it('reuses a recent snapshot instead of probing again', async () => {
+    siteConf.getJson.mockResolvedValue([
+      { key: 'dashboard-api', name: 'Dashboard API', environmentId: 'global', category: 'dashboard', url: 'https://dashboard.example.com/health' },
+    ]);
+    (axios.get as jest.Mock).mockResolvedValue({ data: 'probe_duration_seconds 0.1\nprobe_http_status_code 200\nprobe_success 1\n' });
+    const first = await service.list();
+    const second = await service.list();
+    expect(first.cached).toBe(false);
+    expect(second.cached).toBe(true);
+    expect(second.stale).toBe(false);
+    expect(axios.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces concurrent refreshes into one probe round', async () => {
+    siteConf.getJson.mockResolvedValue([
+      { key: 'dashboard-api', name: 'Dashboard API', environmentId: 'global', category: 'dashboard', url: 'https://dashboard.example.com/health' },
+    ]);
+    let resolveProbe!: (value: { data: string }) => void;
+    const probePromise = new Promise<{ data: string }>((resolve) => { resolveProbe = resolve; });
+    (axios.get as jest.Mock).mockReturnValue(probePromise);
+    const first = service.list();
+    const second = service.list();
+    resolveProbe({ data: 'probe_duration_seconds 0.1\nprobe_http_status_code 200\nprobe_success 1\n' });
+    await Promise.all([first, second]);
+    expect(axios.get).toHaveBeenCalledTimes(1);
   });
 });

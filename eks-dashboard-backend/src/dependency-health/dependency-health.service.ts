@@ -20,15 +20,76 @@ export type DependencyProbeResult = DependencyTarget & {
   checkedAt: string;
 };
 
+type DependencyHealthSnapshot = {
+  checkedAt: string;
+  summary: { total: number; healthy: number; unhealthy: number };
+  items: DependencyProbeResult[];
+};
+
 @Injectable()
 export class DependencyHealthService {
+  private snapshot: DependencyHealthSnapshot | null = null;
+  private snapshotStoredAt = 0;
+  private refreshInFlight: Promise<DependencyHealthSnapshot> | null = null;
+
   constructor(private readonly siteConf: SiteConfService) {}
 
-  async list() {
+  async list(options: { force?: boolean } = {}) {
+    const now = Date.now();
+    const cacheTtlMs = await this.siteConf.getNumber('dependency_health.cache_ttl_ms', 55_000);
+    const cacheAgeMs = this.snapshot ? Math.max(0, now - this.snapshotStoredAt) : null;
+    const forceAllowed = options.force && (cacheAgeMs === null || cacheAgeMs >= 5_000);
+    if (this.snapshot && !forceAllowed && cacheAgeMs !== null && cacheAgeMs < cacheTtlMs) {
+      return { ...this.snapshot, cached: true, stale: false, cacheAgeMs };
+    }
+
+    const joinedExistingRefresh = Boolean(this.refreshInFlight);
+    try {
+      const snapshot = await this.refreshOnce();
+      return {
+        ...snapshot,
+        cached: joinedExistingRefresh,
+        stale: false,
+        cacheAgeMs: Math.max(0, Date.now() - this.snapshotStoredAt),
+      };
+    } catch (error) {
+      if (this.snapshot) {
+        return {
+          ...this.snapshot,
+          cached: true,
+          stale: true,
+          cacheAgeMs: Math.max(0, Date.now() - this.snapshotStoredAt),
+        };
+      }
+      throw error;
+    }
+  }
+
+  private refreshOnce() {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = this.collectSnapshot()
+      .then((snapshot) => {
+        this.snapshot = snapshot;
+        this.snapshotStoredAt = Date.now();
+        return snapshot;
+      })
+      .finally(() => {
+        this.refreshInFlight = null;
+      });
+    return this.refreshInFlight;
+  }
+
+  private async collectSnapshot(): Promise<DependencyHealthSnapshot> {
     const targets = this.validateTargets(
       await this.siteConf.getJson<unknown>('dependency_health.targets_json', []),
     );
-    const results = await Promise.all(targets.map((target) => this.probe(target)));
+    const baseUrl = (await this.siteConf.getString('dependency_health.blackbox_base_url', 'http://127.0.0.1:9115')).trim().replace(/\/+$/, '');
+    const parsedBase = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(parsedBase.protocol) || parsedBase.username || parsedBase.password) {
+      throw new Error('invalid blackbox base URL');
+    }
+    const timeoutMs = await this.siteConf.getNumber('dependency_health.timeout_ms', 12_000);
+    const results = await Promise.all(targets.map((target) => this.probe(target, baseUrl, timeoutMs)));
     return {
       checkedAt: new Date().toISOString(),
       summary: {
@@ -73,15 +134,12 @@ export class DependencyHealthService {
     });
   }
 
-  private async probe(target: DependencyTarget): Promise<DependencyProbeResult> {
+  private async probe(target: DependencyTarget, baseUrl: string, timeoutMs: number): Promise<DependencyProbeResult> {
     const checkedAt = new Date().toISOString();
     try {
-      const baseUrl = (await this.siteConf.getString('dependency_health.blackbox_base_url', 'http://127.0.0.1:9115')).trim().replace(/\/+$/, '');
-      const parsedBase = new URL(baseUrl);
-      if (!['http:', 'https:'].includes(parsedBase.protocol)) throw new Error('invalid blackbox base URL');
       const response = await axios.get<string>(`${baseUrl}/probe`, {
         params: { module: target.module || 'http_2xx', target: target.url },
-        timeout: await this.siteConf.getNumber('dependency_health.timeout_ms', 12_000),
+        timeout: timeoutMs,
         responseType: 'text',
       });
       const metric = (name: string) => {
