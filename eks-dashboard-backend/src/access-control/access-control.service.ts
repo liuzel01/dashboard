@@ -192,7 +192,7 @@ export class AccessControlService {
        INNER JOIN role_permissions rp ON rp.permission_id = p.id
        INNER JOIN user_roles ur ON ur.role_id = rp.role_id
        WHERE ur.user_id = ?
-       ORDER BY p.id ASC`,
+       ORDER BY p.\`key\` ASC`,
       [user.id],
     );
 
