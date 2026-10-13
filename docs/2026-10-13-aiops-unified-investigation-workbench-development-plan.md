@@ -20,11 +20,12 @@ Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 - 已保存两条脱敏回放 fixture，并实现固定、不可由模型改写的 PromQL 专项证据采集；
 - `KylinBackendServiceHttpLatencyHigh` 会关联服务延迟、服务请求速率、慢 URI 和 URI 请求速率，能够单独标记 `LOW_TRAFFIC_SLOW_URI`；
 - `CPUThrottlingHigh` 会关联 throttling、CPU usage、CPU limit 和重启次数；影响证据不完整时保持 `OBSERVE`，不会直接建议扩容；
-- 已使用隔离的本地 MySQL 8.4 和本地后端完成 webhook 创建、重复投递幂等、Prometheus 历史证据落库、列表、详情和反馈 API 验证；未写入共享数据库。
+- 已使用隔离的本地 MySQL 8.4 和本地后端完成 webhook 创建、重复投递幂等、Prometheus 历史证据落库、列表、详情和反馈 API 验证；
+- 2026-10-13 重启常规开发服务后，已在当前后端 `.env` 指向的开发数据库执行四张 AIOps 调查表迁移；生产数据库仍未迁移。
 
 Phase 3 暂不提前开启。原因不是代码或环境阻塞，而是本计划明确要求先由人工核对两条真实案例的证据与判断，再接入 Kubernetes、发布记录及告警群回传。群回传属于外部可见行为，继续保持关闭。
 
-尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行迁移，并将两条白名单告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。
+尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行生产迁移，并将两条白名单告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。
 
 ## 1. 决策结论
 
