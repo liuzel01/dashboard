@@ -436,7 +436,17 @@ const CicdCatalogPage: React.FC = () => {
           </Space>
         </Card>}
 
-    {selectedJob && <Card title="Job 参数契约">
+    {selectedJob && <Card
+      title="Job 参数契约"
+      extra={<Button
+        type="primary"
+        danger={actionType !== 'BUILD_DEPLOY'}
+        icon={<PlayCircleOutlined />}
+        loading={executing}
+        disabled={!selectedJob.buildable || !!executor?.read_only || (actionType === 'BUILD_DEPLOY' ? !canExecuteBuild : actionType === 'IMAGE_BUILD_PUBLISH' ? !canExecuteImagePublish : !canExecutePublish)}
+        onClick={execute}
+      >{actionType === 'BUILD_DEPLOY' ? '触发构建部署' : actionType === 'IMAGE_BUILD_PUBLISH' ? '触发现货镜像构建推包' : '触发制品推包'}</Button>}
+    >
       {actionType === 'IMAGE_BUILD_PUBLISH' && <Alert
         type="warning"
         showIcon
@@ -467,14 +477,6 @@ const CicdCatalogPage: React.FC = () => {
           {String(parameter.type).includes('Boolean') ? <Switch /> : parameter.choices?.length ? <Select options={parameter.choices.map((value) => ({ value, label: value }))} /> : <Input />}
         </Form.Item>)}
       </Form>
-      <Button
-        type="primary"
-        danger={actionType !== 'BUILD_DEPLOY'}
-        icon={<PlayCircleOutlined />}
-        loading={executing}
-        disabled={!selectedJob.buildable || !!executor?.read_only || (actionType === 'BUILD_DEPLOY' ? !canExecuteBuild : actionType === 'IMAGE_BUILD_PUBLISH' ? !canExecuteImagePublish : !canExecutePublish)}
-        onClick={execute}
-      >{actionType === 'BUILD_DEPLOY' ? '触发构建部署' : actionType === 'IMAGE_BUILD_PUBLISH' ? '触发现货镜像构建推包' : '触发制品推包'}</Button>
     </Card>}
 
     <Card title="最近执行" extra={<Space>
