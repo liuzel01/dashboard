@@ -101,6 +101,9 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'aiops.logs.environments.mgbx.max_range_hours', valueType: 'number', category: 'aiops-logs', description: 'mgbx 单次日志调查最大时间范围（小时）', defaultValue: '24', validation: { min: 1, max: 168 } },
   { key: 'aiops.logs.environments.mgbx.max_lines', valueType: 'number', category: 'aiops-logs', description: 'mgbx 单次日志调查最大返回行数', defaultValue: '200', validation: { min: 1, max: 1000 } },
   { key: 'aiops.logs.environments.mgbx.timeout_ms', valueType: 'number', category: 'aiops-logs', description: 'mgbx Grafana/Loki 查询超时（毫秒）', defaultValue: '15000', validation: { min: 1000, max: 60000 } },
+  { key: 'aiops.alertmanager.bearer_token', envKey: 'AIOPS_ALERTMANAGER_BEARER_TOKEN', valueType: 'string', category: 'aiops-alerts', description: 'Alertmanager 调用 AIOps webhook 的专用 Bearer Token', defaultValue: '', sensitive: true },
+  { key: 'aiops.alertmanager.default_environment', envKey: 'AIOPS_ALERTMANAGER_DEFAULT_ENVIRONMENT', valueType: 'string', category: 'aiops-alerts', description: '告警缺少 environment 标签时的环境', defaultValue: 'mgbx' },
+  { key: 'aiops.alertmanager.allowed_alerts', envKey: 'AIOPS_ALERTMANAGER_ALLOWED_ALERTS', valueType: 'string', category: 'aiops-alerts', description: '自动创建 AI 调查的告警名白名单，逗号分隔', defaultValue: 'KylinBackendServiceHttpLatencyHigh,CPUThrottlingHigh' },
 
   { key: 'query_center.agent.k8s_namespace', envKey: 'QUERY_CENTER_AGENT_K8S_NAMESPACE', valueType: 'string', category: 'query-center', description: 'Query Center Agent Kubernetes namespace', defaultValue: 'default' },
   { key: 'query_center.agent.k8s_service', envKey: 'QUERY_CENTER_AGENT_K8S_SERVICE', valueType: 'string', category: 'query-center', description: 'Query Center Agent Kubernetes service name', defaultValue: 'dashboard-db-gateway-agent' },

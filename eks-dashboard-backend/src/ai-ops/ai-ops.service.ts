@@ -148,7 +148,7 @@ export class AiOpsService {
   }
 
   async previewSql(environmentId: string, actor: ActorContext, body: SqlPreviewDto) {
-    this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:sql:generate']);
+    this.ensurePermissions(actor, ['menu:ai-ops']);
     const actionStartedAt = Date.now();
     const policy = await this.getSqlPolicy(environmentId, body.maxRows);
     const llmSessionKey = this.buildLlmSessionKey(environmentId, actor, body.sessionId);
@@ -392,7 +392,7 @@ export class AiOpsService {
       maxTokens?: number;
     },
   ) {
-    this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:log-investigate']);
+    this.ensurePermissions(actor, ['menu:ai-ops']);
     const llm = await this.getCliproxyConfig();
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/chat/completions`;
     const timeoutMs = await this.getCliproxyRequestTimeoutMs();

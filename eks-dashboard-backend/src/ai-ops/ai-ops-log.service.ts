@@ -45,7 +45,7 @@ export class AiOpsLogService {
   ) {}
 
   async listSources(environmentId: string, actor: ActorContext) {
-    this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:log-investigate']);
+    this.ensurePermissions(actor, ['menu:ai-ops']);
     const source = await this.getSource(environmentId);
     if (!source.enabled) return { environmentId, items: [] };
     this.ensureConfigured(source);
@@ -67,7 +67,7 @@ export class AiOpsLogService {
   }
 
   async search(environmentId: string, actor: ActorContext, body: LogSearchDto) {
-    this.ensurePermissions(actor, ['menu:ai-ops', 'aiops:log-investigate']);
+    this.ensurePermissions(actor, ['menu:ai-ops']);
     const startedAt = Date.now();
     const source = await this.getSource(environmentId);
     this.ensureConfigured(source);

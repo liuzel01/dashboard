@@ -6,6 +6,7 @@ import {
   HttpException,
   HttpStatus,
   Post,
+  Param,
   Query,
   ValidationPipe,
 } from '@nestjs/common';
@@ -18,6 +19,8 @@ import { LogSearchDto } from './dto/log-search.dto';
 import { AiOpsLogService } from './ai-ops-log.service';
 import { AiOpsInvestigationService } from './ai-ops-investigation.service';
 import { LogInvestigationDto } from './dto/log-investigation.dto';
+import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.service';
+import type { AlertmanagerPayload } from '../oncall/oncall.types';
 
 @Controller('ai-ops')
 export class AiOpsController {
@@ -25,6 +28,7 @@ export class AiOpsController {
     private readonly service: AiOpsService,
     private readonly logService: AiOpsLogService,
     private readonly investigationService: AiOpsInvestigationService,
+    private readonly alertInvestigationService: AiOpsAlertInvestigationService,
   ) {}
 
   private ensureEnvironmentHeader(environmentId: string | undefined) {
@@ -43,7 +47,8 @@ export class AiOpsController {
     @Body(new ValidationPipe({ transform: true })) body: SqlPreviewDto,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.service.previewSql(environmentId, actor, body);
   }
 
@@ -70,7 +75,8 @@ export class AiOpsController {
     @Query('size') size?: string,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     const pageNum = page ? Number(page) : 1;
     const sizeNum = size ? Number(size) : 20;
     return this.service.listSqlAudit(environmentId, actor, pageNum, sizeNum);
@@ -82,15 +88,15 @@ export class AiOpsController {
     @Headers('authorization') authorization: string,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.service.checkLlmHealth(environmentId, actor);
   }
 
   @Get('llm/models')
-  async getLlmModels(
-    @Headers('authorization') authorization: string,
-  ) {
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+  async getLlmModels(@Headers('authorization') authorization: string) {
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.service.listLlmModels(actor);
   }
 
@@ -99,7 +105,8 @@ export class AiOpsController {
     @Headers('authorization') authorization: string,
     @Body() body: { model?: string },
   ) {
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.service.updateLlmModel(actor, String(body?.model || ''));
   }
 
@@ -109,7 +116,8 @@ export class AiOpsController {
     @Headers('authorization') authorization: string,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.logService.listSources(environmentId, actor);
   }
 
@@ -117,10 +125,12 @@ export class AiOpsController {
   async searchLogs(
     @Headers('x-target-environment') environmentId: string,
     @Headers('authorization') authorization: string,
-    @Body(new ValidationPipe({ transform: true, whitelist: true })) body: LogSearchDto,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: LogSearchDto,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.logService.search(environmentId, actor, body);
   }
 
@@ -132,7 +142,8 @@ export class AiOpsController {
     body: LogInvestigationDto,
   ) {
     this.ensureEnvironmentHeader(environmentId);
-    const actor = await this.service.resolveActorFromAuthorization(authorization);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
     return this.investigationService.investigate(environmentId, actor, body);
   }
 
@@ -140,17 +151,101 @@ export class AiOpsController {
   async ingestCloudWatch(
     @Headers('x-target-environment') environmentId: string | undefined,
     @Headers('x-aiops-ingest-token') ingestToken: string | undefined,
-    @Body(new ValidationPipe({ transform: true, whitelist: false })) payload: CloudWatchEventDto,
+    @Body(new ValidationPipe({ transform: true, whitelist: false }))
+    payload: CloudWatchEventDto,
   ) {
-    return this.service.ingestCloudWatchEvent(environmentId, ingestToken, payload);
+    return this.service.ingestCloudWatchEvent(
+      environmentId,
+      ingestToken,
+      payload,
+    );
   }
 
   @Post('events/slow-query')
   async ingestSlowQuery(
     @Headers('x-target-environment') environmentId: string | undefined,
     @Headers('x-aiops-ingest-token') ingestToken: string | undefined,
-    @Body(new ValidationPipe({ transform: true, whitelist: false })) payload: SlowQueryEventDto,
+    @Body(new ValidationPipe({ transform: true, whitelist: false }))
+    payload: SlowQueryEventDto,
   ) {
-    return this.service.ingestSlowQueryEvent(environmentId, ingestToken, payload);
+    return this.service.ingestSlowQueryEvent(
+      environmentId,
+      ingestToken,
+      payload,
+    );
+  }
+
+  @Post('events/alertmanager')
+  async ingestAlertmanager(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() payload: AlertmanagerPayload,
+  ) {
+    return this.alertInvestigationService.receiveAlertmanager(
+      authorization,
+      payload,
+    );
+  }
+
+  @Get('investigations')
+  async listInvestigations(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Query('status') status?: string,
+    @Query('keyword') keyword?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.list(environmentId, actor, {
+      status,
+      keyword,
+      page: Number(page || 1),
+      pageSize: Number(pageSize || 20),
+    });
+  }
+
+  @Get('investigations/:id')
+  async getInvestigation(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1)
+      throw new HttpException(
+        'Invalid investigation id',
+        HttpStatus.BAD_REQUEST,
+      );
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.get(environmentId, actor, numericId);
+  }
+
+  @Post('investigations/:id/feedback')
+  async addInvestigationFeedback(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Body() body: { rating?: string; comment?: string },
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1)
+      throw new HttpException(
+        'Invalid investigation id',
+        HttpStatus.BAD_REQUEST,
+      );
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.addFeedback(
+      environmentId,
+      actor,
+      numericId,
+      String(body?.rating || ''),
+      body?.comment,
+    );
   }
 }

@@ -1,0 +1,82 @@
+CREATE TABLE IF NOT EXISTS `aiops_investigations` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `environment_id` varchar(64) NOT NULL,
+  `source_type` varchar(32) NOT NULL,
+  `source_id` bigint(20) unsigned DEFAULT NULL,
+  `source_fingerprint` varchar(255) NOT NULL,
+  `source_started_at` datetime NOT NULL,
+  `source_status` varchar(32) NOT NULL,
+  `alert_name` varchar(255) DEFAULT NULL,
+  `severity` varchar(32) DEFAULT NULL,
+  `namespace` varchar(255) DEFAULT NULL,
+  `service_name` varchar(255) DEFAULT NULL,
+  `resource_name` varchar(255) DEFAULT NULL,
+  `question` text,
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING',
+  `playbook_key` varchar(128) NOT NULL,
+  `playbook_version` varchar(32) NOT NULL,
+  `summary` text,
+  `classification` varchar(64) DEFAULT NULL,
+  `confidence` varchar(16) DEFAULT NULL,
+  `insufficient_evidence` tinyint(1) NOT NULL DEFAULT 1,
+  `report_json` json DEFAULT NULL,
+  `created_by` varchar(128) DEFAULT NULL,
+  `started_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `resolved_at` datetime DEFAULT NULL,
+  `error_code` varchar(64) DEFAULT NULL,
+  `error_summary` varchar(1024) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_aiops_investigation_source` (`environment_id`, `source_type`, `source_fingerprint`, `source_started_at`, `playbook_version`),
+  KEY `idx_aiops_investigations_env_status` (`environment_id`, `status`),
+  KEY `idx_aiops_investigations_alert` (`alert_name`),
+  KEY `idx_aiops_investigations_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aiops_investigation_steps` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `investigation_id` bigint(20) unsigned NOT NULL,
+  `step_key` varchar(128) NOT NULL,
+  `tool_name` varchar(128) DEFAULT NULL,
+  `status` varchar(32) NOT NULL,
+  `result_count` int(10) unsigned DEFAULT NULL,
+  `summary` varchar(1024) DEFAULT NULL,
+  `error_summary` varchar(1024) DEFAULT NULL,
+  `started_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_aiops_investigation_step` (`investigation_id`, `step_key`),
+  CONSTRAINT `fk_aiops_investigation_steps` FOREIGN KEY (`investigation_id`) REFERENCES `aiops_investigations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aiops_investigation_evidence` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `investigation_id` bigint(20) unsigned NOT NULL,
+  `evidence_id` varchar(64) NOT NULL,
+  `evidence_type` varchar(64) NOT NULL,
+  `source_system` varchar(64) NOT NULL,
+  `observed_at` datetime DEFAULT NULL,
+  `title` varchar(255) NOT NULL,
+  `content_json` json NOT NULL,
+  `source_url` varchar(1024) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_aiops_investigation_evidence` (`investigation_id`, `evidence_id`),
+  CONSTRAINT `fk_aiops_investigation_evidence` FOREIGN KEY (`investigation_id`) REFERENCES `aiops_investigations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `aiops_investigation_feedback` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `investigation_id` bigint(20) unsigned NOT NULL,
+  `actor_user_id` bigint(20) unsigned DEFAULT NULL,
+  `actor_username` varchar(128) DEFAULT NULL,
+  `rating` varchar(32) NOT NULL,
+  `comment` varchar(1000) DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_aiops_investigation_feedback` (`investigation_id`, `created_at`),
+  CONSTRAINT `fk_aiops_investigation_feedback` FOREIGN KEY (`investigation_id`) REFERENCES `aiops_investigations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
