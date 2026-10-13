@@ -32,6 +32,7 @@ import KmsValuesPage from './pages/KmsValuesPage';
 import OncallPage from './pages/OncallPage';
 import CicdCatalogPage from './pages/CicdCatalogPage';
 import MenuOrderManagementPage from './pages/MenuOrderManagementPage';
+import DependencyHealthPage from './pages/DependencyHealthPage';
 import { EnvironmentProvider } from './contexts/EnvironmentContext';
 import { EnvironmentContext } from './contexts/EnvironmentContextValue';
 import { AuthProvider } from './contexts/AuthContext';
@@ -157,6 +158,7 @@ const AppLayout: React.FC = () => {
     lineOnboarding: { key: '/line-onboarding', label: '新增线路', icon: <GlobalOutlined />, permission: 'menu:line-onboarding', order: 20 },
     adminSiteOnboarding: { key: '/admin-site-ingress', label: '管理端网站 Ingress', icon: <GlobalOutlined />, permission: 'menu:admin-site-onboarding', order: 30 },
     siteMonitors: { key: '/site-monitors', label: '站点监控', icon: <AimOutlined />, permission: 'menu:site-monitors', order: 10 },
+    dependencyHealth: { key: '/dependency-health', label: '外部依赖健康', icon: <AimOutlined />, permission: 'menu:dependency-health', order: 15 },
     monitoringRequests: { key: '/monitoring-requests', label: '监控资源申请', icon: <FileProtectOutlined />, permission: 'menu:monitoring-requests', order: 20 },
     oncall: { key: '/oncall', label: 'Oncall 告警', icon: <AlertOutlined />, permission: 'menu:oncall', order: 30 },
     dataQuery: { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query', order: 10 },
@@ -279,7 +281,7 @@ const AppLayout: React.FC = () => {
     '/monitoring',
     '监控与告警',
     <AimOutlined />,
-    [menuItems.siteMonitors, menuItems.monitoringRequests, menuItems.oncall],
+    [menuItems.siteMonitors, menuItems.dependencyHealth, menuItems.monitoringRequests, menuItems.oncall],
   );
 
   const opsToolsGroup = createMenuGroup(
@@ -402,6 +404,7 @@ const AppLayout: React.FC = () => {
               <Route path="/line-onboarding" element={<ProtectedRoute required={['menu:line-onboarding']}><LineOnboardingPage /></ProtectedRoute>} />
               <Route path="/admin-site-ingress" element={<ProtectedRoute required={['menu:admin-site-onboarding']}><AdminSiteIngressPage /></ProtectedRoute>} />
               <Route path="/site-monitors" element={<ProtectedRoute required={['menu:site-monitors']}><SiteMonitorPage /></ProtectedRoute>} />
+              <Route path="/dependency-health" element={<ProtectedRoute required={['menu:dependency-health']}><DependencyHealthPage /></ProtectedRoute>} />
               <Route path="/monitoring-requests" element={<ProtectedRoute required={['menu:monitoring-requests']}><MonitoringRequestsPage /></ProtectedRoute>} />
               <Route path="/oncall" element={<ProtectedRoute required={['menu:oncall']}><OncallPage /></ProtectedRoute>} />
               <Route path="/environments" element={<ProtectedRoute required={['menu:environments']}><EnvironmentManagementPage /></ProtectedRoute>} />

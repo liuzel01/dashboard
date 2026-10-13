@@ -1944,3 +1944,27 @@ export const cancelCicdRun = async (runId: string) =>
   (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/cancel`)).data as CicdRun;
 export const getCicdRunLog = async (runId: string, start = 0) =>
   (await api.get(`/cicd/runs/${encodeURIComponent(runId)}/log`, { params: { start } })).data as { text: string; nextStart: number; hasMore: boolean };
+
+export type DependencyHealthItem = {
+  key: string;
+  name: string;
+  environmentId: string;
+  category: string;
+  url: string;
+  module?: string;
+  healthy: boolean;
+  httpStatus: number | null;
+  durationMs: number | null;
+  tlsExpiresAt: string | null;
+  errorType: 'NONE' | 'NETWORK' | 'HTTP_STATUS' | 'PROBE_ERROR';
+  checkedAt: string;
+};
+
+export type DependencyHealthResponse = {
+  checkedAt: string;
+  summary: { total: number; healthy: number; unhealthy: number };
+  items: DependencyHealthItem[];
+};
+
+export const getDependencyHealth = async () =>
+  (await api.get('/dependency-health')).data as DependencyHealthResponse;
