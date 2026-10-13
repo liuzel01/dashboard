@@ -61,7 +61,7 @@ export class DependencyHealthService {
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(target.environmentId) && target.environmentId !== 'global') {
         throw new BadRequestException(`dependency target ${target.key} has invalid environmentId`);
       }
-      if (target.module !== 'http_2xx') {
+      if (!['http_2xx', 'http_reachable'].includes(target.module || '')) {
         throw new BadRequestException(`dependency target ${target.key} uses unsupported module`);
       }
       let parsed: URL;

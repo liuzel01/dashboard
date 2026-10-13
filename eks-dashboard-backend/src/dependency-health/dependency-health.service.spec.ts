@@ -34,4 +34,13 @@ describe('DependencyHealthService', () => {
     await expect(service.list()).rejects.toThrow('URL is not allowed');
     expect(axios.get).not.toHaveBeenCalled();
   });
+
+  it('supports the controlled reachability module', async () => {
+    siteConf.getJson.mockResolvedValue([
+      { key: 'gitlab-api', name: 'GitLab API', environmentId: 'global', category: 'gitlab', url: 'https://git.example.com/api/v4/version', module: 'http_reachable' },
+    ]);
+    (axios.get as jest.Mock).mockResolvedValue({ data: 'probe_duration_seconds 0.25\nprobe_http_status_code 401\nprobe_success 1\n' });
+    const result = await service.list();
+    expect(result.items[0]).toMatchObject({ key: 'gitlab-api', module: 'http_reachable', healthy: true, httpStatus: 401 });
+  });
 });
