@@ -16,6 +16,7 @@ import type {
 } from '../oncall/oncall.types';
 import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.service';
 import { AIOPS_REPLAY_CASES } from './ai-ops-replay.fixtures';
+import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 
 type ActorContext = {
   userId: number | null;
@@ -33,6 +34,7 @@ export class AiOpsAlertInvestigationService {
     private readonly siteConf: SiteConfService,
     private readonly config: ConfigService,
     private readonly prometheus: AiOpsPrometheusEvidenceService,
+    private readonly contextEvidence: AiOpsContextEvidenceService,
   ) {}
 
   async receiveAlertmanager(
@@ -264,6 +266,16 @@ export class AiOpsAlertInvestigationService {
           startedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
           labels,
         });
+    const contextual = resolved
+      ? { evidence: [], findings: [], missingEvidence: [], timeline: [] }
+      : await this.contextEvidence.collect({
+          environmentId,
+          startedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
+          namespace,
+          service,
+          labels,
+          replay: sourceType === 'HISTORICAL_REPLAY',
+        });
     const playbookKey = specialized?.playbookKey || 'GENERIC_PROMETHEUS_ALERT';
     const playbookVersion = specialized?.playbookVersion || 'generic-v1';
     const classification = resolved
@@ -289,16 +301,41 @@ export class AiOpsAlertInvestigationService {
         sourceStatus,
         startedAt,
       },
-      findings: specialized?.findings || [
-        '已接收 Alertmanager 结构化事件并完成去重。',
-        '当前仅依据告警元数据生成通用报告，尚未证明根因。',
+      findings: [
+        ...(specialized?.findings || [
+          '已接收 Alertmanager 结构化事件并完成去重。',
+          '当前仅依据告警元数据生成通用报告，尚未证明根因。',
+        ]),
+        ...contextual.findings,
       ],
-      evidenceIds: specialized?.evidence.map((item) => item.evidenceId) || [],
-      missingEvidence: specialized?.missingEvidence || [
-        'Prometheus 源指标趋势',
-        'Kubernetes 当前与历史状态',
-        '日志与发布记录',
+      evidenceIds: [
+        ...(specialized?.evidence.map((item) => item.evidenceId) || []),
+        ...contextual.evidence.map((item) => item.evidenceId),
       ],
+      missingEvidence: [
+        ...(specialized?.missingEvidence || [
+          'Prometheus 源指标趋势',
+          '日志证据',
+        ]),
+        ...contextual.missingEvidence,
+      ],
+      timeline: [
+        {
+          observedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
+          source: sourceType,
+          title: `${sourceStatus} ${alertName}`,
+        },
+        ...(specialized?.evidence.map((item) => ({
+          observedAt: item.observedAt,
+          source: item.sourceSystem,
+          title: item.title,
+          evidenceId: item.evidenceId,
+        })) || []),
+        ...contextual.timeline,
+      ].sort(
+        (left, right) =>
+          Date.parse(left.observedAt) - Date.parse(right.observedAt),
+      ),
       recommendations: specialized?.recommendations || [
         '进入调查详情核对原始指标与关联证据。',
       ],
@@ -377,7 +414,10 @@ export class AiOpsAlertInvestigationService {
           `${sourceStatus} ${alertName}`,
         ],
       );
-      for (const item of specialized?.evidence || []) {
+      for (const item of [
+        ...(specialized?.evidence || []),
+        ...contextual.evidence,
+      ]) {
         await conn.execute(
           `INSERT INTO aiops_investigation_evidence
            (investigation_id, evidence_id, evidence_type, source_system, observed_at, title, content_json, source_url, created_at)
@@ -408,6 +448,22 @@ export class AiOpsAlertInvestigationService {
             specialized.evidence.length
               ? `已保存 ${specialized.evidence.length} 组指标证据`
               : '未取得 Prometheus 指标证据',
+          ],
+        );
+      }
+      if (!resolved) {
+        await conn.execute(
+          `INSERT INTO aiops_investigation_steps
+           (investigation_id, step_key, tool_name, status, result_count, summary, started_at, completed_at, created_at)
+           VALUES (?, 'context.collect', 'kubernetes+cicd', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+           ON DUPLICATE KEY UPDATE status=VALUES(status), result_count=VALUES(result_count), summary=VALUES(summary), completed_at=UTC_TIMESTAMP()`,
+          [
+            id,
+            contextual.evidence.length ? 'COMPLETED' : 'PARTIAL',
+            contextual.evidence.length,
+            contextual.evidence.length
+              ? `已保存 ${contextual.evidence.length} 组 Kubernetes/可选变更上下文证据`
+              : '未取得 Kubernetes 或可选变更上下文证据',
           ],
         );
       }

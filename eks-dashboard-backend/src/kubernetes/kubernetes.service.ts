@@ -50,7 +50,6 @@ interface K8sApis {
   k8sNetworkingV1Api: k8s.NetworkingV1Api;
   k8sLog: k8s.Log;
 }
-
 interface K8sCacheEntry {
   fingerprint: string;
   apis: K8sApis;
@@ -832,6 +831,157 @@ export class KubernetesService {
   ) {
     return this.getPodsForWorkload(environmentId, deploymentName, 'deployment', namespace);
   }
+
+  async getAiOpsEvidenceSnapshot(
+    environmentId: string,
+    target: {
+      namespace?: string;
+      pod?: string;
+      container?: string;
+      workload?: string;
+    },
+  ) {
+    const namespace = target.namespace || 'default';
+    const { k8sAppsV1Api, k8sCoreV1Api } = await this.getK8sApis(environmentId);
+    let pods: k8s.V1Pod[] = [];
+    let workload: Record<string, unknown> | null = null;
+
+    if (target.pod) {
+      pods = [
+        (await k8sCoreV1Api.readNamespacedPod(target.pod, namespace)).body,
+      ];
+    } else if (target.workload) {
+      const { body: deployment } = await k8sAppsV1Api.readNamespacedDeployment(
+        target.workload,
+        namespace,
+      );
+      const selector = deployment.spec?.selector?.matchLabels || {};
+      const labelSelector = Object.entries(selector)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(',');
+      if (labelSelector) {
+        pods = (
+          await k8sCoreV1Api.listNamespacedPod(
+            namespace,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            labelSelector,
+          )
+        ).body.items;
+      }
+      workload = {
+        kind: 'Deployment',
+        name: deployment.metadata?.name,
+        generation: deployment.metadata?.generation,
+        observedGeneration: deployment.status?.observedGeneration,
+        desiredReplicas: deployment.spec?.replicas,
+        readyReplicas: deployment.status?.readyReplicas || 0,
+        availableReplicas: deployment.status?.availableReplicas || 0,
+        updatedReplicas: deployment.status?.updatedReplicas || 0,
+        images: (deployment.spec?.template?.spec?.containers || []).map(
+          (item) => ({
+            name: item.name,
+            image: item.image,
+          }),
+        ),
+      };
+    }
+
+    const podUids = new Set(
+      pods.map((pod) => pod.metadata?.uid).filter(Boolean),
+    );
+    const events = (
+      await k8sCoreV1Api.listNamespacedEvent(namespace)
+    ).body.items
+      .filter(
+        (event) =>
+          event.involvedObject?.uid && podUids.has(event.involvedObject.uid),
+      )
+      .sort((left, right) => {
+        const leftAt =
+          left.eventTime || left.lastTimestamp || left.firstTimestamp;
+        const rightAt =
+          right.eventTime || right.lastTimestamp || right.firstTimestamp;
+        return (rightAt?.getTime() || 0) - (leftAt?.getTime() || 0);
+      })
+      .slice(0, 20)
+      .map((event) => ({
+        type: event.type,
+        reason: event.reason,
+        message: event.message,
+        object: event.involvedObject?.name,
+        count: event.count,
+        observedAt: toIsoTimestamp(
+          event.eventTime || event.lastTimestamp || event.firstTimestamp,
+        ),
+      }));
+
+    const previousLogs: Array<{
+      pod: string;
+      container: string;
+      text: string;
+    }> = [];
+    for (const pod of pods.slice(0, 3)) {
+      const podName = pod.metadata?.name;
+      if (!podName) continue;
+      for (const status of (pod.status?.containerStatuses || []).filter(
+        (item) =>
+          item.restartCount > 0 &&
+          (!target.container || item.name === target.container),
+      )) {
+        try {
+          const response = await k8sCoreV1Api.readNamespacedPodLog(
+            podName,
+            namespace,
+            status.name,
+            false,
+            undefined,
+            64 * 1024,
+            undefined,
+            true,
+            undefined,
+            200,
+            true,
+          );
+          previousLogs.push({
+            pod: podName,
+            container: status.name,
+            text: String(response.body).slice(0, 64 * 1024),
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Unable to read previous log for ${namespace}/${podName}/${status.name}: ${String(error)}`,
+          );
+        }
+      }
+    }
+
+    return {
+      observedAt: new Date().toISOString(),
+      namespace,
+      workload,
+      pods: pods.slice(0, 20).map((pod) => ({
+        name: pod.metadata?.name,
+        phase: pod.status?.phase,
+        nodeName: pod.spec?.nodeName,
+        podIP: pod.status?.podIP,
+        startTime: toIsoTimestamp(pod.status?.startTime),
+        containers: (pod.status?.containerStatuses || []).map((item) => ({
+          name: item.name,
+          ready: item.ready,
+          restartCount: item.restartCount,
+          image: item.image,
+          state: item.state,
+          lastState: item.lastState,
+        })),
+      })),
+      events,
+      previousLogs,
+    };
+  }
+
 
   async streamPodLogs(
     environmentId: string,

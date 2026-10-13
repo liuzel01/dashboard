@@ -55,6 +55,14 @@ const makeService = (existingId?: number) => {
         evidence: [],
       })),
     } as any,
+    {
+      collect: jest.fn(async () => ({
+        evidence: [],
+        findings: [],
+        missingEvidence: ['kubernetes'],
+        timeline: [],
+      })),
+    } as any,
   );
   return { service, db, execute };
 };
