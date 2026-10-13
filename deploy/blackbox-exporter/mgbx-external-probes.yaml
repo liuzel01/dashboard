@@ -60,3 +60,38 @@ spec:
         - http://172.31.18.229:8080/login
         - http://10.80.160.79:8080/login
         - http://172.31.29.3:3000/api/probes/latest
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: dashboard-external-dependencies
+  namespace: monitoring
+  labels:
+    role: alert-rules
+    prometheus: k8s
+    app.kubernetes.io/name: dashboard-external-dependencies
+    app.kubernetes.io/part-of: dashboard
+spec:
+  groups:
+    - name: dashboard-external-dependencies
+      rules:
+        - alert: DashboardExternalDependencyUnavailable
+          expr: probe_success{job="dashboard-external-dependencies"} == 0
+          for: 3m
+          labels:
+            severity: warning
+            risk_level: medium
+            service: dashboard-external-dependencies
+          annotations:
+            summary: "Dashboard 外部依赖探测失败"
+            description: "探测目标 {{ $labels.instance }} 已连续 3 分钟不可用，请在 Dashboard 外部依赖健康页面查看详情。"
+        - alert: DashboardBlackboxExporterUnavailable
+          expr: min(up{job="dashboard-external-dependencies"}) == 0 or absent(up{job="dashboard-external-dependencies"})
+          for: 3m
+          labels:
+            severity: warning
+            risk_level: medium
+            service: dashboard-blackbox-exporter
+          annotations:
+            summary: "Dashboard Blackbox Exporter 不可用"
+            description: "Prometheus 已连续 3 分钟无法正常采集 Dashboard Blackbox Exporter，请检查 EC2 容器、端口 9115 和安全组。"
