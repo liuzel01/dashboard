@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import axios from 'axios';
 import { SiteConfService } from '../site-conf/site-conf.service';
+import { DependencyProviderHealthService, ProviderCheckResult } from './dependency-provider-health.service';
 
 export type DependencyTarget = {
   key: string;
@@ -18,11 +19,22 @@ export type DependencyProbeResult = DependencyTarget & {
   tlsExpiresAt: string | null;
   errorType: 'NONE' | 'NETWORK' | 'HTTP_STATUS' | 'PROBE_ERROR';
   checkedAt: string;
+  overallStatus?: 'HEALTHY' | 'REACHABLE' | 'UNAVAILABLE' | 'AUTH_FAILED' | 'PERMISSION_DENIED' | 'BUSINESS_FAILED' | 'NOT_CONFIGURED' | 'CHECKING' | 'STALE';
+  verificationDepth?: 'L1' | 'L2' | 'L3';
+  layers?: { L1: DependencyLayerResult; L2?: ProviderCheckResult; L3?: ProviderCheckResult };
+};
+
+export type DependencyLayerResult = {
+  status: 'PASS' | 'FAIL';
+  reasonCode: string;
+  summary: string;
+  durationMs: number | null;
+  checkedAt: string;
 };
 
 type DependencyHealthSnapshot = {
   checkedAt: string;
-  summary: { total: number; healthy: number; unhealthy: number };
+  summary: { total: number; healthy: number; unhealthy: number; checking?: number };
   items: DependencyProbeResult[];
 };
 
@@ -32,7 +44,7 @@ export class DependencyHealthService {
   private snapshotStoredAt = 0;
   private refreshInFlight: Promise<DependencyHealthSnapshot> | null = null;
 
-  constructor(private readonly siteConf: SiteConfService) {}
+  constructor(private readonly siteConf: SiteConfService, private readonly providers: DependencyProviderHealthService) {}
 
   async list(options: { force?: boolean } = {}) {
     const now = Date.now();
@@ -40,29 +52,76 @@ export class DependencyHealthService {
     const cacheAgeMs = this.snapshot ? Math.max(0, now - this.snapshotStoredAt) : null;
     const forceAllowed = options.force && (cacheAgeMs === null || cacheAgeMs >= 5_000);
     if (this.snapshot && !forceAllowed && cacheAgeMs !== null && cacheAgeMs < cacheTtlMs) {
-      return { ...this.snapshot, cached: true, stale: false, cacheAgeMs };
+      return this.decorate(this.snapshot, { cached: true, stale: false, cacheAgeMs });
     }
 
     const joinedExistingRefresh = Boolean(this.refreshInFlight);
     try {
       const snapshot = await this.refreshOnce();
-      return {
-        ...snapshot,
+      return this.decorate(snapshot, {
         cached: joinedExistingRefresh,
         stale: false,
         cacheAgeMs: Math.max(0, Date.now() - this.snapshotStoredAt),
-      };
+      });
     } catch (error) {
       if (this.snapshot) {
-        return {
-          ...this.snapshot,
+        return this.decorate(this.snapshot, {
           cached: true,
           stale: true,
           cacheAgeMs: Math.max(0, Date.now() - this.snapshotStoredAt),
-        };
+        });
       }
       throw error;
     }
+  }
+
+  private async decorate(snapshot: DependencyHealthSnapshot, cache: { cached: boolean; stale: boolean; cacheAgeMs: number }) {
+    const [providerResults, l2IntervalMs, l3IntervalMs] = await Promise.all([
+      this.providers.latest(),
+      this.siteConf.getNumber('dependency_health.l2_interval_ms', 300_000),
+      this.siteConf.getNumber('dependency_health.l3_interval_ms', 900_000),
+    ]);
+    const isStale = (result: ProviderCheckResult | undefined, intervalMs: number) => Boolean(result && Date.now() - new Date(result.checkedAt).getTime() > Math.max(120_000, intervalMs * 2));
+    const items = snapshot.items.map((item) => {
+      const verificationDepth = this.providers.verificationDepth(item.key);
+      const provider = providerResults.get(item.key) || {};
+      const l1: DependencyLayerResult = {
+        status: item.healthy ? 'PASS' : 'FAIL', reasonCode: item.errorType,
+        summary: item.healthy ? (item.module === 'http_reachable' ? '网络与 HTTP 服务可达' : 'HTTP 2xx 响应正常') : '网络、TLS 或 HTTP 探测失败',
+        durationMs: item.durationMs, checkedAt: item.checkedAt,
+      };
+      let overallStatus: NonNullable<DependencyProbeResult['overallStatus']> = item.healthy
+        ? item.module === 'http_reachable' ? 'REACHABLE' : 'HEALTHY'
+        : 'UNAVAILABLE';
+      if (item.healthy && verificationDepth !== 'L1') {
+        if (!provider.L2) overallStatus = 'CHECKING';
+        else if (isStale(provider.L2, l2IntervalMs)) overallStatus = 'STALE';
+        else if (provider.L2.status === 'NOT_CONFIGURED') overallStatus = 'NOT_CONFIGURED';
+        else if (provider.L2.status === 'FAIL') overallStatus = provider.L2.reasonCode === 'AUTH_FAILED'
+          ? 'AUTH_FAILED' : provider.L2.reasonCode === 'PERMISSION_DENIED' ? 'PERMISSION_DENIED' : 'UNAVAILABLE';
+        else if (provider.L2.status !== 'PASS') overallStatus = 'CHECKING';
+        else if (!provider.L3) overallStatus = 'CHECKING';
+        else if (isStale(provider.L3, l3IntervalMs)) overallStatus = 'STALE';
+        else if (provider.L3.status === 'NOT_CONFIGURED') overallStatus = 'NOT_CONFIGURED';
+        else if (provider.L3.status === 'FAIL') overallStatus = 'BUSINESS_FAILED';
+        else if (provider.L3.status === 'PASS') overallStatus = 'HEALTHY';
+        else overallStatus = 'CHECKING';
+      }
+      return {
+        ...item, healthy: ['HEALTHY', 'REACHABLE'].includes(overallStatus), overallStatus, verificationDepth,
+        layers: { L1: l1, ...(provider.L2 ? { L2: provider.L2 } : {}), ...(provider.L3 ? { L3: provider.L3 } : {}) },
+      };
+    });
+    return {
+      ...snapshot, ...cache,
+      summary: {
+        total: items.length,
+        healthy: items.filter((item) => item.healthy).length,
+        unhealthy: items.filter((item) => !item.healthy && item.overallStatus !== 'CHECKING').length,
+        checking: items.filter((item) => item.overallStatus === 'CHECKING').length,
+      },
+      items,
+    };
   }
 
   private refreshOnce() {

@@ -10,10 +10,16 @@ describe('DependencyHealthService', () => {
     getNumber: jest.fn(async (key: string) => key === 'dependency_health.cache_ttl_ms' ? 55000 : 12000),
   };
   let service: DependencyHealthService;
+  const providers = {
+    latest: jest.fn(async () => new Map()),
+    verificationDepth: jest.fn(() => 'L1'),
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new DependencyHealthService(siteConf as never);
+    providers.latest.mockResolvedValue(new Map());
+    providers.verificationDepth.mockReturnValue('L1');
+    service = new DependencyHealthService(siteConf as never, providers as never);
   });
 
   it('returns targets from every environment and parses blackbox metrics', async () => {
@@ -23,7 +29,7 @@ describe('DependencyHealthService', () => {
     ]);
     (axios.get as jest.Mock).mockResolvedValue({ data: 'probe_duration_seconds 0.125\nprobe_http_status_code 200\nprobe_success 1\n' });
     const result = await service.list();
-    expect(result.summary).toEqual({ total: 2, healthy: 2, unhealthy: 0 });
+    expect(result.summary).toEqual({ total: 2, healthy: 2, unhealthy: 0, checking: 0 });
     expect(result.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: 'jenkins-mgbx', environmentId: 'mgbx', healthy: true, httpStatus: 200, durationMs: 125 }),
       expect.objectContaining({ key: 'jenkins-icoin', environmentId: 'icoin', healthy: true, httpStatus: 200, durationMs: 125 }),
@@ -72,5 +78,20 @@ describe('DependencyHealthService', () => {
     resolveProbe({ data: 'probe_duration_seconds 0.1\nprobe_http_status_code 200\nprobe_success 1\n' });
     await Promise.all([first, second]);
     expect(axios.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses L2 and L3 results to produce one composite status', async () => {
+    siteConf.getJson.mockResolvedValue([
+      { key: 'jenkins-mgbx', name: 'Jenkins mgbx', environmentId: 'mgbx', category: 'jenkins', url: 'http://jenkins/login', module: 'http_reachable' },
+    ]);
+    providers.verificationDepth.mockReturnValue('L3');
+    providers.latest.mockResolvedValue(new Map([['jenkins-mgbx', {
+      L2: { targetKey: 'jenkins-mgbx', layer: 'L2', status: 'PASS', reasonCode: 'OK', summary: 'identity ok', durationMs: 10, metadata: null, checkedAt: new Date().toISOString() },
+      L3: { targetKey: 'jenkins-mgbx', layer: 'L3', status: 'FAIL', reasonCode: 'BUSINESS_CHECK_FAILED', summary: 'catalog failed', durationMs: 20, metadata: null, checkedAt: new Date().toISOString() },
+    }]]));
+    (axios.get as jest.Mock).mockResolvedValue({ data: 'probe_duration_seconds 0.1\nprobe_http_status_code 403\nprobe_success 1\n' });
+    const result = await service.list();
+    expect(result.items[0]).toMatchObject({ healthy: false, overallStatus: 'BUSINESS_FAILED', verificationDepth: 'L3' });
+    expect(result.summary).toMatchObject({ healthy: 0, unhealthy: 1, checking: 0 });
   });
 });

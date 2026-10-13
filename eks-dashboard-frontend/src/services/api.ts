@@ -1958,6 +1958,22 @@ export type DependencyHealthItem = {
   tlsExpiresAt: string | null;
   errorType: 'NONE' | 'NETWORK' | 'HTTP_STATUS' | 'PROBE_ERROR';
   checkedAt: string;
+  overallStatus: 'HEALTHY' | 'REACHABLE' | 'UNAVAILABLE' | 'AUTH_FAILED' | 'PERMISSION_DENIED' | 'BUSINESS_FAILED' | 'NOT_CONFIGURED' | 'CHECKING' | 'STALE';
+  verificationDepth: 'L1' | 'L2' | 'L3';
+  layers: {
+    L1: DependencyHealthLayer;
+    L2?: DependencyHealthLayer;
+    L3?: DependencyHealthLayer;
+  };
+};
+
+export type DependencyHealthLayer = {
+  status: 'PASS' | 'FAIL' | 'NOT_CONFIGURED' | 'SKIPPED';
+  reasonCode: string;
+  summary: string;
+  durationMs: number | null;
+  checkedAt: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type DependencyHealthResponse = {
@@ -1965,7 +1981,7 @@ export type DependencyHealthResponse = {
   cached: boolean;
   stale: boolean;
   cacheAgeMs: number;
-  summary: { total: number; healthy: number; unhealthy: number };
+  summary: { total: number; healthy: number; unhealthy: number; checking: number };
   items: DependencyHealthItem[];
 };
 
