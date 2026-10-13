@@ -29,6 +29,13 @@ const DependencyHealthPage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
   const environmentNameById = useMemo(
     () => new Map(environments.map((environment) => [environment.id, environment.name])),
     [environments],
@@ -71,7 +78,7 @@ const DependencyHealthPage: React.FC = () => {
   return <>
     <PageHeader
       title="外部依赖健康"
-      description="从 Dashboard 所在网络位置统一探测所有环境的受控外部地址；本页只表示 DNS/TCP/TLS/HTTP 层健康，不代表 Provider 凭据和业务权限一定可用。"
+      description="从 Dashboard 所在网络位置统一探测所有环境的受控外部地址，每 60 秒自动刷新；本页只表示 DNS/TCP/TLS/HTTP 层健康，不代表 Provider 凭据和业务权限一定可用。"
       actions={<Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>刷新</Button>}
     />
     {error && <Alert type="error" showIcon message="外部依赖健康加载失败" description={error} style={{ marginBottom: 16 }} />}
