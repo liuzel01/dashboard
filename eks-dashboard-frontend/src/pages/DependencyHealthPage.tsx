@@ -1,6 +1,6 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Descriptions, Modal, Space, Tag, Typography } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { getDependencyHealth, type DependencyHealthItem, type DependencyHealthResponse } from '../services/api';
 import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
@@ -20,25 +20,44 @@ const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reacha
 const DependencyHealthPage: React.FC = () => {
   const { environments } = useContext(EnvironmentContext);
   const [data, setData] = useState<DependencyHealthResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
+  const [backgroundRefreshing, setBackgroundRefreshing] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<DependencyHealthItem | null>(null);
+  const requestInFlight = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (mode: 'initial' | 'background' | 'manual') => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    if (mode === 'initial') setInitialLoading(true);
+    if (mode === 'background') setBackgroundRefreshing(true);
+    if (mode === 'manual') setManualRefreshing(true);
     setError(null);
-    try { setData(await getDependencyHealth()); }
+    try { setData(await getDependencyHealth(mode === 'manual')); }
     catch (reason: any) { setError(reason?.response?.data?.message || reason?.message || '加载外部依赖健康状态失败'); }
-    finally { setLoading(false); }
+    finally {
+      requestInFlight.current = false;
+      if (mode === 'initial') setInitialLoading(false);
+      if (mode === 'background') setBackgroundRefreshing(false);
+      if (mode === 'manual') setManualRefreshing(false);
+    }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load('initial'); }, [load]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
+      if (document.visibilityState === 'visible') void load('background');
     }, 60_000);
-    return () => window.clearInterval(timer);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void load('background');
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [load]);
 
   const environmentNameById = useMemo(
@@ -83,16 +102,21 @@ const DependencyHealthPage: React.FC = () => {
   return <>
     <PageHeader
       title="外部依赖健康"
-      description="从 Dashboard 所在网络位置统一探测所有环境的受控外部地址，每 60 秒自动刷新；本页只表示 DNS/TCP/TLS/HTTP 层健康，不代表 Provider 凭据和业务权限一定可用。"
-      actions={<Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>刷新</Button>}
+      description="从 Dashboard 所在网络位置统一探测所有环境的受控外部地址；后台静默更新不会中断当前列表，本页只表示 DNS/TCP/TLS/HTTP 层健康，不代表 Provider 凭据和业务权限一定可用。"
+      actions={<Space>
+        {backgroundRefreshing && <Typography.Text type="secondary"><SyncOutlined spin /> 后台更新中</Typography.Text>}
+        {data?.stale && <Tag color="orange">显示上次成功结果</Tag>}
+        {data?.checkedAt && <Typography.Text type="secondary">最后更新：{new Date(data.checkedAt).toLocaleTimeString()}</Typography.Text>}
+        <Button icon={<ReloadOutlined />} loading={manualRefreshing} disabled={backgroundRefreshing} onClick={() => void load('manual')}>刷新</Button>
+      </Space>}
     />
-    {error && <Alert type="error" showIcon message="外部依赖健康加载失败" description={error} style={{ marginBottom: 16 }} />}
+    {error && <Alert type={data ? 'warning' : 'error'} showIcon message={data ? '后台更新失败，继续显示上次结果' : '外部依赖健康加载失败'} description={error} style={{ marginBottom: 16 }} />}
     <MetricGrid items={[
       { key: 'total', label: '受控依赖', value: data?.summary.total ?? 0 },
       { key: 'healthy', label: '正常', value: data?.summary.healthy ?? 0, valueStyle: { color: '#389e0d' } },
       { key: 'unhealthy', label: '异常', value: data?.summary.unhealthy ?? 0, valueStyle: (data?.summary.unhealthy || 0) > 0 ? { color: '#cf1322' } : undefined },
     ]} />
-    <OpsTable rowKey="key" loading={loading} columns={columns as any} dataSource={data?.items || []} pagination={false} />
+    <OpsTable rowKey="key" loading={initialLoading && !data} columns={columns as any} dataSource={data?.items || []} pagination={false} />
     <Modal
       title={selectedItem?.name || '依赖详情'}
       open={Boolean(selectedItem)}

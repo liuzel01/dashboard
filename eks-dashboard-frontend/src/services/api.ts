@@ -1962,9 +1962,12 @@ export type DependencyHealthItem = {
 
 export type DependencyHealthResponse = {
   checkedAt: string;
+  cached: boolean;
+  stale: boolean;
+  cacheAgeMs: number;
   summary: { total: number; healthy: number; unhealthy: number };
   items: DependencyHealthItem[];
 };
 
-export const getDependencyHealth = async () =>
-  (await api.get('/dependency-health')).data as DependencyHealthResponse;
+export const getDependencyHealth = async (forceRefresh = false) =>
+  (await api.get('/dependency-health', { params: forceRefresh ? { refresh: 'true' } : undefined })).data as DependencyHealthResponse;
