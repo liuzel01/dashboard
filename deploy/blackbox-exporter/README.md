@@ -9,7 +9,12 @@ Service 和 EndpointSlice，将 Prometheus Operator `Probe` 转发至 EC2 私网
 `10.100.166.109:9115`。EC2 Security Group 只允许 mgbx EKS 集群 Security Group
 访问该端口，不对公网开放。
 
-当前 Probe 只使用无凭据、无副作用的 `http_2xx` 检查。同一清单中的
+`blackbox.yml` 提供两个受控模块：`http_2xx` 用于真正应返回成功响应的页面和
+健康接口；`http_reachable` 用于认证入口或云厂商 API 根地址，允许预先核定的
+400/401/403/404/405/431 响应，只判断 DNS/TCP/TLS/HTTP 服务是否可达。两类探测
+都不携带凭据、不会验证业务权限。
+
+同一清单中的
 `PrometheusRule` 在目标连续失败 3 分钟或 Blackbox Exporter 连续不可采集 3 分钟后
 产生 `warning` 告警，继续复用现有 Alertmanager 普通告警链路，不进入 `critical`
 Oncall 路由。GitLab Token、Grafana
@@ -21,6 +26,16 @@ Blackbox 配置，后续由 Dashboard Provider Probe 承担。
 ```bash
 curl -fsS http://127.0.0.1:9115/-/healthy
 curl -fsS 'http://127.0.0.1:9115/probe?module=http_2xx&target=https://example.com'
+```
+
+本地开发时使用仓库内的受控配置启动：
+
+```bash
+docker run -d --name dashboard-blackbox-exporter-dev --restart unless-stopped \
+  -p 9115:9115 \
+  -v "$PWD/deploy/blackbox-exporter/blackbox.yml:/config/blackbox.yml:ro" \
+  prom/blackbox-exporter:v0.29.0 \
+  --config.file=/config/blackbox.yml
 ```
 
 变更目标列表后，执行 Kubernetes server-side dry-run，再应用：
