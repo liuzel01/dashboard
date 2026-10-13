@@ -1,8 +1,8 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Modal, Space, Tag, Typography } from 'antd';
-import { ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Typography } from 'antd';
+import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { getDependencyHealth, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthResponse } from '../services/api';
+import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthTargets, updateDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
 import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
 
 const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
@@ -36,6 +36,13 @@ const DependencyHealthPage: React.FC = () => {
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<DependencyHealthItem | null>(null);
+  const [history, setHistory] = useState<DependencyHealthHistory | null>(null);
+  const [targetsOpen, setTargetsOpen] = useState(false);
+  const [targets, setTargets] = useState<DependencyHealthTarget[]>([]);
+  const [editingTarget, setEditingTarget] = useState<DependencyHealthTarget | null>(null);
+  const [targetEditorOpen, setTargetEditorOpen] = useState(false);
+  const [targetSaving, setTargetSaving] = useState(false);
+  const [targetForm] = Form.useForm();
   const requestInFlight = useRef(false);
 
   const load = useCallback(async (mode: 'initial' | 'background' | 'manual') => {
@@ -56,6 +63,34 @@ const DependencyHealthPage: React.FC = () => {
   }, []);
 
   useEffect(() => { void load('initial'); }, [load]);
+
+  useEffect(() => {
+    if (!selectedItem) { setHistory(null); return; }
+    void getDependencyHealthHistory(selectedItem.key, 24).then(setHistory).catch(() => setHistory(null));
+  }, [selectedItem]);
+
+  const openTargets = async () => {
+    setTargets(await listDependencyHealthTargets());
+    setTargetsOpen(true);
+  };
+  const editTarget = (target?: DependencyHealthTarget) => {
+    setEditingTarget(target || null);
+    targetForm.setFieldsValue(target || { environmentId: 'global', category: 'external-api', module: 'http_2xx', enabled: true, sortOrder: 0 });
+    setTargetEditorOpen(true);
+  };
+  const saveTarget = async () => {
+    const value = await targetForm.validateFields();
+    setTargetSaving(true);
+    try {
+      if (editingTarget) await updateDependencyHealthTarget(editingTarget.key, value);
+      else await createDependencyHealthTarget(value);
+      setTargets(await listDependencyHealthTargets());
+      setEditingTarget(null);
+      setTargetEditorOpen(false);
+      targetForm.resetFields();
+      await load('manual');
+    } finally { setTargetSaving(false); }
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -119,6 +154,7 @@ const DependencyHealthPage: React.FC = () => {
         {backgroundRefreshing && <Typography.Text type="secondary"><SyncOutlined spin /> 后台更新中</Typography.Text>}
         {data?.stale && <Tag color="orange">显示上次成功结果</Tag>}
         {data?.checkedAt && <Typography.Text type="secondary">最后更新：{new Date(data.checkedAt).toLocaleTimeString()}</Typography.Text>}
+        <Button icon={<SettingOutlined />} onClick={() => void openTargets()}>目标管理</Button>
         <Button icon={<ReloadOutlined />} loading={manualRefreshing} disabled={backgroundRefreshing} onClick={() => void load('manual')}>刷新</Button>
       </Space>}
     />
@@ -154,7 +190,31 @@ const DependencyHealthPage: React.FC = () => {
         { key: 'duration', label: '响应耗时', children: selectedItem.durationMs === null ? '-' : `${selectedItem.durationMs} ms` },
         { key: 'tls', label: 'TLS 证书到期', children: selectedItem.tlsExpiresAt ? new Date(selectedItem.tlsExpiresAt).toLocaleString() : '-' },
         { key: 'checkedAt', label: '检查时间', children: new Date(selectedItem.checkedAt).toLocaleString() },
+        { key: 'availability', label: '近 24 小时可用率', children: <Space direction="vertical" style={{ width: '100%' }}>{(history?.availability || []).map((item) => <div key={item.layer}><Typography.Text>{item.layer}：{item.percentage ?? '-'}%</Typography.Text><Progress percent={item.percentage || 0} size="small" status={(item.percentage || 0) >= 99 ? 'success' : 'exception'} /></div>)}</Space> },
+        { key: 'trend', label: '历史趋势', children: <Space wrap size={2}>{(history?.points || []).slice(-80).map((point, index) => <span key={`${point.checkedAt}-${index}`} title={`${point.layer} ${point.status} ${new Date(point.checkedAt).toLocaleString()}`} style={{ width: 7, height: 22, display: 'inline-block', borderRadius: 2, background: point.status === 'PASS' ? '#52c41a' : point.status === 'FAIL' ? '#ff4d4f' : '#faad14' }} />)}</Space> },
+        { key: 'events', label: '告警与恢复', children: history?.events.length ? <Space direction="vertical">{history.events.map((event, index) => <Typography.Text key={`${event.createdAt}-${index}`} type={event.eventType === 'FIRING' ? 'danger' : 'success'}>{new Date(event.createdAt).toLocaleString()} [{event.layer}] {event.summary}</Typography.Text>)}</Space> : '近 24 小时无事件' },
       ]} />}
+    </Modal>
+    <Modal title="依赖目标管理" open={targetsOpen} onCancel={() => { setTargetsOpen(false); setEditingTarget(null); }} footer={null} width={1000}>
+      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editTarget()}>新增目标</Button>
+      <OpsTable rowKey="key" pagination={false} dataSource={targets} columns={[
+        { title: '标识', dataIndex: 'key' }, { title: '名称', dataIndex: 'name' }, { title: '环境', dataIndex: 'environmentId' },
+        { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
+        { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
+        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+      ] as any} />
+      <Modal title={editingTarget ? `编辑 ${editingTarget.name}` : '新增依赖目标'} open={targetEditorOpen} onCancel={() => { setTargetEditorOpen(false); setEditingTarget(null); targetForm.resetFields(); }} onOk={() => void saveTarget()} confirmLoading={targetSaving} destroyOnHidden>
+        <Form form={targetForm} layout="vertical">
+          {!editingTarget && <Form.Item name="key" label="内部标识" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9._-]{1,63}$/, message: '仅允许小写字母、数字、点、下划线和短横线' }]}><Input /></Form.Item>}
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="environmentId" label="所属环境" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={[{ value: 'global', label: '全局' }, ...environments.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))]} /></Form.Item>
+          <Form.Item name="category" label="类型" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="url" label="探测 URL" rules={[{ required: true }, { type: 'url' }]}><Input /></Form.Item>
+          <Form.Item name="module" label="L1 探测模块" rules={[{ required: true }]}><Select options={[{ value: 'http_2xx', label: 'HTTP 2xx' }, { value: 'http_reachable', label: 'HTTP 可达' }]} /></Form.Item>
+          <Form.Item name="sortOrder" label="排序"><InputNumber min={0} /></Form.Item>
+          <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
+        </Form>
+      </Modal>
     </Modal>
   </>;
 };

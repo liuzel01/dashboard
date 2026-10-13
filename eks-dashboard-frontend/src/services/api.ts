@@ -1987,3 +1987,19 @@ export type DependencyHealthResponse = {
 
 export const getDependencyHealth = async (forceRefresh = false) =>
   (await api.get('/dependency-health', { params: forceRefresh ? { refresh: 'true' } : undefined })).data as DependencyHealthResponse;
+
+export type DependencyHealthTarget = {
+  key: string; name: string; environmentId: string; category: string; url: string;
+  module: 'http_2xx' | 'http_reachable'; enabled: boolean; sortOrder: number; updatedAt?: string;
+};
+export type DependencyHealthHistory = {
+  targetKey: string; hours: number;
+  availability: Array<{ layer: 'L1' | 'L2' | 'L3'; total: number; passed: number; percentage: number | null }>;
+  points: Array<{ layer: 'L1' | 'L2' | 'L3'; status: string; reasonCode: string; durationMs: number | null; checkedAt: string }>;
+  events: Array<{ layer: 'L2' | 'L3'; eventType: 'FIRING' | 'RECOVERED'; reasonCode: string; summary: string; createdAt: string }>;
+};
+export const listDependencyHealthTargets = async () => (await api.get('/dependency-health/targets')).data as DependencyHealthTarget[];
+export const createDependencyHealthTarget = async (data: Omit<DependencyHealthTarget, 'updatedAt'>) => (await api.post('/dependency-health/targets', data)).data;
+export const updateDependencyHealthTarget = async (key: string, data: Omit<DependencyHealthTarget, 'key' | 'updatedAt'>) => (await api.put(`/dependency-health/targets/${encodeURIComponent(key)}`, data)).data;
+export const deleteDependencyHealthTarget = async (key: string) => (await api.delete(`/dependency-health/targets/${encodeURIComponent(key)}`)).data;
+export const getDependencyHealthHistory = async (key: string, hours = 24) => (await api.get(`/dependency-health/history/${encodeURIComponent(key)}`, { params: { hours } })).data as DependencyHealthHistory;
