@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { DependencyProviderHealthService } from './dependency-provider-health.service';
+import { DependencyProviderHealthService, providerAlertTransition } from './dependency-provider-health.service';
 
 jest.mock('axios');
 
@@ -97,5 +97,18 @@ describe('DependencyProviderHealthService', () => {
       reasonCode: 'AUTH_FAILED',
       message: '专用凭据认证失败',
     });
+  });
+});
+
+describe('providerAlertTransition', () => {
+  it('fires only after the configured consecutive failure threshold', () => {
+    expect(providerAlertTransition('OK', 1, 'FAIL', 3)).toEqual({ state: 'OK', failures: 2, eventType: null });
+    expect(providerAlertTransition('OK', 2, 'FAIL', 3)).toEqual({ state: 'FIRING', failures: 3, eventType: 'FIRING' });
+    expect(providerAlertTransition('FIRING', 3, 'FAIL', 3)).toEqual({ state: 'FIRING', failures: 4, eventType: null });
+  });
+
+  it('emits one recovery event and resets the failure counter', () => {
+    expect(providerAlertTransition('FIRING', 4, 'PASS', 3)).toEqual({ state: 'OK', failures: 0, eventType: 'RECOVERED' });
+    expect(providerAlertTransition('OK', 0, 'PASS', 3)).toEqual({ state: 'OK', failures: 0, eventType: null });
   });
 });

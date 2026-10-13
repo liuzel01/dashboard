@@ -30,6 +30,18 @@ type ProviderDefinition = {
   ) => Promise<Omit<ProviderCheckResult, 'targetKey' | 'layer' | 'checkedAt'>>;
 };
 
+export const providerAlertTransition = (
+  previousState: 'OK' | 'FIRING',
+  previousFailures: number,
+  resultStatus: 'PASS' | 'FAIL',
+  threshold: number,
+) => {
+  if (resultStatus === 'PASS') return { state: 'OK' as const, failures: 0, eventType: previousState === 'FIRING' ? 'RECOVERED' as const : null };
+  const failures = previousFailures + 1;
+  const firing = previousState === 'FIRING' || failures >= threshold;
+  return { state: firing ? 'FIRING' as const : 'OK' as const, failures, eventType: previousState !== 'FIRING' && firing ? 'FIRING' as const : null };
+};
+
 @Injectable()
 export class DependencyProviderHealthService implements OnModuleInit {
   private readonly logger = new Logger(DependencyProviderHealthService.name);
@@ -47,6 +59,13 @@ export class DependencyProviderHealthService implements OnModuleInit {
   @Interval(60_000)
   async scheduledRun() {
     await this.runDueChecks();
+  }
+
+  @Interval(21_600_000)
+  async cleanupHistory() {
+    const days = Math.max(1, Math.min(365, await this.siteConf.getNumber('dependency_health.history_retention_days', 30)));
+    await this.db.query(`DELETE FROM dependency_health_history WHERE checked_at < DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? DAY)`, [days]);
+    await this.db.query(`DELETE FROM dependency_health_alert_events WHERE created_at < DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? DAY)`, [days]);
   }
 
   async latest(): Promise<
@@ -468,6 +487,49 @@ export class DependencyProviderHealthService implements OnModuleInit {
         result.checkedAt.slice(0, 23).replace('T', ' '),
       ],
     );
+    await this.db.query(
+      `INSERT INTO dependency_health_history (target_key,layer,status,reason_code,duration_ms,checked_at) VALUES (?,?,?,?,?,?)`,
+      [result.targetKey, result.layer, result.status, result.reasonCode, result.durationMs, result.checkedAt.slice(0, 23).replace('T', ' ')],
+    );
+    await this.updateAlertState(result);
+  }
+
+  private async updateAlertState(result: ProviderCheckResult) {
+    if (!['PASS', 'FAIL'].includes(result.status)) return;
+    const threshold = Math.max(1, await this.siteConf.getNumber('dependency_health.alert_failure_threshold', 3));
+    await this.db.withTransaction(async (conn) => {
+      const [rows] = await conn.execute<any[]>(
+        `SELECT state,consecutive_failures FROM dependency_health_alert_states WHERE target_key=? AND layer=? FOR UPDATE`,
+        [result.targetKey, result.layer],
+      );
+      const previous = rows[0] || { state: 'OK', consecutive_failures: 0 };
+      const transition = providerAlertTransition(previous.state, Number(previous.consecutive_failures || 0), result.status === 'PASS' ? 'PASS' : 'FAIL', threshold);
+      if (result.status === 'PASS') {
+        if (transition.eventType === 'RECOVERED') {
+          await conn.execute(
+            `INSERT INTO dependency_health_alert_events (target_key,layer,event_type,reason_code,summary,created_at) VALUES (?,?,'RECOVERED','OK',?,UTC_TIMESTAMP(3))`,
+            [result.targetKey, result.layer, `${result.layer} 检查已恢复：${result.summary}`],
+          );
+        }
+        await conn.execute(
+          `INSERT INTO dependency_health_alert_states (target_key,layer,state,consecutive_failures,last_reason_code,last_changed_at) VALUES (?,?,'OK',0,'OK',UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE last_changed_at=IF(state='FIRING',UTC_TIMESTAMP(3),last_changed_at),state='OK',consecutive_failures=0,last_reason_code='OK'`,
+          [result.targetKey, result.layer],
+        );
+        return;
+      }
+      const failures = transition.failures;
+      const shouldFire = transition.eventType === 'FIRING';
+      if (shouldFire) {
+        await conn.execute(
+          `INSERT INTO dependency_health_alert_events (target_key,layer,event_type,reason_code,summary,created_at) VALUES (?,?,'FIRING',?,?,UTC_TIMESTAMP(3))`,
+          [result.targetKey, result.layer, result.reasonCode, `${result.layer} 已连续失败 ${failures} 次：${result.summary}`],
+        );
+      }
+      await conn.execute(
+        `INSERT INTO dependency_health_alert_states (target_key,layer,state,consecutive_failures,last_reason_code,last_changed_at) VALUES (?,?,?,?,?,IF(?='FIRING',UTC_TIMESTAMP(3),NULL)) ON DUPLICATE KEY UPDATE last_changed_at=IF(VALUES(state)<>state,UTC_TIMESTAMP(3),last_changed_at),state=VALUES(state),consecutive_failures=VALUES(consecutive_failures),last_reason_code=VALUES(last_reason_code)`,
+        [result.targetKey, result.layer, transition.state, failures, result.reasonCode, shouldFire ? 'FIRING' : 'OK'],
+      );
+    });
   }
 
   private targetKeys() {
