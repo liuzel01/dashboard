@@ -13,10 +13,10 @@ const AiOpsInvestigationDetailPage: React.FC = () => {
   const { currentEnvironment } = useContext(EnvironmentContext);
   const [item, setItem] = useState<AiOpsInvestigation>(); const [loading, setLoading] = useState(false); const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [form] = Form.useForm();
-  const load = useCallback(async () => { const numericId = Number(id); if (!Number.isInteger(numericId)) return; setLoading(true); try { setItem(await getAiOpsInvestigation(numericId)); } catch (err: unknown) { message.error((err as ApiError)?.response?.data?.message || '调查详情加载失败'); } finally { setLoading(false); } }, [id, message]);
-  useEffect(() => { void load(); }, [currentEnvironment?.id, load]);
+  const load = useCallback(async () => { const numericId = Number(id); if (!currentEnvironment?.id || !Number.isInteger(numericId)) return; setLoading(true); try { setItem(await getAiOpsInvestigation(currentEnvironment.id, numericId)); } catch (err: unknown) { message.error((err as ApiError)?.response?.data?.message || '调查详情加载失败'); } finally { setLoading(false); } }, [currentEnvironment?.id, id, message]);
+  useEffect(() => { setItem(undefined); if (currentEnvironment?.id) void load(); }, [currentEnvironment?.id, load]);
   const report = useMemo(() => { if (!item?.report_json) return undefined; try { return typeof item.report_json === 'string' ? JSON.parse(item.report_json) : item.report_json; } catch { return undefined; } }, [item]);
-  const submitFeedback = async (values: { rating: string; comment?: string }) => { if (!item) return; setFeedbackLoading(true); try { await addAiOpsInvestigationFeedback(item.id, values.rating, values.comment); message.success('反馈已记录'); form.resetFields(); await load(); } finally { setFeedbackLoading(false); } };
+  const submitFeedback = async (values: { rating: string; comment?: string }) => { if (!item || !currentEnvironment?.id) return; setFeedbackLoading(true); try { await addAiOpsInvestigationFeedback(currentEnvironment.id, item.id, values.rating, values.comment); message.success('反馈已记录'); form.resetFields(); await load(); } finally { setFeedbackLoading(false); } };
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     <PageHeader title={item?.alert_name || 'AI 调查详情'} description="结论为 AI 初步调查结果；事实、候选判断和缺失证据分开呈现。" environmentName={currentEnvironment?.name} actions={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/ai-ops')}>返回调查列表</Button>} />
     {loading && <Card loading />}

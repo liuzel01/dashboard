@@ -20,18 +20,19 @@ const AiOpsWorkbenchPage: React.FC = () => {
   const keywordRef = useRef('');
 
   const load = useCallback(async () => {
+    if (!currentEnvironment?.id) return;
     setLoading(true); setError(null);
     try {
-      const result = await listAiOpsInvestigations({ status, keyword: keywordRef.current.trim() || undefined, pageSize: 100 });
+      const result = await listAiOpsInvestigations(currentEnvironment.id, { status, keyword: keywordRef.current.trim() || undefined, pageSize: 100 });
       setItems(result.items); setTotal(result.total);
     } catch (err: unknown) {
       const text = (err as ApiError)?.response?.data?.message || (err as Error)?.message || 'AI 调查任务加载失败';
       setError(text); message.error(text);
     } finally { setLoading(false); }
-  }, [message, status]);
+  }, [currentEnvironment?.id, message, status]);
 
-  useEffect(() => { setKeyword(''); keywordRef.current = ''; setStatus(undefined); }, [currentEnvironment?.id]);
-  useEffect(() => { void load(); }, [currentEnvironment?.id, load, status]);
+  useEffect(() => { setItems([]); setTotal(0); setError(null); setKeyword(''); keywordRef.current = ''; setStatus(undefined); }, [currentEnvironment?.id]);
+  useEffect(() => { if (currentEnvironment?.id) void load(); }, [currentEnvironment?.id, load]);
 
   const metrics = useMemo(() => [
     { key: 'active', label: '调查中', value: items.filter((item) => ['PENDING', 'COLLECTING', 'ANALYZING'].includes(item.status)).length, valueStyle: { color: '#1677ff' } },

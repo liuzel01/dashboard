@@ -382,14 +382,26 @@ export type AiOpsInvestigation = {
   feedback?: Array<{ id: number; actor_username?: string | null; rating: string; comment?: string | null; created_at: string }>;
 };
 
-export const listAiOpsInvestigations = async (params: { status?: string; keyword?: string; page?: number; pageSize?: number } = {}) =>
-  (await api.get('/ai-ops/investigations', { params })).data as { items: AiOpsInvestigation[]; total: number; page: number; pageSize: number };
+const aiOpsEnvironmentHeaders = (environmentId: string) => ({
+  'X-Target-Environment': environmentId,
+});
 
-export const getAiOpsInvestigation = async (id: number) =>
-  (await api.get(`/ai-ops/investigations/${id}`)).data as AiOpsInvestigation;
+export const listAiOpsInvestigations = async (
+  environmentId: string,
+  params: { status?: string; keyword?: string; page?: number; pageSize?: number } = {},
+) =>
+  (await api.get('/ai-ops/investigations', { params, headers: aiOpsEnvironmentHeaders(environmentId) })).data as {
+    items: AiOpsInvestigation[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
 
-export const addAiOpsInvestigationFeedback = async (id: number, rating: string, comment?: string) =>
-  (await api.post(`/ai-ops/investigations/${id}/feedback`, { rating, comment })).data as { ok: boolean };
+export const getAiOpsInvestigation = async (environmentId: string, id: number) =>
+  (await api.get(`/ai-ops/investigations/${id}`, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as AiOpsInvestigation;
+
+export const addAiOpsInvestigationFeedback = async (environmentId: string, id: number, rating: string, comment?: string) =>
+  (await api.post(`/ai-ops/investigations/${id}/feedback`, { rating, comment }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { ok: boolean };
 
 /**
  * 获取当前环境的所有可管理平台
