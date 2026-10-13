@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import axios from 'axios';
+import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import { DependencyProviderHealthService, ProviderCheckResult } from './dependency-provider-health.service';
 
@@ -39,12 +41,73 @@ type DependencyHealthSnapshot = {
 };
 
 @Injectable()
-export class DependencyHealthService {
+export class DependencyHealthService implements OnModuleInit {
   private snapshot: DependencyHealthSnapshot | null = null;
   private snapshotStoredAt = 0;
   private refreshInFlight: Promise<DependencyHealthSnapshot> | null = null;
 
-  constructor(private readonly siteConf: SiteConfService, private readonly providers: DependencyProviderHealthService) {}
+  private backgroundRunning = false;
+
+  constructor(private readonly siteConf: SiteConfService, private readonly providers: DependencyProviderHealthService, private readonly db: PlatformDatabaseService) {}
+
+  onModuleInit() { setTimeout(() => void this.backgroundRefresh(), 5_000); }
+
+  @Interval(60_000)
+  async backgroundRefresh() {
+    if (this.backgroundRunning) return;
+    this.backgroundRunning = true;
+    try { await this.refreshOnce(); } catch { /* next interval retries; the API keeps its last successful snapshot */ } finally { this.backgroundRunning = false; }
+  }
+
+  async targets(includeDisabled = true) {
+    const rows = await this.db.query<any[]>(
+      `SELECT target_key,name,environment_id,category,url,probe_module,enabled,sort_order,updated_at FROM dependency_health_targets ${includeDisabled ? '' : 'WHERE enabled=1'} ORDER BY sort_order,target_key`,
+    );
+    return rows.map((row) => ({ key: row.target_key, name: row.name, environmentId: row.environment_id, category: row.category, url: row.url, module: row.probe_module, enabled: !!row.enabled, sortOrder: Number(row.sort_order), updatedAt: row.updated_at }));
+  }
+
+  async saveTarget(key: string | null, input: unknown) {
+    const value = input as Record<string, unknown>;
+    const target = this.validateTargets([{ ...value, key: key || value?.key }])[0];
+    const enabled = value?.enabled !== false;
+    const sortOrder = Math.max(0, Math.min(100000, Number(value?.sortOrder) || 0));
+    if (key) {
+      const result: any = await this.db.query(
+        `UPDATE dependency_health_targets SET name=?,environment_id=?,category=?,url=?,probe_module=?,enabled=?,sort_order=? WHERE target_key=?`,
+        [target.name, target.environmentId, target.category, target.url, target.module, enabled ? 1 : 0, sortOrder, key],
+      );
+      if (!Number(result.affectedRows)) throw new BadRequestException('Dependency target not found');
+    } else {
+      await this.db.query(
+        `INSERT INTO dependency_health_targets (target_key,name,environment_id,category,url,probe_module,enabled,sort_order) VALUES (?,?,?,?,?,?,?,?)`,
+        [target.key, target.name, target.environmentId, target.category, target.url, target.module, enabled ? 1 : 0, sortOrder],
+      );
+    }
+    this.snapshot = null;
+    return target;
+  }
+
+  async deleteTarget(key: string) {
+    const result: any = await this.db.query(`DELETE FROM dependency_health_targets WHERE target_key=?`, [key]);
+    if (!Number(result.affectedRows)) throw new BadRequestException('Dependency target not found');
+    this.snapshot = null;
+    return { deleted: true };
+  }
+
+  async history(targetKey: string, hours = 24) {
+    const safeHours = Math.max(1, Math.min(24 * 30, Number(hours) || 24));
+    const [points, availability, events] = await Promise.all([
+      this.db.query<any[]>(`SELECT layer,status,reason_code,duration_ms,checked_at FROM dependency_health_history WHERE target_key=? AND checked_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? HOUR) ORDER BY checked_at ASC LIMIT 5000`, [targetKey, safeHours]),
+      this.db.query<any[]>(`SELECT layer,COUNT(*) total,SUM(status='PASS') passed FROM dependency_health_history WHERE target_key=? AND checked_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? HOUR) GROUP BY layer`, [targetKey, safeHours]),
+      this.db.query<any[]>(`SELECT layer,event_type,reason_code,summary,created_at FROM dependency_health_alert_events WHERE target_key=? AND created_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? HOUR) ORDER BY id DESC LIMIT 100`, [targetKey, safeHours]),
+    ]);
+    return {
+      targetKey, hours: safeHours,
+      availability: availability.map((row) => ({ layer: row.layer, total: Number(row.total), passed: Number(row.passed), percentage: Number(row.total) ? Number((Number(row.passed) * 100 / Number(row.total)).toFixed(2)) : null })),
+      points: points.map((row) => ({ layer: row.layer, status: row.status, reasonCode: row.reason_code, durationMs: row.duration_ms === null ? null : Number(row.duration_ms), checkedAt: String(row.checked_at).replace(' ', 'T') + 'Z' })),
+      events: events.map((row) => ({ layer: row.layer, eventType: row.event_type, reasonCode: row.reason_code, summary: row.summary, createdAt: String(row.created_at).replace(' ', 'T') + 'Z' })),
+    };
+  }
 
   async list(options: { force?: boolean } = {}) {
     const now = Date.now();
@@ -139,9 +202,9 @@ export class DependencyHealthService {
   }
 
   private async collectSnapshot(): Promise<DependencyHealthSnapshot> {
-    const targets = this.validateTargets(
-      await this.siteConf.getJson<unknown>('dependency_health.targets_json', []),
-    );
+    let targets: DependencyTarget[];
+    try { targets = (await this.targets(false)).map(({ enabled: _enabled, sortOrder: _sortOrder, updatedAt: _updatedAt, ...target }: any) => target); }
+    catch { targets = this.validateTargets(await this.siteConf.getJson<unknown>('dependency_health.targets_json', [])); }
     const baseUrl = (await this.siteConf.getString('dependency_health.blackbox_base_url', 'http://127.0.0.1:9115')).trim().replace(/\/+$/, '');
     const parsedBase = new URL(baseUrl);
     if (!['http:', 'https:'].includes(parsedBase.protocol) || parsedBase.username || parsedBase.password) {
@@ -149,6 +212,10 @@ export class DependencyHealthService {
     }
     const timeoutMs = await this.siteConf.getNumber('dependency_health.timeout_ms', 12_000);
     const results = await Promise.all(targets.map((target) => this.probe(target, baseUrl, timeoutMs)));
+    await Promise.all(results.map((item) => this.db.query(
+      `INSERT INTO dependency_health_history (target_key,layer,status,reason_code,duration_ms,checked_at) VALUES (?,'L1',?,?,?,?)`,
+      [item.key, item.healthy ? 'PASS' : 'FAIL', item.errorType, item.durationMs, item.checkedAt.slice(0, 23).replace('T', ' ')],
+    ).catch(() => undefined)));
     return {
       checkedAt: new Date().toISOString(),
       summary: {

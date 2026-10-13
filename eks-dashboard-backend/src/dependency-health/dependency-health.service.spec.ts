@@ -14,12 +14,17 @@ describe('DependencyHealthService', () => {
     latest: jest.fn(async () => new Map()),
     verificationDepth: jest.fn(() => 'L1'),
   };
+  const db = { query: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
     providers.latest.mockResolvedValue(new Map());
     providers.verificationDepth.mockReturnValue('L1');
-    service = new DependencyHealthService(siteConf as never, providers as never);
+    db.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM dependency_health_targets')) throw new Error('migration not applied');
+      return [];
+    });
+    service = new DependencyHealthService(siteConf as never, providers as never, db as never);
   });
 
   it('returns targets from every environment and parses blackbox metrics', async () => {
