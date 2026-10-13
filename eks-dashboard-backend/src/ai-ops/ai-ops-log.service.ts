@@ -35,6 +35,17 @@ type LogSourceConfig = {
   timeoutMs: number;
 };
 
+export type AlertLogSearchResult = {
+  querySummary: Record<string, unknown>;
+  evidence: Array<{
+    evidenceId: string;
+    timestamp: string;
+    labels: Record<string, string>;
+    line: string;
+  }>;
+  exploreUrl: string;
+};
+
 @Injectable()
 export class AiOpsLogService {
   private readonly logger = new Logger(AiOpsLogService.name);
@@ -223,6 +234,37 @@ export class AiOpsLogService {
         `环境 ${environmentId} 日志查询失败：${this.errorMessage(error)}`,
       );
     }
+  }
+
+  async searchAlertWindow(
+    environmentId: string,
+    input: {
+      namespace: string;
+      serviceName: string;
+      from: string;
+      to: string;
+      limit?: number;
+    },
+  ): Promise<AlertLogSearchResult> {
+    const source = await this.getSource(environmentId);
+    return (await this.search(
+      environmentId,
+      {
+        userId: null,
+        username: 'aiops-alert-investigator',
+        permissions: ['menu:ai-ops'],
+        roles: ['system'],
+      },
+      {
+        projectId: source.projectId,
+        sourceId: source.sourceId,
+        namespace: input.namespace,
+        serviceName: input.serviceName,
+        from: input.from,
+        to: input.to,
+        limit: input.limit || Math.min(100, source.maxLines),
+      },
+    )) as AlertLogSearchResult;
   }
 
   private async getSource(environmentId: string): Promise<LogSourceConfig> {

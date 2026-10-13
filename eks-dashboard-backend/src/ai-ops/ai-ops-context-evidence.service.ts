@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { KubernetesService } from '../kubernetes/kubernetes.service';
+import { AiOpsLogService } from './ai-ops-log.service';
 
 export type ContextEvidence = {
   evidenceId: string;
@@ -10,7 +11,11 @@ export type ContextEvidence = {
     | 'KUBERNETES_EVENT'
     | 'LOG'
     | 'CHANGE_CONTEXT';
-  sourceSystem: 'kubernetes' | 'kubernetes-previous-log' | 'cicd';
+  sourceSystem:
+    | 'kubernetes'
+    | 'kubernetes-previous-log'
+    | 'grafana-loki'
+    | 'cicd';
   observedAt: string;
   title: string;
   content: Record<string, unknown>;
@@ -43,6 +48,7 @@ export class AiOpsContextEvidenceService {
   constructor(
     private readonly kubernetes: KubernetesService,
     private readonly db: PlatformDatabaseService,
+    private readonly logs: AiOpsLogService,
   ) {}
 
   async collect(context: AlertContext): Promise<ContextEvidenceResult> {
@@ -131,6 +137,66 @@ export class AiOpsContextEvidenceService {
       missingEvidence.push(
         'Kubernetes 目标映射（告警缺少 pod、service 或 job 标签）',
       );
+    }
+
+    const logService = this.text(context.service || context.labels.job);
+    if (logService) {
+      try {
+        const alertAt = new Date(context.startedAt).getTime();
+        const logResult = await this.logs.searchAlertWindow(
+          context.environmentId,
+          {
+            namespace: context.namespace || 'default',
+            serviceName: logService,
+            from: new Date(alertAt - 10 * 60 * 1000).toISOString(),
+            to: new Date(alertAt + 10 * 60 * 1000).toISOString(),
+            limit: 100,
+          },
+        );
+        const queryObservedAt = new Date().toISOString();
+        evidence.push({
+          evidenceId: this.id(
+            'loki-query',
+            `${context.environmentId}:${context.startedAt}:${context.namespace}:${logService}`,
+          ),
+          evidenceType: 'LOG',
+          sourceSystem: 'grafana-loki',
+          observedAt: queryObservedAt,
+          title: `Loki 告警窗口查询 ${context.namespace || 'default'}/${logService}`,
+          content: {
+            querySummary: logResult.querySummary,
+            hitCount: logResult.evidence.length,
+            temporalScope: 'ALERT_WINDOW',
+          },
+          sourceUrl: logResult.exploreUrl || '',
+        });
+        for (const item of logResult.evidence) {
+          evidence.push({
+            evidenceId: `loki-${item.evidenceId}`,
+            evidenceType: 'LOG',
+            sourceSystem: 'grafana-loki',
+            observedAt: item.timestamp,
+            title: `Loki log ${logService}`,
+            content: {
+              labels: item.labels,
+              line: item.line,
+              temporalScope: 'ALERT_WINDOW',
+            },
+            sourceUrl: logResult.exploreUrl || '',
+          });
+        }
+        findings.push(
+          logResult.evidence.length
+            ? `告警前后 10 分钟内取得 ${logResult.evidence.length} 条 Loki 日志证据。`
+            : '告警前后 10 分钟的受控 Loki 查询未返回匹配日志。',
+        );
+      } catch {
+        missingEvidence.push(
+          'Grafana/Loki 告警窗口日志（数据源未配置、目标不在允许范围或查询失败）',
+        );
+      }
+    } else {
+      missingEvidence.push('日志目标映射（告警缺少 service 或 job 标签）');
     }
 
     if (context.service) {

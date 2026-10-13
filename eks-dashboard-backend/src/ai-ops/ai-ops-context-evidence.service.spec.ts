@@ -3,6 +3,11 @@ import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 
 describe('AiOpsContextEvidenceService', () => {
+  const logs = {
+    searchAlertWindow: jest.fn(() =>
+      Promise.resolve({ evidence: [], querySummary: {}, exploreUrl: '' }),
+    ),
+  };
   const context = {
     environmentId: 'mgbx',
     startedAt: '2026-10-13T03:50:43.873Z',
@@ -29,6 +34,7 @@ describe('AiOpsContextEvidenceService', () => {
     const service = new AiOpsContextEvidenceService(
       kubernetes as any,
       db as any,
+      logs as any,
     );
 
     const result = await service.collect(context);
@@ -39,6 +45,18 @@ describe('AiOpsContextEvidenceService', () => {
       content: { temporalScope: 'CURRENT_AT_INVESTIGATION', replay: true },
     });
     expect(result.findings.join(' ')).toContain('不等同于历史告警发生时状态');
+    expect(result.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          evidenceType: 'LOG',
+          sourceSystem: 'grafana-loki',
+          content: expect.objectContaining({
+            hitCount: 0,
+            temporalScope: 'ALERT_WINDOW',
+          }),
+        }),
+      ]),
+    );
   });
 
   it('treats CI/CD records as optional context and never as proven causality', async () => {
@@ -70,6 +88,7 @@ describe('AiOpsContextEvidenceService', () => {
     const service = new AiOpsContextEvidenceService(
       kubernetes as any,
       db as any,
+      logs as any,
     );
 
     const result = await service.collect({ ...context, replay: false });
@@ -93,15 +112,22 @@ describe('AiOpsContextEvidenceService', () => {
     const db = {
       query: jest.fn(() => Promise.reject(new Error('missing table'))),
     };
+    const unavailableLogs = {
+      searchAlertWindow: jest.fn(() =>
+        Promise.reject(new Error('not configured')),
+      ),
+    };
     const service = new AiOpsContextEvidenceService(
       kubernetes as any,
       db as any,
+      unavailableLogs as any,
     );
 
     const result = await service.collect(context);
 
     expect(result.evidence).toEqual([]);
-    expect(result.missingEvidence).toHaveLength(1);
-    expect(result.missingEvidence[0]).toContain('Kubernetes');
+    expect(result.missingEvidence).toHaveLength(2);
+    expect(result.missingEvidence.join(' ')).toContain('Kubernetes');
+    expect(result.missingEvidence.join(' ')).toContain('Grafana/Loki');
   });
 });
