@@ -4,8 +4,8 @@
 `i-0534e7ed9423fff65` 的 `/opt/blackbox-exporter`，容器固定为
 `prom/blackbox-exporter:v0.29.0`，监听 TCP `9115`。
 
-`mgbx-external-probes.yaml` 在 `monitoring` Namespace 中创建一个无 selector 的
-Service 和 EndpointSlice，将 Prometheus Operator `Probe` 转发至 EC2 私网地址
+`mgbx-external-probes.yaml` 在 `monitoring` Namespace 中只创建一个无 selector 的
+Service 和 EndpointSlice，将集群内访问转发至 EC2 私网地址
 `10.100.166.109:9115`。EC2 Security Group 只允许 mgbx EKS 集群 Security Group
 访问该端口，不对公网开放。
 
@@ -14,12 +14,9 @@ Service 和 EndpointSlice，将 Prometheus Operator `Probe` 转发至 EC2 私网
 400/401/403/404/405/431 响应，只判断 DNS/TCP/TLS/HTTP 服务是否可达。两类探测
 都不携带凭据、不会验证业务权限。
 
-同一清单中的
-`PrometheusRule` 在目标连续失败 3 分钟或 Blackbox Exporter 连续不可采集 3 分钟后
-产生 `warning` 告警，继续复用现有 Alertmanager 普通告警链路，不进入 `critical`
-Oncall 路由。GitLab Token、Grafana
-Service Account、Cliproxy API Key 和 Jenkins 专用用户等认证/授权检查不能写入
-Blackbox 配置，后续由 Dashboard Provider Probe 承担。
+目标目录、L1/L2/L3 调度、连续失败阈值、历史和恢复事件全部由 Dashboard 后端统一
+管理。这里不再包含 Prometheus Operator `Probe` 和静态目标列表，避免数据库与
+Kubernetes YAML 双份维护。凭据只由 Dashboard Provider Probe 在后端读取。
 
 验证命令：
 
@@ -38,7 +35,7 @@ docker run -d --name dashboard-blackbox-exporter-dev --restart unless-stopped \
   --config.file=/config/blackbox.yml
 ```
 
-变更目标列表后，执行 Kubernetes server-side dry-run，再应用：
+仅当 Blackbox Exporter 的网络入口发生变化时，执行 Kubernetes server-side dry-run，再应用：
 
 ```bash
 kubectl --context <mgbx-operator-context> apply --server-side --dry-run=server \
