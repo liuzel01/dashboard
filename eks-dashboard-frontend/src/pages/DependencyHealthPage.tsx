@@ -12,6 +12,11 @@ const errorLabel: Record<DependencyHealthItem['errorType'], string> = {
   PROBE_ERROR: '探测器不可用',
 };
 
+const healthyLabel = (item: DependencyHealthItem) => item.module === 'http_reachable' ? '可达' : '健康';
+const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
+  ? 'HTTP 可达性（允许预先核定的认证或业务错误状态码）'
+  : 'HTTP 成功响应（2xx）';
+
 const DependencyHealthPage: React.FC = () => {
   const { environments } = useContext(EnvironmentContext);
   const [data, setData] = useState<DependencyHealthResponse | null>(null);
@@ -67,7 +72,7 @@ const DependencyHealthPage: React.FC = () => {
         : <Space direction="vertical" size={0}><Typography.Text>{environmentNameById.get(value) || value}</Typography.Text><Typography.Text type="secondary">{value}</Typography.Text></Space>,
     },
     { title: '类型', dataIndex: 'category', key: 'category', render: (value: string) => <Tag>{value}</Tag> },
-    { title: '状态', dataIndex: 'healthy', key: 'healthy', render: (value: boolean, row: DependencyHealthItem) => <Space><Tag color={value ? 'success' : 'error'}>{value ? '健康' : '异常'}</Tag>{!value && <Typography.Text type="secondary">{errorLabel[row.errorType]}</Typography.Text>}</Space> },
+    { title: '状态', dataIndex: 'healthy', key: 'healthy', render: (value: boolean, row: DependencyHealthItem) => <Space><Tag color={value ? 'success' : 'error'}>{value ? healthyLabel(row) : '异常'}</Tag>{!value && <Typography.Text type="secondary">{errorLabel[row.errorType]}</Typography.Text>}</Space> },
     { title: 'HTTP', dataIndex: 'httpStatus', key: 'httpStatus', width: 90, render: (value: number | null) => value ?? '-' },
     { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 100, render: (value: number | null) => value === null ? '-' : `${value} ms` },
     { title: '探测目标', dataIndex: 'url', key: 'url', ellipsis: true },
@@ -84,7 +89,7 @@ const DependencyHealthPage: React.FC = () => {
     {error && <Alert type="error" showIcon message="外部依赖健康加载失败" description={error} style={{ marginBottom: 16 }} />}
     <MetricGrid items={[
       { key: 'total', label: '受控依赖', value: data?.summary.total ?? 0 },
-      { key: 'healthy', label: '健康', value: data?.summary.healthy ?? 0, valueStyle: { color: '#389e0d' } },
+      { key: 'healthy', label: '正常', value: data?.summary.healthy ?? 0, valueStyle: { color: '#389e0d' } },
       { key: 'unhealthy', label: '异常', value: data?.summary.unhealthy ?? 0, valueStyle: (data?.summary.unhealthy || 0) > 0 ? { color: '#cf1322' } : undefined },
     ]} />
     <OpsTable rowKey="key" loading={loading} columns={columns as any} dataSource={data?.items || []} pagination={false} />
@@ -99,9 +104,9 @@ const DependencyHealthPage: React.FC = () => {
         { key: 'key', label: '内部标识', children: selectedItem.key },
         { key: 'environment', label: '所属环境', children: selectedItem.environmentId === 'global' ? '全局' : `${environmentNameById.get(selectedItem.environmentId) || selectedItem.environmentId} (${selectedItem.environmentId})` },
         { key: 'category', label: '依赖类型', children: selectedItem.category },
-        { key: 'module', label: '探测模块', children: selectedItem.module || 'http_2xx' },
+        { key: 'module', label: '探测方式', children: moduleLabel(selectedItem) },
         { key: 'url', label: '探测目标', children: <Typography.Text copyable>{selectedItem.url}</Typography.Text> },
-        { key: 'status', label: '当前状态', children: selectedItem.healthy ? '健康' : `异常（${errorLabel[selectedItem.errorType]}）` },
+        { key: 'status', label: '当前状态', children: selectedItem.healthy ? healthyLabel(selectedItem) : `异常（${errorLabel[selectedItem.errorType]}）` },
         { key: 'http', label: 'HTTP 状态码', children: selectedItem.httpStatus ?? '-' },
         { key: 'duration', label: '响应耗时', children: selectedItem.durationMs === null ? '-' : `${selectedItem.durationMs} ms` },
         { key: 'tls', label: 'TLS 证书到期', children: selectedItem.tlsExpiresAt ? new Date(selectedItem.tlsExpiresAt).toLocaleString() : '-' },
