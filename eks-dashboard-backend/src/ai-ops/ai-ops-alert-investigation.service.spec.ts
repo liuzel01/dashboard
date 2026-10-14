@@ -57,7 +57,17 @@ const makeService = (existingId?: number) => {
     } as any,
     {
       collect: jest.fn(async () => ({
-        evidence: [],
+        evidence: [
+          {
+            evidenceId: 'loki-query-test',
+            evidenceType: 'LOG',
+            sourceSystem: 'grafana-loki',
+            observedAt: '2026-10-13T03:50:43.873Z',
+            title: 'Loki query',
+            content: { hitCount: 0 },
+            sourceUrl: '',
+          },
+        ],
         findings: [],
         missingEvidence: ['kubernetes'],
         timeline: [],
@@ -105,6 +115,18 @@ describe('AiOpsAlertInvestigationService', () => {
         String(sql).includes('INSERT INTO aiops_investigation_evidence'),
       ),
     ).toBe(true);
+    const reportJson = execute.mock.calls
+      .flatMap((call) => (Array.isArray(call[1]) ? call[1] : []))
+      .find(
+        (value) =>
+          typeof value === 'string' && value.includes('"missingEvidence"'),
+      );
+    const report = JSON.parse(String(reportJson)) as {
+      missingEvidence: string[];
+    };
+    expect(report.missingEvidence).not.toEqual(
+      expect.arrayContaining(['关联日志', 'release']),
+    );
   });
 
   it('updates the existing investigation for duplicate deliveries', async () => {

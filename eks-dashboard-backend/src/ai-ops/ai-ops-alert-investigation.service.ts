@@ -336,6 +336,22 @@ export class AiOpsAlertInvestigationService {
           0,
           2000,
         );
+    const contextSources = new Set(
+      contextual.evidence.map((item) => item.sourceSystem),
+    );
+    const specializedMissing = (
+      specialized?.missingEvidence || ['Prometheus 源指标趋势', '日志证据']
+    ).filter((item) => {
+      if (/发布|CI\/CD|release/i.test(item)) return false;
+      if (/日志/i.test(item) && contextSources.has('grafana-loki'))
+        return false;
+      if (
+        /Kubernetes|Pod\/Node/i.test(item) &&
+        contextSources.has('kubernetes')
+      )
+        return false;
+      return true;
+    });
     const report = {
       kind: 'generic-alert-report',
       replay: sourceType === 'HISTORICAL_REPLAY',
@@ -360,13 +376,7 @@ export class AiOpsAlertInvestigationService {
         ...(specialized?.evidence.map((item) => item.evidenceId) || []),
         ...contextual.evidence.map((item) => item.evidenceId),
       ],
-      missingEvidence: [
-        ...(specialized?.missingEvidence || [
-          'Prometheus 源指标趋势',
-          '日志证据',
-        ]),
-        ...contextual.missingEvidence,
-      ],
+      missingEvidence: [...specializedMissing, ...contextual.missingEvidence],
       timeline: [
         {
           observedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
