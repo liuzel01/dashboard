@@ -2,7 +2,7 @@
 
 > 日期：2026-10-13
 >
-> 状态：Phase 0～3 已完成本地实现与隔离链路验证；Phase 4 已进入本地开发，外部回传保持关闭
+> 状态：Phase 0～3 已完成本地实现与隔离链路验证；Phase 4 已进入本地开发；接入策略调整为全量接收、分级调查，外部回传保持关闭
 >
 > 适用仓库：`/Users/liuzelin/github/dashboard`
 
@@ -11,7 +11,7 @@
 Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 
 - `/ai-ops` 已改为告警调查任务首页；调查详情、主动日志调查和 SQL 助手使用独立内部路由；
-- 新增 Alertmanager 结构化 webhook、专用 Bearer Token、告警白名单、payload/标签数量限制；
+- 新增 Alertmanager 结构化 webhook、专用 Bearer Token、payload/标签数量限制；最初的告警名试点白名单将在全量接入改造中取消；
 - 新增 Investigation、Step、Evidence、Feedback 持久化表和数据库迁移；
 - 实现 fingerprint + startsAt + playbook version 幂等、firing/resolved 更新和通用告警报告；
 - 用户页面权限统一沿用 `menu:ai-ops`；
@@ -43,7 +43,7 @@ Phase 3 当前本地实现进度：
 - Phase 4 已新增 `POD_OOM`、`HTTP_ERROR_RATE_HIGH` 和 `JVM_HEAP_HIGH_SYNTHETIC` Playbook，合成 JVM 案例明确不计入真实告警准确率或 MTTR；
 - 已新增环境级质量汇总接口，统计证据覆盖率、人工反馈和 `PARTIAL / FAILED` 步骤；Pod OOM 与 HTTP 错误率仍需取得真实脱敏样本后才能完成业务验收。
 
-尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行生产迁移，并将两条白名单告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。
+尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行生产迁移，并将现有 Prometheus 告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。接入全量告警不等于对每条告警立即执行完整取证；具体分级策略见 4.4。
 
 ## 1. 决策结论
 
@@ -57,7 +57,7 @@ Phase 3 当前本地实现进度：
 
 - Oncall 继续负责 Alertmanager 告警接收、去重、`FIRING / ACKED / RESOLVED` 生命周期、通知、ACK、升级和值班；其前端页面不改。
 - AI 运维负责调查任务、证据采集、关联分析、根因候选、排查建议、人工反馈和调查审计。
-- AI 运维优先接收 Alertmanager 按试点白名单并行投递的结构化事件，也可以只读复用 `oncall_alerts`、`oncall_alert_events`；它不反向修改 Oncall 状态、ACK、通知或升级记录。
+- AI 运维接收 Alertmanager 并行投递的全部结构化告警事件，也可以只读复用 `oncall_alerts`、`oncall_alert_events`；它不反向修改 Oncall 状态、ACK、通知或升级记录。
 - 告警群是通知和结果触达入口，不是机器解析的数据源。禁止通过抓取 Lark 群消息或让模型解析告警文本来替代 Alertmanager 结构化 webhook。
 - 权限只沿用现有 `menu:ai-ops` 菜单权限，不增加场景级、工具级或来源级权限。
 - 首期只读，不自动回滚、扩缩容、重启 Pod、修改告警规则或执行 SQL。
@@ -186,13 +186,13 @@ Alertmanager
       └── AIOps receiver ─> Dashboard AIOps webhook
                                   │
                                   ▼
-                         白名单、去重、调查任务
+                      排除策略、去重、分级调查任务
                                   │
                                   ▼
                        AI 运维页面 / 可选群内摘要
 ```
 
-首期不替换现有告警通知 receiver。Alertmanager 对试点告警使用 `continue: true` 或等价并行路由，在正常发往告警群的同时向 Dashboard AIOps webhook 投递同一结构化事件。
+不替换现有告警通知 receiver。Alertmanager 使用 `continue: true` 或等价并行路由，在正常发往告警群的同时向 Dashboard AIOps webhook 投递全部结构化告警事件。Dashboard 只排除 `Watchdog`、`InfoInhibitor` 等明确的内部心跳、抑制或演练专用告警；不再用不断增长的 alertname 白名单决定是否接收。
 
 不能只依赖现有 `oncall_alerts`：Oncall 可能只接收特定高风险路由，而真实试点包含 `warning` 和 `info`。AIOps 应有独立事件接收与幂等能力；若相同 fingerprint 已存在 Oncall 记录，只保存关联 ID，不复制或修改 Oncall 生命周期。
 
@@ -222,7 +222,7 @@ sequenceDiagram
     Engine-->>UI: 调查详情
 ```
 
-不修改 Oncall 前端，不在 Oncall 页面增加按钮、状态或 AI 摘要。用户需要从 AI 运维的“新建调查”中选择告警，或由后端白名单规则自动创建调查。
+不修改 Oncall 前端，不在 Oncall 页面增加按钮、状态或 AI 摘要。用户需要从 AI 运维的“新建调查”中选择告警，或由后端接收策略自动创建调查。
 
 ### 4.3 主动调查
 
@@ -230,14 +230,18 @@ sequenceDiagram
 
 ### 4.4 自动调查
 
-试点告警的自动创建是首期核心链路，但先采用“影子模式”：自动接收、自动取证、自动生成页面报告，不向告警群回传，也不执行任何处置。
+自动创建调查采用“影子模式”：自动接收、按级别取证、自动生成页面报告，不向告警群回传，也不执行任何处置。
 
-- Alertmanager 通过独立 receiver 将白名单告警并行投递给 AIOps；
-- AIOps 只对明确的环境、告警名和 Playbook 白名单自动创建调查；
+- Alertmanager 通过独立 receiver 将全部告警并行投递给 AIOps；
+- AIOps 对全部非排除告警持久化结构化事件，告警名称本身不再作为接入白名单；
+- 已有专项 Playbook 的告警自动执行 Prometheus、Kubernetes、Loki 和可用变更上下文取证；
+- 没有专项 Playbook 的告警只生成轻量通用报告，保存告警事实、生命周期和缺失证据，不在接收请求中扫描 Kubernetes、Loki 或 CI/CD；后续由人工深入调查或新增 Playbook；
+- `resolved` 事件只更新状态和时间线，不重新执行取证；
+- 使用小规模排除列表过滤明确的内部心跳、抑制和演练专用告警，并支持通过 `aiops_enabled=false` 标签显式退出；
 - 幂等键建议为 `environment_id + fingerprint + startsAt + playbook_version`；
-- 同一告警已有进行中或已完成调查时不重复调用模型；
+- 同一告警已有进行中或已完成调查时不重复执行重型取证或调用模型；重复通知只更新必要的生命周期字段；
 - 告警恢复只追加时间线证据，不自动删除或覆盖调查结论；
-- 必须设置并发、超时、每日模型调用量和日志扫描预算。
+- 必须设置并发、超时、冷却时间、每日模型调用量和日志扫描预算；告警风暴时优先保证接收持久化，不以重型调查阻塞 webhook。
 
 人工选择历史告警重新调查作为回放和兜底路径。影子模式验收稳定后，再单独开启群内摘要回传。
 
@@ -491,10 +495,10 @@ JVM heap 暂无真实历史告警，不进入首期真实准确率或 MTTR 指�
 
 ### Phase 1：Alertmanager 接入与通用告警调查
 
-- 新增受认证的 Alertmanager webhook、payload 限制、fingerprint 去重和白名单；
-- 在不影响现有告警群 receiver 的前提下，为两条试点告警配置并行投递；生产配置变更需另行确认后执行；
+- 新增受认证的 Alertmanager webhook、payload 限制、fingerprint 去重和排除策略；
+- 在不影响现有告警群 receiver 的前提下，为全部告警配置并行投递；生产配置变更需另行确认后执行；
 - 保存 Alertmanager 事件、Investigation、Step 和 Prometheus Evidence；
-- 实现 `GENERIC_PROMETHEUS_ALERT`，先完成规则解释、历史状态、实体定位和证据不足判断；
+- 实现 `GENERIC_PROMETHEUS_ALERT` 轻量报告，先完成规则解释、历史状态、实体定位和证据不足判断，不自动扫描重型数据源；
 - 增加调查列表、详情和反馈；
 
 验收：真实或回放告警不会重复创建调查；现有告警群通知不受影响；调查可查询、刷新、回看和审计；失败、告警恢复和证据不足可区分。
@@ -537,7 +541,9 @@ JVM heap 暂无真实历史告警，不进入首期真实准确率或 MTTR 指�
 
 - 创建、列表、详情、重试和反馈接口测试；
 - Header 环境与来源环境不一致时拒绝；
-- Alertmanager webhook 鉴权失败、超大 payload、标签过多和非白名单告警；
+- Alertmanager webhook 鉴权失败、超大 payload、标签过多、显式退出和排除列表告警；
+- 无专项 Playbook 的告警只保存轻量报告，不触发 Prometheus、Kubernetes、Loki 或 CI/CD 取证；
+- 全量接入下的重复 firing、告警风暴限流、调查冷却和 resolved 更新；
 - Oncall 告警不存在、已删除或字段缺失时返回稳定错误；
 - 同一告警和 Playbook 的并发幂等；
 - 工具超时、部分失败、全部失败和证据不足；
@@ -566,6 +572,7 @@ JVM heap 暂无真实历史告警，不进入首期真实准确率或 MTTR 指�
 5. Prometheus、Kubernetes、Grafana/Loki 任一不可用时返回部分失败，不伪造结论；
 6. 使用合成 JVM heap fixture 验证证据引用与“证据不足”，并在页面明确标记“演练”；
 7. 根据 UID/仓位 ID 发起主动日志调查，确认既有非告警能力没有退化。
+8. 在 `default` namespace 创建带 `exercise=aiops-e2e`、`temporary=true` 标签的受控临时 Pod，使其真实 OOMKilled；验证 kube-state-metrics、PrometheusRule、Alertmanager、Dashboard 持久化、专项取证和 resolved 全链路。该样本标记为人工演练，不计入生产告警准确率或 MTTR。
 
 ## 12. 完成标准与非目标
 
@@ -573,7 +580,7 @@ JVM heap 暂无真实历史告警，不进入首期真实准确率或 MTTR 指�
 
 - AI 运维已从纵向功能堆叠页调整为可持久化的统一调查工作台；
 - Oncall 页面及其职责保持不变；
-- 告警群中的试点告警可通过 Alertmanager 结构化事件自动进入调查工作台；
+- 告警群中的全部非排除告警可通过 Alertmanager 结构化事件自动进入调查工作台；有专项 Playbook 的告警自动深度取证，其他告警生成轻量通用报告；
 - 告警、指标、日志和 Kubernetes 证据可汇入同一调查模型，CI/CD/发布记录在可可靠关联时作为可选变更上下文；
 - 每个关键结论可追溯到 Evidence ID；
 - 用户可以区分事实、根因候选、建议和缺失证据；
@@ -592,4 +599,4 @@ JVM heap 暂无真实历史告警，不进入首期真实准确率或 MTTR 指�
 
 ## 13. 建议开发顺序
 
-优先实施 Phase 0 和 Phase 1，先完成页面拆分、Alertmanager 结构化接入、调查持久化和通用告警报告；随后使用 `KylinBackendServiceHttpLatencyHigh` 与 `CPUThrottlingHigh` 完成两个真实专项 Playbook。JVM heap 只作为合成演练，待出现真实历史告警后再转为正式试点。只有两条真实告警的证据模型和人工评测稳定后，才增加群内回传和更多 Playbook。
+Phase 0～3 已完成本地实现。下一步先完成接收与调查解耦，将默认策略切换为“全量接收、专项自动深度调查、通用轻量报告”，并增加排除策略、重复通知冷却和容量保护；随后使用受控临时 Pod 触发真实 `PodOOMKilled`，验证不影响现有告警群的 E2E 链路。JVM heap 继续只作为合成演练，群内回传继续保持默认关闭，待真实样本人工评测稳定后再单独启用。
