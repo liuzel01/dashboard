@@ -2,7 +2,7 @@
 
 > 日期：2026-10-13
 >
-> 状态：Phase 0～2 已完成本地实现与隔离链路验证；Phase 3 已进入本地开发，外部回传保持关闭
+> 状态：Phase 0～3 已完成本地实现与隔离链路验证；Phase 4 已进入本地开发，外部回传保持关闭
 >
 > 适用仓库：`/Users/liuzelin/github/dashboard`
 
@@ -33,7 +33,15 @@ Phase 3 当前本地实现进度：
 - 已复用现有受控 Grafana/Loki 日志查询，固定采集告警前后 10 分钟；零命中保存查询范围与命中数，数据源不可用时记录部分失败；
 - 已把告警事件、Prometheus 指标、Loki 日志、Kubernetes Event/快照和可选 CI/CD 记录汇入同一时间线；
 - CI/CD 记录只在环境、服务名称和告警时间窗口均可匹配时加入，并标记 `causality: UNPROVEN`；
-- 已增加群回传 `enabled=false` 和摘要长度配置，尚未实现或启用真实消息发送。
+- 已实现群回传独立队列、幂等、摘要长度、详情链接和发送调度；`enabled=false` 时不入队、不发送，历史回放始终不入队。
+
+2026-10-14 Phase 3 收口与 Phase 4 开发记录：
+
+- 两条历史案例重新回放后，Kylin 案例取得 `100` 条 Loki 日志和 `1` 条 Loki 查询记录；CPU throttling 案例未取得已消失历史 Pod 的当前 Kubernetes/Loki 上下文，因此保持 `PARTIAL`，已有 Prometheus 证据仍保留；
+- `context.collect` 步骤摘要已改为按 `source_system` 统计，不再把 Loki 日志笼统称为 Kubernetes 证据；
+- 当前开发数据库已创建 `aiops_group_callback_records`；未配置或开启真实群回传；
+- Phase 4 已新增 `POD_OOM`、`HTTP_ERROR_RATE_HIGH` 和 `JVM_HEAP_HIGH_SYNTHETIC` Playbook，合成 JVM 案例明确不计入真实告警准确率或 MTTR；
+- 已新增环境级质量汇总接口，统计证据覆盖率、人工反馈和 `PARTIAL / FAILED` 步骤；Pod OOM 与 HTTP 错误率仍需取得真实脱敏样本后才能完成业务验收。
 
 尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行生产迁移，并将两条白名单告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。
 
