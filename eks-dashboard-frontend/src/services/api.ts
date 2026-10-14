@@ -380,6 +380,7 @@ export type AiOpsInvestigation = {
   steps?: Array<{ id: number; step_key: string; tool_name?: string | null; status: string; result_count?: number | null; summary?: string | null; error_summary?: string | null; started_at?: string | null; completed_at?: string | null }>;
   evidence?: Array<{ id: number; evidence_id: string; evidence_type: string; source_system: string; observed_at?: string | null; title: string; content_json: Record<string, unknown> | string; source_url?: string | null }>;
   feedback?: Array<{ id: number; actor_username?: string | null; rating: string; comment?: string | null; created_at: string }>;
+  attempts?: Array<{ id: number; status: string; attempt_count: number; error_code?: string | null; error_summary?: string | null; created_at: string; started_at?: string | null; completed_at?: string | null }>;
 };
 
 export type AiOpsReplayCase = {
@@ -410,6 +411,21 @@ export const getAiOpsInvestigation = async (environmentId: string, id: number) =
 
 export const addAiOpsInvestigationFeedback = async (environmentId: string, id: number, rating: string, comment?: string) =>
   (await api.post(`/ai-ops/investigations/${id}/feedback`, { rating, comment }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { ok: boolean };
+
+export const retryAiOpsInvestigation = async (environmentId: string, id: number) =>
+  (await api.post(`/ai-ops/investigations/${id}/retry`, {}, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { queued: boolean; eventId: number };
+
+export type AiOpsQualitySummary = {
+  overview: { total?: number; completed?: number; insufficient_evidence?: number; replay_count?: number; synthetic_count?: number };
+  evidenceCoverage: Array<{ source_system: string; investigation_count: number; evidence_count: number }>;
+  feedback: Array<{ rating: string; count: number }>;
+  partialOrFailedSteps: Array<{ step_key: string; status: string; count: number }>;
+  queue: Array<{ status: string; count: number }>;
+  note: string;
+};
+
+export const getAiOpsQualitySummary = async (environmentId: string) =>
+  (await api.get('/ai-ops/investigations-quality-summary', { headers: aiOpsEnvironmentHeaders(environmentId) })).data as AiOpsQualitySummary;
 
 export const listAiOpsReplayCases = async (environmentId: string) =>
   (await api.get('/ai-ops/replay-cases', { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { items: AiOpsReplayCase[] };

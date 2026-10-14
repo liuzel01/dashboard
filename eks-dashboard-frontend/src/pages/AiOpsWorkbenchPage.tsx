@@ -1,10 +1,10 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Input, Modal, Select, Space, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Input, Modal, Select, Space, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { RobotOutlined, SearchOutlined, ToolOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { listAiOpsInvestigations, listAiOpsReplayCases, replayAiOpsCase, type AiOpsInvestigation, type AiOpsReplayCase } from '../services/api';
+import { getAiOpsQualitySummary, listAiOpsInvestigations, listAiOpsReplayCases, replayAiOpsCase, type AiOpsInvestigation, type AiOpsQualitySummary, type AiOpsReplayCase } from '../services/api';
 import { FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
 
 const AiOpsWorkbenchPage: React.FC = () => {
@@ -13,6 +13,7 @@ const AiOpsWorkbenchPage: React.FC = () => {
   const { currentEnvironment } = useContext(EnvironmentContext);
   const [items, setItems] = useState<AiOpsInvestigation[]>([]);
   const [total, setTotal] = useState(0);
+  const [quality, setQuality] = useState<AiOpsQualitySummary>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>();
@@ -27,8 +28,9 @@ const AiOpsWorkbenchPage: React.FC = () => {
     if (!currentEnvironment?.id) return;
     setLoading(true); setError(null);
     try {
-      const result = await listAiOpsInvestigations(currentEnvironment.id, { status, keyword: keywordRef.current.trim() || undefined, pageSize: 100 });
+      const [result, qualityResult] = await Promise.all([listAiOpsInvestigations(currentEnvironment.id, { status, keyword: keywordRef.current.trim() || undefined, pageSize: 100 }), getAiOpsQualitySummary(currentEnvironment.id)]);
       setItems(result.items); setTotal(result.total);
+      setQuality(qualityResult);
     } catch (err: unknown) {
       const text = (err as ApiError)?.response?.data?.message || (err as Error)?.message || 'AI 调查任务加载失败';
       setError(text); message.error(text);
@@ -36,7 +38,7 @@ const AiOpsWorkbenchPage: React.FC = () => {
   }, [currentEnvironment?.id, message, status]);
 
   useEffect(() => { setItems([]); setTotal(0); setError(null); setKeyword(''); keywordRef.current = ''; setStatus(undefined); }, [currentEnvironment?.id]);
-  useEffect(() => { if (currentEnvironment?.id) void load(); }, [currentEnvironment?.id, load]);
+  useEffect(() => { if (!currentEnvironment?.id) return; void load(); const timer = window.setInterval(() => void load(), 15_000); return () => window.clearInterval(timer); }, [currentEnvironment?.id, load]);
 
   const openReplay = async () => {
     if (!currentEnvironment?.id) return;
@@ -90,6 +92,7 @@ const AiOpsWorkbenchPage: React.FC = () => {
     <PageHeader title={<Space><RobotOutlined />AI 运维</Space>} description="以告警为入口，自动形成可追溯的初步调查报告；当前阶段只读，不执行生产处置。" environmentName={currentEnvironment?.name}
       actions={<Space><Button onClick={() => void openReplay()} loading={replayLoading}>历史案例回放</Button><Button icon={<SearchOutlined />} onClick={() => navigate('/ai-ops/tools/logs')}>主动日志调查</Button><Button icon={<ToolOutlined />} onClick={() => navigate('/ai-ops/tools/sql')}>SQL 助手</Button></Space>} />
     <MetricGrid items={metrics} loading={loading} />
+    {quality && <Card size="small" title="质量概览"><Space wrap><Tag>调查 {Number(quality.overview.total || 0)}</Tag><Tag color="orange">证据不足 {Number(quality.overview.insufficient_evidence || 0)}</Tag><Tag color="purple">回放/合成 {Number(quality.overview.replay_count || 0) + Number(quality.overview.synthetic_count || 0)}</Tag>{quality.queue.map((item) => <Tag color={item.status === 'FAILED' ? 'red' : undefined} key={`queue-${item.status}`}>队列 {item.status}: {item.count}</Tag>)}{quality.evidenceCoverage.map((item) => <Tag key={item.source_system}>{item.source_system}: {item.investigation_count}</Tag>)}{quality.partialOrFailedSteps.map((item) => <Tag color="red" key={`${item.step_key}-${item.status}`}>{item.step_key} {item.status}: {item.count}</Tag>)}</Space></Card>}
     <FilterBar actions={<Button type="primary" onClick={() => void load()} loading={loading}>查询</Button>}>
       <Select allowClear placeholder="调查状态" value={status} onChange={setStatus} style={{ width: 180 }} options={['PENDING', 'COLLECTING', 'ANALYZING', 'COMPLETED', 'INSUFFICIENT_EVIDENCE', 'FAILED'].map((value) => ({ value, label: value }))} />
       <Input value={keyword} onChange={(event) => { setKeyword(event.target.value); keywordRef.current = event.target.value; }} onPressEnter={() => void load()} placeholder="告警、服务、Namespace 或摘要" style={{ width: 320 }} />
