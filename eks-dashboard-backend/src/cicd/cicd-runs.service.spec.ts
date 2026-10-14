@@ -24,7 +24,7 @@ const context = {
 
 const createService = () => {
   const db = { query: jest.fn() };
-  const auth = { verifyToken: jest.fn() };
+  const auth = { verifyToken: jest.fn(), verifyMfaForUser: jest.fn() };
   const access = { ensureUserByUsername: jest.fn(), getMe: jest.fn() };
   const siteConf = { getString: jest.fn(), getNumber: jest.fn() };
   const spotPublish = { catalog: jest.fn() };
@@ -91,6 +91,30 @@ describe('CicdRunsService', () => {
       parameters: { BRANCH: 'main' },
     });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('verifies the current actor MFA before publishing an artifact', async () => {
+    const { service, auth, db } = createService();
+    const publishActor = {
+      ...actor,
+      permissions: ['menu:cicd-runs', 'cicd-runs:execute-publish'],
+    };
+    jest.spyOn(service, 'actor').mockResolvedValue(publishActor);
+    auth.verifyMfaForUser.mockRejectedValue(
+      new ForbiddenException('Google 验证码错误'),
+    );
+
+    await expect(
+      service.trigger('Bearer token', {
+        environmentId: 'hashex',
+        actionType: 'PACKAGE_PUBLISH',
+        jobName: 'hash-service-publish',
+        clientRequestId: 'request-publish-mfa',
+        otpCode: '123456',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(auth.verifyMfaForUser).toHaveBeenCalledWith(7, '123456');
+    expect(db.query).not.toHaveBeenCalled();
   });
 
   it.each([401, 403, 500])(

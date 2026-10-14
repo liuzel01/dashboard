@@ -33,7 +33,7 @@ class TriggerRunDto {
   @IsString() @MaxLength(255) jobName!: string;
   @IsUUID() clientRequestId!: string;
   @IsOptional() @IsObject() parameters?: Record<string, unknown>;
-  @IsOptional() @IsString() @MaxLength(32) confirmation?: string;
+  @IsOptional() @IsString() @Matches(/^\d{6}$/, { message: 'Google 验证码必须为 6 位数字' }) otpCode?: string;
 }
 
 class ListRunsDto {

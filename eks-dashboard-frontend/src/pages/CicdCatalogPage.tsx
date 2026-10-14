@@ -227,22 +227,23 @@ const CicdCatalogPage: React.FC = () => {
   const execute = async () => {
     if (!selectedJob || !currentEnvironment?.id) return;
     const values = await form.validateFields();
-    const confirmation = actionType !== 'BUILD_DEPLOY'
+    const otpCode = actionType !== 'BUILD_DEPLOY'
       ? await new Promise<string | undefined>((resolve) => {
           let value = '';
-          Modal.confirm({
-            title: '确认执行制品推包',
-            content: <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="该操作可能向目标仓库发布制品，请核对环境、Job 和参数。" /><Input placeholder="输入：确认推包" onChange={(event) => { value = event.target.value; }} /></Space>,
-            okText: '确认触发', cancelText: '取消',
-            onOk: () => value === '确认推包' ? resolve(value) : Promise.reject(new Error('请输入“确认推包”')),
+          let modalInstance: { update: (config: { okButtonProps: { disabled: boolean } }) => void } | undefined;
+          modalInstance = Modal.confirm({
+            title: '验证 MFA 并确认执行制品推包',
+            content: <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="该操作可能向目标仓库发布制品，请核对环境、Job 和参数。" description="请输入当前登录用户已绑定 Google Authenticator 的 6 位验证码；服务端验证通过后才会触发推包。" /><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { value = event.target.value.replace(/\s+/g, ''); modalInstance?.update({ okButtonProps: { disabled: !/^\d{6}$/.test(value) } }); }} /></Space>,
+            okText: '确认触发', cancelText: '取消', okButtonProps: { disabled: true },
+            onOk: () => /^\d{6}$/.test(value) ? resolve(value) : Promise.reject(new Error('请输入 6 位 Google 验证码')),
             onCancel: () => resolve(undefined),
           });
         })
       : await new Promise<string | undefined>((resolve) => Modal.confirm({ title: '确认触发 Jenkins Job？', content: `${currentEnvironment.name} / ${selectedJob.name}`, okText: '确认触发', cancelText: '取消', onOk: () => resolve('confirmed'), onCancel: () => resolve(undefined) }));
-    if (!confirmation) return;
+    if (!otpCode) return;
     setExecuting(true);
     try {
-      const run = await triggerCicdRun({ environmentId: currentEnvironment.id, actionType, jobName: selectedJob.name, clientRequestId: crypto.randomUUID(), parameters: values, ...(actionType !== 'BUILD_DEPLOY' ? { confirmation } : {}) });
+      const run = await triggerCicdRun({ environmentId: currentEnvironment.id, actionType, jobName: selectedJob.name, clientRequestId: crypto.randomUUID(), parameters: values, ...(actionType !== 'BUILD_DEPLOY' ? { otpCode } : {}) });
       message.success(`已进入 Jenkins 队列 #${run.queue_id || '-'}`);
       void loadRuns();
     } catch (error) { message.error(errorMessage(error, 'Jenkins 触发失败')); }

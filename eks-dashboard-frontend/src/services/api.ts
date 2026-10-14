@@ -2017,7 +2017,7 @@ export const triggerCicdRun = async (data: {
   jobName: string;
   clientRequestId: string;
   parameters: Record<string, unknown>;
-  confirmation?: string;
+  otpCode?: string;
 }) => (await api.post('/cicd/runs', data)).data as CicdRun;
 export const listCicdRuns = async (environmentId?: string) =>
   (await api.get('/cicd/runs', { params: environmentId ? { environmentId } : {} })).data as CicdRun[];

@@ -181,7 +181,7 @@ export class CicdRunsService {
       jobName: string;
       clientRequestId: string;
       parameters?: Record<string, unknown>;
-      confirmation?: string;
+      otpCode?: string;
     },
   ) {
     const required =
@@ -191,11 +191,9 @@ export class CicdRunsService {
           ? EXECUTE_PUBLISH
           : EXECUTE_BUILD;
     const actor = await this.actor(authorization, required);
-    if (
-      ['PACKAGE_PUBLISH', 'IMAGE_BUILD_PUBLISH'].includes(input.actionType) &&
-      input.confirmation !== '确认推包'
-    )
-      throw new BadRequestException('制品推包必须输入“确认推包”');
+    if (['PACKAGE_PUBLISH', 'IMAGE_BUILD_PUBLISH'].includes(input.actionType)) {
+      await this.auth.verifyMfaForUser(actor.userId, input.otpCode);
+    }
     const existing = await this.db.query<RunRow[]>(
       'SELECT * FROM cicd_runs WHERE client_request_id=? LIMIT 1',
       [input.clientRequestId],
