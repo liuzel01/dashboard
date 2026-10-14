@@ -12,6 +12,8 @@ import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.ser
 import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.service';
 import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 import { KubernetesModule } from '../kubernetes/kubernetes.module';
+import { OncallModule } from '../oncall/oncall.module';
+import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
 
 @Module({
   imports: [
@@ -21,6 +23,7 @@ import { KubernetesModule } from '../kubernetes/kubernetes.module';
     EnvironmentsModule,
     SiteConfModule,
     KubernetesModule,
+    OncallModule,
   ],
   controllers: [AiOpsController],
   providers: [
@@ -30,6 +33,7 @@ import { KubernetesModule } from '../kubernetes/kubernetes.module';
     AiOpsAlertInvestigationService,
     AiOpsPrometheusEvidenceService,
     AiOpsContextEvidenceService,
+    AiOpsGroupCallbackService,
   ],
 })
 export class AiOpsModule {}

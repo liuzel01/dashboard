@@ -233,6 +233,17 @@ export class AiOpsController {
     );
   }
 
+  @Get('investigations-quality-summary')
+  async getInvestigationQualitySummary(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.qualitySummary(environmentId, actor);
+  }
+
   @Get('investigations/:id')
   async getInvestigation(
     @Headers('x-target-environment') environmentId: string,

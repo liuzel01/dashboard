@@ -63,6 +63,7 @@ const makeService = (existingId?: number) => {
         timeline: [],
       })),
     } as any,
+    { enqueue: jest.fn(async () => ({ status: 'DISABLED' })) } as any,
   );
   return { service, db, execute };
 };
@@ -152,8 +153,34 @@ describe('AiOpsAlertInvestigationService', () => {
 
   it('lists only replay cases belonging to the current environment', () => {
     const { service } = makeService();
-    expect(service.listReplayCases('mgbx', actor).items).toHaveLength(2);
+    const cases = service.listReplayCases('mgbx', actor).items;
+    expect(cases).toHaveLength(3);
+    expect(cases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'jvm-heap-high-synthetic-v1' }),
+      ]),
+    );
     expect(service.listReplayCases('hashex', actor).items).toHaveLength(0);
+  });
+
+  it('reports evidence coverage, feedback, and partial steps separately', async () => {
+    const { service, db } = makeService();
+    db.query
+      .mockResolvedValueOnce([{ total: 3, synthetic_count: 1 }])
+      .mockResolvedValueOnce([
+        { source_system: 'prometheus', investigation_count: 3 },
+      ])
+      .mockResolvedValueOnce([{ rating: 'EFFECTIVE', count: 1 }])
+      .mockResolvedValueOnce([
+        { step_key: 'context.collect', status: 'PARTIAL', count: 1 },
+      ]);
+
+    const result = await service.qualitySummary('mgbx', actor);
+
+    expect(result.overview).toMatchObject({ total: 3, synthetic_count: 1 });
+    expect(result.evidenceCoverage).toHaveLength(1);
+    expect(result.partialOrFailedSteps).toHaveLength(1);
+    expect(result.note).toContain('Synthetic exercises');
   });
 
   it('replays a fixed historical case without requiring the webhook token', async () => {

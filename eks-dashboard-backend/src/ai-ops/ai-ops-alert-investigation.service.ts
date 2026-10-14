@@ -17,6 +17,7 @@ import type {
 import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.service';
 import { AIOPS_REPLAY_CASES } from './ai-ops-replay.fixtures';
 import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
+import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
 
 type ActorContext = {
   userId: number | null;
@@ -35,6 +36,7 @@ export class AiOpsAlertInvestigationService {
     private readonly config: ConfigService,
     private readonly prometheus: AiOpsPrometheusEvidenceService,
     private readonly contextEvidence: AiOpsContextEvidenceService,
+    private readonly groupCallback: AiOpsGroupCallbackService,
   ) {}
 
   async receiveAlertmanager(
@@ -186,6 +188,52 @@ export class AiOpsAlertInvestigationService {
       ),
     ]);
     return { ...rows[0], steps, evidence, feedback };
+  }
+
+  async qualitySummary(environmentId: string, actor: ActorContext) {
+    this.assertMenu(actor);
+    const [overview, sources, feedback, failures] = await Promise.all([
+      this.db.query<Array<Record<string, unknown>>>(
+        `SELECT COUNT(*) total,
+                SUM(status='COMPLETED') completed,
+                SUM(insufficient_evidence=1) insufficient_evidence,
+                SUM(source_type='HISTORICAL_REPLAY') replay_count,
+                SUM(alert_name='JVMHeapHighSynthetic') synthetic_count
+           FROM aiops_investigations WHERE environment_id=?`,
+        [environmentId],
+      ),
+      this.db.query<Array<Record<string, unknown>>>(
+        `SELECT e.source_system, COUNT(DISTINCT e.investigation_id) investigation_count, COUNT(*) evidence_count
+           FROM aiops_investigation_evidence e
+           INNER JOIN aiops_investigations i ON i.id=e.investigation_id
+          WHERE i.environment_id=? GROUP BY e.source_system ORDER BY e.source_system`,
+        [environmentId],
+      ),
+      this.db.query<Array<Record<string, unknown>>>(
+        `SELECT f.rating, COUNT(*) count
+           FROM aiops_investigation_feedback f
+           INNER JOIN aiops_investigations i ON i.id=f.investigation_id
+          WHERE i.environment_id=? GROUP BY f.rating ORDER BY f.rating`,
+        [environmentId],
+      ),
+      this.db.query<Array<Record<string, unknown>>>(
+        `SELECT s.step_key, s.status, COUNT(*) count
+           FROM aiops_investigation_steps s
+           INNER JOIN aiops_investigations i ON i.id=s.investigation_id
+          WHERE i.environment_id=? AND s.status IN ('PARTIAL','FAILED')
+          GROUP BY s.step_key, s.status ORDER BY s.step_key, s.status`,
+        [environmentId],
+      ),
+    ]);
+    return {
+      environmentId,
+      generatedAt: new Date().toISOString(),
+      overview: overview[0] || {},
+      evidenceCoverage: sources,
+      feedback,
+      partialOrFailedSteps: failures,
+      note: 'Synthetic exercises are reported separately and must not be counted as real alert accuracy or MTTR.',
+    };
   }
 
   async addFeedback(
@@ -341,7 +389,7 @@ export class AiOpsAlertInvestigationService {
       ],
     };
 
-    return this.db.withTransaction(async (conn) => {
+    const outcome = await this.db.withTransaction(async (conn) => {
       const [existing] = await conn.execute<
         Array<mysql.RowDataPacket & { id: number }>
       >(
@@ -452,18 +500,30 @@ export class AiOpsAlertInvestigationService {
         );
       }
       if (!resolved) {
+        const evidenceBySource = contextual.evidence.reduce<
+          Record<string, number>
+        >((counts, item) => {
+          counts[item.sourceSystem] = (counts[item.sourceSystem] || 0) + 1;
+          return counts;
+        }, {});
+        const sourceSummary = Object.entries(evidenceBySource)
+          .map(([source, count]) => `${source}=${count}`)
+          .join(', ');
         await conn.execute(
           `INSERT INTO aiops_investigation_steps
            (investigation_id, step_key, tool_name, status, result_count, summary, started_at, completed_at, created_at)
-           VALUES (?, 'context.collect', 'kubernetes+cicd', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+           VALUES (?, 'context.collect', 'kubernetes+loki+cicd', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
            ON DUPLICATE KEY UPDATE status=VALUES(status), result_count=VALUES(result_count), summary=VALUES(summary), completed_at=UTC_TIMESTAMP()`,
           [
             id,
             contextual.evidence.length ? 'COMPLETED' : 'PARTIAL',
             contextual.evidence.length,
             contextual.evidence.length
-              ? `已保存 ${contextual.evidence.length} 组 Kubernetes/可选变更上下文证据`
-              : '未取得 Kubernetes 或可选变更上下文证据',
+              ? `已保存 ${contextual.evidence.length} 组上下文证据（${sourceSummary}）`
+              : `未取得上下文证据；${contextual.missingEvidence.join('；')}`.slice(
+                  0,
+                  1000,
+                ),
           ],
         );
       }
@@ -492,6 +552,17 @@ export class AiOpsAlertInvestigationService {
       );
       return { id, created };
     });
+    await this.groupCallback.enqueue({
+      investigationId: outcome.id,
+      sourceType,
+      sourceStatus,
+      alertName,
+      environmentId,
+      classification,
+      confidence: specialized?.confidence || 'LOW',
+      summary,
+    });
+    return outcome;
   }
 
   private validatePayload(payload: AlertmanagerPayload): AlertmanagerAlert[] {

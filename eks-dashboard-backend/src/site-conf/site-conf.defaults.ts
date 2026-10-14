@@ -106,6 +106,7 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'aiops.alertmanager.allowed_alerts', envKey: 'AIOPS_ALERTMANAGER_ALLOWED_ALERTS', valueType: 'string', category: 'aiops-alerts', description: '自动创建 AI 调查的告警名白名单，逗号分隔', defaultValue: 'KylinBackendServiceHttpLatencyHigh,CPUThrottlingHigh' },
   { key: 'aiops.alerts.group_callback.enabled', envKey: 'AIOPS_ALERTS_GROUP_CALLBACK_ENABLED', valueType: 'boolean', category: 'aiops-alerts', description: '将 AI 初步调查摘要回传告警群（本地开发及默认状态均关闭）', defaultValue: 'false' },
   { key: 'aiops.alerts.group_callback.max_length', envKey: 'AIOPS_ALERTS_GROUP_CALLBACK_MAX_LENGTH', valueType: 'number', category: 'aiops-alerts', description: '告警群 AI 初步调查摘要最大字符数', defaultValue: '1200' },
+  { key: 'aiops.alerts.group_callback.dashboard_base_url', envKey: 'AIOPS_ALERTS_GROUP_CALLBACK_DASHBOARD_BASE_URL', valueType: 'string', category: 'aiops-alerts', description: '告警群 AI 初步调查详情链接的 Dashboard 基础地址', defaultValue: 'http://localhost:5173' },
   { key: 'aiops.prometheus.environments.mgbx.enabled', valueType: 'boolean', category: 'aiops-prometheus', description: '是否允许 AIOps 对 mgbx 执行内置只读 PromQL', defaultValue: 'true' },
   { key: 'aiops.prometheus.environments.mgbx.base_url', valueType: 'string', category: 'aiops-prometheus', description: 'mgbx Prometheus 只读地址', defaultValue: 'https://prometheus.pre.mg56.net' },
   { key: 'aiops.prometheus.environments.mgbx.timeout_ms', valueType: 'number', category: 'aiops-prometheus', description: 'mgbx Prometheus 单次查询超时（毫秒）', defaultValue: '8000', validation: { min: 1000, max: 20000 } },

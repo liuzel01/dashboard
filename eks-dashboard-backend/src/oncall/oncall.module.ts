@@ -13,7 +13,13 @@ import { HotlineService } from './hotline.service';
 @Module({
   imports: [AccessControlModule, AuditModule, AuthModule, SiteConfModule],
   controllers: [OncallController],
-  providers: [OncallConfigService, OncallService, OncallNotificationService, OncallEscalationService, HotlineService],
-  exports: [OncallService],
+  providers: [
+    OncallConfigService,
+    OncallService,
+    OncallNotificationService,
+    OncallEscalationService,
+    HotlineService,
+  ],
+  exports: [OncallService, HotlineService],
 })
 export class OncallModule {}
