@@ -1,0 +1,20 @@
+# Merge this route before existing notification routes. Keep the existing
+# receiver and routes unchanged. The empty matcher set intentionally mirrors
+# every alert to AIOps; Dashboard owns the small exclusion policy.
+route:
+  receiver: existing-alert-receiver
+  routes:
+    - receiver: dashboard-aiops-webhook
+      continue: true
+    # Existing routes continue below this point.
+
+receivers:
+  - name: dashboard-aiops-webhook
+    webhook_configs:
+      - url: https://dashboard.example.com/api/ai-ops/events/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/dashboard-aiops/token
+

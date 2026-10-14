@@ -574,6 +574,11 @@ JVM heap 暂无真实历史告警，不进入首期真实准确率或 MTTR 指�
 7. 根据 UID/仓位 ID 发起主动日志调查，确认既有非告警能力没有退化。
 8. 在 `default` namespace 创建带 `exercise=aiops-e2e`、`temporary=true` 标签的受控临时 Pod，使其真实 OOMKilled；验证 kube-state-metrics、PrometheusRule、Alertmanager、Dashboard 持久化、专项取证和 resolved 全链路。该样本标记为人工演练，不计入生产告警准确率或 MTTR。
 
+真实 E2E 前置模板：
+
+- `docs/examples/aiops-alertmanager-all-alerts-route.yaml`：全量并行 AIOps receiver 合并示例，不替换现有告警 receiver；
+- `docs/examples/aiops-e2e-pod-oom.yaml`：受控临时 OOM Pod；只允许在确认 receiver、Bearer Token、Dashboard 数据库迁移和回收人后人工应用，验证完成立即删除。
+
 ## 12. 完成标准与非目标
 
 ### 完成标准

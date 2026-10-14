@@ -1,0 +1,38 @@
+# Controlled E2E exercise only. Apply to the mgbx default namespace after the
+# Dashboard AIOps receiver and bearer token are configured. This Pod repeatedly
+# exceeds its memory limit so kube-state-metrics can expose a real OOMKilled
+# termination and restart. Delete the Pod immediately after firing is observed.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dashboard-aiops-e2e-oom
+  namespace: default
+  labels:
+    app: dashboard-aiops-e2e-oom
+    exercise: aiops-e2e
+    temporary: "true"
+    owner: dashboard-aiops
+spec:
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: memory-consumer
+      image: python:3.12-alpine
+      imagePullPolicy: IfNotPresent
+      command:
+        - python
+        - -c
+        - |
+          import time
+          chunks = []
+          while True:
+              chunks.append(bytearray(8 * 1024 * 1024))
+              time.sleep(0.2)
+      resources:
+        requests:
+          cpu: 5m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+
