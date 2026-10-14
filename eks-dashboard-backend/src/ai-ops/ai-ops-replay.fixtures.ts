@@ -140,4 +140,46 @@ export const AIOPS_REPLAY_CASES: AiOpsReplayCase[] = [
       ],
     },
   },
+  {
+    key: 'http-error-rate-synthetic-v1',
+    name: 'HTTP 错误率合成演练',
+    environmentId: 'mgbx',
+    description:
+      '在真实临时工作负载演练前，验证 HTTP 错误率 Playbook、证据不足和非生产样本标记。',
+    expectedClassification: 'NEEDS_INVESTIGATION',
+    payload: {
+      version: '4',
+      status: 'firing',
+      receiver: 'dashboard-aiops-synthetic-replay',
+      commonLabels: {
+        alertname: 'HTTPErrorRateHigh',
+        environment: 'mgbx',
+        severity: 'warning',
+        exercise: 'synthetic',
+      },
+      commonAnnotations: { summary: 'Synthetic HTTP 5xx error-rate exercise' },
+      alerts: [
+        {
+          status: 'firing',
+          labels: {
+            alertname: 'HTTPErrorRateHigh',
+            environment: 'mgbx',
+            severity: 'warning',
+            exercise: 'synthetic',
+            namespace: 'default',
+            job: 'dashboard-aiops-http-error-synthetic',
+            service: 'dashboard-aiops-http-error-synthetic',
+          },
+          annotations: {
+            summary: 'Synthetic HTTP 5xx error-rate exercise',
+            description:
+              'Synthetic fixture only; run a temporary workload after local development closes.',
+          },
+          startsAt: '2026-10-14T00:00:00.000Z',
+          endsAt: '0001-01-01T00:00:00Z',
+          fingerprint: 'fixture-http-error-rate-synthetic-v1',
+        },
+      ],
+    },
+  },
 ];
