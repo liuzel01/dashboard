@@ -20,10 +20,13 @@ const payload = (alertname = 'KylinBackendServiceHttpLatencyHigh') => ({
 const makeService = (existingId?: number) => {
   let queuedPayload = '';
   let queueClaimed = false;
+  let queueInserted = false;
   const execute = jest.fn(async (sql: string, params?: unknown[]) => {
     if (sql.includes('INSERT IGNORE INTO aiops_alert_event_queue')) {
       queuedPayload = typeof params?.[4] === 'string' ? params[4] : '';
-      return [{ insertId: 11, affectedRows: 1 }, []];
+      const affectedRows = queueInserted ? 0 : 1;
+      queueInserted = true;
+      return [{ insertId: 11, affectedRows }, []];
     }
     if (
       sql.includes('FROM aiops_alert_event_queue') &&
@@ -161,6 +164,22 @@ describe('AiOpsAlertInvestigationService', () => {
     expect(report.missingEvidence).not.toEqual(
       expect.arrayContaining(['关联日志', 'release']),
     );
+  });
+
+  it('deduplicates the same Alertmanager delivery before investigation work', async () => {
+    const { service, prometheus } = makeService();
+    const first = await service.receiveAlertmanager(
+      'Bearer test-token',
+      payload(),
+    );
+    const second = await service.receiveAlertmanager(
+      'Bearer test-token',
+      payload(),
+    );
+
+    expect(first).toMatchObject({ queued: 1, duplicate: 0 });
+    expect(second).toMatchObject({ queued: 0, duplicate: 1 });
+    expect(prometheus.collect).not.toHaveBeenCalled();
   });
 
   it('updates the existing investigation for duplicate deliveries', async () => {
