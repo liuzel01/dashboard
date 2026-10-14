@@ -2,11 +2,11 @@
 
 > 日期：2026-10-13
 >
-> 状态：Phase 0～3 已完成本地实现与隔离链路验证；Phase 4 已进入本地开发；接入策略调整为全量接收、分级调查，外部回传保持关闭
+> 状态：Phase 0～3 已完成并部署到 EC2；mgbx 已启用全量接收、分级调查并通过真实 Pod OOM E2E；Phase 4 进入收口开发，外部回传保持关闭
 >
 > 适用仓库：`/Users/liuzelin/github/dashboard`
 
-## 0. 实施状态（2026-10-13）
+## 0. 实施状态（更新于 2026-10-14）
 
 Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 
@@ -21,9 +21,9 @@ Phase 0、Phase 1 和 Phase 2 的本地代码已经完成：
 - `KylinBackendServiceHttpLatencyHigh` 会关联服务延迟、服务请求速率、慢 URI 和 URI 请求速率，能够单独标记 `LOW_TRAFFIC_SLOW_URI`；
 - `CPUThrottlingHigh` 会关联 throttling、CPU usage、CPU limit 和重启次数；影响证据不完整时保持 `OBSERVE`，不会直接建议扩容；
 - 已使用隔离的本地 MySQL 8.4 和本地后端完成 webhook 创建、重复投递幂等、Prometheus 历史证据落库、列表、详情和反馈 API 验证；
-- 2026-10-13 重启常规开发服务后，已在当前后端 `.env` 指向的开发数据库执行四张 AIOps 调查表迁移；生产数据库仍未迁移。
+- 本地开发数据库与 EC2 数据库均已执行 AIOps 调查表及群回传表迁移；迁移过程不输出数据库口令。
 - 已在“AI 运维”增加受控历史案例回放：后端仅暴露两个内置脱敏案例，按环境过滤，回放记录使用 `HISTORICAL_REPLAY` 标识，不触发 Oncall 或告警群通知；重复回放保持幂等。
-- 已准备默认不触发的 `DashboardAiOpsSmokeTest` PrometheusRule 模板；只有历史案例人工验收通过并完成独立 AIOps receiver/route 审核后才允许应用到集群。
+- 保留默认不触发的 `DashboardAiOpsSmokeTest` PrometheusRule 模板作为离线参考；真实链路优先使用带明确演练标签、完成后立即回收的临时 Pod，不使用长期 smoke 告警污染生产告警指标。
 
 Phase 3 已按人工确认进入本地开发。首要顺序调整为 Kubernetes 状态/Event/previous log、Grafana/Loki 日志和跨来源时间线；CI/CD 记录不再作为每条告警的必备证据，只在项目/服务可可靠映射且时间窗口内存在记录时作为可选变更上下文。群回传属于外部可见行为，本地阶段只实现默认关闭的受控配置，不发送真实群消息。
 
@@ -41,9 +41,21 @@ Phase 3 当前本地实现进度：
 - `context.collect` 步骤摘要已改为按 `source_system` 统计，不再把 Loki 日志笼统称为 Kubernetes 证据；
 - 当前开发数据库已创建 `aiops_group_callback_records`；未配置或开启真实群回传；
 - Phase 4 已新增 `POD_OOM`、`HTTP_ERROR_RATE_HIGH` 和 `JVM_HEAP_HIGH_SYNTHETIC` Playbook，合成 JVM 案例明确不计入真实告警准确率或 MTTR；
-- 已新增环境级质量汇总接口，统计证据覆盖率、人工反馈和 `PARTIAL / FAILED` 步骤；Pod OOM 与 HTTP 错误率仍需取得真实脱敏样本后才能完成业务验收。
+- 已新增环境级质量汇总接口，统计证据覆盖率、人工反馈和 `PARTIAL / FAILED` 步骤；
+- mgbx 已完成真实受控 `PodOOMKilled` E2E：Alertmanager 自动接收、`pod-oom-v2`、Prometheus/Kubernetes/previous log 证据、`OOM_CONFIRMED`、同一调查 resolved 更新及群回传为零均验证通过；
+- `HTTP_ERROR_RATE_HIGH` 暂无历史真实告警，先完成代码、fixture 和本地回归，开发收口后再通过临时 Pod/测试服务执行真实 E2E，不以缺少历史告警阻塞本地开发。
 
-尚未执行生产数据库迁移，也未修改线上 Alertmanager route/receiver，因此真实告警还不会自动进入 AI 运维。生产接入需要后续单独配置 `aiops.alertmanager.bearer_token`，执行生产迁移，并将现有 Prometheus 告警以并行 receiver 投递到 `/api/ai-ops/events/alertmanager`。接入全量告警不等于对每条告警立即执行完整取证；具体分级策略见 4.4。
+mgbx 已配置独立 Bearer Token 和并行 Alertmanager receiver，全部非排除告警会自动进入 EC2 上的 AI 运维工作台；专项 Playbook 自动深度调查，其他告警只生成轻量报告。现有告警群 receiver、Oncall 生命周期和页面保持不变。
+
+当前收口缺口是：接收持久化与重型调查仍需彻底解耦；resolved 不能覆盖 firing 阶段结论；需要受控 retry、稳定的数据源失败错误码、HTTP 错误率验收 fixture 和质量运营页面。完成这些任务后，再进行 HTTP 错误率真实临时工作负载演练。
+
+### 0.1 本地、EC2 与 hashex 验证边界
+
+- 本地开发环境可以验证页面、接口、数据库迁移、fixture 回放以及本机能够访问的数据源，不要求真实 Alertmanager 回调本机；
+- EKS 内的 Alertmanager 通常不能访问开发机 `localhost`，不得把本机临时 webhook 当作长期接收地址，也不建议长期依赖公网隧道；
+- hashex 的真实自动告警 E2E 应投递到具有固定可达地址的 EC2 Dashboard webhook，再由 EC2 访问 hashex 的 Prometheus、Kubernetes 和 Loki；
+- 接入 hashex 前必须分别确认环境标签映射、Bearer Token、EC2 到各数据源的网络/白名单和只读凭据；
+- 本轮任务只在本地仓库完成开发和自动化验证，不修改 hashex 或 EC2 运行配置，不创建临时 Pod。真实 HTTP 错误率 E2E 在开发完成后单独执行。
 
 ## 1. 决策结论
 
