@@ -55,7 +55,7 @@ mgbx 已配置独立 Bearer Token 和并行 Alertmanager receiver，全部非排
 - resolved 只更新生命周期和追加告警事件证据，不再覆盖 firing 阶段的分类、置信度、报告和证据不足状态；
 - 增加调查“重新调查”入口和执行记录，重试仍复用受控 Alertmanager payload，不接受用户提供任意 PromQL、URL 或 Kubernetes 命令；
 - Prometheus 失败会保存脱敏稳定错误码，例如 `HTTP_403`、`TIMEOUT`、`DNS_ERROR`、`TLS_ERROR`，区分访问失败和零样本；
-- AI 运维首页增加队列状态、证据覆盖和失败步骤质量概览，并每 15 秒刷新；调查详情每 10 秒刷新；
+- AI 运维首页增加队列状态、证据覆盖和失败步骤质量概览；列表仅在页面可见时每 60 秒静默刷新并保留现有内容，调查详情只在任务或执行记录仍处于运行态时每 10 秒静默刷新，终态停止轮询；
 - 新增明确标记为合成演练的 HTTP 错误率回放 fixture；真实临时工作负载 E2E 仍按计划延后执行。
 
 部署前必须先执行 `eks-dashboard-backend/scripts/sql/2026-10-14_aiops_alert_event_queue_phase4.sql`，再部署包含后台 runner 的后端版本；否则新版 webhook 和质量汇总接口会因队列表不存在而失败。
