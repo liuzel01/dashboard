@@ -354,7 +354,7 @@ export class AiOpsAlertInvestigationService {
     if (!rows[0]) throw new NotFoundException('AI investigation not found');
     const events = await this.db.query<Array<{ payload_json: string }>>(
       `SELECT payload_json FROM aiops_alert_event_queue
-       WHERE investigation_id=? ORDER BY id DESC LIMIT 1`,
+       WHERE investigation_id=? AND source_status='FIRING' ORDER BY id DESC LIMIT 1`,
       [id],
     );
     if (!events[0])
