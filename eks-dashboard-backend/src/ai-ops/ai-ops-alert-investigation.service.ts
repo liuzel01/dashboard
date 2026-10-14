@@ -45,7 +45,7 @@ export class AiOpsAlertInvestigationService {
   ) {
     await this.assertWebhookAuthorization(authorization);
     const alerts = this.validatePayload(payload);
-    const allowed = await this.allowedAlertNames();
+    const excluded = await this.excludedAlertNames();
     const result = {
       received: alerts.length,
       accepted: 0,
@@ -60,7 +60,10 @@ export class AiOpsAlertInvestigationService {
         ...(alert.labels || {}),
       };
       const alertName = this.text(labels.alertname, 255) || 'UnknownAlert';
-      if (!allowed.includes('*') && !allowed.includes(alertName)) {
+      if (
+        excluded.includes(alertName) ||
+        this.text(labels.aiops_enabled, 16).toLowerCase() === 'false'
+      ) {
         result.ignored += 1;
         continue;
       }
@@ -306,24 +309,26 @@ export class AiOpsAlertInvestigationService {
       annotations.description || annotations.summary,
       1000,
     );
-    const specialized = resolved
-      ? null
-      : await this.prometheus.collect({
+    const hasSpecializedPlaybook = this.prometheus.supports(alertName);
+    const shouldCollect = !resolved && hasSpecializedPlaybook;
+    const specialized = shouldCollect
+      ? await this.prometheus.collect({
           environmentId,
           alertName,
           startedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
           labels,
-        });
-    const contextual = resolved
-      ? { evidence: [], findings: [], missingEvidence: [], timeline: [] }
-      : await this.contextEvidence.collect({
+        })
+      : null;
+    const contextual = shouldCollect
+      ? await this.contextEvidence.collect({
           environmentId,
           startedAt: new Date(`${startedAt.replace(' ', 'T')}Z`).toISOString(),
           namespace,
           service,
           labels,
           replay: sourceType === 'HISTORICAL_REPLAY',
-        });
+        })
+      : { evidence: [], findings: [], missingEvidence: [], timeline: [] };
     const playbookKey = specialized?.playbookKey || 'GENERIC_PROMETHEUS_ALERT';
     const playbookVersion = specialized?.playbookVersion || 'generic-v1';
     const classification = resolved
@@ -395,7 +400,9 @@ export class AiOpsAlertInvestigationService {
           Date.parse(left.observedAt) - Date.parse(right.observedAt),
       ),
       recommendations: specialized?.recommendations || [
-        '进入调查详情核对原始指标与关联证据。',
+        hasSpecializedPlaybook
+          ? '进入调查详情核对原始指标与关联证据。'
+          : '当前告警已完成轻量接入；如需自动深度取证，请补充专项 Playbook。',
       ],
     };
 
@@ -509,7 +516,7 @@ export class AiOpsAlertInvestigationService {
           ],
         );
       }
-      if (!resolved) {
+      if (shouldCollect) {
         const evidenceBySource = contextual.evidence.reduce<
           Record<string, number>
         >((counts, item) => {
@@ -562,16 +569,18 @@ export class AiOpsAlertInvestigationService {
       );
       return { id, created };
     });
-    await this.groupCallback.enqueue({
-      investigationId: outcome.id,
-      sourceType,
-      sourceStatus,
-      alertName,
-      environmentId,
-      classification,
-      confidence: specialized?.confidence || 'LOW',
-      summary,
-    });
+    if (hasSpecializedPlaybook) {
+      await this.groupCallback.enqueue({
+        investigationId: outcome.id,
+        sourceType,
+        sourceStatus,
+        alertName,
+        environmentId,
+        classification,
+        confidence: specialized?.confidence || 'LOW',
+        summary,
+      });
+    }
     return outcome;
   }
 
@@ -625,10 +634,10 @@ export class AiOpsAlertInvestigationService {
       throw new UnauthorizedException('Invalid AIOps Alertmanager token');
   }
 
-  private async allowedAlertNames() {
+  private async excludedAlertNames() {
     const raw = await this.siteConf.getString(
-      'aiops.alertmanager.allowed_alerts',
-      'KylinBackendServiceHttpLatencyHigh,CPUThrottlingHigh',
+      'aiops.alertmanager.excluded_alerts',
+      'Watchdog,InfoInhibitor,DashboardAiOpsSmokeTest',
     );
     return raw
       .split(',')

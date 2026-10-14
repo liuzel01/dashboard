@@ -32,50 +32,62 @@ const makeService = (existingId?: number) => {
   const siteConf = {
     getString: jest.fn(async (key: string, fallback: string) => {
       if (key === 'aiops.alertmanager.bearer_token') return 'test-token';
-      if (key === 'aiops.alertmanager.allowed_alerts')
-        return 'KylinBackendServiceHttpLatencyHigh,CPUThrottlingHigh';
+      if (key === 'aiops.alertmanager.excluded_alerts')
+        return 'Watchdog,InfoInhibitor,DashboardAiOpsSmokeTest';
       if (key === 'aiops.alertmanager.default_environment') return 'mgbx';
       return fallback;
     }),
+  };
+  const prometheus = {
+    supports: jest.fn((alertName: string) =>
+      [
+        'KylinBackendServiceHttpLatencyHigh',
+        'CPUThrottlingHigh',
+        'PodOOMKilled',
+      ].includes(alertName),
+    ),
+    collect: jest.fn(async () => ({
+      playbookKey: 'KYLIN_BACKEND_HTTP_LATENCY_HIGH',
+      playbookVersion: 'latency-v1',
+      classification: 'LOW_TRAFFIC_SLOW_URI',
+      confidence: 'MEDIUM',
+      insufficientEvidence: false,
+      findings: ['low traffic'],
+      recommendations: ['inspect logs'],
+      missingEvidence: ['release'],
+      evidence: [],
+    })),
+  };
+  const contextEvidence = {
+    collect: jest.fn(async () => ({
+      evidence: [
+        {
+          evidenceId: 'loki-query-test',
+          evidenceType: 'LOG',
+          sourceSystem: 'grafana-loki',
+          observedAt: '2026-10-13T03:50:43.873Z',
+          title: 'Loki query',
+          content: { hitCount: 0 },
+          sourceUrl: '',
+        },
+      ],
+      findings: [],
+      missingEvidence: ['kubernetes'],
+      timeline: [],
+    })),
+  };
+  const groupCallback = {
+    enqueue: jest.fn(async () => ({ status: 'DISABLED' })),
   };
   const service = new AiOpsAlertInvestigationService(
     db as any,
     siteConf as any,
     { get: jest.fn() } as any,
-    {
-      collect: jest.fn(async () => ({
-        playbookKey: 'KYLIN_BACKEND_HTTP_LATENCY_HIGH',
-        playbookVersion: 'latency-v1',
-        classification: 'LOW_TRAFFIC_SLOW_URI',
-        confidence: 'MEDIUM',
-        insufficientEvidence: false,
-        findings: ['low traffic'],
-        recommendations: ['inspect logs'],
-        missingEvidence: ['release'],
-        evidence: [],
-      })),
-    } as any,
-    {
-      collect: jest.fn(async () => ({
-        evidence: [
-          {
-            evidenceId: 'loki-query-test',
-            evidenceType: 'LOG',
-            sourceSystem: 'grafana-loki',
-            observedAt: '2026-10-13T03:50:43.873Z',
-            title: 'Loki query',
-            content: { hitCount: 0 },
-            sourceUrl: '',
-          },
-        ],
-        findings: [],
-        missingEvidence: ['kubernetes'],
-        timeline: [],
-      })),
-    } as any,
-    { enqueue: jest.fn(async () => ({ status: 'DISABLED' })) } as any,
+    prometheus as any,
+    contextEvidence as any,
+    groupCallback as any,
   );
-  return { service, db, execute };
+  return { service, db, execute, prometheus, contextEvidence, groupCallback };
 };
 
 describe('AiOpsAlertInvestigationService', () => {
@@ -92,7 +104,7 @@ describe('AiOpsAlertInvestigationService', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('creates a persisted generic investigation for an allowed alert', async () => {
+  it('creates a persisted investigation with deep evidence for a specialized alert', async () => {
     const { service, execute } = makeService();
     const result = await service.receiveAlertmanager(
       'Bearer test-token',
@@ -148,11 +160,29 @@ describe('AiOpsAlertInvestigationService', () => {
     ).toBe(true);
   });
 
-  it('ignores alerts outside the explicit whitelist', async () => {
+  it('accepts an alert without a specialized playbook as a lightweight report', async () => {
+    const { service, prometheus, contextEvidence, groupCallback } =
+      makeService();
+    const result = await service.receiveAlertmanager(
+      'Bearer test-token',
+      payload('PreviouslyUnknownAlert'),
+    );
+    expect(result).toMatchObject({
+      received: 1,
+      accepted: 1,
+      ignored: 0,
+      created: 1,
+    });
+    expect(prometheus.collect).not.toHaveBeenCalled();
+    expect(contextEvidence.collect).not.toHaveBeenCalled();
+    expect(groupCallback.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('ignores alerts in the explicit exclusion list', async () => {
     const { service, db } = makeService();
     const result = await service.receiveAlertmanager(
       'Bearer test-token',
-      payload('UnapprovedAlert'),
+      payload('Watchdog'),
     );
     expect(result).toMatchObject({
       received: 1,
@@ -160,6 +190,21 @@ describe('AiOpsAlertInvestigationService', () => {
       ignored: 1,
       created: 0,
     });
+    expect(db.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('ignores alerts that explicitly disable AIOps', async () => {
+    const { service, db } = makeService();
+    const disabled = payload('PodOOMKilled');
+    disabled.alerts[0].labels = {
+      ...disabled.alerts[0].labels,
+      aiops_enabled: 'false',
+    };
+    const result = await service.receiveAlertmanager(
+      'Bearer test-token',
+      disabled,
+    );
+    expect(result).toMatchObject({ accepted: 0, ignored: 1, created: 0 });
     expect(db.withTransaction).not.toHaveBeenCalled();
   });
 

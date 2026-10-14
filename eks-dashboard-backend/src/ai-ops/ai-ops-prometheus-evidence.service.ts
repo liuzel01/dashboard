@@ -46,6 +46,19 @@ type PrometheusResponse = {
 export class AiOpsPrometheusEvidenceService {
   constructor(private readonly siteConf: SiteConfService) {}
 
+  supports(alertName: string): boolean {
+    return [
+      'KylinBackendServiceHttpLatencyHigh',
+      'CPUThrottlingHigh',
+      'PodOOM',
+      'PodOOMKilled',
+      'ContainerOOMKilled',
+      'HTTPErrorRateHigh',
+      'KylinBackendServiceHttpErrorRateHigh',
+      'JVMHeapHighSynthetic',
+    ].includes(alertName);
+  }
+
   async collect(context: AlertContext): Promise<AlertPlaybookResult> {
     const playbook = this.playbook(context);
     if (!playbook) return this.genericResult();
