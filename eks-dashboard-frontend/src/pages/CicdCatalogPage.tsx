@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { BellOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
 import {
   DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
@@ -9,6 +9,7 @@ import {
 import { AuthContext } from '../contexts/AuthContextValue';
 import { CicdRealtimeContext } from '../contexts/CicdRealtimeContextValue';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
+import { OpsTable } from '../components/ops';
 import {
   diagnoseCicdExecutor,
   discoverCicdJobs,
@@ -513,28 +514,31 @@ const CicdCatalogPage: React.FC = () => {
       <Tag color={realtimeConnected ? 'success' : 'default'}>{realtimeConnected ? '实时追踪已连接' : '实时追踪未连接'}</Tag>
       <Button icon={<ReloadOutlined />} loading={runsLoading} onClick={() => void loadRuns()}>刷新列表</Button>
     </Space>}>
-      <Table size="small" rowKey="run_id" loading={runsLoading} dataSource={runs} pagination={{ pageSize: 10 }} columns={[
-        { title: '时间', dataIndex: 'created_at', width: 170 },
-        { title: '类型', dataIndex: 'action_type', render: (value) => value === 'PACKAGE_PUBLISH' ? '制品推包' : value === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署' },
+      <OpsTable size="small" rowKey="run_id" loading={runsLoading} dataSource={runs} tableLayout="fixed" scroll={{ x: 1190 }} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }} columns={[
         {
           title: 'Job',
           dataIndex: 'job_name',
-          render: (jobName, row) => {
+          width: 300,
+          fixed: 'left' as const,
+          ellipsis: true,
+          render: (jobName: string, row: CicdRun) => {
             const buildUrl = safeExternalUrl(row.build_url);
             return buildUrl
-              ? <a href={buildUrl} target="_blank" rel="noreferrer" title="在 Jenkins 中打开本次 Build">{jobName}</a>
-              : <Text code>{jobName}</Text>;
+              ? <Tooltip title="在 Jenkins 中打开本次 Build"><a href={buildUrl} target="_blank" rel="noreferrer"><Text code ellipsis style={{ display: 'block' }}>{jobName}</Text></a></Tooltip>
+              : <Tooltip title={jobName}><Text code ellipsis style={{ display: 'block' }}>{jobName}</Text></Tooltip>;
           },
         },
-        { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'SUCCESS' ? 'success' : value === 'FAILURE' || value === 'ABORTED' ? 'error' : value === 'RUNNING' ? 'processing' : 'default'}>{value}</Tag> },
-        { title: '队列 / Build / 镜像', render: (_, row) => row.action_type === 'IMAGE_BUILD_PUBLISH' ? (row.external_result_tag || '-') : `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
-        { title: '操作', render: (_, row) => <Space>
+        { title: '类型', dataIndex: 'action_type', width: 150, render: (value: CicdRun['action_type']) => value === 'PACKAGE_PUBLISH' ? '制品推包' : value === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署' },
+        { title: '状态', dataIndex: 'status', width: 110, render: (value: string) => <Tag color={value === 'SUCCESS' ? 'success' : value === 'FAILURE' || value === 'ABORTED' ? 'error' : value === 'RUNNING' ? 'processing' : 'default'}>{value}</Tag> },
+        { title: '时间', dataIndex: 'created_at', width: 175, ellipsis: true, render: (value: string) => <Tooltip title={value}><Text ellipsis style={{ display: 'block' }}>{value}</Text></Tooltip> },
+        { title: '队列 / Build / 镜像', width: 180, render: (_: unknown, row: CicdRun) => row.action_type === 'IMAGE_BUILD_PUBLISH' ? (row.external_result_tag || '-') : `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
+        { title: '操作', width: 250, fixed: 'right' as const, align: 'center' as const, render: (_: unknown, row: CicdRun) => <Space size={4}>
           <Button size="small" onClick={() => setDetailRun(row)}>详情</Button>
           <Button size="small" loading={refreshingRunIds.has(row.run_id)} disabled={runsLoading} onClick={() => void refreshRun(row.run_id)}>刷新</Button>
           <Button size="small" disabled={!row.build_number && row.action_type !== 'IMAGE_BUILD_PUBLISH'} onClick={() => showLog(row.run_id)}>日志</Button>
           <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || row.action_type === 'IMAGE_BUILD_PUBLISH' || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); await loadRuns(); } })}>取消</Button>
         </Space> },
-      ]} />
+      ] as any} />
     </Card>
 
     <Modal title="Jenkins 控制台日志（实时）" open={logOpen} onCancel={closeLog} footer={<Button onClick={closeLog}>关闭</Button>} width={900} destroyOnHidden>
