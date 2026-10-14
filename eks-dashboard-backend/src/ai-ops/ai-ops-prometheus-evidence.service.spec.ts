@@ -100,6 +100,19 @@ describe('AiOpsPrometheusEvidenceService', () => {
     expect(result.playbookKey).toBe('POD_OOM');
     expect(result.classification).toBe('OOM_CONFIRMED');
     expect(result.findings.join(' ')).toContain('不能区分 JVM heap');
+    const queries = get.mock.calls.map((call) =>
+      String((call[1] as { params?: { query?: string } })?.params?.query || ''),
+    );
+    expect(queries.filter((query) => query.includes('kube_pod_'))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('exported_namespace="default"'),
+        expect.stringContaining('exported_pod="app-1"'),
+        expect.stringContaining('exported_container="app"'),
+      ]),
+    );
+    expect(
+      queries.find((query) => query.includes('container_memory_working_set')),
+    ).toContain('namespace="default"');
   });
 
   it('keeps the synthetic JVM exercise out of confirmed-root-cause claims', async () => {

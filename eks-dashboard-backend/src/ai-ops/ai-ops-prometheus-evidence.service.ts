@@ -298,30 +298,34 @@ export class AiOpsPrometheusEvidenceService {
       const namespace = this.literal(context.labels.namespace);
       const pod = this.literal(context.labels.pod);
       const container = this.literal(context.labels.container);
-      const selector = `{namespace="${namespace}",pod="${pod}",container="${container}"}`;
+      const containerSelector = `{namespace="${namespace}",pod="${pod}",container="${container}"}`;
+      // kube-state-metrics is scraped from the monitoring namespace in mgbx.
+      // Prometheus preserves the workload identity under exported_* labels to
+      // avoid colliding with the scrape target's own namespace/pod/container.
+      const kubeStateSelector = `{exported_namespace="${namespace}",exported_pod="${pod}",exported_container="${container}"}`;
       const queries = [
         {
           key: 'oom-reason',
           title: '容器 OOMKilled 状态',
-          promql: `max(kube_pod_container_status_last_terminated_reason${selector},reason="OOMKilled"})`,
+          promql: `max(kube_pod_container_status_last_terminated_reason${kubeStateSelector.slice(0, -1)},reason="OOMKilled"})`,
         },
         {
           key: 'memory-working-set',
           title: '容器内存工作集',
-          promql: `max(container_memory_working_set_bytes${selector})`,
+          promql: `max(container_memory_working_set_bytes${containerSelector})`,
         },
         {
           key: 'memory-limit',
           title: '容器内存 limit',
-          promql: `max(kube_pod_container_resource_limits${selector.slice(0, -1)},resource="memory"})`,
+          promql: `max(kube_pod_container_resource_limits${kubeStateSelector.slice(0, -1)},resource="memory"})`,
         },
         {
           key: 'restarts',
           title: '容器重启次数',
-          promql: `max(kube_pod_container_status_restarts_total${selector})`,
+          promql: `max(kube_pod_container_status_restarts_total${kubeStateSelector})`,
         },
       ];
-      const empty = this.empty('POD_OOM', 'pod-oom-v1');
+      const empty = this.empty('POD_OOM', 'pod-oom-v2');
       return {
         queries,
         empty,
