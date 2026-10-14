@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuthService } from '../auth/auth.service';
+import { MfaVerificationService } from '../auth/mfa-verification.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import {
   CicdActionType,
@@ -44,6 +45,7 @@ export class CicdRunsService {
   constructor(
     private readonly db: PlatformDatabaseService,
     private readonly auth: AuthService,
+    private readonly mfaVerification: MfaVerificationService,
     private readonly access: AccessControlService,
     private readonly siteConf: SiteConfService,
     private readonly spotPublish: CicdSpotPublishService,
@@ -192,7 +194,7 @@ export class CicdRunsService {
           : EXECUTE_BUILD;
     const actor = await this.actor(authorization, required);
     if (['PACKAGE_PUBLISH', 'IMAGE_BUILD_PUBLISH'].includes(input.actionType)) {
-      await this.auth.verifyMfaForUser(actor.userId, input.otpCode);
+      await this.mfaVerification.verifyForUser(actor.userId, input.otpCode);
     }
     const existing = await this.db.query<RunRow[]>(
       'SELECT * FROM cicd_runs WHERE client_request_id=? LIMIT 1',

@@ -25,17 +25,19 @@ const context = {
 const createService = () => {
   const db = { query: jest.fn() };
   const auth = { verifyToken: jest.fn(), verifyMfaForUser: jest.fn() };
+  const mfaVerification = { verifyForUser: jest.fn() };
   const access = { ensureUserByUsername: jest.fn(), getMe: jest.fn() };
   const siteConf = { getString: jest.fn(), getNumber: jest.fn() };
   const spotPublish = { catalog: jest.fn() };
   const service = new CicdRunsService(
     db as never,
     auth as never,
+    mfaVerification as never,
     access as never,
     siteConf as never,
     spotPublish as never,
   );
-  return { service, db, auth, access };
+  return { service, db, auth, mfaVerification, access };
 };
 
 describe('CicdRunsService', () => {
@@ -94,13 +96,13 @@ describe('CicdRunsService', () => {
   });
 
   it('verifies the current actor MFA before publishing an artifact', async () => {
-    const { service, auth, db } = createService();
+    const { service, mfaVerification, db } = createService();
     const publishActor = {
       ...actor,
       permissions: ['menu:cicd-runs', 'cicd-runs:execute-publish'],
     };
     jest.spyOn(service, 'actor').mockResolvedValue(publishActor);
-    auth.verifyMfaForUser.mockRejectedValue(
+    mfaVerification.verifyForUser.mockRejectedValue(
       new ForbiddenException('Google 验证码错误'),
     );
 
@@ -113,7 +115,7 @@ describe('CicdRunsService', () => {
         otpCode: '123456',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(auth.verifyMfaForUser).toHaveBeenCalledWith(7, '123456');
+    expect(mfaVerification.verifyForUser).toHaveBeenCalledWith(7, '123456');
     expect(db.query).not.toHaveBeenCalled();
   });
 

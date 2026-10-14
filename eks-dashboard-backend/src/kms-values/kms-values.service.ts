@@ -5,7 +5,7 @@ import { fromInstanceMetadata, fromTemporaryCredentials } from '@aws-sdk/credent
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
-import { verifyTotpCode } from '../auth/mfa';
+import { MfaVerificationService } from '../auth/mfa-verification.service';
 import { EnvironmentsService } from '../environments/environments.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 
@@ -18,11 +18,11 @@ const KMS_CONFIGURATIONS: Record<string, KmsConfiguration> = {
   icoin: { keyAlias: 'alias/kms-eks-newicoin', keyId: 'arn:aws:kms:ap-southeast-1:412235698072:key/27d8eb92-0774-4014-8b6d-8c3818c262f1', context: { Environment: 'icoin', Source: 'backend', DataType: 'config-password' } },
   tb: { keyAlias: 'alias/kms-eks-vlink', keyId: 'arn:aws:kms:ap-southeast-1:249563934516:key/fd39ad0b-0fff-48ac-ab9c-38a1a431ca5d', context: { Environment: 'vlink', Source: 'backend', DataType: 'config-password' } },
 };
-type Actor = { userId: number; username: string; displayName?: string | null; permissions: string[]; mfaEnabled?: boolean; mfaSecret?: string | null };
+type Actor = { userId: number; username: string; displayName?: string | null; permissions: string[] };
 
 @Injectable()
 export class KmsValuesService {
-  constructor(private readonly auth: AuthService, private readonly access: AccessControlService, private readonly audit: AuditService, private readonly environments: EnvironmentsService, private readonly db: PlatformDatabaseService) {}
+  constructor(private readonly auth: AuthService, private readonly mfaVerification: MfaVerificationService, private readonly access: AccessControlService, private readonly audit: AuditService, private readonly environments: EnvironmentsService, private readonly db: PlatformDatabaseService) {}
   async resolveActorFromAuthorization(authorization?: string): Promise<Actor> {
     if (!String(authorization || '').toLowerCase().startsWith('bearer ')) throw new UnauthorizedException('Missing token');
     const payload = await this.auth.verifyToken(String(authorization).slice(7).trim());
@@ -30,9 +30,9 @@ export class KmsValuesService {
       ? (await this.access.ensureUserByUsername(payload.username, { displayName: payload.displayName })).id
       : Number(payload.sub);
     const me = await this.access.getMe({ userId });
-    const rows = await this.db.query<any[]>('SELECT mfa_enabled, mfa_secret, display_name FROM users WHERE id = ? LIMIT 1', [userId]);
+    const rows = await this.db.query<any[]>('SELECT display_name FROM users WHERE id = ? LIMIT 1', [userId]);
     const user = rows[0] || {};
-    const actor: Actor = { userId: Number(me.id), username: String(me.username || payload.username || ''), displayName: String(user.display_name || me.display_name || me.username || ''), permissions: Array.isArray(me.permissions) ? me.permissions.map(String) : [], mfaEnabled: Number(user.mfa_enabled || 0) === 1 && !!user.mfa_secret, mfaSecret: user.mfa_secret ? String(user.mfa_secret) : null };
+    const actor: Actor = { userId: Number(me.id), username: String(me.username || payload.username || ''), displayName: String(user.display_name || me.display_name || me.username || ''), permissions: Array.isArray(me.permissions) ? me.permissions.map(String) : [] };
     if (!actor.permissions.includes(MENU_PERMISSION)) throw new ForbiddenException(`Missing permissions: ${MENU_PERMISSION}`);
     return actor;
   }
@@ -64,9 +64,8 @@ export class KmsValuesService {
     const credentials = fromTemporaryCredentials({ masterCredentials: fromInstanceMetadata({ maxRetries: 1, timeout: 1_000 }), clientConfig: { region: process.env.AWS_STS_REGION || 'ap-southeast-1' }, params: { RoleArn: roleArn, RoleSessionName: `dashboard-kms-${environmentId}` } });
     return { client: new KMSClient({ region, credentials }), configuration };
   }
-  private assertMfa(actor: Actor, code: string) {
-    if (!actor.mfaEnabled || !actor.mfaSecret) throw new BadRequestException('当前账号未启用 Google Authenticator MFA');
-    if (!verifyTotpCode(actor.mfaSecret, code)) throw new UnauthorizedException('Google 验证码错误');
+  private async assertMfa(actor: Actor, code: string) {
+    await this.mfaVerification.verifyForUser(actor.userId, code);
   }
   private digest(value: string) { return createHash('sha256').update(value).digest('hex'); }
   private async record(actor: Actor, action: string, environmentId: string, input: string, configuration: KmsConfiguration, meta: { ip?: string | null; userAgent?: string | null }) {
@@ -84,7 +83,7 @@ export class KmsValuesService {
     } catch (error: any) { throw new BadRequestException(`KMS 加密失败：${error?.name || 'UnknownError'}: ${error?.message || String(error)}`); }
   }
   async decrypt(actor: Actor, input: { environmentId: string; value: string; otpCode: string }, meta: { ip?: string | null; userAgent?: string | null }) {
-    this.assertMfa(actor, input.otpCode);
+    await this.assertMfa(actor, input.otpCode);
     const value = String(input.value || '').trim();
     if (!value.startsWith(PREFIX)) throw new BadRequestException(`密文必须以 ${PREFIX} 开头。`);
     let blob: Buffer; try { blob = Buffer.from(value.slice(PREFIX.length), 'base64'); } catch { throw new BadRequestException('密文不是有效 Base64。'); }

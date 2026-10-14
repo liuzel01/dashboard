@@ -9,10 +9,12 @@ const createService = () => {
   };
   const config = { get: jest.fn() };
   const siteConf = { getString: jest.fn() };
+  const mfaVerification = { verifyForUser: jest.fn() };
   return {
-    service: new AuthService(db as any, accessControl as any, config as any, siteConf as any),
+    service: new AuthService(db as any, accessControl as any, config as any, siteConf as any, mfaVerification as any),
     db,
     accessControl,
+    mfaVerification,
   };
 };
 
@@ -84,14 +86,14 @@ describe('AuthService MFA management', () => {
   });
 
   it('does not treat an unbound account as MFA enabled', async () => {
-    const { service, db } = createService();
+    const { service, db, mfaVerification } = createService();
     db.query.mockResolvedValueOnce([{ mfa_enabled: 0, mfa_secret: null, mfa_confirmed_at: null }]);
     await expect(service.getMfaStatus(27)).resolves.toEqual({
       enabled: false,
       enrollmentPending: false,
       confirmedAt: null,
     });
-    db.query.mockResolvedValueOnce([]);
+    mfaVerification.verifyForUser.mockRejectedValue(new BadRequestException('当前账号未启用 Google Authenticator MFA'));
     await expect(service.verifyMfaForUser(27, '123456')).rejects.toBeInstanceOf(BadRequestException);
   });
 });

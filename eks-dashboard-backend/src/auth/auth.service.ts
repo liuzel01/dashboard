@@ -10,6 +10,7 @@ import { PlatformDatabaseService } from '../access-control/platform-database.ser
 import { AccessControlService } from '../access-control/access-control.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import { verifyTotpCode } from './mfa';
+import { MfaVerificationService } from './mfa-verification.service';
 
 const verifyPassword = (password: string, stored: string) => {
   const [salt, hash] = String(stored || '').split('$');
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly accessControl: AccessControlService,
     private readonly config: ConfigService,
     private readonly siteConf: SiteConfService,
+    private readonly mfaVerification: MfaVerificationService,
   ) {}
 
   private getJwtSecret() {
@@ -266,17 +268,7 @@ export class AuthService {
   }
 
   async verifyMfaForUser(userId: number, code?: string) {
-    const rows = await this.db.query<any[]>(
-      'SELECT mfa_enabled, mfa_secret FROM users WHERE id = ? LIMIT 1',
-      [userId],
-    );
-    const user = rows[0];
-    if (Number(user?.mfa_enabled || 0) !== 1 || !user?.mfa_secret) {
-      throw new BadRequestException('当前账号未启用 Google Authenticator MFA');
-    }
-    if (!this.verifyMfaCode(String(user.mfa_secret), code)) {
-      throw new UnauthorizedException('Google 验证码错误');
-    }
+    return this.mfaVerification.verifyForUser(userId, code);
   }
 
   async resolveCurrentUser(authorization?: string) {

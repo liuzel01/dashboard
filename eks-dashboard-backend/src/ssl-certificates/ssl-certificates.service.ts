@@ -22,7 +22,7 @@ import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import JSZip from 'jszip';
 import { createPrivateKey } from 'crypto';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
-import { verifyTotpCode } from '../auth/mfa';
+import { MfaVerificationService } from '../auth/mfa-verification.service';
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
 import { AuditService } from '../audit/audit.service';
@@ -35,8 +35,6 @@ type ActorContext = {
   displayName?: string | null;
   permissions: string[];
   roles: string[];
-  mfaEnabled?: boolean;
-  mfaSecret?: string | null;
 };
 
 type DownloadSession = {
@@ -57,14 +55,11 @@ export class SslCertificatesService {
   constructor(
     private readonly db: PlatformDatabaseService,
     private readonly authService: AuthService,
+    private readonly mfaVerification: MfaVerificationService,
     private readonly accessControl: AccessControlService,
     private readonly auditService: AuditService,
     private readonly environmentsService: EnvironmentsService,
   ) {}
-
-  private verifyMfa(secret: string, code?: string) {
-    return verifyTotpCode(secret, code);
-  }
 
   private ensurePermission(actor: ActorContext) {
     if (actor.permissions.includes(MENU_PERMISSION)) return;
@@ -91,7 +86,7 @@ export class SslCertificatesService {
 
     const me = await this.accessControl.getMe({ userId });
     const rows = await this.db.query<any[]>(
-      'SELECT mfa_enabled, mfa_secret, display_name FROM users WHERE id = ? LIMIT 1',
+      'SELECT display_name FROM users WHERE id = ? LIMIT 1',
       [userId],
     );
     const user = rows?.[0] || {};
@@ -101,20 +96,13 @@ export class SslCertificatesService {
       displayName: String(user?.display_name || me.display_name || me.username || payload.displayName || payload.username || ''),
       permissions: Array.isArray(me.permissions) ? me.permissions.map((v: any) => String(v)) : [],
       roles: Array.isArray(me.roles) ? me.roles.map((r: any) => String(r?.name || r || '')).filter(Boolean) : [],
-      mfaEnabled: Number(user?.mfa_enabled || 0) === 1 && !!user?.mfa_secret,
-      mfaSecret: user?.mfa_secret ? String(user.mfa_secret) : null,
     };
     this.ensurePermission(actor);
     return actor;
   }
 
-  private assertMfa(actor: ActorContext, otpCode?: string) {
-    if (!actor.mfaEnabled || !actor.mfaSecret) {
-      throw new BadRequestException('当前账号未启用 Google Authenticator MFA');
-    }
-    if (!this.verifyMfa(actor.mfaSecret, otpCode)) {
-      throw new UnauthorizedException('Google 验证码错误');
-    }
+  private async assertMfa(actor: ActorContext, otpCode?: string) {
+    await this.mfaVerification.verifyForUser(actor.userId, otpCode);
   }
 
   private normalizeSelection(input: AwsSelection) {
@@ -556,7 +544,7 @@ export class SslCertificatesService {
     req: { ip?: string | null; userAgent?: string | null },
   ) {
     this.ensurePermission(actor);
-    this.assertMfa(actor, body.otpCode);
+    await this.assertMfa(actor, body.otpCode);
     const passphrase = String(body.passphrase || '').trim();
     if (passphrase.length < 8) {
       throw new BadRequestException('passphrase 至少 8 位');
@@ -616,7 +604,7 @@ export class SslCertificatesService {
     req: { ip?: string | null; userAgent?: string | null },
   ) {
     this.ensurePermission(actor);
-    this.assertMfa(actor, body.otpCode);
+    await this.assertMfa(actor, body.otpCode);
     const passphrase = String(body.passphrase || '').trim();
     if (passphrase.length < 8) {
       throw new BadRequestException('passphrase 至少 8 位');

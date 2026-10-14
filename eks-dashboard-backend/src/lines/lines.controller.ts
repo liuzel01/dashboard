@@ -18,6 +18,7 @@ import { SyncRoute53CnameDto } from './dto/sync-route53-cname.dto';
 import { SyncDcdnSslDto } from './dto/sync-dcdn-ssl.dto';
 import { ApplyIngressManifestDto } from './dto/apply-ingress-manifest.dto';
 import { AuthService } from '../auth/auth.service';
+import { MfaVerificationService } from '../auth/mfa-verification.service';
 import { AccessControlService } from '../access-control/access-control.service';
 
 @Controller('lines')
@@ -25,6 +26,7 @@ export class LinesController {
   constructor(
     private readonly linesService: LinesService,
     private readonly authService: AuthService,
+    private readonly mfaVerification: MfaVerificationService,
     private readonly accessControl: AccessControlService,
   ) {}
 
@@ -201,7 +203,7 @@ export class LinesController {
       throw new HttpException('environmentId mismatch with X-Target-Environment', HttpStatus.BAD_REQUEST);
     }
     const actor = await this.assertIngressProvisioningAccess(authorization);
-    await this.authService.verifyMfaForUser(Number(actor.userId), body.otpCode);
+    await this.mfaVerification.verifyForUser(Number(actor.userId), body.otpCode);
     return this.linesService.applyTenantDomain(environmentId, {
       tenantId: body.tenantId,
       domain: body.domain,
