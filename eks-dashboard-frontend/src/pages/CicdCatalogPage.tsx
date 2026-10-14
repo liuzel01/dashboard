@@ -53,6 +53,23 @@ const actionFilterLabel = (filter?: { includeAnyTokens?: string[]; excludeAnyTok
 const parameterDefaultLabel = (value: unknown) =>
   value === undefined || value === '' ? '（空）' : String(value);
 
+const safeExternalUrl = (value?: string | null) => {
+  try {
+    const url = new URL(String(value || ''));
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const formatDuration = (value?: number | null) => {
+  const milliseconds = Number(value || 0);
+  if (!milliseconds) return '-';
+  return milliseconds >= 60_000
+    ? `${Math.floor(milliseconds / 60_000)} 分 ${Math.round((milliseconds % 60_000) / 1000)} 秒`
+    : `${(milliseconds / 1000).toFixed(1)} 秒`;
+};
+
 const CicdCatalogPage: React.FC = () => {
   const { message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
@@ -85,6 +102,7 @@ const CicdCatalogPage: React.FC = () => {
   const [logOpen, setLogOpen] = useState(false);
   const [logText, setLogText] = useState('');
   const [logRunId, setLogRunId] = useState<string>();
+  const [detailRun, setDetailRun] = useState<CicdRun>();
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
     desktopNotificationPermission,
   );
@@ -498,10 +516,20 @@ const CicdCatalogPage: React.FC = () => {
       <Table size="small" rowKey="run_id" loading={runsLoading} dataSource={runs} pagination={{ pageSize: 10 }} columns={[
         { title: '时间', dataIndex: 'created_at', width: 170 },
         { title: '类型', dataIndex: 'action_type', render: (value) => value === 'PACKAGE_PUBLISH' ? '制品推包' : value === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署' },
-        { title: 'Job', dataIndex: 'job_name' },
+        {
+          title: 'Job',
+          dataIndex: 'job_name',
+          render: (jobName, row) => {
+            const buildUrl = safeExternalUrl(row.build_url);
+            return buildUrl
+              ? <a href={buildUrl} target="_blank" rel="noreferrer" title="在 Jenkins 中打开本次 Build">{jobName}</a>
+              : <Text code>{jobName}</Text>;
+          },
+        },
         { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'SUCCESS' ? 'success' : value === 'FAILURE' || value === 'ABORTED' ? 'error' : value === 'RUNNING' ? 'processing' : 'default'}>{value}</Tag> },
         { title: '队列 / Build / 镜像', render: (_, row) => row.action_type === 'IMAGE_BUILD_PUBLISH' ? (row.external_result_tag || '-') : `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
         { title: '操作', render: (_, row) => <Space>
+          <Button size="small" onClick={() => setDetailRun(row)}>详情</Button>
           <Button size="small" loading={refreshingRunIds.has(row.run_id)} disabled={runsLoading} onClick={() => void refreshRun(row.run_id)}>刷新</Button>
           <Button size="small" disabled={!row.build_number && row.action_type !== 'IMAGE_BUILD_PUBLISH'} onClick={() => showLog(row.run_id)}>日志</Button>
           <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || row.action_type === 'IMAGE_BUILD_PUBLISH' || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); await loadRuns(); } })}>取消</Button>
@@ -511,6 +539,23 @@ const CicdCatalogPage: React.FC = () => {
 
     <Modal title="Jenkins 控制台日志（实时）" open={logOpen} onCancel={closeLog} footer={<Button onClick={closeLog}>关闭</Button>} width={900} destroyOnHidden>
       <pre ref={logContainerRef} style={{ height: 560, overflow: 'auto', whiteSpace: 'pre-wrap', background: '#111', color: '#ddd', padding: 16 }}>{logText || '正在等待日志...'}</pre>
+    </Modal>
+
+    <Modal title="执行详情" open={!!detailRun} onCancel={() => setDetailRun(undefined)} footer={<Button onClick={() => setDetailRun(undefined)}>关闭</Button>} width={760} destroyOnHidden>
+      {detailRun && <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
+        <Descriptions.Item label="环境"><Text code>{detailRun.environment_id}</Text></Descriptions.Item>
+        <Descriptions.Item label="操作类型">{detailRun.action_type === 'PACKAGE_PUBLISH' ? '制品推包' : detailRun.action_type === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署'}</Descriptions.Item>
+        <Descriptions.Item label="Job" span={2}>{safeExternalUrl(detailRun.build_url) ? <a href={safeExternalUrl(detailRun.build_url)} target="_blank" rel="noreferrer">{detailRun.job_name}</a> : <Text code>{detailRun.job_name}</Text>}</Descriptions.Item>
+        <Descriptions.Item label="状态"><Tag color={detailRun.status === 'SUCCESS' ? 'success' : detailRun.status === 'FAILURE' || detailRun.status === 'ABORTED' ? 'error' : detailRun.status === 'RUNNING' ? 'processing' : 'default'}>{detailRun.status}</Tag></Descriptions.Item>
+        <Descriptions.Item label="发起人">{detailRun.requested_by_username}</Descriptions.Item>
+        <Descriptions.Item label="队列号">{detailRun.queue_id ? `#${detailRun.queue_id}` : '-'}</Descriptions.Item>
+        <Descriptions.Item label="Build">{detailRun.action_type === 'IMAGE_BUILD_PUBLISH' ? (detailRun.external_result_tag || '-') : (detailRun.build_number ? `#${detailRun.build_number}` : '-')}</Descriptions.Item>
+        <Descriptions.Item label="耗时">{formatDuration(detailRun.duration_ms)}</Descriptions.Item>
+        <Descriptions.Item label="创建时间">{detailRun.created_at}</Descriptions.Item>
+        <Descriptions.Item label="完成时间">{detailRun.finished_at || '-'}</Descriptions.Item>
+        <Descriptions.Item label="错误摘要" span={2}>{detailRun.error_summary || '-'}</Descriptions.Item>
+        <Descriptions.Item label="本次参数" span={2}><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(detailRun.parameters || {}, null, 2)}</pre></Descriptions.Item>
+      </Descriptions>}
     </Modal>
 
     {diagnostic && <Alert
