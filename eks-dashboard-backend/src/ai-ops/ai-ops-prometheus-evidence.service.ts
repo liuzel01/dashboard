@@ -23,6 +23,7 @@ export type AlertPlaybookResult = {
   recommendations: string[];
   missingEvidence: string[];
   evidence: PrometheusEvidence[];
+  collectionErrors?: Array<{ code: string; summary: string }>;
 };
 
 type AlertContext = {
@@ -81,6 +82,12 @@ export class AiOpsPrometheusEvidenceService {
       return {
         ...playbook.empty,
         missingEvidence: ['Prometheus 数据源未启用或未配置'],
+        collectionErrors: [
+          {
+            code: 'SOURCE_DISABLED',
+            summary: 'Prometheus 数据源未启用或未配置',
+          },
+        ],
       };
     }
     const timeoutMs = this.clamp(
@@ -122,7 +129,10 @@ export class AiOpsPrometheusEvidenceService {
       item.status === 'fulfilled' ? [item.value] : [],
     );
     const failed = settled.filter((item) => item.status === 'rejected').length;
-    return playbook.analyze(evidence, failed);
+    const collectionErrors = settled.flatMap((item) =>
+      item.status === 'rejected' ? [this.stableFailure(item.reason)] : [],
+    );
+    return { ...playbook.analyze(evidence, failed), collectionErrors };
   }
 
   private playbook(context: AlertContext): {
@@ -543,6 +553,29 @@ export class AiOpsPrometheusEvidenceService {
   }
   private genericResult() {
     return this.empty('GENERIC_PROMETHEUS_ALERT', 'generic-v1');
+  }
+  private stableFailure(error: unknown) {
+    const candidate = error as {
+      code?: string;
+      message?: string;
+      response?: { status?: number };
+    };
+    const status = Number(candidate?.response?.status || 0);
+    const rawCode = String(candidate?.code || '').toUpperCase();
+    const code = status
+      ? `HTTP_${status}`
+      : rawCode === 'ECONNABORTED' || rawCode === 'ETIMEDOUT'
+        ? 'TIMEOUT'
+        : rawCode === 'ENOTFOUND'
+          ? 'DNS_ERROR'
+          : rawCode.startsWith('CERT_') || rawCode.includes('TLS')
+            ? 'TLS_ERROR'
+            : 'PROMETHEUS_REQUEST_FAILED';
+    const summary = String(candidate?.message || 'Prometheus request failed')
+      .replace(/https?:\/\/[^\s]+/gi, '[url]')
+      .replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]')
+      .slice(0, 500);
+    return { code, summary };
   }
   private missing(failed: number, items: string[]) {
     return failed ? [`${failed} 个 Prometheus 查询失败`, ...items] : items;

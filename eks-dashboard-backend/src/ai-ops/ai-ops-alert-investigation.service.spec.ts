@@ -18,7 +18,23 @@ const payload = (alertname = 'KylinBackendServiceHttpLatencyHigh') => ({
 });
 
 const makeService = (existingId?: number) => {
-  const execute = jest.fn(async (sql: string) => {
+  let queuedPayload = '';
+  let queueClaimed = false;
+  const execute = jest.fn(async (sql: string, params?: unknown[]) => {
+    if (sql.includes('INSERT IGNORE INTO aiops_alert_event_queue')) {
+      queuedPayload = typeof params?.[4] === 'string' ? params[4] : '';
+      return [{ insertId: 11, affectedRows: 1 }, []];
+    }
+    if (
+      sql.includes('FROM aiops_alert_event_queue') &&
+      sql.includes('event_key=?')
+    )
+      return [[{ id: 11, status: 'PENDING', investigation_id: null }], []];
+    if (sql.includes("status='PENDING'")) {
+      if (queueClaimed || !queuedPayload) return [[], []];
+      queueClaimed = true;
+      return [[{ id: 11, payload_json: queuedPayload, attempt_count: 0 }], []];
+    }
     if (sql.includes('SELECT id FROM aiops_investigations'))
       return [[...(existingId ? [{ id: existingId }] : [])], []];
     if (sql.includes('INSERT INTO aiops_investigations'))
@@ -27,9 +43,14 @@ const makeService = (existingId?: number) => {
   });
   const db = {
     withTransaction: jest.fn(async (fn: any) => fn({ execute })),
-    query: jest.fn(),
+    query: jest.fn(async (sql: string) =>
+      sql.includes('COUNT(*) AS total FROM aiops_alert_event_queue')
+        ? [{ total: 0 }]
+        : [],
+    ),
   };
   const siteConf = {
+    getNumber: jest.fn(async (_key: string, fallback: number) => fallback),
     getString: jest.fn(async (key: string, fallback: string) => {
       if (key === 'aiops.alertmanager.bearer_token') return 'test-token';
       if (key === 'aiops.alertmanager.excluded_alerts')
@@ -114,9 +135,10 @@ describe('AiOpsAlertInvestigationService', () => {
       received: 1,
       accepted: 1,
       ignored: 0,
-      created: 1,
-      investigationIds: [7],
+      queued: 1,
+      eventIds: [11],
     });
+    await service.processQueuedAlerts();
     expect(
       execute.mock.calls.some(([sql]) =>
         String(sql).includes('INSERT INTO aiops_investigations'),
@@ -147,11 +169,11 @@ describe('AiOpsAlertInvestigationService', () => {
       'Bearer test-token',
       payload(),
     );
+    await service.processQueuedAlerts();
     expect(result).toMatchObject({
       accepted: 1,
-      created: 0,
-      updated: 1,
-      investigationIds: [7],
+      queued: 1,
+      eventIds: [11],
     });
     expect(
       execute.mock.calls.some(([sql]) =>
@@ -173,8 +195,9 @@ describe('AiOpsAlertInvestigationService', () => {
       'Bearer test-token',
       resolved,
     );
+    await service.processQueuedAlerts();
 
-    expect(result).toMatchObject({ created: 0, updated: 1 });
+    expect(result).toMatchObject({ queued: 1 });
     const select = execute.mock.calls.find(([sql]) =>
       String(sql).includes('SELECT id FROM aiops_investigations'),
     );
@@ -193,8 +216,9 @@ describe('AiOpsAlertInvestigationService', () => {
       received: 1,
       accepted: 1,
       ignored: 0,
-      created: 1,
+      queued: 1,
     });
+    await service.processQueuedAlerts();
     expect(prometheus.collect).not.toHaveBeenCalled();
     expect(contextEvidence.collect).not.toHaveBeenCalled();
     expect(groupCallback.enqueue).not.toHaveBeenCalled();
@@ -210,7 +234,7 @@ describe('AiOpsAlertInvestigationService', () => {
       received: 1,
       accepted: 0,
       ignored: 1,
-      created: 0,
+      queued: 0,
     });
     expect(db.withTransaction).not.toHaveBeenCalled();
   });
@@ -226,7 +250,7 @@ describe('AiOpsAlertInvestigationService', () => {
       'Bearer test-token',
       disabled,
     );
-    expect(result).toMatchObject({ accepted: 0, ignored: 1, created: 0 });
+    expect(result).toMatchObject({ accepted: 0, ignored: 1, queued: 0 });
     expect(db.withTransaction).not.toHaveBeenCalled();
   });
 
@@ -243,10 +267,11 @@ describe('AiOpsAlertInvestigationService', () => {
   it('lists only replay cases belonging to the current environment', () => {
     const { service } = makeService();
     const cases = service.listReplayCases('mgbx', actor).items;
-    expect(cases).toHaveLength(3);
+    expect(cases).toHaveLength(4);
     expect(cases).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ key: 'jvm-heap-high-synthetic-v1' }),
+        expect.objectContaining({ key: 'http-error-rate-synthetic-v1' }),
       ]),
     );
     expect(service.listReplayCases('hashex', actor).items).toHaveLength(0);
@@ -262,13 +287,15 @@ describe('AiOpsAlertInvestigationService', () => {
       .mockResolvedValueOnce([{ rating: 'EFFECTIVE', count: 1 }])
       .mockResolvedValueOnce([
         { step_key: 'context.collect', status: 'PARTIAL', count: 1 },
-      ]);
+      ])
+      .mockResolvedValueOnce([{ status: 'FAILED', count: 1 }]);
 
     const result = await service.qualitySummary('mgbx', actor);
 
     expect(result.overview).toMatchObject({ total: 3, synthetic_count: 1 });
     expect(result.evidenceCoverage).toHaveLength(1);
     expect(result.partialOrFailedSteps).toHaveLength(1);
+    expect(result.queue).toEqual([{ status: 'FAILED', count: 1 }]);
     expect(result.note).toContain('Synthetic exercises');
   });
 

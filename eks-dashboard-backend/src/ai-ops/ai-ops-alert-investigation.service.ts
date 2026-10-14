@@ -2,9 +2,12 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { createHash, timingSafeEqual } from 'crypto';
 import type * as mysql from 'mysql2/promise';
@@ -30,6 +33,9 @@ const MAX_LABELS = 64;
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 @Injectable()
 export class AiOpsAlertInvestigationService {
+  private readonly logger = new Logger(AiOpsAlertInvestigationService.name);
+  private queueRunning = false;
+
   constructor(
     private readonly db: PlatformDatabaseService,
     private readonly siteConf: SiteConfService,
@@ -50,10 +56,21 @@ export class AiOpsAlertInvestigationService {
       received: alerts.length,
       accepted: 0,
       ignored: 0,
-      created: 0,
-      updated: 0,
-      investigationIds: [] as number[],
+      queued: 0,
+      duplicate: 0,
+      eventIds: [] as number[],
     };
+    const [{ total }] = await this.db.query<Array<{ total: number }>>(
+      `SELECT COUNT(*) AS total FROM aiops_alert_event_queue WHERE status IN ('PENDING','RUNNING')`,
+    );
+    const maxPending = await this.siteConf.getNumber(
+      'aiops.alertmanager.queue.max_pending',
+      1000,
+    );
+    if (Number(total || 0) + alerts.length > maxPending)
+      throw new ServiceUnavailableException(
+        'AIOps alert queue capacity exceeded; retry later',
+      );
     for (const alert of alerts) {
       const labels = {
         ...(payload.commonLabels || {}),
@@ -67,19 +84,149 @@ export class AiOpsAlertInvestigationService {
         result.ignored += 1;
         continue;
       }
-      const outcome = await this.persistAlert(
+      const outcome = await this.enqueueAlert(
         payload,
         alert,
         labels,
         alertName,
-        'ALERTMANAGER_ALERT',
       );
       result.accepted += 1;
-      result.created += outcome.created ? 1 : 0;
-      result.updated += outcome.created ? 0 : 1;
-      result.investigationIds.push(outcome.id);
+      result.queued += outcome.created ? 1 : 0;
+      result.duplicate += outcome.created ? 0 : 1;
+      result.eventIds.push(outcome.id);
     }
     return result;
+  }
+
+  @Interval(2_000)
+  async processQueuedAlerts() {
+    if (this.queueRunning) return;
+    this.queueRunning = true;
+    try {
+      const job = await this.claimQueuedAlert();
+      if (!job) return;
+      try {
+        const payload = JSON.parse(job.payload_json) as AlertmanagerPayload;
+        const alert = payload.alerts?.[0];
+        if (!alert) throw new Error('Queued payload has no alert');
+        const labels = {
+          ...(payload.commonLabels || {}),
+          ...(alert.labels || {}),
+        };
+        const alertName = this.text(labels.alertname, 255) || 'UnknownAlert';
+        const outcome = await this.persistAlert(
+          payload,
+          alert,
+          labels,
+          alertName,
+          'ALERTMANAGER_ALERT',
+        );
+        await this.db.query(
+          `UPDATE aiops_alert_event_queue SET status='COMPLETED', investigation_id=?, completed_at=UTC_TIMESTAMP(),
+           error_code=NULL, error_summary=NULL, updated_at=UTC_TIMESTAMP() WHERE id=?`,
+          [outcome.id, job.id],
+        );
+      } catch (error) {
+        const maxAttempts = await this.siteConf.getNumber(
+          'aiops.alertmanager.queue.max_attempts',
+          3,
+        );
+        const retry = job.attempt_count < maxAttempts;
+        const failure = this.stableFailure(error);
+        await this.db.query(
+          `UPDATE aiops_alert_event_queue SET status=?, available_at=DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? SECOND),
+           completed_at=IF(?='FAILED', UTC_TIMESTAMP(), NULL), error_code=?, error_summary=?, updated_at=UTC_TIMESTAMP() WHERE id=?`,
+          [
+            retry ? 'PENDING' : 'FAILED',
+            Math.min(300, 10 * 2 ** Math.max(0, job.attempt_count - 1)),
+            retry ? 'PENDING' : 'FAILED',
+            failure.code,
+            failure.summary,
+            job.id,
+          ],
+        );
+        this.logger.warn(
+          `AIOps alert event ${job.id} ${retry ? 'will retry' : 'failed'}: ${failure.code}`,
+        );
+      }
+    } finally {
+      this.queueRunning = false;
+    }
+  }
+
+  private async enqueueAlert(
+    payload: AlertmanagerPayload,
+    alert: AlertmanagerAlert,
+    labels: Record<string, unknown>,
+    alertName: string,
+  ) {
+    const environmentId = await this.environmentId(labels);
+    const sourceStatus =
+      this.text(alert.status || payload.status, 32).toLowerCase() === 'resolved'
+        ? 'RESOLVED'
+        : 'FIRING';
+    const eventKey = this.hash(
+      `${environmentId}:${this.text(alert.fingerprint, 255) || this.hash(labels)}:${sourceStatus}:${this.text(alert.startsAt, 128)}:${this.text(alert.endsAt, 128)}`,
+    );
+    const singlePayload = { ...payload, alerts: [alert] };
+    return this.db.withTransaction(async (conn) => {
+      const [insert] = await conn.execute<mysql.ResultSetHeader>(
+        `INSERT IGNORE INTO aiops_alert_event_queue
+         (event_key, environment_id, alert_name, source_status, payload_json, status, attempt_count, available_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'PENDING', 0, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+        [
+          eventKey,
+          environmentId,
+          alertName,
+          sourceStatus,
+          JSON.stringify(singlePayload),
+        ],
+      );
+      const [rows] = await conn.execute<
+        Array<
+          mysql.RowDataPacket & {
+            id: number;
+            status: string;
+            investigation_id: number | null;
+          }
+        >
+      >(
+        'SELECT id, status, investigation_id FROM aiops_alert_event_queue WHERE event_key=? LIMIT 1',
+        [eventKey],
+      );
+      const row = rows[0];
+      return {
+        id: Number(row.id),
+        created: Number(insert.affectedRows || 0) > 0,
+      };
+    });
+  }
+
+  private async claimQueuedAlert() {
+    return this.db.withTransaction(async (conn) => {
+      const [rows] = await conn.execute<
+        Array<
+          mysql.RowDataPacket & {
+            id: number;
+            payload_json: string;
+            attempt_count: number;
+          }
+        >
+      >(
+        `SELECT id, payload_json, attempt_count FROM aiops_alert_event_queue
+         WHERE (status='PENDING' AND available_at<=UTC_TIMESTAMP())
+            OR (status='RUNNING' AND started_at<DATE_SUB(UTC_TIMESTAMP(), INTERVAL 10 MINUTE))
+         ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+      );
+      const row = rows[0];
+      if (!row) return null;
+      await conn.execute(
+        `UPDATE aiops_alert_event_queue SET status='RUNNING', attempt_count=attempt_count+1,
+         started_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP() WHERE id=?`,
+        [row.id],
+      );
+      return { ...row, attempt_count: Number(row.attempt_count) + 1 };
+    });
   }
 
   listReplayCases(environmentId: string, actor: ActorContext) {
@@ -176,7 +323,7 @@ export class AiOpsAlertInvestigationService {
       [id, environmentId],
     );
     if (!rows[0]) throw new NotFoundException('AI investigation not found');
-    const [steps, evidence, feedback] = await Promise.all([
+    const [steps, evidence, feedback, attempts] = await Promise.all([
       this.db.query<Array<Record<string, unknown>>>(
         'SELECT * FROM aiops_investigation_steps WHERE investigation_id=? ORDER BY id',
         [id],
@@ -189,13 +336,47 @@ export class AiOpsAlertInvestigationService {
         'SELECT id, actor_username, rating, comment, created_at FROM aiops_investigation_feedback WHERE investigation_id=? ORDER BY id DESC',
         [id],
       ),
+      this.db.query<Array<Record<string, unknown>>>(
+        `SELECT id, status, attempt_count, error_code, error_summary, created_at, started_at, completed_at
+         FROM aiops_alert_event_queue WHERE investigation_id=? ORDER BY id DESC`,
+        [id],
+      ),
     ]);
-    return { ...rows[0], steps, evidence, feedback };
+    return { ...rows[0], steps, evidence, feedback, attempts };
+  }
+
+  async retry(environmentId: string, actor: ActorContext, id: number) {
+    this.assertMenu(actor);
+    const rows = await this.db.query<Array<{ id: number }>>(
+      'SELECT id FROM aiops_investigations WHERE id=? AND environment_id=? LIMIT 1',
+      [id, environmentId],
+    );
+    if (!rows[0]) throw new NotFoundException('AI investigation not found');
+    const events = await this.db.query<Array<{ payload_json: string }>>(
+      `SELECT payload_json FROM aiops_alert_event_queue
+       WHERE investigation_id=? ORDER BY id DESC LIMIT 1`,
+      [id],
+    );
+    if (!events[0])
+      throw new BadRequestException(
+        'This investigation has no retryable Alertmanager event',
+      );
+    const eventKey = this.hash(
+      `manual-retry:${id}:${Date.now()}:${actor.username}`,
+    );
+    const result = await this.db.query<mysql.ResultSetHeader>(
+      `INSERT INTO aiops_alert_event_queue
+       (event_key, environment_id, alert_name, source_status, payload_json, status, attempt_count, available_at, investigation_id, created_at, updated_at)
+       SELECT ?, environment_id, alert_name, source_status, ?, 'PENDING', 0, UTC_TIMESTAMP(), id, UTC_TIMESTAMP(), UTC_TIMESTAMP()
+       FROM aiops_investigations WHERE id=?`,
+      [eventKey, events[0].payload_json, id],
+    );
+    return { queued: true, eventId: Number(result.insertId || 0) };
   }
 
   async qualitySummary(environmentId: string, actor: ActorContext) {
     this.assertMenu(actor);
-    const [overview, sources, feedback, failures] = await Promise.all([
+    const [overview, sources, feedback, failures, queue] = await Promise.all([
       this.db.query<Array<Record<string, unknown>>>(
         `SELECT COUNT(*) total,
                 SUM(status='COMPLETED') completed,
@@ -227,6 +408,11 @@ export class AiOpsAlertInvestigationService {
           GROUP BY s.step_key, s.status ORDER BY s.step_key, s.status`,
         [environmentId],
       ),
+      this.db.query<Array<Record<string, unknown>>>(
+        `SELECT status, COUNT(*) count FROM aiops_alert_event_queue
+         WHERE environment_id=? GROUP BY status ORDER BY status`,
+        [environmentId],
+      ),
     ]);
     return {
       environmentId,
@@ -235,6 +421,7 @@ export class AiOpsAlertInvestigationService {
       evidenceCoverage: sources,
       feedback,
       partialOrFailedSteps: failures,
+      queue,
       note: 'Synthetic exercises are reported separately and must not be counted as real alert accuracy or MTTR.',
     };
   }
@@ -283,15 +470,7 @@ export class AiOpsAlertInvestigationService {
       ...(payload.commonAnnotations || {}),
       ...(alert.annotations || {}),
     };
-    const environmentId =
-      this.text(labels.environment || labels.env, 64) ||
-      (
-        await this.siteConf.getString(
-          'aiops.alertmanager.default_environment',
-          'mgbx',
-        )
-      ).trim() ||
-      'mgbx';
+    const environmentId = await this.environmentId(labels);
     const fingerprint = this.text(alert.fingerprint, 255) || this.hash(labels);
     const startedAt =
       this.mysqlDate(alert.startsAt) ||
@@ -451,21 +630,27 @@ export class AiOpsAlertInvestigationService {
         );
         id = Number(insert.insertId);
       } else {
-        await conn.execute(
-          `UPDATE aiops_investigations SET source_status=?, summary=?, classification=?, confidence=?, insufficient_evidence=?, report_json=?,
-           resolved_at=IF(?='RESOLVED', COALESCE(?, UTC_TIMESTAMP()), resolved_at), updated_at=UTC_TIMESTAMP() WHERE id=?`,
-          [
-            sourceStatus,
-            summary,
-            classification,
-            specialized?.confidence || 'LOW',
-            specialized?.insufficientEvidence === false ? 0 : 1,
-            JSON.stringify(report),
-            sourceStatus,
-            this.mysqlDate(alert.endsAt),
-            id,
-          ],
-        );
+        if (resolved) {
+          await conn.execute(
+            `UPDATE aiops_investigations SET source_status='RESOLVED',
+             resolved_at=COALESCE(?, UTC_TIMESTAMP()), updated_at=UTC_TIMESTAMP() WHERE id=?`,
+            [this.mysqlDate(alert.endsAt), id],
+          );
+        } else {
+          await conn.execute(
+            `UPDATE aiops_investigations SET source_status=?, summary=?, classification=?, confidence=?, insufficient_evidence=?,
+             report_json=?, updated_at=UTC_TIMESTAMP() WHERE id=?`,
+            [
+              sourceStatus,
+              summary,
+              classification,
+              specialized?.confidence || 'LOW',
+              specialized?.insufficientEvidence === false ? 0 : 1,
+              JSON.stringify(report),
+              id,
+            ],
+          );
+        }
       }
       await conn.execute(
         `INSERT INTO aiops_investigation_steps
@@ -507,16 +692,27 @@ export class AiOpsAlertInvestigationService {
       if (specialized) {
         await conn.execute(
           `INSERT INTO aiops_investigation_steps
-           (investigation_id, step_key, tool_name, status, result_count, summary, started_at, completed_at, created_at)
-           VALUES (?, 'prometheus.collect', 'prometheus', ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
-           ON DUPLICATE KEY UPDATE status=VALUES(status), result_count=VALUES(result_count), summary=VALUES(summary), completed_at=UTC_TIMESTAMP()`,
+           (investigation_id, step_key, tool_name, status, result_count, summary, error_summary, started_at, completed_at, created_at)
+           VALUES (?, 'prometheus.collect', 'prometheus', ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+           ON DUPLICATE KEY UPDATE status=VALUES(status), result_count=VALUES(result_count), summary=VALUES(summary),
+             error_summary=VALUES(error_summary), completed_at=UTC_TIMESTAMP()`,
           [
             id,
-            specialized.evidence.length ? 'COMPLETED' : 'PARTIAL',
+            specialized.collectionErrors?.length
+              ? specialized.evidence.length
+                ? 'PARTIAL'
+                : 'FAILED'
+              : 'COMPLETED',
             specialized.evidence.length,
             specialized.evidence.length
               ? `已保存 ${specialized.evidence.length} 组指标证据`
               : '未取得 Prometheus 指标证据',
+            specialized.collectionErrors?.length
+              ? specialized.collectionErrors
+                  .map((item) => `${item.code}: ${item.summary}`)
+                  .join('；')
+                  .slice(0, 1000)
+              : null,
           ],
         );
       }
@@ -647,6 +843,42 @@ export class AiOpsAlertInvestigationService {
       .split(',')
       .map((item) => item.trim())
       .filter(Boolean);
+  }
+
+  private async environmentId(labels: Record<string, unknown>) {
+    return (
+      this.text(labels.environment || labels.env, 64) ||
+      (
+        await this.siteConf.getString(
+          'aiops.alertmanager.default_environment',
+          'mgbx',
+        )
+      ).trim() ||
+      'mgbx'
+    );
+  }
+
+  private stableFailure(error: unknown) {
+    const candidate = error as {
+      code?: string;
+      message?: string;
+      response?: { status?: number };
+    };
+    const status = Number(candidate?.response?.status || 0);
+    const rawCode = String(candidate?.code || '').toUpperCase();
+    const code = status
+      ? `HTTP_${status}`
+      : rawCode === 'ECONNABORTED' || rawCode === 'ETIMEDOUT'
+        ? 'TIMEOUT'
+        : rawCode === 'ENOTFOUND'
+          ? 'DNS_ERROR'
+          : rawCode.startsWith('CERT_') || rawCode.includes('TLS')
+            ? 'TLS_ERROR'
+            : 'INVESTIGATION_FAILED';
+    const message = this.text(candidate?.message || 'Investigation failed', 500)
+      .replace(/https?:\/\/[^\s]+/gi, '[url]')
+      .replace(/Bearer\s+[^\s]+/gi, 'Bearer [redacted]');
+    return { code, summary: message };
   }
 
   private assertMenu(actor: ActorContext) {

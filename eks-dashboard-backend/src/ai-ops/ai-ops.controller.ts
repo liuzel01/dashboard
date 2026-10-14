@@ -286,4 +286,26 @@ export class AiOpsController {
       body?.comment,
     );
   }
+
+  @Post('investigations/:id/retry')
+  async retryInvestigation(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1)
+      throw new HttpException(
+        'Invalid investigation id',
+        HttpStatus.BAD_REQUEST,
+      );
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.alertInvestigationService.retry(
+      environmentId,
+      actor,
+      numericId,
+    );
+  }
 }

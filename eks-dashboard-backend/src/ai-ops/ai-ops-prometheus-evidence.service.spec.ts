@@ -157,4 +157,26 @@ describe('AiOpsPrometheusEvidenceService', () => {
     expect(result.classification).toBe('ERROR_RATE_CONFIRMED');
     expect(result.findings.join(' ')).toContain('不能直接证明因果关系');
   });
+
+  it('returns a stable redacted error when Prometheus rejects access', async () => {
+    get.mockRejectedValue({
+      message: 'Request failed for https://prometheus.internal/api/v1/query',
+      response: { status: 403 },
+    });
+
+    const result = await service.collect({
+      environmentId: 'mgbx',
+      alertName: 'PodOOMKilled',
+      startedAt: new Date().toISOString(),
+      labels: { namespace: 'default', pod: 'app-1', container: 'app' },
+    });
+
+    expect(result.evidence).toHaveLength(0);
+    expect(result.collectionErrors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'HTTP_403' })]),
+    );
+    expect(result.collectionErrors?.[0].summary).not.toContain(
+      'prometheus.internal',
+    );
+  });
 });
