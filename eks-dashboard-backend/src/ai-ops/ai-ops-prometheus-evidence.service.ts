@@ -93,7 +93,10 @@ export class AiOpsPrometheusEvidenceService {
       1000,
       20000,
     );
-    const at = Math.floor(new Date(context.startedAt).getTime() / 1000) + 300;
+    const at = Math.min(
+      Math.floor(Date.now() / 1000),
+      Math.floor(new Date(context.startedAt).getTime() / 1000) + 300,
+    );
     const settled = await Promise.allSettled(
       playbook.queries.map(async (query) => {
         const response = await axios.get<PrometheusResponse>(

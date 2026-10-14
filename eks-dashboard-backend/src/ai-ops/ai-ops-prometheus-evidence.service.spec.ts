@@ -93,7 +93,7 @@ describe('AiOpsPrometheusEvidenceService', () => {
     const result = await service.collect({
       environmentId: 'mgbx',
       alertName: 'PodOOMKilled',
-      startedAt: '2026-10-14T00:00:00.000Z',
+      startedAt: new Date().toISOString(),
       labels: { namespace: 'default', pod: 'app-1', container: 'app' },
     });
 
@@ -113,6 +113,12 @@ describe('AiOpsPrometheusEvidenceService', () => {
     expect(
       queries.find((query) => query.includes('container_memory_working_set')),
     ).toContain('namespace="default"');
+    const queryTimes = get.mock.calls.map((call) =>
+      Number((call[1] as { params?: { time?: number } })?.params?.time),
+    );
+    expect(Math.max(...queryTimes)).toBeLessThanOrEqual(
+      Math.floor(Date.now() / 1000),
+    );
   });
 
   it('keeps the synthetic JVM exercise out of confirmed-root-cause claims', async () => {
