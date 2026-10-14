@@ -77,4 +77,65 @@ describe('AiOpsPrometheusEvidenceService', () => {
     expect(result.insufficientEvidence).toBe(false);
     expect(result.findings.join(' ')).toContain('证据不完整');
   });
+
+  it('confirms the OOM signal without claiming a specific memory leak cause', async () => {
+    get.mockImplementation(async (_url, config) => {
+      const query = String(config?.params?.query || '');
+      if (query.includes('last_terminated_reason'))
+        return response([{ value: [1, '1'] }]) as any;
+      if (query.includes('working_set'))
+        return response([{ value: [1, '900'] }]) as any;
+      if (query.includes('resource_limits'))
+        return response([{ value: [1, '1000'] }]) as any;
+      return response([{ value: [1, '2'] }]) as any;
+    });
+
+    const result = await service.collect({
+      environmentId: 'mgbx',
+      alertName: 'PodOOMKilled',
+      startedAt: '2026-10-14T00:00:00.000Z',
+      labels: { namespace: 'default', pod: 'app-1', container: 'app' },
+    });
+
+    expect(result.playbookKey).toBe('POD_OOM');
+    expect(result.classification).toBe('OOM_CONFIRMED');
+    expect(result.findings.join(' ')).toContain('不能区分 JVM heap');
+  });
+
+  it('keeps the synthetic JVM exercise out of confirmed-root-cause claims', async () => {
+    get.mockResolvedValue(response([]) as any);
+
+    const result = await service.collect({
+      environmentId: 'mgbx',
+      alertName: 'JVMHeapHighSynthetic',
+      startedAt: '2026-10-14T00:00:00.000Z',
+      labels: { job: 'synthetic-service' },
+    });
+
+    expect(result.playbookKey).toBe('JVM_HEAP_HIGH_SYNTHETIC');
+    expect(result.insufficientEvidence).toBe(true);
+    expect(result.findings.join(' ')).toContain('不计入真实告警准确率');
+  });
+
+  it('correlates HTTP error rate while keeping change causality unproven', async () => {
+    get.mockImplementation(async (_url, config) => {
+      const query = String(config?.params?.query || '');
+      if (query.includes('status=~'))
+        return response([
+          { value: [1, query.includes('topk') ? '0.2' : '0.08'] },
+        ]) as any;
+      return response([{ value: [1, '12'] }]) as any;
+    });
+
+    const result = await service.collect({
+      environmentId: 'mgbx',
+      alertName: 'HTTPErrorRateHigh',
+      startedAt: '2026-10-14T00:00:00.000Z',
+      labels: { namespace: 'default', service: 'api' },
+    });
+
+    expect(result.playbookKey).toBe('HTTP_ERROR_RATE_HIGH');
+    expect(result.classification).toBe('ERROR_RATE_CONFIRMED');
+    expect(result.findings.join(' ')).toContain('不能直接证明因果关系');
+  });
 });

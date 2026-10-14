@@ -97,4 +97,47 @@ export const AIOPS_REPLAY_CASES: AiOpsReplayCase[] = [
       ],
     },
   },
+  {
+    key: 'jvm-heap-high-synthetic-v1',
+    name: 'JVM heap 高水位合成演练',
+    environmentId: 'mgbx',
+    description: '离线验证 JVM heap 证据不足、候选结论和非真实样本标记。',
+    expectedClassification: 'INSUFFICIENT_EVIDENCE',
+    payload: {
+      version: '4',
+      status: 'firing',
+      receiver: 'dashboard-aiops-synthetic-replay',
+      commonLabels: {
+        alertname: 'JVMHeapHighSynthetic',
+        environment: 'mgbx',
+        severity: 'warning',
+        exercise: 'synthetic',
+      },
+      commonAnnotations: {
+        summary: 'Synthetic JVM heap pressure exercise',
+      },
+      alerts: [
+        {
+          status: 'firing',
+          labels: {
+            alertname: 'JVMHeapHighSynthetic',
+            environment: 'mgbx',
+            severity: 'warning',
+            exercise: 'synthetic',
+            namespace: 'default',
+            job: 'aiops-jvm-synthetic-service',
+            service: 'aiops-jvm-synthetic-service',
+          },
+          annotations: {
+            summary: 'Synthetic JVM heap pressure exercise',
+            description:
+              'Synthetic fixture only; no production incident or heap dump exists.',
+          },
+          startsAt: '2026-10-14T00:00:00.000Z',
+          endsAt: '0001-01-01T00:00:00Z',
+          fingerprint: 'fixture-jvm-heap-synthetic-v1',
+        },
+      ],
+    },
+  },
 ];

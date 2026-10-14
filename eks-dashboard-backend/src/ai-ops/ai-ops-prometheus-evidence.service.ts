@@ -277,6 +277,206 @@ export class AiOpsPrometheusEvidenceService {
         },
       };
     }
+    if (
+      ['PodOOM', 'PodOOMKilled', 'ContainerOOMKilled'].includes(
+        context.alertName,
+      )
+    ) {
+      const namespace = this.literal(context.labels.namespace);
+      const pod = this.literal(context.labels.pod);
+      const container = this.literal(context.labels.container);
+      const selector = `{namespace="${namespace}",pod="${pod}",container="${container}"}`;
+      const queries = [
+        {
+          key: 'oom-reason',
+          title: '容器 OOMKilled 状态',
+          promql: `max(kube_pod_container_status_last_terminated_reason${selector},reason="OOMKilled"})`,
+        },
+        {
+          key: 'memory-working-set',
+          title: '容器内存工作集',
+          promql: `max(container_memory_working_set_bytes${selector})`,
+        },
+        {
+          key: 'memory-limit',
+          title: '容器内存 limit',
+          promql: `max(kube_pod_container_resource_limits${selector.slice(0, -1)},resource="memory"})`,
+        },
+        {
+          key: 'restarts',
+          title: '容器重启次数',
+          promql: `max(kube_pod_container_status_restarts_total${selector})`,
+        },
+      ];
+      const empty = this.empty('POD_OOM', 'pod-oom-v1');
+      return {
+        queries,
+        empty,
+        analyze: (evidence, failed) => {
+          const oom = this.single(evidence, 'oom-reason');
+          const workingSet = this.single(evidence, 'memory-working-set');
+          const limit = this.single(evidence, 'memory-limit');
+          const utilization =
+            workingSet !== null && limit !== null && limit > 0
+              ? workingSet / limit
+              : null;
+          return {
+            playbookKey: empty.playbookKey,
+            playbookVersion: empty.playbookVersion,
+            classification:
+              oom === 1 ? 'OOM_CONFIRMED' : 'OOM_NEEDS_CORRELATION',
+            confidence: oom === 1 && utilization !== null ? 'MEDIUM' : 'LOW',
+            insufficientEvidence: oom === null,
+            findings: [
+              oom === 1
+                ? 'Kubernetes 指标确认容器最近一次终止原因为 OOMKilled。'
+                : '尚未从指标确认 OOMKilled 终止原因。',
+              utilization === null
+                ? '内存工作集或 limit 证据不完整。'
+                : `告警窗口内存工作集约占 limit 的 ${(utilization * 100).toFixed(1)}%。`,
+              '仅凭容器 OOM 不能区分 JVM heap、native memory、sidecar 或节点压力。',
+            ],
+            recommendations: [
+              '核对 previous log、Pod Event、容器 limit、节点压力及同服务其他 Pod。',
+              '没有 heap dump 或 JVM 指标时，不要声称已定位具体泄漏对象。',
+            ],
+            missingEvidence: this.missing(failed, [
+              'previous log 与 Pod Event',
+              'JVM heap/native memory 拆分',
+              '同服务 Pod 对比',
+            ]),
+            evidence,
+          };
+        },
+      };
+    }
+    if (
+      ['HTTPErrorRateHigh', 'KylinBackendServiceHttpErrorRateHigh'].includes(
+        context.alertName,
+      )
+    ) {
+      const job = this.matcher(context.labels.job || context.labels.service);
+      const base = `{job=${job},namespace="${this.literal(context.labels.namespace) || 'default'}"}`;
+      const queries = [
+        {
+          key: 'error-rate',
+          title: 'HTTP 5xx 错误率',
+          promql: `sum(rate(http_server_requests_seconds_count${base.slice(0, -1)},status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count${base}[5m]))`,
+        },
+        {
+          key: 'request-rate',
+          title: 'HTTP 请求速率',
+          promql: `sum(rate(http_server_requests_seconds_count${base}[5m]))`,
+        },
+        {
+          key: 'status-top',
+          title: 'HTTP 错误状态分布',
+          promql: `topk(10, sum by (status,uri) (rate(http_server_requests_seconds_count${base.slice(0, -1)},status=~"5.."}[5m])))`,
+        },
+      ];
+      const empty = this.empty('HTTP_ERROR_RATE_HIGH', 'http-error-rate-v1');
+      return {
+        queries,
+        empty,
+        analyze: (evidence, failed) => {
+          const errorRate = this.single(evidence, 'error-rate');
+          const requestRate = this.single(evidence, 'request-rate');
+          return {
+            playbookKey: empty.playbookKey,
+            playbookVersion: empty.playbookVersion,
+            classification:
+              errorRate !== null && errorRate > 0
+                ? 'ERROR_RATE_CONFIRMED'
+                : 'NEEDS_INVESTIGATION',
+            confidence: this.populatedCount(evidence) >= 2 ? 'MEDIUM' : 'LOW',
+            insufficientEvidence: errorRate === null || requestRate === null,
+            findings: [
+              errorRate === null
+                ? '未取得 HTTP 5xx 错误率。'
+                : `告警窗口 HTTP 5xx 错误率约 ${(errorRate * 100).toFixed(2)}%。`,
+              requestRate === null
+                ? '未取得请求速率。'
+                : `告警窗口请求速率约 ${requestRate.toFixed(3)} 次/秒。`,
+              '时间接近的发布或依赖异常只作为候选因素，不能直接证明因果关系。',
+            ],
+            recommendations: [
+              '关联错误 URI、日志错误模式、下游依赖健康和同时间窗口变更记录。',
+            ],
+            missingEvidence: this.missing(failed, [
+              '错误日志模式',
+              '下游依赖与 Trace',
+              '同服务实例对比',
+            ]),
+            evidence,
+          };
+        },
+      };
+    }
+    if (context.alertName === 'JVMHeapHighSynthetic') {
+      const job = this.matcher(context.labels.job || context.labels.service);
+      const base = `{job=${job}}`;
+      const queries = [
+        {
+          key: 'heap-used',
+          title: 'JVM heap used',
+          promql: `max(jvm_memory_used_bytes${base.slice(0, -1)},area="heap"})`,
+        },
+        {
+          key: 'heap-max',
+          title: 'JVM heap max',
+          promql: `max(jvm_memory_max_bytes${base.slice(0, -1)},area="heap"})`,
+        },
+        {
+          key: 'gc-pause',
+          title: 'GC pause rate',
+          promql: `sum(rate(jvm_gc_pause_seconds_sum${base}[5m]))`,
+        },
+        {
+          key: 'pod-memory',
+          title: 'Pod memory working set',
+          promql: `sum(container_memory_working_set_bytes${base})`,
+        },
+      ];
+      const empty = this.empty(
+        'JVM_HEAP_HIGH_SYNTHETIC',
+        'jvm-heap-synthetic-v1',
+      );
+      return {
+        queries,
+        empty,
+        analyze: (evidence, failed) => {
+          const used = this.single(evidence, 'heap-used');
+          const max = this.single(evidence, 'heap-max');
+          const ratio =
+            used !== null && max !== null && max > 0 ? used / max : null;
+          return {
+            playbookKey: empty.playbookKey,
+            playbookVersion: empty.playbookVersion,
+            classification:
+              ratio !== null && ratio >= 0.9
+                ? 'HEAP_PRESSURE_CANDIDATE'
+                : 'INSUFFICIENT_EVIDENCE',
+            confidence: ratio !== null ? 'LOW' : 'LOW',
+            insufficientEvidence: true,
+            findings: [
+              '这是合成演练，不计入真实告警准确率或 MTTR。',
+              ratio === null
+                ? '未取得完整 heap used/max 证据。'
+                : `单点 heap 使用率约 ${(ratio * 100).toFixed(1)}%，仍不足以证明内存泄漏。`,
+            ],
+            recommendations: [
+              '补充时间趋势、Full GC 后回落情况、Pod limit、previous log 和 heap dump 后再判断。',
+            ],
+            missingEvidence: this.missing(failed, [
+              'heap/Old Gen 时间趋势',
+              'Full GC 后回落情况',
+              'heap dump 或对象分配证据',
+            ]),
+            evidence,
+          };
+        },
+      };
+    }
     return null;
   }
 
