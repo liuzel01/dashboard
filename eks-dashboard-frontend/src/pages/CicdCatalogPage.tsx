@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { BellOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
+import { BellOutlined, ExportOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
 import {
   DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
   desktopNotificationPermission,
@@ -33,7 +33,7 @@ import {
   type CicdRun,
 } from '../services/api';
 
-const { Text, Title } = Typography;
+const { Link, Text, Title } = Typography;
 const actionOptions = [
   { value: 'BUILD_DEPLOY', label: '构建部署' },
   { value: 'PACKAGE_PUBLISH', label: '制品推包' },
@@ -524,7 +524,7 @@ const CicdCatalogPage: React.FC = () => {
           render: (jobName: string, row: CicdRun) => {
             const buildUrl = safeExternalUrl(row.build_url);
             return buildUrl
-              ? <Tooltip title="在 Jenkins 中打开本次 Build"><a href={buildUrl} target="_blank" rel="noreferrer"><Text code ellipsis style={{ display: 'block' }}>{jobName}</Text></a></Tooltip>
+              ? <Tooltip title="在 Jenkins 中打开本次 Build"><Link href={buildUrl} target="_blank" rel="noreferrer" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><ExportOutlined style={{ marginRight: 6 }} />{jobName}</Link></Tooltip>
               : <Tooltip title={jobName}><Text code ellipsis style={{ display: 'block' }}>{jobName}</Text></Tooltip>;
           },
         },
@@ -549,7 +549,7 @@ const CicdCatalogPage: React.FC = () => {
       {detailRun && <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
         <Descriptions.Item label="环境"><Text code>{detailRun.environment_id}</Text></Descriptions.Item>
         <Descriptions.Item label="操作类型">{detailRun.action_type === 'PACKAGE_PUBLISH' ? '制品推包' : detailRun.action_type === 'IMAGE_BUILD_PUBLISH' ? '现货镜像构建推包' : '构建部署'}</Descriptions.Item>
-        <Descriptions.Item label="Job" span={2}>{safeExternalUrl(detailRun.build_url) ? <a href={safeExternalUrl(detailRun.build_url)} target="_blank" rel="noreferrer">{detailRun.job_name}</a> : <Text code>{detailRun.job_name}</Text>}</Descriptions.Item>
+        <Descriptions.Item label="Job" span={2}>{safeExternalUrl(detailRun.build_url) ? <Link href={safeExternalUrl(detailRun.build_url)} target="_blank" rel="noreferrer"><ExportOutlined style={{ marginRight: 6 }} />{detailRun.job_name}</Link> : <Text code>{detailRun.job_name}</Text>}</Descriptions.Item>
         <Descriptions.Item label="状态"><Tag color={detailRun.status === 'SUCCESS' ? 'success' : detailRun.status === 'FAILURE' || detailRun.status === 'ABORTED' ? 'error' : detailRun.status === 'RUNNING' ? 'processing' : 'default'}>{detailRun.status}</Tag></Descriptions.Item>
         <Descriptions.Item label="发起人">{detailRun.requested_by_username}</Descriptions.Item>
         <Descriptions.Item label="队列号">{detailRun.queue_id ? `#${detailRun.queue_id}` : '-'}</Descriptions.Item>
