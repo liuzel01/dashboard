@@ -407,13 +407,17 @@ export class AiOpsAlertInvestigationService {
     };
 
     const outcome = await this.db.withTransaction(async (conn) => {
+      const existingSql = resolved
+        ? `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type=?
+           AND source_fingerprint=? AND source_started_at=? ORDER BY id DESC LIMIT 1 FOR UPDATE`
+        : `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type=?
+           AND source_fingerprint=? AND source_started_at=? AND playbook_version=? LIMIT 1 FOR UPDATE`;
+      const existingParams = resolved
+        ? [environmentId, sourceType, fingerprint, startedAt]
+        : [environmentId, sourceType, fingerprint, startedAt, playbookVersion];
       const [existing] = await conn.execute<
         Array<mysql.RowDataPacket & { id: number }>
-      >(
-        `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type=?
-         AND source_fingerprint=? AND source_started_at=? AND playbook_version=? LIMIT 1 FOR UPDATE`,
-        [environmentId, sourceType, fingerprint, startedAt, playbookVersion],
-      );
+      >(existingSql, existingParams);
       let id = Number(existing[0]?.id || 0);
       const created = !id;
       if (created) {

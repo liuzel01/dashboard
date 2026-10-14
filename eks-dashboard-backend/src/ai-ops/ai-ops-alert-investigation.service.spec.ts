@@ -160,6 +160,28 @@ describe('AiOpsAlertInvestigationService', () => {
     ).toBe(true);
   });
 
+  it('resolves the existing specialized investigation without matching a playbook version', async () => {
+    const { service, execute } = makeService(7);
+    const resolved = payload('PodOOMKilled');
+    resolved.status = 'resolved';
+    resolved.alerts[0].status = 'resolved';
+    (
+      resolved.alerts[0] as (typeof resolved.alerts)[0] & { endsAt: string }
+    ).endsAt = '2026-10-14T04:00:00.000Z';
+
+    const result = await service.receiveAlertmanager(
+      'Bearer test-token',
+      resolved,
+    );
+
+    expect(result).toMatchObject({ created: 0, updated: 1 });
+    const select = execute.mock.calls.find(([sql]) =>
+      String(sql).includes('SELECT id FROM aiops_investigations'),
+    );
+    expect(String(select?.[0])).not.toContain('playbook_version=?');
+    expect(select?.[1]).toHaveLength(4);
+  });
+
   it('accepts an alert without a specialized playbook as a lightweight report', async () => {
     const { service, prometheus, contextEvidence, groupCallback } =
       makeService();
