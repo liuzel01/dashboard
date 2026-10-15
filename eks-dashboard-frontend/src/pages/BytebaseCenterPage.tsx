@@ -10,6 +10,7 @@ import {
   App,
   Button,
   Card,
+  Collapse,
   Form,
   Input,
   Modal,
@@ -21,6 +22,7 @@ import {
   Typography,
 } from "antd";
 import { ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { InlineHelpTooltip } from "../components/ops";
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { BytebaseRealtimeContext } from "../contexts/BytebaseRealtimeContextValue";
@@ -173,14 +175,14 @@ const BytebaseCenterPage: React.FC = () => {
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
-        数据库访问与变更中心
+        <Space size={6} align="center">
+          <span>数据库访问与变更中心</span>
+          <InlineHelpTooltip
+            ariaLabel="数据库访问与变更说明"
+            content={`Dashboard 负责统一授权与审计；数据库变更由 Bytebase Issue / Plan / Rollout 执行。当前实时状态：${realtimeConnected ? "已连接" : "连接中或不可用"}。`}
+          />
+        </Space>
       </Typography.Title>
-      <Alert
-        type="info"
-        showIcon
-        message="Dashboard 负责统一授权与审计；数据库变更由 Bytebase Issue / Plan / Rollout 执行。"
-        description={`实时状态：${realtimeConnected ? "已连接" : "连接中或不可用"}`}
-      />
       <Card>
         <Space wrap>
           <Select
@@ -215,19 +217,18 @@ const BytebaseCenterPage: React.FC = () => {
           )}
         </Space>
         {diagnostic && (
-          <Alert
+          <Collapse
             style={{ marginTop: 12 }}
-            type={diagnostic.ok ? "success" : "warning"}
-            showIcon
-            message={
-              diagnostic.ok
-                ? `Bytebase ${diagnostic.version || ""} 连接正常`
-                : "JIT 当前不可用"
-            }
-            description={
-              diagnostic.jitReason ||
-              `延迟 ${diagnostic.latencyMs || "-"}ms；JIT：${diagnostic.jit || "UNSUPPORTED"}`
-            }
+            items={[{
+              key: "bytebase-runtime-status",
+              label: <Space size={6}><Typography.Text strong>Bytebase 运行状态</Typography.Text><Tag color={diagnostic.ok ? "success" : "warning"}>{diagnostic.ok ? "连接正常" : "JIT 当前不可用"}</Tag></Space>,
+              children: <Alert
+                type={diagnostic.ok ? "success" : "warning"}
+                showIcon
+                message={diagnostic.ok ? `Bytebase ${diagnostic.version || ""} 连接正常` : "JIT 当前不可用"}
+                description={diagnostic.jitReason || `延迟 ${diagnostic.latencyMs || "-"}ms；JIT：${diagnostic.jit || "UNSUPPORTED"}`}
+              />,
+            }]}
           />
         )}
       </Card>
