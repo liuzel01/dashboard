@@ -109,7 +109,12 @@ const DependencyHealthPage: React.FC = () => {
     try {
       if (editingProfile) await updateDependencyHealthProviderProfile(editingProfile.id, value);
       else await createDependencyHealthProviderProfile(value);
-      setProfileRecords(await listDependencyHealthProviderProfileRecords());
+      const [records, profiles] = await Promise.all([
+        listDependencyHealthProviderProfileRecords(),
+        listDependencyHealthProviderProfiles(),
+      ]);
+      setProfileRecords(records);
+      setProviderProfiles(profiles);
       setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields();
     } finally { setProfileSaving(false); }
   };
