@@ -129,15 +129,67 @@ export class DependencyHealthService implements OnModuleInit {
 
   async history(targetKey: string, hours = 24) {
     const safeHours = Math.max(1, Math.min(24 * 30, Number(hours) || 24));
-    const [points, availability, events] = await Promise.all([
+    // The visual trend is intentionally hour-based.  Raw probe records arrive at
+    // different intervals per layer (and users may start an immediate check), so
+    // rendering records directly would make a "24 hour" chart appear to contain
+    // an arbitrary number of bars.
+    const currentHour = new Date();
+    currentHour.setUTCMinutes(0, 0, 0);
+    const trendStart = new Date(currentHour.getTime() - 23 * 60 * 60 * 1000);
+    const trendEnd = new Date(currentHour.getTime() + 60 * 60 * 1000);
+    const toMysqlUtc = (value: Date) => value.toISOString().slice(0, 19).replace('T', ' ');
+    const [points, availability, events, trendRows] = await Promise.all([
       this.db.query<any[]>(`SELECT layer,status,reason_code,duration_ms,checked_at FROM dependency_health_history WHERE target_key=? AND checked_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? HOUR) ORDER BY checked_at ASC LIMIT 5000`, [targetKey, safeHours]),
       this.db.query<any[]>(`SELECT layer,COUNT(*) total,SUM(status='PASS') passed FROM dependency_health_history WHERE target_key=? AND checked_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? HOUR) GROUP BY layer`, [targetKey, safeHours]),
       this.db.query<any[]>(`SELECT layer,event_type,reason_code,summary,created_at FROM dependency_health_alert_events WHERE target_key=? AND created_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? HOUR) ORDER BY id DESC LIMIT 100`, [targetKey, safeHours]),
+      this.db.query<any[]>(`SELECT DATE_FORMAT(checked_at, '%Y-%m-%d %H:00:00') AS hour_bucket,layer,status,COUNT(*) total,SUM(status='PASS') passed,SUM(status='FAIL') failed
+        FROM dependency_health_history
+        WHERE target_key=? AND checked_at>=? AND checked_at<?
+        GROUP BY hour_bucket,layer,status
+        ORDER BY hour_bucket ASC,layer ASC`, [targetKey, toMysqlUtc(trendStart), toMysqlUtc(trendEnd)]),
     ]);
+    const trendByHour = new Map<string, any>();
+    for (const row of trendRows) {
+      const bucket = String(row.hour_bucket).replace(' ', 'T') + '.000Z';
+      const existing = trendByHour.get(bucket) || { total: 0, passed: 0, failed: 0, layers: new Map<string, any>() };
+      const layer = existing.layers.get(row.layer) || { layer: row.layer, total: 0, passed: 0, failed: 0, statuses: new Set<string>() };
+      const total = Number(row.total);
+      const passed = Number(row.passed);
+      const failed = Number(row.failed);
+      existing.total += total;
+      existing.passed += passed;
+      existing.failed += failed;
+      layer.total += total;
+      layer.passed += passed;
+      layer.failed += failed;
+      layer.statuses.add(String(row.status));
+      existing.layers.set(row.layer, layer);
+      trendByHour.set(bucket, existing);
+    }
+    const trend = Array.from({ length: 24 }, (_, index) => {
+      const hour = new Date(trendStart.getTime() + index * 60 * 60 * 1000).toISOString();
+      const aggregate = trendByHour.get(hour);
+      const status = !aggregate ? 'NO_DATA' : aggregate.failed > 0 ? 'FAIL' : aggregate.passed > 0 ? 'PASS' : 'SKIPPED';
+      return {
+        hour,
+        status,
+        total: aggregate?.total || 0,
+        passed: aggregate?.passed || 0,
+        failed: aggregate?.failed || 0,
+        layers: aggregate ? Array.from(aggregate.layers.values()).map((layer: any) => ({
+          layer: layer.layer,
+          status: layer.failed > 0 ? 'FAIL' : layer.passed > 0 ? 'PASS' : Array.from(layer.statuses).join(','),
+          total: layer.total,
+          passed: layer.passed,
+          failed: layer.failed,
+        })) : [],
+      };
+    });
     return {
       targetKey, hours: safeHours,
       availability: availability.map((row) => ({ layer: row.layer, total: Number(row.total), passed: Number(row.passed), percentage: Number(row.total) ? Number((Number(row.passed) * 100 / Number(row.total)).toFixed(2)) : null })),
       points: points.map((row) => ({ layer: row.layer, status: row.status, reasonCode: row.reason_code, durationMs: row.duration_ms === null ? null : Number(row.duration_ms), checkedAt: String(row.checked_at).replace(' ', 'T') + 'Z' })),
+      trend,
       events: events.map((row) => ({ layer: row.layer, eventType: row.event_type, reasonCode: row.reason_code, summary: row.summary, createdAt: String(row.created_at).replace(' ', 'T') + 'Z' })),
     };
   }

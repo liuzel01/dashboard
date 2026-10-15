@@ -40,6 +40,22 @@ const showVerificationResult = (result: any) => {
   message.open({ type: succeeded ? 'success' : 'warning', content: `立即验证完成：${layers.join('；')}`, duration: 6 });
 };
 
+const trendPointColor: Record<DependencyHealthHistory['trend'][number]['status'], string> = {
+  PASS: '#52c41a',
+  FAIL: '#ff4d4f',
+  SKIPPED: '#faad14',
+  NO_DATA: '#d9d9d9',
+};
+
+const trendPointTitle = (point: DependencyHealthHistory['trend'][number]) => {
+  const start = new Date(point.hour);
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  const range = `${start.toLocaleString()} - ${end.toLocaleTimeString()}`;
+  if (point.status === 'NO_DATA') return `${range}\n该小时没有检查记录`;
+  const layers = point.layers.map((layer) => `${layer.layer}：${layer.status}（${layer.total} 次）`).join('；');
+  return `${range}\n${point.total} 次检查，通过 ${point.passed}，失败 ${point.failed}\n${layers}`;
+};
+
 const profileFields: Record<string, Array<{ key: string; label: string }>> = {
   jenkins: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'usernameKey', label: '账号' }, { key: 'secretKey', label: 'API Token' }, { key: 'timeoutKey', label: '超时（可选）' }],
   gitlab: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'secretKey', label: 'Bot Token' }, { key: 'projectIdKey', label: '项目 ID' }, { key: 'targetBranchKey', label: '目标分支' }, { key: 'timeoutKey', label: '超时（可选）' }],
@@ -270,7 +286,7 @@ const DependencyHealthPage: React.FC = () => {
         { key: 'tls', label: 'TLS 证书到期', children: selectedItem.tlsExpiresAt ? new Date(selectedItem.tlsExpiresAt).toLocaleString() : '-' },
         { key: 'checkedAt', label: '检查时间', children: new Date(selectedItem.checkedAt).toLocaleString() },
         { key: 'availability', label: '近 24 小时可用率', children: <Space direction="vertical" style={{ width: '100%' }}>{(history?.availability || []).map((item) => <div key={item.layer}><Typography.Text>{item.layer}：{item.percentage ?? '-'}%</Typography.Text><Progress percent={item.percentage || 0} size="small" status={(item.percentage || 0) >= 99 ? 'success' : 'exception'} /></div>)}</Space> },
-        { key: 'trend', label: '历史趋势', children: <Space wrap size={2}>{(history?.points || []).slice(-80).map((point, index) => <span key={`${point.checkedAt}-${index}`} title={`${point.layer} ${point.status} ${new Date(point.checkedAt).toLocaleString()}`} style={{ width: 7, height: 22, display: 'inline-block', borderRadius: 2, background: point.status === 'PASS' ? '#52c41a' : point.status === 'FAIL' ? '#ff4d4f' : '#faad14' }} />)}</Space> },
+        { key: 'trend', label: '近 24 小时趋势', children: <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 2, minWidth: 0 }}>{(history?.trend || []).map((point) => <Tooltip key={point.hour} title={<span style={{ whiteSpace: 'pre-line' }}>{trendPointTitle(point)}</span>}><span aria-label={trendPointTitle(point)} style={{ flex: '1 1 0', minWidth: 0, height: 22, display: 'inline-block', borderRadius: 2, background: trendPointColor[point.status] }} /></Tooltip>)}</div> },
         { key: 'events', label: '告警与恢复', children: history?.events.length ? <Space direction="vertical">{history.events.map((event, index) => <Typography.Text key={`${event.createdAt}-${index}`} type={event.eventType === 'FIRING' ? 'danger' : 'success'}>{new Date(event.createdAt).toLocaleString()} [{event.layer}] {event.summary}</Typography.Text>)}</Space> : '近 24 小时无事件' },
       ]} />}
     </Modal>

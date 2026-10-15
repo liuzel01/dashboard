@@ -2100,6 +2100,10 @@ export type DependencyHealthHistory = {
   targetKey: string; hours: number;
   availability: Array<{ layer: 'L1' | 'L2' | 'L3'; total: number; passed: number; percentage: number | null }>;
   points: Array<{ layer: 'L1' | 'L2' | 'L3'; status: string; reasonCode: string; durationMs: number | null; checkedAt: string }>;
+  trend: Array<{
+    hour: string; status: 'PASS' | 'FAIL' | 'SKIPPED' | 'NO_DATA'; total: number; passed: number; failed: number;
+    layers: Array<{ layer: 'L1' | 'L2' | 'L3'; status: string; total: number; passed: number; failed: number }>;
+  }>;
   events: Array<{ layer: 'L2' | 'L3'; eventType: 'FIRING' | 'RECOVERED'; reasonCode: string; summary: string; createdAt: string }>;
 };
 export const listDependencyHealthTargets = async () => (await api.get('/dependency-health/targets')).data as DependencyHealthTarget[];
