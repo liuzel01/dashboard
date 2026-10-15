@@ -450,6 +450,21 @@ const BytebaseCenterPage: React.FC = () => {
             {detail.statementIntegrity === "VERIFIED" ? "内容校验通过" : detail.statementIntegrity === "CHANGED" ? "内容已变化" : "无法校验"}
           </Tag>
           <Input.TextArea value={detail.statement || "未找到 SQL Sheet"} readOnly autoSize={{ minRows: 8, maxRows: 20 }} style={{ fontFamily: "monospace" }} />
+          <Divider plain>部署诊断</Divider>
+          {detail.deploymentDiagnostics?.length ? detail.deploymentDiagnostics.map((run) => <Alert
+            key={run.name}
+            type="error"
+            showIcon
+            message={`${run.status} · ${run.name.split("/").slice(-3).join("/")}`}
+            description={<Space direction="vertical" size={6} style={{ width: "100%" }}>
+              {run.errors.map((error, index) => <Typography.Text key={`${run.name}-error-${index}`} code copyable>{error}</Typography.Text>)}
+              {run.timeline.map((entry, index) => <Space key={`${run.name}-log-${index}`} wrap>
+                <Tag color={entry.status === "ERROR" ? "error" : "default"}>{entry.type}</Tag>
+                {entry.action && <Tag>{entry.action}</Tag>}
+                {entry.error && <Typography.Text type="danger">{entry.error}</Typography.Text>}
+              </Space>)}
+            </Space>}
+          />) : <Typography.Text type="secondary">未发现失败或取消的 Bytebase TaskRun</Typography.Text>}
           <Divider plain>流转记录</Divider>
           {detail.events.length ? detail.events.map((event, index) => <Typography.Paragraph key={`${event.created_at}-${index}`} style={{ marginBottom: 4 }}>
             <Typography.Text type="secondary">{new Date(event.created_at).toLocaleString()} </Typography.Text>

@@ -324,6 +324,57 @@ describe('BytebaseService', () => {
     );
   });
 
+  it('extracts failed task-run diagnostics without returning executed statements', () => {
+    const result = (service as any).summarizeTaskRun(
+      {
+        name: 'projects/p/plans/1/rollout/stages/prod/tasks/1/taskRuns/2',
+        status: 'FAILED',
+        detail: 'migration failed',
+      },
+      [
+        {
+          type: 'TRANSACTION_CONTROL',
+          transactionControl: { type: 'BEGIN' },
+        },
+        {
+          type: 'COMMAND_EXECUTE',
+          commandExecute: {
+            statement: 'UPDATE secret_table SET password="secret"',
+            response: { error: 'Duplicate entry 1 for key PRIMARY' },
+          },
+        },
+        {
+          type: 'TRANSACTION_CONTROL',
+          transactionControl: { type: 'ROLLBACK' },
+        },
+      ],
+    );
+
+    expect(result.errors).toEqual([
+      'migration failed',
+      'Duplicate entry 1 for key PRIMARY',
+    ]);
+    expect(result.timeline).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'TRANSACTION_CONTROL',
+          action: 'BEGIN',
+        }),
+        expect.objectContaining({
+          type: 'COMMAND_EXECUTE',
+          status: 'ERROR',
+          error: 'Duplicate entry 1 for key PRIMARY',
+        }),
+        expect.objectContaining({
+          type: 'TRANSACTION_CONTROL',
+          action: 'ROLLBACK',
+        }),
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toContain('secret_table');
+    expect(JSON.stringify(result)).not.toContain('password');
+  });
+
   it('reconciles a completed rollout without issuing another write request', async () => {
     db.query
       .mockResolvedValueOnce([

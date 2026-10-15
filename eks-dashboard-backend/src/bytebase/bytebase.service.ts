@@ -273,6 +273,8 @@ export class BytebaseService {
         issue: null,
         plan: null,
         statement: null,
+        statementIntegrity: 'UNAVAILABLE',
+        deploymentDiagnostics: [],
         events: [],
       };
     const c = await this.config(row.environment_id);
@@ -304,13 +306,114 @@ export class BytebaseService {
           ? 'VERIFIED'
           : 'CHANGED';
     }
+    const deploymentDiagnostics: any[] = [];
+    try {
+      const rollout = await this.remote(
+        c,
+        'deployer',
+        'GET',
+        `/v1/${row.plan_name}/rollout`,
+      );
+      const taskNames = new Set(
+        (rollout?.stages || []).flatMap((stage: any) =>
+          (stage.tasks || []).map((task: any) => String(task.name || '')),
+        ),
+      );
+      const runs = await this.remote(
+        c,
+        'deployer',
+        'GET',
+        `/v1/${row.plan_name}/rollout/stages/-/tasks/-/taskRuns`,
+      );
+      const failedRuns = (runs.taskRuns || [])
+        .filter((run: any) =>
+          ['FAILED', 'CANCELED'].includes(
+            String(run.status || '').toUpperCase(),
+          ),
+        )
+        .filter((run: any) => {
+          const taskName = String(run.name || '').split('/taskRuns/')[0];
+          return taskNames.size === 0 || taskNames.has(taskName);
+        })
+        .slice(0, 50);
+      for (const run of failedRuns) {
+        let entries: any[] = [];
+        try {
+          const log = await this.remote(
+            c,
+            'deployer',
+            'GET',
+            `/v1/${run.name}/log`,
+          );
+          entries = Array.isArray(log.entries) ? log.entries : [];
+        } catch (error) {
+          if (!(error instanceof NotFoundException)) throw error;
+        }
+        deploymentDiagnostics.push(this.summarizeTaskRun(run, entries));
+      }
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+    }
     return {
       request: row,
       issue,
       plan,
       statement,
       statementIntegrity,
+      deploymentDiagnostics,
       events,
+    };
+  }
+
+  private summarizeTaskRun(run: any, entries: any[]) {
+    const timeline = entries.slice(-200).map((entry: any) => {
+      const type = String(entry.type || 'UNKNOWN');
+      const payload =
+        entry.commandExecute ||
+        entry.databaseSync ||
+        entry.transactionControl ||
+        entry.schemaDump ||
+        entry.priorBackup ||
+        entry.retryInfo ||
+        entry.computeDiff ||
+        entry.ghostMigration ||
+        entry.releaseFileExecute ||
+        {};
+      const error = String(
+        payload?.response?.error || payload?.error || '',
+      ).slice(0, 4000);
+      return {
+        type,
+        action:
+          type === 'TRANSACTION_CONTROL'
+            ? String(payload.type || '')
+            : undefined,
+        status: error ? 'ERROR' : 'OK',
+        error: error || undefined,
+        logTime:
+          entry.logTime ||
+          payload.logTime ||
+          payload.response?.logTime ||
+          payload.endTime ||
+          payload.startTime ||
+          null,
+      };
+    });
+    const errors = Array.from(
+      new Set(
+        [String(run.detail || ''), ...timeline.map((item: any) => item.error)]
+          .filter(Boolean)
+          .map((value) => String(value).slice(0, 4000)),
+      ),
+    ).slice(0, 20);
+    return {
+      name: String(run.name || ''),
+      status: String(run.status || 'UNKNOWN'),
+      detail: String(run.detail || '').slice(0, 4000) || null,
+      startTime: run.startTime || null,
+      updateTime: run.updateTime || null,
+      errors,
+      timeline,
     };
   }
 
