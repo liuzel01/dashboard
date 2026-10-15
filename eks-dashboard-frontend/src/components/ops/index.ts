@@ -1,4 +1,6 @@
 export { default as DetailDrawer } from './DetailDrawer';
+export { default as ColumnSettingsPopover } from './ColumnSettingsPopover';
+export type { ColumnSettingOption } from './ColumnSettingsPopover';
 export { default as FilterBar } from './FilterBar';
 export { default as InlineHelpTooltip } from './InlineHelpTooltip';
 export { default as MetricGrid } from './MetricGrid';
@@ -8,3 +10,4 @@ export { default as PageHeader } from './PageHeader';
 export { default as RiskConfirm } from './RiskConfirm';
 export { default as StatusBadge } from './StatusBadge';
 export type { StatusDisplay, StatusTone } from './StatusBadge';
+export { useVisibleColumns } from './useVisibleColumns';

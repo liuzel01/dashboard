@@ -10,7 +10,6 @@ import {
   Input,
   InputNumber,
   Popconfirm,
-  Popover,
   Select,
   Space,
   Table,
@@ -23,7 +22,7 @@ import {
 } from 'antd';
 import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
-import { InfoCircleOutlined, SettingOutlined } from '@ant-design/icons';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import { InlineHelpTooltip } from '../components/ops';
 import {
   createAssetAccount,
@@ -61,7 +60,7 @@ import {
   updateCredentialRef,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
+import { ColumnSettingsPopover, MetricGrid, OpsTable, PageHeader, useVisibleColumns } from '../components/ops';
 import type {
   AssetAccount,
   AssetChangeLog,
@@ -357,35 +356,14 @@ function EntityTab<T extends AssetEntity>({
     { label: '更新时间', value: 'updated_at' },
     { label: '记录状态', value: 'deleted_state' },
   ];
-  const validColumnKeys = new Set(columnOptions.map((item) => item.value));
   const defaultVisibleColumnKeys = columnSettings?.defaultVisibleColumnKeys
-    ? columnSettings.defaultVisibleColumnKeys.filter((key) => validColumnKeys.has(key))
+    ? columnSettings.defaultVisibleColumnKeys.filter((key) => columnOptions.some((option) => option.value === key))
     : columnOptions.map((item) => item.value);
-  const normalizeVisibleColumnKeys = (values: unknown) => {
-    if (!Array.isArray(values)) return defaultVisibleColumnKeys;
-    const next = Array.from(new Set(values.filter((value): value is string =>
-      typeof value === 'string' && validColumnKeys.has(value),
-    )));
-    return next.length > 0 ? next : defaultVisibleColumnKeys;
-  };
-  const loadVisibleColumnKeys = () => {
-    if (!columnSettings || typeof window === 'undefined') return defaultVisibleColumnKeys;
-    try {
-      return normalizeVisibleColumnKeys(JSON.parse(window.localStorage.getItem(columnSettings.storageKey) || 'null'));
-    } catch {
-      return defaultVisibleColumnKeys;
-    }
-  };
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumnKeys);
-
-  useEffect(() => {
-    setVisibleColumnKeys(loadVisibleColumnKeys());
-  }, [columnSettings?.storageKey]);
-
-  useEffect(() => {
-    if (!columnSettings || typeof window === 'undefined') return;
-    window.localStorage.setItem(columnSettings.storageKey, JSON.stringify(visibleColumnKeys));
-  }, [columnSettings?.storageKey, visibleColumnKeys]);
+  const { visibleKeys: visibleColumnKeys, setVisibleKeys: setVisibleColumnKeys, resetVisibleKeys } = useVisibleColumns({
+    storageKey: columnSettings?.storageKey,
+    options: columnOptions,
+    defaultVisibleKeys: defaultVisibleColumnKeys,
+  });
 
   const load = useCallback(async () => {
     const requestKey = JSON.stringify(filters);
@@ -572,37 +550,16 @@ function EntityTab<T extends AssetEntity>({
           </>
         )}
         {columnSettings && (
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            title="列设置"
-            content={
-              <Space direction="vertical" size={8} style={{ minWidth: 260 }}>
-                <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
-                  <Text type="secondary">选择要显示的列</Text>
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => setVisibleColumnKeys(defaultVisibleColumnKeys)}
-                  >
-                    恢复默认
-                  </Button>
-                </Space>
-                <Checkbox.Group
-                  options={columnOptions}
-                  value={visibleColumnKeys}
-                  onChange={(values) => setVisibleColumnKeys(normalizeVisibleColumnKeys(values))}
-                  style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
-                />
-              </Space>
-            }
-          >
-            <Button icon={<SettingOutlined />}>列设置</Button>
-          </Popover>
+          <ColumnSettingsPopover
+            options={columnOptions}
+            value={visibleColumnKeys}
+            onChange={setVisibleColumnKeys}
+            onReset={resetVisibleKeys}
+          />
         )}
       </Space>
 
-      <Table
+      <OpsTable
         rowKey="id"
         loading={loading}
         dataSource={items}

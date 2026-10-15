@@ -9,18 +9,14 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Popover,
   Select,
-  Checkbox,
   Collapse,
   Space,
   Switch,
-  Table,
   Tag,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { SettingOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   createCertStudyNote,
@@ -33,6 +29,7 @@ import {
   updateCertStudyReview,
 } from '../services/api';
 import type { CertStudyQuestionListItem, CertStudyQuestionNote } from '../services/api';
+import { ColumnSettingsPopover, OpsTable, useVisibleColumns } from '../components/ops';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -90,31 +87,6 @@ const loadDetailDrawerWidth = (examCode: string) => {
       : getDefaultDetailDrawerWidth();
   } catch {
     return getDefaultDetailDrawerWidth();
-  }
-};
-
-const validColumnKeys = new Set<CertStudyColumnKey>([
-  ...columnOptions.map((item) => item.value),
-  'actions',
-]);
-
-const normalizeVisibleColumns = (values: unknown): CertStudyColumnKey[] => {
-  if (!Array.isArray(values)) return defaultVisibleColumns;
-  const next = values.filter((item): item is CertStudyColumnKey =>
-    typeof item === 'string' && validColumnKeys.has(item as CertStudyColumnKey),
-  );
-  const unique = Array.from(new Set<CertStudyColumnKey>([...next, 'actions']));
-  return unique.length > 1 ? unique : defaultVisibleColumns;
-};
-
-const loadVisibleColumns = (examCode: string): CertStudyColumnKey[] => {
-  if (typeof window === 'undefined') return defaultVisibleColumns;
-  try {
-    const raw = window.localStorage.getItem(getVisibleColumnsStorageKey(examCode));
-    if (!raw) return defaultVisibleColumns;
-    return normalizeVisibleColumns(JSON.parse(raw));
-  } catch {
-    return defaultVisibleColumns;
   }
 };
 
@@ -298,7 +270,11 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
   const [savingEditedNote, setSavingEditedNote] = useState(false);
   const [noteComposerOpen, setNoteComposerOpen] = useState(false);
   const [detailNavLoading, setDetailNavLoading] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<CertStudyColumnKey[]>(() => loadVisibleColumns(examCode));
+  const { visibleKeys: visibleColumns, setVisibleKeys: setVisibleColumns, resetVisibleKeys } = useVisibleColumns({
+    storageKey: getVisibleColumnsStorageKey(examCode),
+    options: columnOptions,
+    defaultVisibleKeys: defaultVisibleColumns.filter((key) => key !== 'actions'),
+  });
   const [detailDrawerWidth, setDetailDrawerWidth] = useState(() => loadDetailDrawerWidth(examCode));
   const detailDrawerWidthRef = useRef(detailDrawerWidth);
 
@@ -307,17 +283,6 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
   const [editNoteForm] = Form.useForm();
   const [manualImportForm] = Form.useForm();
   const [jsonImportForm] = Form.useForm();
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      getVisibleColumnsStorageKey(examCode),
-      JSON.stringify(visibleColumns),
-    );
-  }, [examCode, visibleColumns]);
-
-  useEffect(() => {
-    setVisibleColumns(loadVisibleColumns(examCode));
-  }, [examCode]);
 
   useEffect(() => {
     setDetailDrawerWidth(loadDetailDrawerWidth(examCode));
@@ -921,7 +886,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         ),
       },
     ];
-      return allColumns.filter((column) => visibleColumns.includes(column.columnKey));
+      return allColumns.filter((column) => column.columnKey === 'actions' || visibleColumns.includes(column.columnKey));
     },
     [reviewSort, visibleColumns],
   );
@@ -1003,39 +968,12 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
             options={reviewSortOptions}
             style={{ width: 180 }}
           />
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            title="列设置"
-            content={
-              <Space direction="vertical" size={8} style={{ minWidth: 260 }}>
-                <Space align="center" style={{ justifyContent: 'space-between', width: '100%' }}>
-                  <Text type="secondary">选择要显示的列</Text>
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => setVisibleColumns(defaultVisibleColumns)}
-                  >
-                    恢复默认
-                  </Button>
-                </Space>
-                <Checkbox.Group
-                  options={columnOptions}
-                  value={visibleColumns.filter((item) => item !== 'actions')}
-                  onChange={(values) => {
-                    setVisibleColumns(normalizeVisibleColumns(values));
-                  }}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                    gap: 8,
-                  }}
-                />
-              </Space>
-            }
-          >
-            <Button icon={<SettingOutlined />}>列设置</Button>
-          </Popover>
+          <ColumnSettingsPopover
+            options={columnOptions}
+            value={visibleColumns}
+            onChange={setVisibleColumns}
+            onReset={resetVisibleKeys}
+          />
           <Button
             onClick={() => {
               void loadQuestions();
@@ -1054,7 +992,7 @@ const CertStudyPage: React.FC<CertStudyPageProps> = ({ examCode, examTitle }) =>
         </Space>
       </Card>
 
-      <Table
+      <OpsTable
         rowKey="id"
         loading={loading}
         dataSource={items}
