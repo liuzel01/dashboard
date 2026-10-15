@@ -2087,7 +2087,10 @@ export const getDependencyHealth = async (forceRefresh = false) =>
 
 export type DependencyHealthTarget = {
   key: string; name: string; environmentId: string; category: string; url: string;
-  module: 'http_2xx' | 'http_reachable'; enabled: boolean; sortOrder: number; updatedAt?: string;
+  module: 'http_2xx' | 'http_reachable'; providerProfile?: string | null; enabled: boolean; sortOrder: number; updatedAt?: string;
+};
+export type DependencyHealthProviderProfile = {
+  id: string; label: string; category: string; environmentId: string; suggestedUrl: string; configured: boolean; description: string;
 };
 export type DependencyHealthHistory = {
   targetKey: string; hours: number;
@@ -2096,6 +2099,7 @@ export type DependencyHealthHistory = {
   events: Array<{ layer: 'L2' | 'L3'; eventType: 'FIRING' | 'RECOVERED'; reasonCode: string; summary: string; createdAt: string }>;
 };
 export const listDependencyHealthTargets = async () => (await api.get('/dependency-health/targets')).data as DependencyHealthTarget[];
+export const listDependencyHealthProviderProfiles = async () => (await api.get('/dependency-health/provider-profiles')).data as DependencyHealthProviderProfile[];
 export const createDependencyHealthTarget = async (data: Omit<DependencyHealthTarget, 'updatedAt'>) => (await api.post('/dependency-health/targets', data)).data;
 export const updateDependencyHealthTarget = async (key: string, data: Omit<DependencyHealthTarget, 'key' | 'updatedAt'>) => (await api.put(`/dependency-health/targets/${encodeURIComponent(key)}`, data)).data;
 export const deleteDependencyHealthTarget = async (key: string) => (await api.delete(`/dependency-health/targets/${encodeURIComponent(key)}`)).data;

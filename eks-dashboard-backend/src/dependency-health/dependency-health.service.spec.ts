@@ -12,14 +12,15 @@ describe('DependencyHealthService', () => {
   let service: DependencyHealthService;
   const providers = {
     latest: jest.fn(async () => new Map()),
-    verificationDepth: jest.fn(() => 'L1'),
+    targetKeys: jest.fn(async () => new Set<string>()),
+    hasProfile: jest.fn(() => true),
   };
   const db = { query: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
     providers.latest.mockResolvedValue(new Map());
-    providers.verificationDepth.mockReturnValue('L1');
+    providers.targetKeys.mockResolvedValue(new Set<string>());
     db.query.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM dependency_health_targets')) throw new Error('migration not applied');
       return [];
@@ -89,7 +90,7 @@ describe('DependencyHealthService', () => {
     siteConf.getJson.mockResolvedValue([
       { key: 'jenkins-mgbx', name: 'Jenkins mgbx', environmentId: 'mgbx', category: 'jenkins', url: 'http://jenkins/login', module: 'http_reachable' },
     ]);
-    providers.verificationDepth.mockReturnValue('L3');
+    providers.targetKeys.mockResolvedValue(new Set(['jenkins-mgbx']));
     providers.latest.mockResolvedValue(new Map([['jenkins-mgbx', {
       L2: { targetKey: 'jenkins-mgbx', layer: 'L2', status: 'PASS', reasonCode: 'OK', summary: 'identity ok', durationMs: 10, metadata: null, checkedAt: new Date().toISOString() },
       L3: { targetKey: 'jenkins-mgbx', layer: 'L3', status: 'FAIL', reasonCode: 'BUSINESS_CHECK_FAILED', summary: 'catalog failed', durationMs: 20, metadata: null, checkedAt: new Date().toISOString() },

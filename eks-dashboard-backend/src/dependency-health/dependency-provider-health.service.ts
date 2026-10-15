@@ -30,6 +30,22 @@ type ProviderDefinition = {
   ) => Promise<Omit<ProviderCheckResult, 'targetKey' | 'layer' | 'checkedAt'>>;
 };
 
+export type DependencyProviderProfile = {
+  id: string;
+  label: string;
+  category: string;
+  environmentId: string;
+  suggestedUrl: string;
+  configured: boolean;
+  description: string;
+};
+
+type ProviderProfileDefinition = Omit<DependencyProviderProfile, 'configured' | 'suggestedUrl'> & {
+  urlKey: string;
+  requiredKeys: string[];
+  create: (targetKeys: string[]) => ProviderDefinition;
+};
+
 export const providerAlertTransition = (
   previousState: 'OK' | 'FIRING',
   previousFailures: number,
@@ -104,8 +120,24 @@ export class DependencyProviderHealthService implements OnModuleInit {
     }
   }
 
-  verificationDepth(targetKey: string): ProviderLayer | 'L1' {
-    return this.targetKeys().has(targetKey) ? 'L3' : 'L1';
+  async targetKeys(): Promise<Set<string>> {
+    try {
+      const rows = await this.db.query<any[]>(`SELECT target_key FROM dependency_health_targets WHERE enabled=1 AND provider_profile IS NOT NULL AND provider_profile<>''`);
+      return new Set(rows.map((row) => String(row.target_key)));
+    } catch {
+      return this.legacyTargetKeys();
+    }
+  }
+
+  hasProfile(profileId: string) {
+    return this.profileDefinitions().some((profile) => profile.id === profileId);
+  }
+
+  async profiles(): Promise<DependencyProviderProfile[]> {
+    return Promise.all(this.profileDefinitions().map(async (profile) => {
+      const [suggestedUrl, ...required] = await Promise.all([this.siteConf.getString(profile.urlKey, ''), ...profile.requiredKeys.map((key) => this.siteConf.getString(key, ''))]);
+      return { id: profile.id, label: profile.label, category: profile.category, environmentId: profile.environmentId, suggestedUrl, configured: required.every((value) => Boolean(String(value).trim())), description: profile.description };
+    }));
   }
 
   private async runDueChecks() {
@@ -196,22 +228,50 @@ export class DependencyProviderHealthService implements OnModuleInit {
   }
 
   private async definitions(): Promise<ProviderDefinition[]> {
+    try {
+      const rows = await this.db.query<any[]>(`SELECT target_key,provider_profile FROM dependency_health_targets WHERE enabled=1 AND provider_profile IS NOT NULL AND provider_profile<>''`);
+      const keysByProfile = new Map<string, string[]>();
+      rows.forEach((row) => {
+        const profile = String(row.provider_profile);
+        keysByProfile.set(profile, [...(keysByProfile.get(profile) || []), String(row.target_key)]);
+      });
+      return this.profileDefinitions().filter((profile) => keysByProfile.has(profile.id)).map((profile) => profile.create(keysByProfile.get(profile.id) || []));
+    } catch {
+      return this.legacyDefinitions();
+    }
+  }
+
+  private legacyDefinitions(): ProviderDefinition[] {
     return [
       this.jenkins(['jenkins-hashex', 'jenkins-hashdev'], 'hash-jenkins'),
       this.jenkins(['jenkins-mgbx'], 'mgbx-jenkins'),
       this.jenkins(['jenkins-icoin'], 'icoin-jenkins'),
       this.jenkins(['jenkins-tb'], 'tb-jenkins'),
-      this.gitlab(),
-      this.grafana(),
-      this.cliproxy(),
-      this.spotPublish(),
-      this.bytebase(),
+      this.gitlab(['gitlab-api']),
+      this.grafana(['grafana-mgbx']),
+      this.cliproxy(['cliproxy-api']),
+      this.spotPublish(['icoin-spot-publish']),
+      this.bytebase(['bytebase-hashex']),
     ];
   }
 
-  private bytebase(): ProviderDefinition {
+  private profileDefinitions(): ProviderProfileDefinition[] {
+    return [
+      { id: 'jenkins-hash', label: 'Jenkins / Hash', category: 'jenkins', environmentId: 'hashex', urlKey: 'cicd.executors.hash-jenkins.base_url', requiredKeys: ['cicd.executors.hash-jenkins.base_url', 'cicd.executors.hash-jenkins.username', 'cicd.executors.hash-jenkins.api_token'], description: '使用 Hash Jenkins 专用只读账号执行身份和 Job 目录检查', create: (keys) => this.jenkins(keys, 'hash-jenkins') },
+      { id: 'jenkins-mgbx', label: 'Jenkins / MGBX', category: 'jenkins', environmentId: 'mgbx', urlKey: 'cicd.executors.mgbx-jenkins.base_url', requiredKeys: ['cicd.executors.mgbx-jenkins.base_url', 'cicd.executors.mgbx-jenkins.username', 'cicd.executors.mgbx-jenkins.api_token'], description: '使用 MGBX Jenkins 专用只读账号执行身份和 Job 目录检查', create: (keys) => this.jenkins(keys, 'mgbx-jenkins') },
+      { id: 'jenkins-icoin', label: 'Jenkins / iCoin', category: 'jenkins', environmentId: 'icoin', urlKey: 'cicd.executors.icoin-jenkins.base_url', requiredKeys: ['cicd.executors.icoin-jenkins.base_url', 'cicd.executors.icoin-jenkins.username', 'cicd.executors.icoin-jenkins.api_token'], description: '使用 iCoin Jenkins 专用只读账号执行身份和 Job 目录检查', create: (keys) => this.jenkins(keys, 'icoin-jenkins') },
+      { id: 'jenkins-tb', label: 'Jenkins / TB', category: 'jenkins', environmentId: 'tb', urlKey: 'cicd.executors.tb-jenkins.base_url', requiredKeys: ['cicd.executors.tb-jenkins.base_url', 'cicd.executors.tb-jenkins.username', 'cicd.executors.tb-jenkins.api_token'], description: '使用 TB Jenkins 专用只读账号执行身份和 Job 目录检查', create: (keys) => this.jenkins(keys, 'tb-jenkins') },
+      { id: 'gitlab-monitoring', label: 'GitLab / 监控配置', category: 'gitlab', environmentId: 'hashex', urlKey: 'monitoring.requests.gitlab.base_url', requiredKeys: ['monitoring.requests.gitlab.base_url', 'monitoring.requests.gitlab.bot_token', 'monitoring.requests.gitlab.project_id', 'monitoring.requests.gitlab.target_branch'], description: '使用 GitLab Bot 验证身份并读取受控分支', create: (keys) => this.gitlab(keys) },
+      { id: 'grafana-mgbx', label: 'Grafana / MGBX', category: 'observability', environmentId: 'mgbx', urlKey: 'aiops.logs.environments.mgbx.grafana_base_url', requiredKeys: ['aiops.logs.environments.mgbx.grafana_base_url', 'aiops.logs.environments.mgbx.grafana_token', 'aiops.logs.environments.mgbx.datasource_uid'], description: '使用 Grafana Service Account 读取身份和数据源元数据', create: (keys) => this.grafana(keys) },
+      { id: 'cliproxy', label: 'CLIProxy / AI Ops', category: 'aiops', environmentId: 'global', urlKey: 'aiops.cliproxy.base_url', requiredKeys: ['aiops.cliproxy.base_url', 'aiops.cliproxy.api_key'], description: '使用 CLIProxy API Key 读取模型目录', create: (keys) => this.cliproxy(keys) },
+      { id: 'icoin-spot-publish', label: 'iCoin / 现货推包', category: 'publish', environmentId: 'icoin', urlKey: 'cicd.providers.icoin-spot.signin_url', requiredKeys: ['cicd.providers.icoin-spot.signin_url', 'cicd.providers.icoin-spot.username', 'cicd.providers.icoin-spot.password'], description: '使用 iCoin 推包专用账号验证登录并读取服务目录', create: (keys) => this.spotPublish(keys) },
+      { id: 'bytebase-hashex', label: 'Bytebase / Hashex', category: 'bytebase', environmentId: 'hashex', urlKey: 'bytebase.hashex.base_url', requiredKeys: ['bytebase.hashex.base_url', 'bytebase.hashex.catalog_email', 'bytebase.hashex.catalog_service_key'], description: '使用 Bytebase Catalog 专用账号验证并读取项目目录', create: (keys) => this.bytebase(keys) },
+    ];
+  }
+
+  private bytebase(targetKeys: string[]): ProviderDefinition {
     return {
-      targetKeys: ['bytebase-hashex'],
+      targetKeys,
       check: async (layer) => {
         const [baseUrl, email, serviceKey] = await Promise.all([
           this.siteConf.getString('bytebase.hashex.base_url', ''),
@@ -290,9 +350,9 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private gitlab(): ProviderDefinition {
+  private gitlab(targetKeys: string[]): ProviderDefinition {
     return {
-      targetKeys: ['gitlab-api'],
+      targetKeys,
       check: async (layer) => {
         const [baseUrl, projectId, token, branch, timeoutMs] =
           await Promise.all([
@@ -333,9 +393,9 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private grafana(): ProviderDefinition {
+  private grafana(targetKeys: string[]): ProviderDefinition {
     return {
-      targetKeys: ['grafana-mgbx'],
+      targetKeys,
       check: async (layer) => {
         const prefix = 'aiops.logs.environments.mgbx';
         const [baseUrl, token, datasourceUid, timeoutMs] = await Promise.all([
@@ -375,9 +435,9 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private cliproxy(): ProviderDefinition {
+  private cliproxy(targetKeys: string[]): ProviderDefinition {
     return {
-      targetKeys: ['cliproxy-api'],
+      targetKeys,
       check: async (layer) => {
         const [baseUrl, apiKey, model, timeoutMs] = await Promise.all([
           this.siteConf.getString('aiops.cliproxy.base_url', ''),
@@ -421,9 +481,9 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private spotPublish(): ProviderDefinition {
+  private spotPublish(targetKeys: string[]): ProviderDefinition {
     return {
-      targetKeys: ['icoin-spot-publish'],
+      targetKeys,
       check: async (layer) => {
         const [signinUrl, username, password] = await Promise.all([
           this.siteConf.getString('cicd.providers.icoin-spot.signin_url', ''),
@@ -564,7 +624,7 @@ export class DependencyProviderHealthService implements OnModuleInit {
     });
   }
 
-  private targetKeys() {
+  private legacyTargetKeys() {
     return new Set([
       'jenkins-hashex',
       'jenkins-hashdev',
@@ -575,6 +635,7 @@ export class DependencyProviderHealthService implements OnModuleInit {
       'grafana-mgbx',
       'cliproxy-api',
       'icoin-spot-publish',
+      'bytebase-hashex',
     ]);
   }
   private pass(

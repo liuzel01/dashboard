@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthTargets, updateDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
+import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfiles, listDependencyHealthTargets, updateDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
 import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
 
 const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
@@ -39,6 +39,7 @@ const DependencyHealthPage: React.FC = () => {
   const [history, setHistory] = useState<DependencyHealthHistory | null>(null);
   const [targetsOpen, setTargetsOpen] = useState(false);
   const [targets, setTargets] = useState<DependencyHealthTarget[]>([]);
+  const [providerProfiles, setProviderProfiles] = useState<DependencyHealthProviderProfile[]>([]);
   const [editingTarget, setEditingTarget] = useState<DependencyHealthTarget | null>(null);
   const [targetEditorOpen, setTargetEditorOpen] = useState(false);
   const [targetSaving, setTargetSaving] = useState(false);
@@ -70,7 +71,9 @@ const DependencyHealthPage: React.FC = () => {
   }, [selectedItem]);
 
   const openTargets = async () => {
-    setTargets(await listDependencyHealthTargets());
+    const [loadedTargets, loadedProfiles] = await Promise.all([listDependencyHealthTargets(), listDependencyHealthProviderProfiles()]);
+    setTargets(loadedTargets);
+    setProviderProfiles(loadedProfiles);
     setTargetsOpen(true);
   };
   const editTarget = (target?: DependencyHealthTarget) => {
@@ -213,6 +216,7 @@ const DependencyHealthPage: React.FC = () => {
       <OpsTable rowKey="key" pagination={false} dataSource={targets} columns={[
         { title: '标识', dataIndex: 'key' }, { title: '名称', dataIndex: 'name' }, { title: '环境', dataIndex: 'environmentId' },
         { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
+        { title: 'Provider 配置', dataIndex: 'providerProfile', render: (value: string | null) => value ? <Tag color="blue">{providerProfiles.find((profile) => profile.id === value)?.label || value}</Tag> : '-' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
         { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
       ] as any} />
@@ -224,6 +228,12 @@ const DependencyHealthPage: React.FC = () => {
           <Form.Item name="category" label="类型" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="url" label="探测 URL" rules={[{ required: true }, { type: 'url' }]}><Input /></Form.Item>
           <Form.Item name="module" label="L1 探测模块" rules={[{ required: true }]}><Select options={[{ value: 'http_2xx', label: 'HTTP 2xx' }, { value: 'http_reachable', label: 'HTTP 可达' }]} /></Form.Item>
+          <Form.Item name="providerProfile" label="L2/L3 Provider 配置（可选）" extra="选择后由服务端读取 SiteConf 的对应专用凭据并执行只读检查；浏览器不会接收凭据值。不选择时仍按普通 L1 URL 探测。">
+            <Select allowClear showSearch optionFilterProp="label" placeholder="不启用 Provider 专用检查" onChange={(value) => {
+              const profile = providerProfiles.find((item) => item.id === value);
+              if (profile) targetForm.setFieldsValue({ category: profile.category, url: profile.suggestedUrl || undefined, environmentId: profile.environmentId });
+            }} options={providerProfiles.map((profile) => ({ value: profile.id, label: `${profile.label}（${profile.configured ? '已配置' : '未完整配置'}）`, title: profile.description }))} />
+          </Form.Item>
           <Form.Item name="sortOrder" label="排序"><InputNumber min={0} /></Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
         </Form>

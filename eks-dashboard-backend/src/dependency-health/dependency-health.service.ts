@@ -12,6 +12,7 @@ export type DependencyTarget = {
   category: string;
   url: string;
   module?: string;
+  providerProfile?: string | null;
 };
 
 export type DependencyProbeResult = DependencyTarget & {
@@ -61,10 +62,12 @@ export class DependencyHealthService implements OnModuleInit {
 
   async targets(includeDisabled = true) {
     const rows = await this.db.query<any[]>(
-      `SELECT target_key,name,environment_id,category,url,probe_module,enabled,sort_order,updated_at FROM dependency_health_targets ${includeDisabled ? '' : 'WHERE enabled=1'} ORDER BY sort_order,target_key`,
+      `SELECT target_key,name,environment_id,category,url,probe_module,provider_profile,enabled,sort_order,updated_at FROM dependency_health_targets ${includeDisabled ? '' : 'WHERE enabled=1'} ORDER BY sort_order,target_key`,
     );
-    return rows.map((row) => ({ key: row.target_key, name: row.name, environmentId: row.environment_id, category: row.category, url: row.url, module: row.probe_module, enabled: !!row.enabled, sortOrder: Number(row.sort_order), updatedAt: row.updated_at }));
+    return rows.map((row) => ({ key: row.target_key, name: row.name, environmentId: row.environment_id, category: row.category, url: row.url, module: row.probe_module, providerProfile: row.provider_profile || null, enabled: !!row.enabled, sortOrder: Number(row.sort_order), updatedAt: row.updated_at }));
   }
+
+  async providerProfiles() { return this.providers.profiles(); }
 
   async saveTarget(key: string | null, input: unknown) {
     const value = input as Record<string, unknown>;
@@ -73,14 +76,14 @@ export class DependencyHealthService implements OnModuleInit {
     const sortOrder = Math.max(0, Math.min(100000, Number(value?.sortOrder) || 0));
     if (key) {
       const result: any = await this.db.query(
-        `UPDATE dependency_health_targets SET name=?,environment_id=?,category=?,url=?,probe_module=?,enabled=?,sort_order=? WHERE target_key=?`,
-        [target.name, target.environmentId, target.category, target.url, target.module, enabled ? 1 : 0, sortOrder, key],
+        `UPDATE dependency_health_targets SET name=?,environment_id=?,category=?,url=?,probe_module=?,provider_profile=?,enabled=?,sort_order=? WHERE target_key=?`,
+        [target.name, target.environmentId, target.category, target.url, target.module, target.providerProfile || null, enabled ? 1 : 0, sortOrder, key],
       );
       if (!Number(result.affectedRows)) throw new BadRequestException('Dependency target not found');
     } else {
       await this.db.query(
-        `INSERT INTO dependency_health_targets (target_key,name,environment_id,category,url,probe_module,enabled,sort_order) VALUES (?,?,?,?,?,?,?,?)`,
-        [target.key, target.name, target.environmentId, target.category, target.url, target.module, enabled ? 1 : 0, sortOrder],
+        `INSERT INTO dependency_health_targets (target_key,name,environment_id,category,url,probe_module,provider_profile,enabled,sort_order) VALUES (?,?,?,?,?,?,?,?,?)`,
+        [target.key, target.name, target.environmentId, target.category, target.url, target.module, target.providerProfile || null, enabled ? 1 : 0, sortOrder],
       );
     }
     this.snapshot = null;
@@ -139,14 +142,15 @@ export class DependencyHealthService implements OnModuleInit {
   }
 
   private async decorate(snapshot: DependencyHealthSnapshot, cache: { cached: boolean; stale: boolean; cacheAgeMs: number }) {
-    const [providerResults, l2IntervalMs, l3IntervalMs] = await Promise.all([
+    const [providerResults, providerTargetKeys, l2IntervalMs, l3IntervalMs] = await Promise.all([
       this.providers.latest(),
+      this.providers.targetKeys(),
       this.siteConf.getNumber('dependency_health.l2_interval_ms', 300_000),
       this.siteConf.getNumber('dependency_health.l3_interval_ms', 900_000),
     ]);
     const isStale = (result: ProviderCheckResult | undefined, intervalMs: number) => Boolean(result && Date.now() - new Date(result.checkedAt).getTime() > Math.max(120_000, intervalMs * 2));
     const items = snapshot.items.map((item) => {
-      const verificationDepth = this.providers.verificationDepth(item.key);
+      const verificationDepth = providerTargetKeys.has(item.key) ? 'L3' : 'L1';
       const provider = providerResults.get(item.key) || {};
       const l1: DependencyLayerResult = {
         status: item.healthy ? 'PASS' : 'FAIL', reasonCode: item.errorType,
@@ -240,6 +244,7 @@ export class DependencyHealthService implements OnModuleInit {
         category: String(value?.category || 'external-api').trim(),
         url: String(value?.url || '').trim(),
         module: String(value?.module || 'http_2xx').trim(),
+        providerProfile: value?.providerProfile ? String(value.providerProfile).trim() : null,
       };
       if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(target.key)) throw new BadRequestException(`dependency target ${index} has invalid key`);
       if (keys.has(target.key)) throw new BadRequestException(`duplicate dependency target key: ${target.key}`);
@@ -250,6 +255,9 @@ export class DependencyHealthService implements OnModuleInit {
       }
       if (!['http_2xx', 'http_reachable'].includes(target.module || '')) {
         throw new BadRequestException(`dependency target ${target.key} uses unsupported module`);
+      }
+      if (target.providerProfile && !this.providers.hasProfile(target.providerProfile)) {
+        throw new BadRequestException(`dependency target ${target.key} uses unsupported providerProfile`);
       }
       let parsed: URL;
       try { parsed = new URL(target.url); } catch { throw new BadRequestException(`dependency target ${target.key} has invalid URL`); }

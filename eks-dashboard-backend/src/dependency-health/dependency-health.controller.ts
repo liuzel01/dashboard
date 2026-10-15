@@ -26,6 +26,12 @@ export class DependencyHealthController {
     return this.service.targets(true);
   }
 
+  @Get('provider-profiles')
+  async providerProfiles(@Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.service.providerProfiles();
+  }
+
   @Post('targets')
   async createTarget(@Headers('authorization') authorization: string | undefined, @Body() body: unknown) {
     await this.authorize(authorization);

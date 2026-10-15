@@ -72,6 +72,17 @@ describe('DependencyProviderHealthService', () => {
     );
   });
 
+  it('returns selectable provider profiles without returning SiteConf credential values', async () => {
+    const profiles = await service.profiles();
+    const jenkins = profiles.find((profile) => profile.id === 'jenkins-hash');
+    expect(jenkins).toMatchObject({
+      label: 'Jenkins / Hash', configured: true,
+      suggestedUrl: 'https://jenkins.example.com',
+    });
+    expect(JSON.stringify(profiles)).not.toContain('secret-token');
+    expect(JSON.stringify(profiles)).not.toContain('bytebase-secret');
+  });
+
   it('checks the configured model without invoking completions', async () => {
     (axios.request as jest.Mock).mockResolvedValue({
       status: 200,
