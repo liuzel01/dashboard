@@ -13,6 +13,9 @@ describe('DependencyProviderHealthService', () => {
     'aiops.cliproxy.api_key': 'secret-key',
     'aiops.cliproxy.model': 'gpt-5.6-terra',
     'aiops.cliproxy.timeout_ms': 20000,
+    'bytebase.hashex.base_url': 'https://bytebase.example.com',
+    'bytebase.hashex.catalog_email': 'dashboard-catalog@example.com',
+    'bytebase.hashex.catalog_service_key': 'bytebase-secret',
   };
   const siteConf = {
     getString: jest.fn(async (key: string, fallback = '') =>
@@ -97,6 +100,25 @@ describe('DependencyProviderHealthService', () => {
       reasonCode: 'AUTH_FAILED',
       message: '专用凭据认证失败',
     });
+  });
+
+  it('uses the Bytebase catalog identity for L2 and a minimal project read for L3', async () => {
+    (axios.request as jest.Mock)
+      .mockResolvedValueOnce({ status: 200, data: { token: 'short-token' } })
+      .mockResolvedValueOnce({ status: 200, data: { token: 'short-token' } })
+      .mockResolvedValueOnce({ status: 200, data: { projects: [{ name: 'projects/hash' }] } });
+    const definitions = await (service as any).definitions();
+    const bytebase = definitions.find((entry: any) => entry.targetKeys.includes('bytebase-hashex'));
+    await expect(bytebase.check('L2')).resolves.toMatchObject({
+      status: 'PASS', metadata: { identity: 'dashboard-catalog@example.com' },
+    });
+    await expect(bytebase.check('L3')).resolves.toMatchObject({
+      status: 'PASS', metadata: { projectProbeCount: 1 },
+    });
+    expect(axios.request).toHaveBeenLastCalledWith(expect.objectContaining({
+      url: 'https://bytebase.example.com/v1/projects?pageSize=1',
+      headers: { Authorization: 'Bearer short-token' },
+    }));
   });
 });
 

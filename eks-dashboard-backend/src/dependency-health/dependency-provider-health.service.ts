@@ -205,7 +205,39 @@ export class DependencyProviderHealthService implements OnModuleInit {
       this.grafana(),
       this.cliproxy(),
       this.spotPublish(),
+      this.bytebase(),
     ];
+  }
+
+  private bytebase(): ProviderDefinition {
+    return {
+      targetKeys: ['bytebase-hashex'],
+      check: async (layer) => {
+        const [baseUrl, email, serviceKey] = await Promise.all([
+          this.siteConf.getString('bytebase.hashex.base_url', ''),
+          this.siteConf.getString('bytebase.hashex.catalog_email', ''),
+          this.siteConf.getString('bytebase.hashex.catalog_service_key', ''),
+        ]);
+        if (!baseUrl || !email || !serviceKey)
+          return this.notConfigured('Bytebase Catalog 专用凭据未配置');
+        const startedAt = Date.now();
+        const login = await this.request(`${baseUrl.replace(/\/+$/, '')}/v1/auth/login`, {
+          method: 'POST', data: { email, password: serviceKey, web: false }, timeout: 15_000,
+        });
+        const token = String(login.data?.token || '');
+        if (!token) throw new ProviderValidationError('INVALID_RESPONSE', 'Bytebase 登录响应缺少 Token');
+        if (layer === 'L2')
+          return this.pass('Bytebase Catalog 专用账号认证正常', Date.now() - startedAt, { identity: email });
+        const projects = await this.request(`${baseUrl.replace(/\/+$/, '')}/v1/projects?pageSize=1`, {
+          headers: { Authorization: `Bearer ${token}` }, timeout: 15_000,
+        });
+        if (!Array.isArray(projects.data?.projects))
+          throw new ProviderValidationError('INVALID_RESPONSE', 'Bytebase 项目目录响应无效');
+        return this.pass('Bytebase 项目目录最小只读检查正常', Date.now() - startedAt, {
+          projectProbeCount: projects.data.projects.length,
+        });
+      },
+    };
   }
 
   private jenkins(
