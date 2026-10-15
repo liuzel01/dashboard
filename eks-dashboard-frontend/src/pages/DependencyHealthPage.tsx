@@ -56,6 +56,7 @@ const DependencyHealthPage: React.FC = () => {
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<DependencyHealthProviderProfileRecord | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [profileEditorLoading, setProfileEditorLoading] = useState(false);
   const [profileForm] = Form.useForm();
   const [editingTarget, setEditingTarget] = useState<DependencyHealthTarget | null>(null);
   const [targetEditorOpen, setTargetEditorOpen] = useState(false);
@@ -95,10 +96,17 @@ const DependencyHealthPage: React.FC = () => {
     setTargetsOpen(true);
   };
   const openProfileManager = async () => {
-    const [records, references, types] = await Promise.all([listDependencyHealthProviderProfileRecords(), listDependencyHealthSiteConfReferences(), listDependencyHealthProviderTypes()]);
-    setProfileRecords(records); setSiteConfReferences(references); setProviderTypes(types); setProfilesOpen(true);
+    setProfileRecords(await listDependencyHealthProviderProfileRecords());
+    setProfilesOpen(true);
   };
-  const editProfile = (profile?: DependencyHealthProviderProfileRecord) => {
+  const editProfile = async (profile?: DependencyHealthProviderProfileRecord) => {
+    setProfileEditorLoading(true);
+    try {
+      if (!siteConfReferences.length || !providerTypes.length) {
+        const [references, types] = await Promise.all([listDependencyHealthSiteConfReferences(), listDependencyHealthProviderTypes()]);
+        setSiteConfReferences(references); setProviderTypes(types);
+      }
+    } finally { setProfileEditorLoading(false); }
     setEditingProfile(profile || null);
     profileForm.setFieldsValue(profile || { environmentId: 'global', providerType: 'jenkins', category: 'jenkins', enabled: true, sortOrder: 0, config: {} });
     setProfileEditorOpen(true);
@@ -284,11 +292,11 @@ const DependencyHealthPage: React.FC = () => {
     </Modal>
     <Modal title="Provider 连接档案管理" open={profilesOpen} onCancel={() => { setProfilesOpen(false); setEditingProfile(null); }} footer={null} width={1050}>
       <Typography.Paragraph type="secondary">连接档案只保存 SiteConf 配置项引用，不保存或展示 Token、密码等值。同一 Provider 类型可创建多个环境连接实例。</Typography.Paragraph>
-      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editProfile()}>新增连接档案</Button>
+      <Button type="primary" style={{ marginBottom: 12 }} loading={profileEditorLoading} onClick={() => void editProfile()}>新增连接档案</Button>
       <OpsTable rowKey="id" pagination={false} dataSource={profileRecords} columns={[
         { title: '标识', dataIndex: 'id' }, { title: '名称', dataIndex: 'name' }, { title: '类型', dataIndex: 'providerType', render: (value: string) => <Tag>{value}</Tag> }, { title: '环境', dataIndex: 'environmentId' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-        { title: '操作', render: (_: unknown, row: DependencyHealthProviderProfileRecord) => <Space><Button type="link" onClick={() => editProfile(row)}>编辑</Button><Popconfirm title="确认删除此 Provider 连接档案？" onConfirm={async () => { await deleteDependencyHealthProviderProfile(row.id); setProfileRecords(await listDependencyHealthProviderProfileRecords()); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+        { title: '操作', render: (_: unknown, row: DependencyHealthProviderProfileRecord) => <Space><Button type="link" loading={profileEditorLoading} onClick={() => void editProfile(row)}>编辑</Button><Popconfirm title="确认删除此 Provider 连接档案？" onConfirm={async () => { await deleteDependencyHealthProviderProfile(row.id); setProfileRecords(await listDependencyHealthProviderProfileRecords()); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
       ] as any} />
       <Modal title={editingProfile ? `编辑 ${editingProfile.name}` : '新增 Provider 连接档案'} open={profileEditorOpen} onCancel={() => { setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields(); }} onOk={() => void saveProfile()} confirmLoading={profileSaving} destroyOnHidden width={680}>
         <Form form={profileForm} layout="vertical">
