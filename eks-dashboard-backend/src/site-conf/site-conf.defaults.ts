@@ -13,6 +13,15 @@ export type SiteConfDefault = {
 };
 
 export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
+  { key: 'bytebase.hashex.base_url', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase HTTPS 地址', defaultValue: '' },
+  { key: 'bytebase.hashex.catalog_email', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 项目目录 SA', defaultValue: '' },
+  { key: 'bytebase.hashex.catalog_service_key', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 项目目录 Service Key', defaultValue: '', sensitive: true },
+  { key: 'bytebase.hashex.reader_email', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 只读 SA', defaultValue: '' },
+  { key: 'bytebase.hashex.reader_service_key', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 只读 Service Key', defaultValue: '', sensitive: true },
+  { key: 'bytebase.hashex.submitter_email', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 变更提交 SA', defaultValue: '' },
+  { key: 'bytebase.hashex.submitter_service_key', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 变更提交 Service Key', defaultValue: '', sensitive: true },
+  { key: 'bytebase.hashex.deployer_email', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 发布 SA', defaultValue: '' },
+  { key: 'bytebase.hashex.deployer_service_key', valueType: 'string', category: 'bytebase', description: 'Hashex Bytebase 发布 Service Key', defaultValue: '', sensitive: true },
   { key: 'dependency_health.blackbox_base_url', valueType: 'string', category: 'dependency-health', description: 'Dashboard 后端访问 Blackbox Exporter 的地址', defaultValue: 'http://127.0.0.1:9115' },
   { key: 'dependency_health.timeout_ms', valueType: 'number', category: 'dependency-health', description: '单个外部依赖探测超时（毫秒）', defaultValue: '12000', validation: { min: 1000, max: 30000 } },
   { key: 'dependency_health.cache_ttl_ms', valueType: 'number', category: 'dependency-health', description: '外部依赖探测结果缓存时间（毫秒）', defaultValue: '55000', validation: { min: 5000, max: 300000 } },

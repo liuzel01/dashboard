@@ -28,6 +28,17 @@ export const setAuthToken = (token: string | null) => {
   }
 };
 
+export type BytebaseProject = { name: string; title?: string; state?: string };
+export type BytebaseDatabase = { name: string; databaseName?: string; environment?: string; effectiveEnvironment?: string };
+export type BytebaseRequest = { request_id: string; environment_id: string; project_name: string; database_name: string; title: string; sql_sha256: string; status: string; actor_username: string; issue_name?: string; plan_name?: string; rollout_name?: string; last_error?: string; created_at: string };
+export const getBytebaseCatalog = async (environmentId: string) => (await api.get('/bytebase/catalog',{params:{environmentId}})).data as {projects:BytebaseProject[];capabilities:string[];jit:{supported:boolean;reason:string}};
+export const getBytebaseDatabases = async (environmentId:string,project:string) => (await api.get('/bytebase/databases',{params:{environmentId,project}})).data as {databases:BytebaseDatabase[]};
+export const getBytebaseIssues = async (environmentId:string,project:string) => (await api.get('/bytebase/issues',{params:{environmentId,project}})).data;
+export const diagnoseBytebase = async (environmentId:string) => (await api.get('/bytebase/diagnostics',{params:{environmentId}})).data;
+export const listBytebaseRequests = async () => (await api.get('/bytebase/requests')).data as BytebaseRequest[];
+export const createBytebaseChange = async (input:{environmentId:string;project:string;database:string;title:string;description?:string;statement:string}) => (await api.post('/bytebase/changes',{...input,confirmation:'CREATE_BYTEBASE_CHANGE'})).data;
+export const executeBytebaseRollout = async (environmentId:string,plan:string,mfaCode:string) => (await api.post('/bytebase/rollouts',{environmentId,plan,mfaCode,confirmation:'EXECUTE_BYTEBASE_ROLLOUT'})).data;
+
 /**
  * 获取应用列表
  * @param params - 包含查询参数的对象, 例如 { name: 'filter-text' }

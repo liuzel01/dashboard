@@ -11,6 +11,8 @@ export type AuditRuleConfig = {
 export type AuditPatternRuleConfig = AuditRuleConfig & { regex: RegExp };
 
 export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
+  { method: 'POST', path: '/bytebase/changes', action: 'bytebase.change.submit', actionName: '提交 Bytebase 数据库变更', menuKey: 'menu:bytebase', targetType: 'bytebase_change' },
+  { method: 'POST', path: '/bytebase/rollouts', action: 'bytebase.rollout.execute', actionName: '执行 Bytebase 数据库发布', menuKey: 'menu:bytebase', targetType: 'bytebase_rollout' },
   { method: 'POST', path: '/auth/login', action: 'auth.login', actionName: '登录' },
   { method: 'POST', path: '/auth/logout', action: 'auth.logout', actionName: '登出' },
   { method: 'PUT', path: '/menu-order', action: 'menuOrder.update', actionName: '修改菜单排序', menuKey: 'menu:menu-management', targetType: 'menu_order', getResourceId: () => 'global' },

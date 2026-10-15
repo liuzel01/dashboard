@@ -29,6 +29,7 @@ import { OncallModule } from './oncall/oncall.module';
 import { CicdModule } from './cicd/cicd.module';
 import { MenuOrderModule } from './menu-order/menu-order.module';
 import { DependencyHealthModule } from './dependency-health/dependency-health.module';
+import { BytebaseModule } from './bytebase/bytebase.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { DependencyHealthModule } from './dependency-health/dependency-health.mo
     CicdModule,
     MenuOrderModule,
     DependencyHealthModule,
+    BytebaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

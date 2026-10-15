@@ -35,6 +35,7 @@ import OncallPage from './pages/OncallPage';
 import CicdCatalogPage from './pages/CicdCatalogPage';
 import MenuOrderManagementPage from './pages/MenuOrderManagementPage';
 import DependencyHealthPage from './pages/DependencyHealthPage';
+import BytebaseCenterPage from './pages/BytebaseCenterPage';
 import { EnvironmentProvider } from './contexts/EnvironmentContext';
 import { EnvironmentContext } from './contexts/EnvironmentContextValue';
 import { AuthProvider } from './contexts/AuthContext';
@@ -165,6 +166,7 @@ const AppLayout: React.FC = () => {
     oncall: { key: '/oncall', label: 'Oncall 告警', icon: <AlertOutlined />, permission: 'menu:oncall', order: 30 },
     dataQuery: { key: '/data-query', label: '查询中心', icon: <DeploymentUnitOutlined />, permission: 'menu:data-query', order: 10 },
     cicdRuns: { key: '/cicd-runs', label: 'CI/CD 执行中心', icon: <RocketOutlined />, permission: 'menu:cicd-runs', order: 20 },
+    bytebase: { key: '/bytebase', label: '数据库访问与变更', icon: <DatabaseOutlined />, permission: 'menu:bytebase', order: 25 },
     sslCertificates: { key: '/ssl-certificates', label: 'SSL证书申请', icon: <SafetyCertificateOutlined />, permission: 'menu:ssl-certificates', order: 30 },
     kmsValues: { key: '/kms-values', label: 'KMS 配置加解密', icon: <SafetyCertificateOutlined />, permission: 'menu:kms-values', order: 40 },
     aiOps: { key: '/ai-ops', label: 'AI 运维', icon: <RobotOutlined />, permission: 'menu:ai-ops', order: 50 },
@@ -290,7 +292,7 @@ const AppLayout: React.FC = () => {
     '/ops-tools',
     '运维工具',
     <RobotOutlined />,
-    [menuItems.dataQuery, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues, menuItems.cicdRuns],
+    [menuItems.dataQuery, menuItems.bytebase, menuItems.aiOps, menuItems.sslCertificates, menuItems.kmsValues, menuItems.cicdRuns],
   );
 
   const systemManagementChildren: NonNullable<MenuProps['items']> = createOrderedChildren('/system-management', [
@@ -364,7 +366,7 @@ const AppLayout: React.FC = () => {
     ...(location.pathname.startsWith('/asset-management') ? ['/asset-management'] : []),
     ...(['/lines', '/line-onboarding', '/admin-site-ingress'].some((path) => location.pathname.startsWith(path)) ? ['/line-management'] : []),
     ...(['/site-monitors', '/monitoring-requests', '/oncall'].some((path) => location.pathname.startsWith(path)) ? ['/monitoring'] : []),
-    ...(['/data-query', '/ai-ops', '/ssl-certificates', '/kms-values', '/cicd-runs'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
+    ...(['/data-query', '/bytebase', '/ai-ops', '/ssl-certificates', '/kms-values', '/cicd-runs'].some((path) => location.pathname.startsWith(path)) ? ['/ops-tools'] : []),
     ...(location.pathname.startsWith('/cert-study/') ? ['/cert-study'] : []),
     ...(['/environments', '/site-conf', '/access-control', '/menu-management'].some((path) => location.pathname.startsWith(path)) ? ['/system-management'] : []),
     ...(location.pathname.startsWith('/access-control') ? ['/access-control'] : []),
@@ -423,6 +425,7 @@ const AppLayout: React.FC = () => {
               <Route path="/ssl-certificates" element={<ProtectedRoute required={['menu:ssl-certificates']}><SslCertificateExportPage /></ProtectedRoute>} />
               <Route path="/kms-values" element={<ProtectedRoute required={['menu:kms-values']}><KmsValuesPage /></ProtectedRoute>} />
               <Route path="/cicd-runs" element={<ProtectedRoute required={['menu:cicd-runs']}><CicdCatalogPage /></ProtectedRoute>} />
+              <Route path="/bytebase" element={<ProtectedRoute required={['menu:bytebase']}><BytebaseCenterPage /></ProtectedRoute>} />
               <Route path="/cert-study" element={<Navigate to="/cert-study/sap-c02" replace />} />
               <Route
                 path="/cert-study/sap-c02"
