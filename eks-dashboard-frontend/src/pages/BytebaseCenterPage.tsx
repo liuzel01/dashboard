@@ -10,7 +10,6 @@ import {
   App,
   Button,
   Card,
-  Collapse,
   Descriptions,
   Divider,
   Form,
@@ -31,7 +30,6 @@ import { BytebaseRealtimeContext } from "../contexts/BytebaseRealtimeContextValu
 import {
   cancelBytebaseRequest,
   createBytebaseChange,
-  diagnoseBytebase,
   executeBytebaseRollout,
   getBytebaseCatalog,
   getBytebaseDatabases,
@@ -45,13 +43,6 @@ import {
 
 const errorText = (e: unknown, fallback: string) =>
   (e as ApiError)?.response?.data?.message || (e as Error)?.message || fallback;
-type Diagnostic = {
-  ok?: boolean;
-  version?: string;
-  latencyMs?: number;
-  jit?: string;
-  jitReason?: string;
-};
 type ChangeForm = {
   database: string;
   title: string;
@@ -69,15 +60,13 @@ const BytebaseCenterPage: React.FC = () => {
     [databases, setDatabases] = useState<BytebaseDatabase[]>([]),
     [requests, setRequests] = useState<BytebaseRequest[]>([]);
   const [project, setProject] = useState<string>(),
-    [loading, setLoading] = useState(false),
-    [diagnostic, setDiagnostic] = useState<Diagnostic>();
+    [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<BytebaseRequestDetail>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [form] = Form.useForm();
   const env = currentEnvironment?.id;
   const canSubmit = permissions.includes("bytebase:change:submit"),
-    canRollout = permissions.includes("bytebase:rollout:execute"),
-    canDiagnose = permissions.includes("bytebase:config:manage");
+    canRollout = permissions.includes("bytebase:rollout:execute");
   const load = useCallback(async () => {
     if (!env) return;
     setLoading(true);
@@ -88,8 +77,6 @@ const BytebaseCenterPage: React.FC = () => {
       ]);
       setProjects(catalog.projects);
       setRequests(runs);
-      if (!catalog.jit.supported)
-        setDiagnostic((v) => ({ ...v, jitReason: catalog.jit.reason }));
     } catch (e) {
       message.error(errorText(e, "Bytebase 目录加载失败"));
     } finally {
@@ -248,36 +235,7 @@ const BytebaseCenterPage: React.FC = () => {
           >
             刷新目录
           </Button>
-          {canDiagnose && (
-            <Button
-              onClick={async () => {
-                try {
-                  setDiagnostic(await diagnoseBytebase(env));
-                  message.success("连接诊断完成");
-                } catch (e) {
-                  message.error(errorText(e, "连接诊断失败"));
-                }
-              }}
-            >
-              连接诊断
-            </Button>
-          )}
         </Space>
-        {diagnostic && (
-          <Collapse
-            style={{ marginTop: 12 }}
-            items={[{
-              key: "bytebase-runtime-status",
-              label: <Space size={6}><Typography.Text strong>Bytebase 运行状态</Typography.Text><Tag color={diagnostic.ok ? "success" : "warning"}>{diagnostic.ok ? "连接正常" : "JIT 当前不可用"}</Tag></Space>,
-              children: <Alert
-                type={diagnostic.ok ? "success" : "warning"}
-                showIcon
-                message={diagnostic.ok ? `Bytebase ${diagnostic.version || ""} 连接正常` : "JIT 当前不可用"}
-                description={diagnostic.jitReason || `延迟 ${diagnostic.latencyMs || "-"}ms；JIT：${diagnostic.jit || "UNSUPPORTED"}`}
-              />,
-            }]}
-          />
-        )}
       </Card>
       <Tabs
         items={[
