@@ -1,53 +1,60 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { Select, Spin, Alert, Space, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { Link, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { FileProtectOutlined, DeploymentUnitOutlined, SafetyCertificateOutlined, GlobalOutlined, AimOutlined, SettingOutlined, CloudUploadOutlined, RobotOutlined, LineChartOutlined, BookOutlined, DatabaseOutlined, AlertOutlined, RocketOutlined } from '@ant-design/icons';
-import DeploymentListPage from './pages/DeploymentListPage';
-import WindowsJumpServerPage from './pages/WindowsJumpServerPage';
-import DataQueryPage from './pages/DataQueryPage';
-import SecurityGroupPage from './pages/SecurityGroupPage';
-import SiteMonitorPage from './pages/SiteMonitorPage';
-import EnvironmentManagementPage from './pages/EnvironmentManagementPage';
-import S3UploadPage from './pages/S3UploadPage';
-import AccountManagementPage from './pages/AccountManagementPage';
-import AuditLogPage from './pages/AuditLogPage';
-import LineOnboardingPage from './pages/LineOnboardingPage';
-import AdminSiteIngressPage from './pages/AdminSiteIngressPage';
-import LineListPage from './pages/LineListPage';
-import ForbiddenPage from './pages/ForbiddenPage';
-import LoginPage from './pages/LoginPage';
-import SsoCallbackPage from './pages/SsoCallbackPage';
-import AiOpsPage from './pages/AiOpsPage';
-import AiOpsWorkbenchPage from './pages/AiOpsWorkbenchPage';
-import AiOpsInvestigationDetailPage from './pages/AiOpsInvestigationDetailPage';
-import SignalMonitorRealtimePage from './pages/SignalMonitorRealtimePage';
-import SignalMonitorHistoryPage from './pages/SignalMonitorHistoryPage';
-import SignalMonitorStatsPage from './pages/SignalMonitorStatsPage';
-import SignalMonitorDailyPage from './pages/SignalMonitorDailyPage';
-import CertStudyPage from './pages/CertStudyPage';
-import AssetManagementPage from './pages/AssetManagementPage';
-import SiteConfPage from './pages/SiteConfPage';
-import SslCertificateExportPage from './pages/SslCertificateExportPage';
-import MonitoringRequestsPage from './pages/MonitoringRequestsPage';
-import KmsValuesPage from './pages/KmsValuesPage';
-import OncallPage from './pages/OncallPage';
-import CicdCatalogPage from './pages/CicdCatalogPage';
-import MenuOrderManagementPage from './pages/MenuOrderManagementPage';
-import DependencyHealthPage from './pages/DependencyHealthPage';
-import BytebaseCenterPage from './pages/BytebaseCenterPage';
 import { EnvironmentProvider } from './contexts/EnvironmentContext';
 import { EnvironmentContext } from './contexts/EnvironmentContextValue';
 import { AuthProvider } from './contexts/AuthContext';
 import { AuthContext } from './contexts/AuthContextValue';
 import './App.css';
-import Home from './pages/Home';
 import AppShell from './components/AppShell';
 import { DesktopNotificationPrompt } from './components/DesktopNotificationPrompt';
 import { CicdRealtimeProvider } from './contexts/CicdRealtimeContext';
 import { BytebaseRealtimeProvider } from './contexts/BytebaseRealtimeContext';
 import { getMenuOrder, type MenuOrderMap } from './services/api';
 import { readCachedMenuOrder, writeCachedMenuOrder } from './utils/menuOrderCache';
+
+const DeploymentListPage = lazy(() => import('./pages/DeploymentListPage'));
+const WindowsJumpServerPage = lazy(() => import('./pages/WindowsJumpServerPage'));
+const DataQueryPage = lazy(() => import('./pages/DataQueryPage'));
+const SecurityGroupPage = lazy(() => import('./pages/SecurityGroupPage'));
+const SiteMonitorPage = lazy(() => import('./pages/SiteMonitorPage'));
+const EnvironmentManagementPage = lazy(() => import('./pages/EnvironmentManagementPage'));
+const S3UploadPage = lazy(() => import('./pages/S3UploadPage'));
+const AccountManagementPage = lazy(() => import('./pages/AccountManagementPage'));
+const AuditLogPage = lazy(() => import('./pages/AuditLogPage'));
+const LineOnboardingPage = lazy(() => import('./pages/LineOnboardingPage'));
+const AdminSiteIngressPage = lazy(() => import('./pages/AdminSiteIngressPage'));
+const LineListPage = lazy(() => import('./pages/LineListPage'));
+const ForbiddenPage = lazy(() => import('./pages/ForbiddenPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const SsoCallbackPage = lazy(() => import('./pages/SsoCallbackPage'));
+const AiOpsPage = lazy(() => import('./pages/AiOpsPage'));
+const AiOpsWorkbenchPage = lazy(() => import('./pages/AiOpsWorkbenchPage'));
+const AiOpsInvestigationDetailPage = lazy(() => import('./pages/AiOpsInvestigationDetailPage'));
+const SignalMonitorRealtimePage = lazy(() => import('./pages/SignalMonitorRealtimePage'));
+const SignalMonitorHistoryPage = lazy(() => import('./pages/SignalMonitorHistoryPage'));
+const SignalMonitorStatsPage = lazy(() => import('./pages/SignalMonitorStatsPage'));
+const SignalMonitorDailyPage = lazy(() => import('./pages/SignalMonitorDailyPage'));
+const CertStudyPage = lazy(() => import('./pages/CertStudyPage'));
+const AssetManagementPage = lazy(() => import('./pages/AssetManagementPage'));
+const SiteConfPage = lazy(() => import('./pages/SiteConfPage'));
+const SslCertificateExportPage = lazy(() => import('./pages/SslCertificateExportPage'));
+const MonitoringRequestsPage = lazy(() => import('./pages/MonitoringRequestsPage'));
+const KmsValuesPage = lazy(() => import('./pages/KmsValuesPage'));
+const OncallPage = lazy(() => import('./pages/OncallPage'));
+const CicdCatalogPage = lazy(() => import('./pages/CicdCatalogPage'));
+const MenuOrderManagementPage = lazy(() => import('./pages/MenuOrderManagementPage'));
+const DependencyHealthPage = lazy(() => import('./pages/DependencyHealthPage'));
+const BytebaseCenterPage = lazy(() => import('./pages/BytebaseCenterPage'));
+const Home = lazy(() => import('./pages/Home'));
+
+const PageLoadingFallback: React.FC = () => (
+  <div style={{ minHeight: 240, display: 'grid', placeItems: 'center' }} aria-label="页面加载中">
+    <Spin size="large" />
+  </div>
+);
 
 const EnvironmentSwitcher: React.FC = () => {
   const { environments, currentEnvironment, setCurrentEnvironment, refreshEnvironments, loading, error } = useContext(EnvironmentContext);
@@ -393,6 +400,7 @@ const AppLayout: React.FC = () => {
         userKey={String(me?.id || me?.username || 'unknown')}
         visible={permissions.includes('menu:cicd-runs') || permissions.includes('menu:bytebase')}
       />
+      <Suspense fallback={<PageLoadingFallback />}>
       <Routes>
               <Route path="/deployments" element={<ProtectedRoute required={['menu:deployments']}><DeploymentListPage /></ProtectedRoute>} />
               <Route path="/jump-servers" element={<ProtectedRoute required={['menu:jump-servers']}><WindowsJumpServerPage /></ProtectedRoute>} />
@@ -448,6 +456,7 @@ const AppLayout: React.FC = () => {
               <Route path="/403" element={<ForbiddenPage />} />
               <Route path="/" element={<Home />} />
       </Routes>
+      </Suspense>
       </AppShell>
       </BytebaseRealtimeProvider>
     </CicdRealtimeProvider>
@@ -458,8 +467,8 @@ const App: React.FC = () => (
   <AuthProvider>
     <EnvironmentProvider>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/sso/callback" element={<SsoCallbackPage />} />
+        <Route path="/login" element={<Suspense fallback={<PageLoadingFallback />}><LoginPage /></Suspense>} />
+        <Route path="/sso/callback" element={<Suspense fallback={<PageLoadingFallback />}><SsoCallbackPage /></Suspense>} />
         <Route path="/*" element={<AppLayout />} />
       </Routes>
     </EnvironmentProvider>
