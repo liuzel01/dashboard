@@ -145,7 +145,7 @@ export class DependencyProviderHealthService implements OnModuleInit {
       return Promise.all(profiles.map(async (profile) => {
         const keys = Object.values(profile.config).filter(Boolean);
         const values = await Promise.all(keys.map((key) => this.siteConf.getString(key, '')));
-        return { id: profile.id, label: profile.name, category: profile.category, environmentId: profile.environmentId, suggestedUrl: profile.config.baseUrlKey ? await this.siteConf.getString(profile.config.baseUrlKey, '') : '', configured: keys.length > 0 && values.every((value) => Boolean(String(value).trim())), description: `${profile.providerType} Provider 配置档案` };
+        return { id: profile.id, label: profile.name, category: profile.category, environmentId: profile.environmentId, suggestedUrl: profile.config.baseUrlKey ? await this.siteConf.getString(profile.config.baseUrlKey, '') : '', configured: keys.length > 0 && values.every((value) => Boolean(String(value).trim())), description: `${profile.providerType} Provider 连接档案` };
       }));
     } catch {
       return Promise.all(this.profileDefinitions().map(async (profile) => {

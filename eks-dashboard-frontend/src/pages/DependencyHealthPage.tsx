@@ -204,6 +204,7 @@ const DependencyHealthPage: React.FC = () => {
         {backgroundRefreshing && <Typography.Text type="secondary"><SyncOutlined spin /> 后台更新中</Typography.Text>}
         {data?.stale && <Tag color="orange">显示上次成功结果</Tag>}
         {data?.checkedAt && <Typography.Text type="secondary">最后更新：{new Date(data.checkedAt).toLocaleTimeString()}</Typography.Text>}
+        <Button onClick={() => void openProfileManager()}>Provider 连接档案</Button>
         <Button icon={<SettingOutlined />} onClick={() => void openTargets()}>目标管理</Button>
         <Button icon={<ReloadOutlined />} loading={manualRefreshing} disabled={backgroundRefreshing} onClick={() => void load('manual')}>刷新</Button>
       </Space>}
@@ -254,11 +255,11 @@ const DependencyHealthPage: React.FC = () => {
       ]} />}
     </Modal>
     <Modal title="依赖目标管理" open={targetsOpen} onCancel={() => { setTargetsOpen(false); setEditingTarget(null); }} footer={null} width={1000}>
-      <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => editTarget()}>新增目标</Button><Button onClick={() => void openProfileManager()}>Provider 档案</Button></Space>
+      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editTarget()}>新增目标</Button>
       <OpsTable rowKey="key" pagination={false} dataSource={targets} columns={[
         { title: '标识', dataIndex: 'key' }, { title: '名称', dataIndex: 'name' }, { title: '环境', dataIndex: 'environmentId' },
         { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
-        { title: 'Provider 配置', dataIndex: 'providerProfile', render: (value: string | null) => value ? <Tag color="blue">{providerProfiles.find((profile) => profile.id === value)?.label || value}</Tag> : '-' },
+        { title: '连接档案', dataIndex: 'providerProfile', render: (value: string | null) => value ? <Tag color="blue">{providerProfiles.find((profile) => profile.id === value)?.label || value}</Tag> : '-' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
         { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" loading={targetVerifying === row.key} onClick={async () => { setTargetVerifying(row.key); try { await verifyDependencyHealthTarget(row.key); await load('manual'); } finally { setTargetVerifying(null); } }}>立即验证</Button><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
       ] as any} />
@@ -270,7 +271,7 @@ const DependencyHealthPage: React.FC = () => {
           <Form.Item name="category" label="类型" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="url" label="探测 URL" rules={[{ required: true }, { type: 'url' }]}><Input /></Form.Item>
           <Form.Item name="module" label="L1 探测模块" rules={[{ required: true }]}><Select options={[{ value: 'http_2xx', label: 'HTTP 2xx' }, { value: 'http_reachable', label: 'HTTP 可达' }]} /></Form.Item>
-          <Form.Item name="providerProfile" label="L2/L3 Provider 配置（可选）" extra="选择后由服务端读取 SiteConf 的对应专用凭据并执行只读检查；浏览器不会接收凭据值。不选择时仍按普通 L1 URL 探测。">
+          <Form.Item name="providerProfile" label="L2/L3 连接档案（可选）" extra="连接档案决定使用哪套 SiteConf 地址与专用凭据；服务端据此执行只读检查，浏览器不会接收凭据值。不选择时仍按普通 L1 URL 探测。">
             <Select allowClear showSearch optionFilterProp="label" placeholder="不启用 Provider 专用检查" onChange={(value) => {
               const profile = providerProfiles.find((item) => item.id === value);
               if (profile) targetForm.setFieldsValue({ category: profile.category, url: profile.suggestedUrl || undefined, environmentId: profile.environmentId });
@@ -281,15 +282,15 @@ const DependencyHealthPage: React.FC = () => {
         </Form>
       </Modal>
     </Modal>
-    <Modal title="Provider 配置档案" open={profilesOpen} onCancel={() => { setProfilesOpen(false); setEditingProfile(null); }} footer={null} width={1050}>
-      <Typography.Paragraph type="secondary">档案只保存 SiteConf 配置项引用，不保存或展示 Token、密码等值。可为同一 Provider 类型创建多个环境实例。</Typography.Paragraph>
-      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editProfile()}>新增档案</Button>
+    <Modal title="Provider 连接档案管理" open={profilesOpen} onCancel={() => { setProfilesOpen(false); setEditingProfile(null); }} footer={null} width={1050}>
+      <Typography.Paragraph type="secondary">连接档案只保存 SiteConf 配置项引用，不保存或展示 Token、密码等值。同一 Provider 类型可创建多个环境连接实例。</Typography.Paragraph>
+      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editProfile()}>新增连接档案</Button>
       <OpsTable rowKey="id" pagination={false} dataSource={profileRecords} columns={[
         { title: '标识', dataIndex: 'id' }, { title: '名称', dataIndex: 'name' }, { title: '类型', dataIndex: 'providerType', render: (value: string) => <Tag>{value}</Tag> }, { title: '环境', dataIndex: 'environmentId' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-        { title: '操作', render: (_: unknown, row: DependencyHealthProviderProfileRecord) => <Space><Button type="link" onClick={() => editProfile(row)}>编辑</Button><Popconfirm title="确认删除此 Provider 档案？" onConfirm={async () => { await deleteDependencyHealthProviderProfile(row.id); setProfileRecords(await listDependencyHealthProviderProfileRecords()); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+        { title: '操作', render: (_: unknown, row: DependencyHealthProviderProfileRecord) => <Space><Button type="link" onClick={() => editProfile(row)}>编辑</Button><Popconfirm title="确认删除此 Provider 连接档案？" onConfirm={async () => { await deleteDependencyHealthProviderProfile(row.id); setProfileRecords(await listDependencyHealthProviderProfileRecords()); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
       ] as any} />
-      <Modal title={editingProfile ? `编辑 ${editingProfile.name}` : '新增 Provider 档案'} open={profileEditorOpen} onCancel={() => { setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields(); }} onOk={() => void saveProfile()} confirmLoading={profileSaving} destroyOnHidden width={680}>
+      <Modal title={editingProfile ? `编辑 ${editingProfile.name}` : '新增 Provider 连接档案'} open={profileEditorOpen} onCancel={() => { setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields(); }} onOk={() => void saveProfile()} confirmLoading={profileSaving} destroyOnHidden width={680}>
         <Form form={profileForm} layout="vertical">
           <Form.Item name="id" label="档案标识" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9._-]{1,63}$/, message: '仅允许小写字母、数字、点、下划线和短横线' }]}><Input disabled={Boolean(editingProfile)} /></Form.Item>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
