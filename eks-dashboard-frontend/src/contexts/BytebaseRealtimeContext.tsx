@@ -41,15 +41,18 @@ export const BytebaseRealtimeProvider: React.FC<React.PropsWithChildren> = ({
       const key = `bytebase-notified:${me.username}:${request.request_id}:${request.status}`;
       if (localStorage.getItem(key)) return;
       localStorage.setItem(key, new Date().toISOString());
-      const notification = new Notification(
-        request.status === "SUCCEEDED"
-          ? "Bytebase 发布成功"
-          : "Bytebase 发布已结束",
-        {
-          body: `${request.environment_id} / ${request.title}：${request.status}`,
-          tag: `bytebase-request-${request.request_id}`,
-        },
-      );
+      const released = Boolean(request.release_confirmed_at || request.rollout_name);
+      const wording = request.status === "SUCCEEDED"
+        ? { title: "Bytebase 发布成功", result: "发布成功" }
+        : request.status === "FAILED"
+          ? { title: "Bytebase 发布失败", result: "发布失败" }
+          : released
+            ? { title: "Bytebase 发布已取消", result: "发布已取消" }
+            : { title: "Bytebase 申请已撤销", result: "申请已撤销" };
+      const notification = new Notification(wording.title, {
+        body: `${request.environment_id} / ${request.title}：${wording.result}`,
+        tag: `bytebase-request-${request.request_id}`,
+      });
       notification.onclick = () => {
         window.focus();
         navigate("/bytebase");

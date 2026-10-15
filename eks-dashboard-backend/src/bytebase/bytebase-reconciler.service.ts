@@ -59,7 +59,7 @@ export class BytebaseReconcilerService {
 
   private async emitRecentUpdates() {
     const rows = await this.db.query<any[]>(
-      `SELECT request_id,environment_id,title,status,actor_user_id,actor_username,updated_at
+      `SELECT request_id,environment_id,title,status,actor_user_id,actor_username,rollout_name,release_confirmed_at,updated_at
        FROM bytebase_requests WHERE updated_at>=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 20 SECOND)`,
     );
     for (const row of rows) {
