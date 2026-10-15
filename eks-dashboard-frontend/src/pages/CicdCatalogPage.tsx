@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, App, Button, Card, Collapse, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { BellOutlined, ExportOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
 import {
   DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
@@ -441,7 +441,10 @@ const CicdCatalogPage: React.FC = () => {
 
     {!binding ? <Alert type="info" showIcon message="当前环境尚未录入此操作类型的 CI/CD 绑定" />
       : !binding.enabled ? <Alert type="warning" showIcon message="当前环境的 CI/CD 绑定已停用" />
-      : <Card title="执行器绑定" extra={<Tag color={executor?.read_only ? 'default' : 'success'}>{executor?.read_only ? '只读' : '可执行'}</Tag>}>
+      : <Collapse items={[{
+          key: 'executor-binding',
+          label: <Space><Text strong>执行器绑定</Text><Tag color={executor?.read_only ? 'default' : 'success'}>{executor?.read_only ? '只读' : '可执行'}</Tag></Space>,
+          children: <>
           <Descriptions size="small" column={{ xs: 1, md: 2, lg: 3 }}>
             <Descriptions.Item label="Executor">{binding.executor_display_name || binding.executor_key}</Descriptions.Item>
             <Descriptions.Item label="Provider">{binding.provider_type}</Descriptions.Item>
@@ -456,7 +459,8 @@ const CicdCatalogPage: React.FC = () => {
             <Button icon={<ReloadOutlined />} loading={reconciling} disabled={!canManage || !executor?.configured || binding.provider_type !== 'JENKINS'} onClick={runReconciliation}>Job / 参数对账</Button>
             {!canManage && <Text type="secondary">需要 cicd-config:manage 权限</Text>}
           </Space>
-        </Card>}
+          </>,
+        }]} />}
 
     {selectedJob && <Card
       title="Job 参数契约"
