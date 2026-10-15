@@ -140,6 +140,34 @@ export class DependencyProviderHealthService implements OnModuleInit {
     }));
   }
 
+  async verifyTarget(targetKey: string): Promise<ProviderCheckResult[]> {
+    const definition = (await this.definitions()).find((item) => item.targetKeys.includes(targetKey));
+    if (!definition) return [];
+    const results: ProviderCheckResult[] = [];
+    const checkedAt = new Date().toISOString();
+    const run = async (layer: ProviderLayer) => {
+      const startedAt = Date.now();
+      let outcome: Omit<ProviderCheckResult, 'targetKey' | 'layer' | 'checkedAt'>;
+      try { outcome = await definition.check(layer); }
+      catch (error) { outcome = this.failure(error, Date.now() - startedAt); }
+      const result = { ...outcome, targetKey, layer, checkedAt };
+      await this.save(result);
+      results.push(result);
+      return result;
+    };
+    const l2 = await run('L2');
+    if (l2.status === 'PASS') await run('L3');
+    else {
+      const result: ProviderCheckResult = {
+        targetKey, layer: 'L3', status: 'SKIPPED', reasonCode: 'L2_NOT_PASSED',
+        summary: 'L2 尚未通过，已跳过 L3', durationMs: null, metadata: null, checkedAt,
+      };
+      await this.save(result);
+      results.push(result);
+    }
+    return results;
+  }
+
   private async runDueChecks() {
     if (
       this.running ||

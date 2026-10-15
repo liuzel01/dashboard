@@ -97,6 +97,29 @@ export class DependencyHealthService implements OnModuleInit {
     return { deleted: true };
   }
 
+  async verifyTarget(key: string) {
+    const rows = await this.db.query<any[]>(
+      `SELECT target_key,name,environment_id,category,url,probe_module,provider_profile FROM dependency_health_targets WHERE target_key=? AND enabled=1`,
+      [key],
+    );
+    if (!rows[0]) throw new BadRequestException('Dependency target not found or disabled');
+    const row = rows[0];
+    const target = this.validateTargets([{
+      key: row.target_key, name: row.name, environmentId: row.environment_id, category: row.category,
+      url: row.url, module: row.probe_module, providerProfile: row.provider_profile,
+    }])[0];
+    const baseUrl = (await this.siteConf.getString('dependency_health.blackbox_base_url', 'http://127.0.0.1:9115')).trim().replace(/\/+$/, '');
+    const timeoutMs = await this.siteConf.getNumber('dependency_health.timeout_ms', 12_000);
+    const l1 = await this.probe(target, baseUrl, timeoutMs);
+    await this.db.query(
+      `INSERT INTO dependency_health_history (target_key,layer,status,reason_code,duration_ms,checked_at) VALUES (?,'L1',?,?,?,?)`,
+      [l1.key, l1.healthy ? 'PASS' : 'FAIL', l1.errorType, l1.durationMs, l1.checkedAt.slice(0, 23).replace('T', ' ')],
+    ).catch(() => undefined);
+    const provider = target.providerProfile ? await this.providers.verifyTarget(target.key) : [];
+    this.snapshot = null;
+    return { targetKey: target.key, l1, provider };
+  }
+
   async history(targetKey: string, hours = 24) {
     const safeHours = Math.max(1, Math.min(24 * 30, Number(hours) || 24));
     const [points, availability, events] = await Promise.all([

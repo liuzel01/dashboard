@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfiles, listDependencyHealthTargets, updateDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
+import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfiles, listDependencyHealthTargets, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
 import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
 
 const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
@@ -43,6 +43,7 @@ const DependencyHealthPage: React.FC = () => {
   const [editingTarget, setEditingTarget] = useState<DependencyHealthTarget | null>(null);
   const [targetEditorOpen, setTargetEditorOpen] = useState(false);
   const [targetSaving, setTargetSaving] = useState(false);
+  const [targetVerifying, setTargetVerifying] = useState<string | null>(null);
   const [targetForm] = Form.useForm();
   const requestInFlight = useRef(false);
 
@@ -81,12 +82,12 @@ const DependencyHealthPage: React.FC = () => {
     targetForm.setFieldsValue(target || { environmentId: 'global', category: 'external-api', module: 'http_2xx', enabled: true, sortOrder: 0 });
     setTargetEditorOpen(true);
   };
-  const saveTarget = async () => {
+  const saveTarget = async (verify = false) => {
     const value = await targetForm.validateFields();
     setTargetSaving(true);
     try {
-      if (editingTarget) await updateDependencyHealthTarget(editingTarget.key, value);
-      else await createDependencyHealthTarget(value);
+      const saved = editingTarget ? await updateDependencyHealthTarget(editingTarget.key, value) : await createDependencyHealthTarget(value);
+      if (verify) await verifyDependencyHealthTarget(saved.key || editingTarget?.key);
       setTargets(await listDependencyHealthTargets());
       setEditingTarget(null);
       setTargetEditorOpen(false);
@@ -218,9 +219,9 @@ const DependencyHealthPage: React.FC = () => {
         { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
         { title: 'Provider 配置', dataIndex: 'providerProfile', render: (value: string | null) => value ? <Tag color="blue">{providerProfiles.find((profile) => profile.id === value)?.label || value}</Tag> : '-' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" loading={targetVerifying === row.key} onClick={async () => { setTargetVerifying(row.key); try { await verifyDependencyHealthTarget(row.key); await load('manual'); } finally { setTargetVerifying(null); } }}>立即验证</Button><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
       ] as any} />
-      <Modal title={editingTarget ? `编辑 ${editingTarget.name}` : '新增依赖目标'} open={targetEditorOpen} onCancel={() => { setTargetEditorOpen(false); setEditingTarget(null); targetForm.resetFields(); }} onOk={() => void saveTarget()} confirmLoading={targetSaving} destroyOnHidden>
+      <Modal title={editingTarget ? `编辑 ${editingTarget.name}` : '新增依赖目标'} open={targetEditorOpen} onCancel={() => { setTargetEditorOpen(false); setEditingTarget(null); targetForm.resetFields(); }} onOk={() => void saveTarget()} confirmLoading={targetSaving} okText="仅保存" destroyOnHidden footer={(_, { OkBtn, CancelBtn }) => <Space><CancelBtn /><Button loading={targetSaving} onClick={() => void saveTarget(true)}>保存并立即验证</Button><OkBtn /></Space>}>
         <Form form={targetForm} layout="vertical">
           {!editingTarget && <Form.Item name="key" label="内部标识" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9._-]{1,63}$/, message: '仅允许小写字母、数字、点、下划线和短横线' }]}><Input /></Form.Item>}
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>

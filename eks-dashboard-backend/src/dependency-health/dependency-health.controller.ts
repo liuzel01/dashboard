@@ -44,6 +44,12 @@ export class DependencyHealthController {
     return this.service.saveTarget(key, body);
   }
 
+  @Post('targets/:key/verify')
+  async verifyTarget(@Headers('authorization') authorization: string | undefined, @Param('key') key: string) {
+    await this.authorize(authorization);
+    return this.service.verifyTarget(key);
+  }
+
   @Delete('targets/:key')
   async deleteTarget(@Headers('authorization') authorization: string | undefined, @Param('key') key: string) {
     await this.authorize(authorization);
