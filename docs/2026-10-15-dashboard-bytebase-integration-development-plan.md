@@ -1,7 +1,7 @@
 # Dashboard Bytebase 统一入口开发计划
 
 > 日期：2026-10-15  
-> 状态：hashex Phase 0、Phase 1 核心链路与 Phase 2 人工验收已完成；社区版不支持原生 JIT Grant，权限控制由 Dashboard RBAC 承担，Phase 4 原生自动授权冻结为 `UNSUPPORTED`  
+> 状态：hashex Phase 0、Phase 1 与 Phase 2 必需开发已完成；Draft 发布主链路已人工验收，对账/实时通知等待本轮人工验收；社区版不支持原生 JIT Grant，权限控制由 Dashboard RBAC 承担，Phase 4 原生自动授权冻结为 `UNSUPPORTED`
 > 范围：Dashboard、各环境独立 Bytebase、数据库目录/临时访问/查询/变更申请与审计  
 > 约束：本计划不把数据库密码、Bytebase Service Key、SQL 查询结果或会话 Cookie 写入仓库
 
@@ -380,7 +380,7 @@ DRAFT -> SUBMITTED -> APPROVED/REJECTED -> EXECUTING
 
 ### Phase 1：Provider、目录与配置诊断
 
-状态：**核心功能完成，本地真实链路已验证。** 已完成 migration、受控 SiteConf、权限、Provider、项目/数据库目录、连接诊断、菜单页面和 mock 测试；hashex 实测识别 2 个项目、49 个数据库，诊断返回 Bytebase 3.21.0 与正确 HTTPS External URL。目录持久缓存/增量刷新以及“外部依赖健康”L1/L2 接入仍是 Phase 1 收尾项，不影响当前页面人工验收。
+状态：**必需开发完成，本地真实链路已验证。** 已完成 migration、受控 SiteConf、权限、Provider、项目/数据库目录、连接诊断、菜单页面和 mock 测试；hashex 实测识别 2 个项目、49 个数据库，诊断返回 Bytebase 3.21.0 与正确 HTTPS External URL。“外部依赖健康”已增加 Hashex Bytebase：L1 标准外部探测、L2 Catalog SA 登录和 L3 最小项目目录读取。目录持久缓存/增量刷新在当前数据量下不是上线前置，后续有性能证据时再引入。
 
 - 新建独立 NestJS `bytebase` 模块、Provider interface 和 Bytebase REST Client；
 - 实现 executor/binding migration、SiteConf/Secret 引用和配置诊断；
@@ -393,12 +393,12 @@ DRAFT -> SUBMITTED -> APPROVED/REJECTED -> EXECUTING
 
 ### Phase 2：Issue 提交与管理员发布（第一版）
 
-状态：**核心发布链路已完成人工验收。** 普通用户创建 Draft Issue 与 Plan Check，管理员通过 Dashboard MFA 确认后才提交 Draft 并触发 Bytebase Rollout。已修复“无原生审批模板时，非 Draft Issue 被 Bytebase 自动批准并立即部署”的问题。Rollout/TaskRun 后台对账、WebSocket 和桌面终态通知仍是 Phase 2 必需收尾任务。
+状态：**必需开发完成，等待本轮人工验收。** 普通用户创建 Draft Issue 与 Plan Check，管理员通过 Dashboard MFA 确认后才提交 Draft 并触发 Bytebase Rollout；Draft 发布主链路已人工验证。已修复“无原生审批模板时，非 Draft Issue 被 Bytebase 自动批准并立即部署”的问题，并完成发布前 Issue/Plan/Sheet、目标数据库、SQL 哈希和 Plan Check 二次校验。后台 Worker 只读对账 Rollout/Task 状态，通过受用户/管理员房间隔离的 WebSocket 推送页面刷新和桌面终态通知；远端未知状态不会重试发布。
 
 - 普通用户使用 change-submitter SA 创建 Sheet/Plan/Draft Issue；Draft 是社区版下阻断自动部署的关键边界；
 - 展示 SQL Review、Plan Check、目标数据库、SQL 哈希和远端 Issue 状态；
 - 只有管理员可在 Dashboard 提交 Draft，发布前强制 MFA、风险 ACK、申请状态校验和二次读取远端 Plan Check；社区版会在 Draft 提交后自动创建 Rollout，因此不能把 deployer SA 描述为唯一的最终边界；
-- 后台 Worker 对账 Rollout/TaskRun，并通过 WebSocket 和桌面通知回报终态；
+- 后台 Worker 对账 Rollout/TaskRun，并通过 WebSocket 和桌面通知回报终态；已实现，待真实长任务和失败任务人工验收；
 - Bytebase Portal 只作为详情/诊断备用入口，正常发布链路在 Dashboard 内闭环。
 
 验收：提交者没有 Rollout API 权限；Admin 不能发布已被修改或 Plan Check 未通过的内容；UNKNOWN 不自动重试；Dashboard 与 Bytebase 原生 ID 可双向追溯。
@@ -434,6 +434,8 @@ DRAFT -> SUBMITTED -> APPROVED/REJECTED -> EXECUTING
 验收：所有写语句与绕过尝试被后端和 Bytebase 双重拒绝；跨环境/跨项目目标被拒绝；大结果和超时可取消且不拖垮 Dashboard。
 
 ### Phase 6：生产化
+
+状态：**hashex 本地开发收口，生产运维项待部署执行。** 本轮提供幂等 migration、后台对账、健康检查和自动化测试；EC2 数据库迁移、部署、真实终态通知验收以及其他环境凭据/版本探测必须按环境执行，不能由本地结果替代。
 
 - 各环境逐一灰度，先目录、再访问、最后变更；
 - 密钥轮换、停用、备份、审计保留、Provider 降级和恢复演练；
