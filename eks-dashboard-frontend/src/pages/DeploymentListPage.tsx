@@ -4,7 +4,7 @@ import { ReloadOutlined, FileTextOutlined } from '@ant-design/icons';
 import { LogViewer } from '../components/LogViewer';
 import { getDeployments, getDeploymentNamespaces, getDeploymentWorkloadTypes, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic, type WorkloadCapabilities, type WorkloadType, type WorkloadTypeOption } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge } from '../components/ops';
+import { ColumnSettingsPopover, FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge, useVisibleColumns } from '../components/ops';
 
 // 定义 Deployment 对象的接口
 interface Deployment {
@@ -30,6 +30,15 @@ interface Deployment {
 }
 
 type RolloutPhase = 'completed' | 'in_progress' | 'failed' | 'unknown';
+type DeploymentColumnKey = 'workloadKind' | 'replicas' | 'images' | 'status' | 'lastRestartAt' | 'creationTimestamp';
+const deploymentColumnOptions: Array<{ label: string; value: DeploymentColumnKey }> = [
+  { label: '类型', value: 'workloadKind' },
+  { label: '运行副本', value: 'replicas' },
+  { label: '当前镜像', value: 'images' },
+  { label: '发布状态', value: 'status' },
+  { label: '最近重启', value: 'lastRestartAt' },
+  { label: '创建时间', value: 'creationTimestamp' },
+];
 type OperationName = '重启' | '镜像回退' | '故障回退';
 type RolloutOperationState = {
   phase: 'completed' | 'progressing' | 'blocked' | 'failed';
@@ -99,6 +108,11 @@ const sleep = (ms: number) =>
   });
 
 const DeploymentListPage: React.FC = () => {
+  const { visibleKeys: visibleDeploymentColumns, setVisibleKeys: setVisibleDeploymentColumns, resetVisibleKeys: resetDeploymentColumns } = useVisibleColumns({
+    storageKey: 'deployment-list.visible-columns.v1',
+    options: deploymentColumnOptions,
+    defaultVisibleKeys: deploymentColumnOptions.map((option) => option.value),
+  });
   const { modal, message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
   const requestSeqRef = useRef(0);
@@ -594,6 +608,7 @@ const DeploymentListPage: React.FC = () => {
       },
     },
   ];
+  const visibleColumns = columns.filter((column) => column.key === 'name' || column.key === 'action' || visibleDeploymentColumns.includes(column.key as DeploymentColumnKey));
 
   const summaryItems = useMemo(() => {
     const summary = { completed: 0, progressing: 0, blocked: 0, failed: 0 };
@@ -627,7 +642,10 @@ const DeploymentListPage: React.FC = () => {
         environmentName={currentEnvironment.name}
       />
       <FilterBar
-        actions={<Button onClick={() => handleSearch(filterInput)} loading={loading}>刷新</Button>}
+        actions={<Space>
+          <ColumnSettingsPopover options={deploymentColumnOptions} value={visibleDeploymentColumns} onChange={setVisibleDeploymentColumns} onReset={resetDeploymentColumns} />
+          <Button onClick={() => handleSearch(filterInput)} loading={loading}>刷新</Button>
+        </Space>}
       >
         <Select
           showSearch
@@ -664,7 +682,7 @@ const DeploymentListPage: React.FC = () => {
       </FilterBar>
       <MetricGrid items={summaryItems} loading={loading} />
       <OpsTable
-        columns={columns}
+        columns={visibleColumns}
         dataSource={allDeployments}
         loading={loading}
         rowKey={(record) => `${record.namespace || namespace}/${record.name || ''}`}

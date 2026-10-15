@@ -60,7 +60,7 @@ import {
   updateCredentialRef,
 } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { ColumnSettingsPopover, MetricGrid, OpsTable, PageHeader, useVisibleColumns } from '../components/ops';
+import { ColumnSettingsPopover, MetricGrid, OpsTable, PageHeader, useResizableColumns, useVisibleColumns } from '../components/ops';
 import type {
   AssetAccount,
   AssetChangeLog,
@@ -1279,45 +1279,7 @@ const AliyunDcdnSyncPanel: React.FC<SyncPanelProps> = ({ messageApi }) => {
   const [syncResult, setSyncResult] = useState<AliyunDcdnDomainSyncResponse | null>(null);
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
-  const [columnWidths, setColumnWidths] = useState<Record<AliyunDcdnColumnKey, number>>(aliyunDcdnDefaultColumnWidths);
-
-  const renderResizableTitle = (key: AliyunDcdnColumnKey, title: string) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', userSelect: 'none' }}>
-      <span>{title}</span>
-      <span
-        title="拖拽调整列宽"
-        onClick={(event) => event.stopPropagation()}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const startX = event.clientX;
-          const startWidth = columnWidths[key];
-          const onMouseMove = (moveEvent: MouseEvent) => {
-            const nextWidth = Math.max(aliyunDcdnMinColumnWidths[key], startWidth + moveEvent.clientX - startX);
-            setColumnWidths((current) => ({ ...current, [key]: nextWidth }));
-          };
-          const onMouseUp = () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-          };
-          document.body.style.cursor = 'col-resize';
-          document.body.style.userSelect = 'none';
-          document.addEventListener('mousemove', onMouseMove);
-          document.addEventListener('mouseup', onMouseUp);
-        }}
-        style={{
-          cursor: 'col-resize',
-          display: 'inline-block',
-          height: 18,
-          marginLeft: 8,
-          width: 8,
-          borderRight: '2px solid #d9d9d9',
-        }}
-      />
-    </div>
-  );
+  const { columnWidths, renderResizableTitle } = useResizableColumns(aliyunDcdnDefaultColumnWidths, aliyunDcdnMinColumnWidths);
 
   const columns = useMemo<ColumnsType<AliyunDcdnDomainPreviewItem>>(
     () => [

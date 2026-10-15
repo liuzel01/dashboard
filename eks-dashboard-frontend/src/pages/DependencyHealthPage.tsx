@@ -3,7 +3,7 @@ import { Alert, Button, Descriptions, Form, Input, InputNumber, message, Modal, 
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { createDependencyHealthProviderProfile, createDependencyHealthTarget, deleteDependencyHealthProviderProfile, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfileRecords, listDependencyHealthProviderProfiles, listDependencyHealthProviderTypes, listDependencyHealthSiteConfReferences, listDependencyHealthTargets, updateDependencyHealthProviderProfile, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthProviderProfileRecord, type DependencyHealthResponse, type DependencyHealthTarget, type SiteConfReference } from '../services/api';
-import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
+import { ColumnSettingsPopover, MetricGrid, OpsTable, PageHeader, useVisibleColumns } from '../components/ops';
 
 const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
   ? 'HTTP 可达性（允许预先核定的认证或业务错误状态码）'
@@ -56,6 +56,17 @@ const trendPointTitle = (point: DependencyHealthHistory['trend'][number]) => {
   return `${range}\n${point.total} 次检查，通过 ${point.passed}，失败 ${point.failed}\n${layers}`;
 };
 
+type DependencyHealthColumnKey = 'environmentId' | 'category' | 'overallStatus' | 'verificationDepth' | 'httpStatus' | 'durationMs' | 'url';
+const dependencyHealthColumnOptions: Array<{ label: string; value: DependencyHealthColumnKey }> = [
+  { label: '所属环境', value: 'environmentId' },
+  { label: '类型', value: 'category' },
+  { label: '状态', value: 'overallStatus' },
+  { label: '验证深度', value: 'verificationDepth' },
+  { label: 'HTTP', value: 'httpStatus' },
+  { label: '耗时', value: 'durationMs' },
+  { label: '探测目标', value: 'url' },
+];
+
 const profileFields: Record<string, Array<{ key: string; label: string }>> = {
   jenkins: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'usernameKey', label: '账号' }, { key: 'secretKey', label: 'API Token' }, { key: 'timeoutKey', label: '超时（可选）' }],
   gitlab: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'secretKey', label: 'Bot Token' }, { key: 'projectIdKey', label: '项目 ID' }, { key: 'targetBranchKey', label: '目标分支' }, { key: 'timeoutKey', label: '超时（可选）' }],
@@ -66,6 +77,11 @@ const profileFields: Record<string, Array<{ key: string; label: string }>> = {
 };
 
 const DependencyHealthPage: React.FC = () => {
+  const { visibleKeys: visibleHealthColumns, setVisibleKeys: setVisibleHealthColumns, resetVisibleKeys: resetHealthColumns } = useVisibleColumns({
+    storageKey: 'dependency-health.visible-columns.v1',
+    options: dependencyHealthColumnOptions,
+    defaultVisibleKeys: dependencyHealthColumnOptions.map((option) => option.value),
+  });
   const { environments } = useContext(EnvironmentContext);
   const [data, setData] = useState<DependencyHealthResponse | null>(null);
   const [initialLoading, setInitialLoading] = useState(false);
@@ -230,7 +246,7 @@ const DependencyHealthPage: React.FC = () => {
     { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 100, render: (value: number | null) => value === null ? '-' : `${value} ms` },
     { title: '探测目标', dataIndex: 'url', key: 'url', width: 360, ellipsis: true, render: (value: string) => <Tooltip title={value}><Typography.Text ellipsis style={{ display: 'block' }}>{value}</Typography.Text></Tooltip> },
     { title: '操作', key: 'actions', width: 90, fixed: 'right' as const, align: 'center' as const, render: (_: unknown, row: DependencyHealthItem) => <Button type="link" onClick={() => setSelectedItem(row)}>详情</Button> },
-  ], [environmentFilters, environmentNameById]);
+  ].filter((column) => column.key === 'name' || column.key === 'actions' || visibleHealthColumns.includes(column.key as DependencyHealthColumnKey)), [environmentFilters, environmentNameById, visibleHealthColumns]);
 
   return <>
     <PageHeader
@@ -240,6 +256,7 @@ const DependencyHealthPage: React.FC = () => {
         {backgroundRefreshing && <Typography.Text type="secondary"><SyncOutlined spin /> 后台更新中</Typography.Text>}
         {data?.stale && <Tag color="orange">显示上次成功结果</Tag>}
         {data?.checkedAt && <Typography.Text type="secondary">最后更新：{new Date(data.checkedAt).toLocaleTimeString()}</Typography.Text>}
+        <ColumnSettingsPopover options={dependencyHealthColumnOptions} value={visibleHealthColumns} onChange={setVisibleHealthColumns} onReset={resetHealthColumns} />
         <Button onClick={() => void openProfileManager()}>Provider 连接档案</Button>
         <Button icon={<SettingOutlined />} onClick={() => void openTargets()}>目标管理</Button>
         <Button icon={<ReloadOutlined />} loading={manualRefreshing} disabled={backgroundRefreshing} onClick={() => void load('manual')}>刷新</Button>

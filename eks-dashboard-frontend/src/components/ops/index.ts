@@ -11,3 +11,4 @@ export { default as RiskConfirm } from './RiskConfirm';
 export { default as StatusBadge } from './StatusBadge';
 export type { StatusDisplay, StatusTone } from './StatusBadge';
 export { useVisibleColumns } from './useVisibleColumns';
+export { useResizableColumns } from './useResizableColumns';

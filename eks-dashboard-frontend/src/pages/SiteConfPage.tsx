@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Form, Input, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { deleteDashboardSiteConf, getAiOpsLlmModels, getDashboardSiteConfCategories, getDashboardSiteConfList, saveAiOpsLlmModel, saveDashboardSiteConf } from '../services/api';
-import { FilterBar, PageHeader, RiskConfirm } from '../components/ops';
+import { FilterBar, PageHeader, RiskConfirm, useResizableColumns } from '../components/ops';
 
 const { Text, Paragraph } = Typography;
 
@@ -67,7 +67,7 @@ const SiteConfPage: React.FC = () => {
   const formConfKey = Form.useWatch('confKey', form) as string | undefined;
   const [llmModels, setLlmModels] = useState<string[]>([]);
   const [llmModelsLoading, setLlmModelsLoading] = useState(false);
-  const [columnWidths, setColumnWidths] = useState<Record<SiteConfColumnKey, number>>(defaultColumnWidths);
+  const { columnWidths, renderResizableTitle } = useResizableColumns(defaultColumnWidths, minColumnWidths);
 
   const fetchCategories = async () => {
     try {
@@ -200,44 +200,6 @@ const SiteConfPage: React.FC = () => {
       setDeleteTarget(null);
     }
   };
-
-  const renderResizableTitle = (key: SiteConfColumnKey, title: string) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', userSelect: 'none' }}>
-      <span>{title}</span>
-      <span
-        title="拖拽调整列宽"
-        onClick={(event) => event.stopPropagation()}
-        onMouseDown={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const startX = event.clientX;
-          const startWidth = columnWidths[key];
-          const onMouseMove = (moveEvent: MouseEvent) => {
-            const nextWidth = Math.max(minColumnWidths[key], startWidth + moveEvent.clientX - startX);
-            setColumnWidths((current) => ({ ...current, [key]: nextWidth }));
-          };
-          const onMouseUp = () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-          };
-          document.body.style.cursor = 'col-resize';
-          document.body.style.userSelect = 'none';
-          document.addEventListener('mousemove', onMouseMove);
-          document.addEventListener('mouseup', onMouseUp);
-        }}
-        style={{
-          cursor: 'col-resize',
-          display: 'inline-block',
-          height: 18,
-          marginLeft: 8,
-          width: 8,
-          borderRight: '2px solid #d9d9d9',
-        }}
-      />
-    </div>
-  );
 
   const columns = useMemo(
     () => [
