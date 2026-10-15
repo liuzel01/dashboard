@@ -252,6 +252,78 @@ describe('BytebaseService', () => {
     ).toBe(false);
   });
 
+  it('lets an admin cancel a draft issue without creating a rollout', async () => {
+    access.getMe.mockResolvedValueOnce({
+      id: 1,
+      username: 'admin',
+      permissions: ['bytebase:rollout:execute'],
+    });
+    db.query
+      .mockResolvedValueOnce([
+        {
+          request_id: 'request-1',
+          environment_id: 'hashex',
+          status: 'AWAITING_ADMIN_CONFIRMATION',
+          issue_name: 'projects/p/issues/1',
+          plan_name: 'projects/p/plans/1',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          environment_id: 'hashex',
+          executor_key: 'hashex-bytebase',
+          enabled: 1,
+          base_url_conf_key: 'url',
+          catalog_email_conf_key: 'ce',
+          catalog_key_conf_key: 'ck',
+          reader_email_conf_key: 're',
+          reader_key_conf_key: 'rk',
+          submitter_email_conf_key: 'se',
+          submitter_key_conf_key: 'sk',
+          deployer_email_conf_key: 'de',
+          deployer_key_conf_key: 'dk',
+        },
+      ])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ insertId: 1 });
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key === 'url' ? 'https://bytebase.example.com' : 'configured',
+    );
+    (axios.post as jest.Mock).mockResolvedValue({
+      status: 200,
+      data: { token: 'token' },
+    });
+    (axios.request as jest.Mock)
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { name: 'projects/p/issues/1', draft: true },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { name: 'projects/p/plans/1', state: 'DELETED' },
+      });
+
+    await expect(
+      service.cancelRequest('Bearer dashboard', 'request-1', {
+        mfaCode: '123456',
+        reason: 'no longer needed',
+      }),
+    ).resolves.toEqual({
+      requestId: 'request-1',
+      status: 'CANCELLED',
+      bestEffort: false,
+    });
+
+    expect(mfa.verifyForUser).toHaveBeenCalledWith(1, '123456');
+    expect(axios.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: 'PATCH',
+        url: 'https://bytebase.example.com/v1/projects/p/plans/1?updateMask=state',
+        data: { name: 'projects/p/plans/1', state: 'DELETED' },
+      }),
+    );
+  });
+
   it('reconciles a completed rollout without issuing another write request', async () => {
     db.query
       .mockResolvedValueOnce([

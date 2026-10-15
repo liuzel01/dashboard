@@ -11,6 +11,8 @@ import {
   Button,
   Card,
   Collapse,
+  Descriptions,
+  Divider,
   Form,
   Input,
   Modal,
@@ -21,21 +23,24 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { EyeOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
 import { InlineHelpTooltip } from "../components/ops";
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { BytebaseRealtimeContext } from "../contexts/BytebaseRealtimeContextValue";
 import {
+  cancelBytebaseRequest,
   createBytebaseChange,
   diagnoseBytebase,
   executeBytebaseRollout,
   getBytebaseCatalog,
   getBytebaseDatabases,
+  getBytebaseRequestDetail,
   listBytebaseRequests,
   type BytebaseDatabase,
   type BytebaseProject,
   type BytebaseRequest,
+  type BytebaseRequestDetail,
 } from "../services/api";
 
 const errorText = (e: unknown, fallback: string) =>
@@ -66,6 +71,8 @@ const BytebaseCenterPage: React.FC = () => {
   const [project, setProject] = useState<string>(),
     [loading, setLoading] = useState(false),
     [diagnostic, setDiagnostic] = useState<Diagnostic>();
+  const [detail, setDetail] = useState<BytebaseRequestDetail>();
+  const [detailLoading, setDetailLoading] = useState(false);
   const [form] = Form.useForm();
   const env = currentEnvironment?.id;
   const canSubmit = permissions.includes("bytebase:change:submit"),
@@ -166,6 +173,46 @@ const BytebaseCenterPage: React.FC = () => {
           await load();
         } catch (e) {
           message.error(errorText(e, "发布失败"));
+          throw e;
+        }
+      },
+    });
+  };
+  const openDetail = async (row: BytebaseRequest) => {
+    setDetailLoading(true);
+    try {
+      setDetail(await getBytebaseRequestDetail(row.request_id));
+    } catch (e) {
+      message.error(errorText(e, "申请详情加载失败"));
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+  const cancelRequest = (row: BytebaseRequest) => {
+    let code = "", reason = "";
+    const beforeRelease = row.status === "AWAITING_ADMIN_CONFIRMATION";
+    Modal.confirm({
+      title: beforeRelease ? "撤销待确认申请" : "停止 Bytebase 发布",
+      icon: <StopOutlined />,
+      width: 620,
+      content: <Space direction="vertical" style={{ width: "100%" }}>
+        <Alert type="warning" showIcon
+          message={beforeRelease ? "撤销后不能再确认发布" : "停止为尽力而为，不是数据库回滚"}
+          description={beforeRelease ? "Bytebase Draft Issue 会被取消，SQL 不会执行。" : "运行中的数据库语句可能无法中断，已经执行的 SQL 不会撤销；后台会继续对账最终状态。"}
+        />
+        <Input.TextArea rows={2} placeholder="取消原因（可选）" onChange={(e) => { reason = e.target.value; }} />
+        <Input.Password placeholder="Google Authenticator 验证码" onChange={(e) => { code = e.target.value; }} />
+      </Space>,
+      okText: beforeRelease ? "确认撤销" : "确认停止发布",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const result = await cancelBytebaseRequest(row.request_id, code, reason);
+          message.success(result.bestEffort ? "已提交停止请求，正在确认最终状态" : "申请已撤销");
+          setDetail(undefined);
+          await load();
+        } catch (e) {
+          message.error(errorText(e, "取消失败"));
           throw e;
         }
       },
@@ -359,8 +406,10 @@ const BytebaseCenterPage: React.FC = () => {
                   {
                     title: "操作",
                     fixed: "right",
-                    render: (_, r) =>
-                      canRollout && r.plan_name ? (
+                    width: 230,
+                    render: (_, r) => <Space size={4}>
+                      <Button size="small" icon={<EyeOutlined />} loading={detailLoading} onClick={() => void openDetail(r)}>详情</Button>
+                      {canRollout && r.plan_name && (
                         <Button
                           danger
                           size="small"
@@ -369,7 +418,13 @@ const BytebaseCenterPage: React.FC = () => {
                         >
                           确认发布
                         </Button>
-                      ) : null,
+                      )}
+                      {canRollout && ["AWAITING_ADMIN_CONFIRMATION", "RELEASE_CONFIRMED", "ROLLOUT_RUNNING", "UNKNOWN"].includes(r.status) && (
+                        <Button danger size="small" icon={<StopOutlined />} onClick={() => cancelRequest(r)}>
+                          {r.status === "AWAITING_ADMIN_CONFIRMATION" ? "撤销" : "停止"}
+                        </Button>
+                      )}
+                    </Space>,
                   },
                 ]}
               />
@@ -377,6 +432,31 @@ const BytebaseCenterPage: React.FC = () => {
           },
         ]}
       />
+      <Modal open={Boolean(detail)} title="Bytebase 申请详情" width={900} footer={null} onCancel={() => setDetail(undefined)}>
+        {detail && <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Descriptions bordered size="small" column={2} items={[
+            { key: "title", label: "标题", children: detail.request.title },
+            { key: "actor", label: "提交人", children: detail.request.actor_username },
+            { key: "environment", label: "环境", children: detail.request.environment_id },
+            { key: "status", label: "状态", children: <Tag>{detail.request.status}</Tag> },
+            { key: "project", label: "项目", children: detail.request.project_name, span: 2 },
+            { key: "database", label: "数据库", children: detail.request.database_name, span: 2 },
+            { key: "issue", label: "Issue", children: detail.request.issue_name || "-", span: 2 },
+            { key: "plan", label: "Plan", children: detail.request.plan_name || "-", span: 2 },
+          ]} />
+          <Divider plain>SQL（从 Bytebase Sheet 实时读取）</Divider>
+          {detail.statementIntegrity === "CHANGED" && <Alert type="error" showIcon message="SQL 内容与申请提交时的哈希不一致，禁止据此确认发布" />}
+          <Tag color={detail.statementIntegrity === "VERIFIED" ? "success" : detail.statementIntegrity === "CHANGED" ? "error" : "default"}>
+            {detail.statementIntegrity === "VERIFIED" ? "内容校验通过" : detail.statementIntegrity === "CHANGED" ? "内容已变化" : "无法校验"}
+          </Tag>
+          <Input.TextArea value={detail.statement || "未找到 SQL Sheet"} readOnly autoSize={{ minRows: 8, maxRows: 20 }} style={{ fontFamily: "monospace" }} />
+          <Divider plain>流转记录</Divider>
+          {detail.events.length ? detail.events.map((event, index) => <Typography.Paragraph key={`${event.created_at}-${index}`} style={{ marginBottom: 4 }}>
+            <Typography.Text type="secondary">{new Date(event.created_at).toLocaleString()} </Typography.Text>
+            <Tag>{event.event_type}</Tag>{event.summary}
+          </Typography.Paragraph>) : <Typography.Text type="secondary">暂无流转记录</Typography.Text>}
+        </Space>}
+      </Modal>
     </Space>
   );
 };

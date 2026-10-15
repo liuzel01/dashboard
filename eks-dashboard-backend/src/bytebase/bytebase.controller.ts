@@ -42,6 +42,11 @@ class RolloutDto extends EnvironmentQuery {
   @IsString() @MinLength(6) @MaxLength(8) mfaCode!: string;
   @IsIn(['EXECUTE_BYTEBASE_ROLLOUT']) confirmation!: 'EXECUTE_BYTEBASE_ROLLOUT';
 }
+class CancelRequestDto {
+  @IsString() @MinLength(6) @MaxLength(8) mfaCode!: string;
+  @IsOptional() @IsString() @MaxLength(500) reason?: string;
+  @IsIn(['CANCEL_BYTEBASE_REQUEST']) confirmation!: 'CANCEL_BYTEBASE_REQUEST';
+}
 
 @Controller('bytebase')
 export class BytebaseController {
@@ -94,6 +99,19 @@ export class BytebaseController {
     @Param('requestId') requestId: string,
   ) {
     return this.service.request(authorization, requestId);
+  }
+  @Get('requests/:requestId/detail') requestDetail(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('requestId') requestId: string,
+  ) {
+    return this.service.requestDetail(authorization, requestId);
+  }
+  @Post('requests/:requestId/cancel') cancelRequest(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('requestId') requestId: string,
+    @Body(validation) body: CancelRequestDto,
+  ) {
+    return this.service.cancelRequest(authorization, requestId, body);
   }
   @Get('jit/capability') jit(
     @Headers('authorization') authorization: string | undefined,

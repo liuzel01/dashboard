@@ -31,6 +31,7 @@ export const setAuthToken = (token: string | null) => {
 export type BytebaseProject = { name: string; title?: string; state?: string };
 export type BytebaseDatabase = { name: string; databaseName?: string; environment?: string; effectiveEnvironment?: string };
 export type BytebaseRequest = { request_id: string; environment_id: string; project_name: string; database_name: string; title: string; sql_sha256: string; status: string; actor_username: string; issue_name?: string; plan_name?: string; rollout_name?: string; issue_status?: string; approval_status?: string; rollout_status?: string; task_summary_json?: Array<{name:string;status:string}> | string; last_error?: string; release_confirmed_at?: string; last_reconciled_at?: string; terminal_at?: string; created_at: string; updated_at?: string };
+export type BytebaseRequestDetail = { request: BytebaseRequest; issue?: Record<string,unknown> | null; plan?: Record<string,unknown> | null; statement?: string | null; statementIntegrity: 'VERIFIED'|'CHANGED'|'UNAVAILABLE'; events:Array<{event_type:string;from_status?:string;to_status?:string;summary:string;created_at:string}> };
 export const getBytebaseCatalog = async (environmentId: string) => (await api.get('/bytebase/catalog',{params:{environmentId}})).data as {projects:BytebaseProject[];capabilities:string[];jit:{supported:boolean;reason:string}};
 export const getBytebaseDatabases = async (environmentId:string,project:string) => (await api.get('/bytebase/databases',{params:{environmentId,project}})).data as {databases:BytebaseDatabase[]};
 export const getBytebaseIssues = async (environmentId:string,project:string) => (await api.get('/bytebase/issues',{params:{environmentId,project}})).data;
@@ -38,6 +39,8 @@ export const diagnoseBytebase = async (environmentId:string) => (await api.get('
 export const listBytebaseRequests = async () => (await api.get('/bytebase/requests')).data as BytebaseRequest[];
 export const createBytebaseChange = async (input:{environmentId:string;project:string;database:string;title:string;description?:string;statement:string}) => (await api.post('/bytebase/changes',{...input,confirmation:'CREATE_BYTEBASE_CHANGE'})).data;
 export const executeBytebaseRollout = async (environmentId:string,plan:string,mfaCode:string) => (await api.post('/bytebase/rollouts',{environmentId,plan,mfaCode,confirmation:'EXECUTE_BYTEBASE_ROLLOUT'})).data;
+export const getBytebaseRequestDetail = async (requestId:string) => (await api.get(`/bytebase/requests/${encodeURIComponent(requestId)}/detail`)).data as BytebaseRequestDetail;
+export const cancelBytebaseRequest = async (requestId:string,mfaCode:string,reason?:string) => (await api.post(`/bytebase/requests/${encodeURIComponent(requestId)}/cancel`,{mfaCode,reason,confirmation:'CANCEL_BYTEBASE_REQUEST'})).data as {requestId:string;status:string;bestEffort:boolean};
 
 /**
  * 获取应用列表

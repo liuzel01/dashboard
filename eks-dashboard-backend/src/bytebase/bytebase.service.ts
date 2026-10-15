@@ -265,6 +265,200 @@ export class BytebaseService {
     return row;
   }
 
+  async requestDetail(authorization: string | undefined, requestId: string) {
+    const row = await this.request(authorization, requestId);
+    if (!row.plan_name || !row.issue_name)
+      return {
+        request: row,
+        issue: null,
+        plan: null,
+        statement: null,
+        events: [],
+      };
+    const c = await this.config(row.environment_id);
+    const [issue, plan, events] = await Promise.all([
+      this.remote(c, 'submitter', 'GET', `/v1/${row.issue_name}`),
+      this.remote(c, 'submitter', 'GET', `/v1/${row.plan_name}`),
+      this.db.query<any[]>(
+        `SELECT event_type,from_status,to_status,summary,created_at FROM bytebase_request_events WHERE request_id=? ORDER BY id DESC LIMIT 100`,
+        [requestId],
+      ),
+    ]);
+    const specs = Array.isArray(plan.specs) ? plan.specs : [];
+    const sheetName = specs[0]?.changeDatabaseConfig?.sheet;
+    let statement: string | null = null;
+    let statementIntegrity: 'VERIFIED' | 'CHANGED' | 'UNAVAILABLE' =
+      'UNAVAILABLE';
+    if (sheetName) {
+      const sheet = await this.remote(
+        c,
+        'submitter',
+        'GET',
+        `/v1/${sheetName}`,
+      );
+      statement = Buffer.from(String(sheet.content || ''), 'base64').toString(
+        'utf8',
+      );
+      statementIntegrity =
+        createHash('sha256').update(statement).digest('hex') === row.sql_sha256
+          ? 'VERIFIED'
+          : 'CHANGED';
+    }
+    return {
+      request: row,
+      issue,
+      plan,
+      statement,
+      statementIntegrity,
+      events,
+    };
+  }
+
+  async cancelRequest(
+    authorization: string | undefined,
+    requestId: string,
+    input: { mfaCode: string; reason?: string },
+  ) {
+    const actor = await this.actor(authorization, 'bytebase:rollout:execute');
+    await this.mfa.verifyForUser(actor.userId, input.mfaCode);
+    const rows = await this.db.query<any[]>(
+      `SELECT * FROM bytebase_requests WHERE request_id=? LIMIT 1`,
+      [requestId],
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException('Bytebase 变更申请不存在');
+    if (!row.issue_name || !row.plan_name)
+      throw new BadRequestException('该申请缺少 Bytebase Issue 或 Plan');
+    if (
+      ![
+        'AWAITING_ADMIN_CONFIRMATION',
+        'RELEASE_CONFIRMED',
+        'ROLLOUT_RUNNING',
+        'UNKNOWN',
+      ].includes(row.status)
+    )
+      throw new BadRequestException('该申请当前状态不可取消');
+    const c = await this.config(row.environment_id);
+    const reason =
+      input.reason?.trim() || `Dashboard 管理员 ${actor.username} 取消申请`;
+    const issueBeforeCancel = await this.remote(
+      c,
+      'submitter',
+      'GET',
+      `/v1/${row.issue_name}`,
+    );
+    if (issueBeforeCancel.draft === true) {
+      await this.remote(
+        c,
+        'submitter',
+        'PATCH',
+        `/v1/${row.plan_name}?updateMask=state`,
+        { name: row.plan_name, state: 'DELETED' },
+      );
+      await this.db.query(
+        `UPDATE bytebase_requests SET status='CANCELLED',issue_status='CANCELED',rollout_status='CANCELLED',last_error=NULL,terminal_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE request_id=?`,
+        [requestId],
+      );
+      await this.recordEvent(
+        requestId,
+        'CANCELLED',
+        row.status,
+        'CANCELLED',
+        `管理员 ${actor.username} 已关闭 Bytebase Draft Plan 并撤销待确认申请`,
+      );
+      return { requestId, status: 'CANCELLED', bestEffort: false };
+    }
+    let activeRollout = false;
+    try {
+      const rollout = await this.remote(
+        c,
+        'deployer',
+        'GET',
+        `/v1/${row.plan_name}/rollout`,
+      );
+      activeRollout = true;
+      for (const stage of rollout?.stages || []) {
+        const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+        const notStarted = tasks
+          .filter(
+            (task: any) =>
+              String(task.status || '').toUpperCase() === 'NOT_STARTED',
+          )
+          .map((task: any) => String(task.name));
+        if (notStarted.length)
+          await this.remote(
+            c,
+            'deployer',
+            'POST',
+            `/v1/${stage.name}/tasks:batchSkip`,
+            { parent: stage.name, tasks: notStarted, reason },
+          );
+        for (const task of tasks.filter((candidate: any) =>
+          ['PENDING', 'RUNNING'].includes(
+            String(candidate.status || '').toUpperCase(),
+          ),
+        )) {
+          const runs = await this.remote(
+            c,
+            'deployer',
+            'GET',
+            `/v1/${task.name}/taskRuns`,
+          );
+          const cancellable = (runs.taskRuns || [])
+            .filter((run: any) =>
+              ['PENDING', 'AVAILABLE', 'RUNNING'].includes(
+                String(run.status || '').toUpperCase(),
+              ),
+            )
+            .map((run: any) => String(run.name));
+          if (cancellable.length)
+            await this.remote(
+              c,
+              'deployer',
+              'POST',
+              `/v1/${task.name}/taskRuns:batchCancel`,
+              { parent: task.name, taskRuns: cancellable },
+            );
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
+    }
+    const project = row.issue_name.split('/issues/')[0];
+    await this.remote(
+      c,
+      'submitter',
+      'POST',
+      `/v1/${project}/issues:batchUpdateStatus`,
+      {
+        parent: project,
+        issues: [row.issue_name],
+        status: 'CANCELED',
+        reason,
+      },
+    );
+    const nextStatus = activeRollout ? 'CANCEL_REQUESTED' : 'CANCELLED';
+    await this.db.query(
+      `UPDATE bytebase_requests SET status=?,issue_status='CANCELED',rollout_status=?,last_error=NULL,terminal_at=IF(?='CANCELLED',UTC_TIMESTAMP(3),NULL),updated_at=UTC_TIMESTAMP(3) WHERE request_id=?`,
+      [
+        nextStatus,
+        activeRollout ? 'CANCEL_REQUESTED' : 'CANCELLED',
+        nextStatus,
+        requestId,
+      ],
+    );
+    await this.recordEvent(
+      requestId,
+      activeRollout ? 'CANCEL_REQUESTED' : 'CANCELLED',
+      row.status,
+      nextStatus,
+      activeRollout
+        ? `管理员 ${actor.username} 已请求停止发布；运行中任务为尽力取消`
+        : `管理员 ${actor.username} 已撤销待确认申请`,
+    );
+    return { requestId, status: nextStatus, bestEffort: activeRollout };
+  }
+
   async createChange(authorization: string | undefined, input: any) {
     const actor = await this.actor(authorization, 'bytebase:change:submit');
     const c = await this.config(input.environmentId);
@@ -472,7 +666,12 @@ export class BytebaseService {
           status: String(task.status || 'UNKNOWN'),
         })),
       );
-      const nextStatus = this.requestStatus(tasks, Boolean(rollout));
+      let nextStatus = this.requestStatus(tasks, Boolean(rollout));
+      if (
+        row.status === 'CANCEL_REQUESTED' &&
+        ['RELEASE_CONFIRMED', 'ROLLOUT_RUNNING'].includes(nextStatus)
+      )
+        nextStatus = 'CANCEL_REQUESTED';
       const rolloutStatus = rollout
         ? nextStatus === 'SUCCEEDED'
           ? 'DONE'
@@ -480,6 +679,8 @@ export class BytebaseService {
             ? 'FAILED'
             : nextStatus === 'CANCELLED'
               ? 'CANCELLED'
+              : nextStatus === 'CANCEL_REQUESTED'
+                ? 'CANCEL_REQUESTED'
               : 'RUNNING'
         : 'PENDING';
       const terminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(
