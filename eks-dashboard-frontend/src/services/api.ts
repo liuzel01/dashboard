@@ -2092,6 +2092,10 @@ export type DependencyHealthTarget = {
 export type DependencyHealthProviderProfile = {
   id: string; label: string; category: string; environmentId: string; suggestedUrl: string; configured: boolean; description: string;
 };
+export type DependencyHealthProviderProfileRecord = {
+  id: string; providerType: string; name: string; environmentId: string; category: string; config: Record<string, string>; enabled: boolean; sortOrder?: number;
+};
+export type SiteConfReference = { confKey: string; valueType: string; category?: string; description?: string; isSensitive: boolean; configured: boolean };
 export type DependencyHealthHistory = {
   targetKey: string; hours: number;
   availability: Array<{ layer: 'L1' | 'L2' | 'L3'; total: number; passed: number; percentage: number | null }>;
@@ -2100,6 +2104,12 @@ export type DependencyHealthHistory = {
 };
 export const listDependencyHealthTargets = async () => (await api.get('/dependency-health/targets')).data as DependencyHealthTarget[];
 export const listDependencyHealthProviderProfiles = async () => (await api.get('/dependency-health/provider-profiles')).data as DependencyHealthProviderProfile[];
+export const listDependencyHealthProviderProfileRecords = async () => (await api.get('/dependency-health/provider-profile-records')).data as DependencyHealthProviderProfileRecord[];
+export const listDependencyHealthProviderTypes = async () => (await api.get('/dependency-health/provider-types')).data as string[];
+export const listDependencyHealthSiteConfReferences = async () => (await api.get('/dependency-health/siteconf-references')).data as SiteConfReference[];
+export const createDependencyHealthProviderProfile = async (data: DependencyHealthProviderProfileRecord) => (await api.post('/dependency-health/provider-profiles', data)).data;
+export const updateDependencyHealthProviderProfile = async (id: string, data: DependencyHealthProviderProfileRecord) => (await api.put(`/dependency-health/provider-profiles/${encodeURIComponent(id)}`, data)).data;
+export const deleteDependencyHealthProviderProfile = async (id: string) => (await api.delete(`/dependency-health/provider-profiles/${encodeURIComponent(id)}`)).data;
 export const createDependencyHealthTarget = async (data: Omit<DependencyHealthTarget, 'updatedAt'>) => (await api.post('/dependency-health/targets', data)).data;
 export const updateDependencyHealthTarget = async (key: string, data: Omit<DependencyHealthTarget, 'key' | 'updatedAt'>) => (await api.put(`/dependency-health/targets/${encodeURIComponent(key)}`, data)).data;
 export const verifyDependencyHealthTarget = async (key: string) => (await api.post(`/dependency-health/targets/${encodeURIComponent(key)}/verify`)).data;

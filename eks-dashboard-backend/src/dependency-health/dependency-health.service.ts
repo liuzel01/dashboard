@@ -69,6 +69,13 @@ export class DependencyHealthService implements OnModuleInit {
 
   async providerProfiles() { return this.providers.profiles(); }
 
+  async providerProfileRecords() { return this.providers.profileRecords(); }
+  async saveProviderProfile(id: string | null, input: unknown) { return this.providers.saveProfile(id, input); }
+  async deleteProviderProfile(id: string) { return this.providers.deleteProfile(id); }
+  providerTypes() { return this.providers.providerTypes(); }
+
+  async siteConfReferences() { return this.siteConf.references(); }
+
   async saveTarget(key: string | null, input: unknown) {
     const value = input as Record<string, unknown>;
     const target = this.validateTargets([{ ...value, key: key || value?.key }])[0];
@@ -278,9 +285,6 @@ export class DependencyHealthService implements OnModuleInit {
       }
       if (!['http_2xx', 'http_reachable'].includes(target.module || '')) {
         throw new BadRequestException(`dependency target ${target.key} uses unsupported module`);
-      }
-      if (target.providerProfile && !this.providers.hasProfile(target.providerProfile)) {
-        throw new BadRequestException(`dependency target ${target.key} uses unsupported providerProfile`);
       }
       let parsed: URL;
       try { parsed = new URL(target.url); } catch { throw new BadRequestException(`dependency target ${target.key} has invalid URL`); }

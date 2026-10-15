@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import axios, { AxiosRequestConfig } from 'axios';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
@@ -44,6 +44,16 @@ type ProviderProfileDefinition = Omit<DependencyProviderProfile, 'configured' | 
   urlKey: string;
   requiredKeys: string[];
   create: (targetKeys: string[]) => ProviderDefinition;
+};
+
+type StoredProviderProfile = {
+  id: string;
+  providerType: string;
+  name: string;
+  environmentId: string;
+  category: string;
+  config: Record<string, string>;
+  enabled: boolean;
 };
 
 export const providerAlertTransition = (
@@ -129,15 +139,62 @@ export class DependencyProviderHealthService implements OnModuleInit {
     }
   }
 
-  hasProfile(profileId: string) {
-    return this.profileDefinitions().some((profile) => profile.id === profileId);
+  async profiles(): Promise<DependencyProviderProfile[]> {
+    try {
+      const profiles = await this.storedProfiles();
+      return Promise.all(profiles.map(async (profile) => {
+        const keys = Object.values(profile.config).filter(Boolean);
+        const values = await Promise.all(keys.map((key) => this.siteConf.getString(key, '')));
+        return { id: profile.id, label: profile.name, category: profile.category, environmentId: profile.environmentId, suggestedUrl: profile.config.baseUrlKey ? await this.siteConf.getString(profile.config.baseUrlKey, '') : '', configured: keys.length > 0 && values.every((value) => Boolean(String(value).trim())), description: `${profile.providerType} Provider 配置档案` };
+      }));
+    } catch {
+      return Promise.all(this.profileDefinitions().map(async (profile) => {
+        const [suggestedUrl, ...required] = await Promise.all([this.siteConf.getString(profile.urlKey, ''), ...profile.requiredKeys.map((key) => this.siteConf.getString(key, ''))]);
+        return { id: profile.id, label: profile.label, category: profile.category, environmentId: profile.environmentId, suggestedUrl, configured: required.every((value) => Boolean(String(value).trim())), description: profile.description };
+      }));
+    }
   }
 
-  async profiles(): Promise<DependencyProviderProfile[]> {
-    return Promise.all(this.profileDefinitions().map(async (profile) => {
-      const [suggestedUrl, ...required] = await Promise.all([this.siteConf.getString(profile.urlKey, ''), ...profile.requiredKeys.map((key) => this.siteConf.getString(key, ''))]);
-      return { id: profile.id, label: profile.label, category: profile.category, environmentId: profile.environmentId, suggestedUrl, configured: required.every((value) => Boolean(String(value).trim())), description: profile.description };
-    }));
+  providerTypes() {
+    return ['jenkins', 'gitlab', 'grafana', 'cliproxy', 'spot-publish', 'bytebase'];
+  }
+
+  async profileRecords() {
+    return this.storedProfiles();
+  }
+
+  async saveProfile(profileId: string | null, input: unknown) {
+    const value = input as Record<string, unknown>;
+    const id = String(profileId || value?.id || '').trim();
+    const providerType = String(value?.providerType || '').trim();
+    const name = String(value?.name || '').trim();
+    const environmentId = String(value?.environmentId || 'global').trim();
+    const category = String(value?.category || providerType).trim();
+    const config = this.parseConfig(value?.config);
+    if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(id)) throw new BadRequestException('Invalid provider profile id');
+    if (!this.providerTypes().includes(providerType)) throw new BadRequestException('Unsupported provider type');
+    if (!name || name.length > 100 || !category || category.length > 64) throw new BadRequestException('Invalid provider profile name or category');
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(environmentId) && environmentId !== 'global') throw new BadRequestException('Invalid provider profile environment');
+    for (const [field, key] of Object.entries(config)) {
+      if (!/^[a-zA-Z][a-zA-Z0-9]*Key$/.test(field) || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,191}$/.test(key)) throw new BadRequestException('Invalid SiteConf reference');
+    }
+    const enabled = value?.enabled !== false;
+    const sortOrder = Math.max(0, Math.min(100000, Number(value?.sortOrder) || 0));
+    if (profileId) {
+      const result: any = await this.db.query(`UPDATE dependency_health_provider_profiles SET provider_type=?,name=?,environment_id=?,category=?,config_json=?,enabled=?,sort_order=? WHERE profile_id=?`, [providerType, name, environmentId, category, JSON.stringify(config), enabled ? 1 : 0, sortOrder, id]);
+      if (!Number(result.affectedRows)) throw new BadRequestException('Provider profile not found');
+    } else {
+      await this.db.query(`INSERT INTO dependency_health_provider_profiles (profile_id,provider_type,name,environment_id,category,config_json,enabled,sort_order) VALUES (?,?,?,?,?,?,?,?)`, [id, providerType, name, environmentId, category, JSON.stringify(config), enabled ? 1 : 0, sortOrder]);
+    }
+    return { id, providerType, name, environmentId, category, config, enabled, sortOrder };
+  }
+
+  async deleteProfile(profileId: string) {
+    const references = await this.db.query<any[]>(`SELECT target_key FROM dependency_health_targets WHERE provider_profile=? LIMIT 1`, [profileId]);
+    if (references[0]) throw new BadRequestException('Provider profile is still used by a dependency target');
+    const result: any = await this.db.query(`DELETE FROM dependency_health_provider_profiles WHERE profile_id=?`, [profileId]);
+    if (!Number(result.affectedRows)) throw new BadRequestException('Provider profile not found');
+    return { deleted: true };
   }
 
   async verifyTarget(targetKey: string): Promise<ProviderCheckResult[]> {
@@ -257,16 +314,43 @@ export class DependencyProviderHealthService implements OnModuleInit {
 
   private async definitions(): Promise<ProviderDefinition[]> {
     try {
-      const rows = await this.db.query<any[]>(`SELECT target_key,provider_profile FROM dependency_health_targets WHERE enabled=1 AND provider_profile IS NOT NULL AND provider_profile<>''`);
-      const keysByProfile = new Map<string, string[]>();
+      const rows = await this.db.query<any[]>(`SELECT t.target_key,p.profile_id,p.provider_type,p.config_json FROM dependency_health_targets t JOIN dependency_health_provider_profiles p ON p.profile_id=t.provider_profile AND p.enabled=1 WHERE t.enabled=1 AND t.provider_profile IS NOT NULL AND t.provider_profile<>''`);
+      const byProfile = new Map<string, { providerType: string; config: Record<string, string>; targetKeys: string[] }>();
       rows.forEach((row) => {
-        const profile = String(row.provider_profile);
-        keysByProfile.set(profile, [...(keysByProfile.get(profile) || []), String(row.target_key)]);
+        const id = String(row.profile_id);
+        const current = byProfile.get(id) || { providerType: String(row.provider_type), config: this.parseConfig(row.config_json), targetKeys: [] };
+        current.targetKeys.push(String(row.target_key));
+        byProfile.set(id, current);
       });
-      return this.profileDefinitions().filter((profile) => keysByProfile.has(profile.id)).map((profile) => profile.create(keysByProfile.get(profile.id) || []));
+      return [...byProfile.values()].map((profile) => this.definitionFor(profile.providerType, profile.targetKeys, profile.config));
     } catch {
       return this.legacyDefinitions();
     }
+  }
+
+  private definitionFor(providerType: string, targetKeys: string[], config: Record<string, string>): ProviderDefinition {
+    switch (providerType) {
+      case 'jenkins': return this.jenkins(targetKeys, config);
+      case 'gitlab': return this.gitlab(targetKeys, config);
+      case 'grafana': return this.grafana(targetKeys, config);
+      case 'cliproxy': return this.cliproxy(targetKeys, config);
+      case 'spot-publish': return this.spotPublish(targetKeys, config);
+      case 'bytebase': return this.bytebase(targetKeys, config);
+      default: throw new Error(`unsupported provider type: ${providerType}`);
+    }
+  }
+
+  private async storedProfiles(): Promise<StoredProviderProfile[]> {
+    const rows = await this.db.query<any[]>(`SELECT profile_id,provider_type,name,environment_id,category,config_json,enabled FROM dependency_health_provider_profiles ORDER BY sort_order,profile_id`);
+    return rows.map((row) => ({ id: String(row.profile_id), providerType: String(row.provider_type), name: String(row.name), environmentId: String(row.environment_id), category: String(row.category), config: this.parseConfig(row.config_json), enabled: Boolean(row.enabled) }));
+  }
+
+  private parseConfig(value: unknown): Record<string, string> {
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      return Object.fromEntries(Object.entries(parsed).filter(([, item]) => typeof item === 'string').map(([key, item]) => [key, String(item).trim()]));
+    } catch { return {}; }
   }
 
   private legacyDefinitions(): ProviderDefinition[] {
@@ -297,14 +381,14 @@ export class DependencyProviderHealthService implements OnModuleInit {
     ];
   }
 
-  private bytebase(targetKeys: string[]): ProviderDefinition {
+  private bytebase(targetKeys: string[], config: Record<string, string> = {}): ProviderDefinition {
     return {
       targetKeys,
       check: async (layer) => {
         const [baseUrl, email, serviceKey] = await Promise.all([
-          this.siteConf.getString('bytebase.hashex.base_url', ''),
-          this.siteConf.getString('bytebase.hashex.catalog_email', ''),
-          this.siteConf.getString('bytebase.hashex.catalog_service_key', ''),
+          this.siteConf.getString(this.ref(config, 'baseUrlKey', 'bytebase.hashex.base_url'), ''),
+          this.siteConf.getString(this.ref(config, 'usernameKey', 'bytebase.hashex.catalog_email'), ''),
+          this.siteConf.getString(this.ref(config, 'secretKey', 'bytebase.hashex.catalog_service_key'), ''),
         ]);
         if (!baseUrl || !email || !serviceKey)
           return this.notConfigured('Bytebase Catalog 专用凭据未配置');
@@ -328,19 +412,17 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private jenkins(
-    targetKeys: string[],
-    executorKey: string,
-  ): ProviderDefinition {
+  private jenkins(targetKeys: string[], executorKeyOrConfig: string | Record<string, string>): ProviderDefinition {
     return {
       targetKeys,
       check: async (layer) => {
-        const prefix = `cicd.executors.${executorKey}`;
+        const prefix = typeof executorKeyOrConfig === 'string' ? `cicd.executors.${executorKeyOrConfig}` : '';
+        const config = typeof executorKeyOrConfig === 'string' ? {} : executorKeyOrConfig;
         const [baseUrl, username, token, timeoutMs] = await Promise.all([
-          this.siteConf.getString(`${prefix}.base_url`, ''),
-          this.siteConf.getString(`${prefix}.username`, ''),
-          this.siteConf.getString(`${prefix}.api_token`, ''),
-          this.siteConf.getNumber(`${prefix}.timeout_ms`, 15_000),
+          this.siteConf.getString(this.ref(config, 'baseUrlKey', `${prefix}.base_url`), ''),
+          this.siteConf.getString(this.ref(config, 'usernameKey', `${prefix}.username`), ''),
+          this.siteConf.getString(this.ref(config, 'secretKey', `${prefix}.api_token`), ''),
+          this.siteConf.getNumber(this.ref(config, 'timeoutKey', `${prefix}.timeout_ms`), 15_000),
         ]);
         if (!baseUrl || !username || !token)
           return this.notConfigured('Jenkins 专用凭据未配置');
@@ -378,24 +460,24 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private gitlab(targetKeys: string[]): ProviderDefinition {
+  private gitlab(targetKeys: string[], config: Record<string, string> = {}): ProviderDefinition {
     return {
       targetKeys,
       check: async (layer) => {
         const [baseUrl, projectId, token, branch, timeoutMs] =
           await Promise.all([
-            this.siteConf.getString('monitoring.requests.gitlab.base_url', ''),
-            this.siteConf.getString(
-              'monitoring.requests.gitlab.project_id',
+            this.siteConf.getString(this.ref(config, 'baseUrlKey', 'monitoring.requests.gitlab.base_url'), ''),
+            this.siteConf.getString(this.ref(config, 'projectIdKey',
+              'monitoring.requests.gitlab.project_id'),
               '',
             ),
-            this.siteConf.getString('monitoring.requests.gitlab.bot_token', ''),
-            this.siteConf.getString(
-              'monitoring.requests.gitlab.target_branch',
+            this.siteConf.getString(this.ref(config, 'secretKey', 'monitoring.requests.gitlab.bot_token'), ''),
+            this.siteConf.getString(this.ref(config, 'targetBranchKey',
+              'monitoring.requests.gitlab.target_branch'),
               '',
             ),
-            this.siteConf.getNumber(
-              'monitoring.requests.gitlab.timeout_ms',
+            this.siteConf.getNumber(this.ref(config, 'timeoutKey',
+              'monitoring.requests.gitlab.timeout_ms'),
               15_000,
             ),
           ]);
@@ -421,16 +503,15 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private grafana(targetKeys: string[]): ProviderDefinition {
+  private grafana(targetKeys: string[], config: Record<string, string> = {}): ProviderDefinition {
     return {
       targetKeys,
       check: async (layer) => {
-        const prefix = 'aiops.logs.environments.mgbx';
         const [baseUrl, token, datasourceUid, timeoutMs] = await Promise.all([
-          this.siteConf.getString(`${prefix}.grafana_base_url`, ''),
-          this.siteConf.getString(`${prefix}.grafana_token`, ''),
-          this.siteConf.getString(`${prefix}.datasource_uid`, ''),
-          this.siteConf.getNumber(`${prefix}.timeout_ms`, 15_000),
+          this.siteConf.getString(this.ref(config, 'baseUrlKey', 'aiops.logs.environments.mgbx.grafana_base_url'), ''),
+          this.siteConf.getString(this.ref(config, 'secretKey', 'aiops.logs.environments.mgbx.grafana_token'), ''),
+          this.siteConf.getString(this.ref(config, 'datasourceUidKey', 'aiops.logs.environments.mgbx.datasource_uid'), ''),
+          this.siteConf.getNumber(this.ref(config, 'timeoutKey', 'aiops.logs.environments.mgbx.timeout_ms'), 15_000),
         ]);
         if (!baseUrl || !token || (layer === 'L3' && !datasourceUid))
           return this.notConfigured(
@@ -463,15 +544,15 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private cliproxy(targetKeys: string[]): ProviderDefinition {
+  private cliproxy(targetKeys: string[], config: Record<string, string> = {}): ProviderDefinition {
     return {
       targetKeys,
       check: async (layer) => {
         const [baseUrl, apiKey, model, timeoutMs] = await Promise.all([
-          this.siteConf.getString('aiops.cliproxy.base_url', ''),
-          this.siteConf.getString('aiops.cliproxy.api_key', ''),
-          this.siteConf.getString('aiops.cliproxy.model', 'gpt-5.6-terra'),
-          this.siteConf.getNumber('aiops.cliproxy.timeout_ms', 20_000),
+          this.siteConf.getString(this.ref(config, 'baseUrlKey', 'aiops.cliproxy.base_url'), ''),
+          this.siteConf.getString(this.ref(config, 'secretKey', 'aiops.cliproxy.api_key'), ''),
+          this.siteConf.getString(this.ref(config, 'modelKey', 'aiops.cliproxy.model'), 'gpt-5.6-terra'),
+          this.siteConf.getNumber(this.ref(config, 'timeoutKey', 'aiops.cliproxy.timeout_ms'), 20_000),
         ]);
         if (!baseUrl || !apiKey)
           return this.notConfigured('CLIProxy API Key 未配置');
@@ -509,14 +590,14 @@ export class DependencyProviderHealthService implements OnModuleInit {
     };
   }
 
-  private spotPublish(targetKeys: string[]): ProviderDefinition {
+  private spotPublish(targetKeys: string[], config: Record<string, string> = {}): ProviderDefinition {
     return {
       targetKeys,
       check: async (layer) => {
         const [signinUrl, username, password] = await Promise.all([
-          this.siteConf.getString('cicd.providers.icoin-spot.signin_url', ''),
-          this.siteConf.getString('cicd.providers.icoin-spot.username', ''),
-          this.siteConf.getString('cicd.providers.icoin-spot.password', ''),
+          this.siteConf.getString(this.ref(config, 'baseUrlKey', 'cicd.providers.icoin-spot.signin_url'), ''),
+          this.siteConf.getString(this.ref(config, 'usernameKey', 'cicd.providers.icoin-spot.username'), ''),
+          this.siteConf.getString(this.ref(config, 'secretKey', 'cicd.providers.icoin-spot.password'), ''),
         ]);
         if (!signinUrl || !username || !password)
           return this.notConfigured('iCoin 推包系统专用凭据未配置');
@@ -665,6 +746,9 @@ export class DependencyProviderHealthService implements OnModuleInit {
       'icoin-spot-publish',
       'bytebase-hashex',
     ]);
+  }
+  private ref(config: Record<string, string>, field: string, fallback: string) {
+    return String(config[field] || fallback).trim();
   }
   private pass(
     summary: string,

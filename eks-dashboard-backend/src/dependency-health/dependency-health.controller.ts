@@ -32,6 +32,42 @@ export class DependencyHealthController {
     return this.service.providerProfiles();
   }
 
+  @Get('provider-profile-records')
+  async providerProfileRecords(@Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.service.providerProfileRecords();
+  }
+
+  @Get('provider-types')
+  async providerTypes(@Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.service.providerTypes();
+  }
+
+  @Post('provider-profiles')
+  async createProviderProfile(@Headers('authorization') authorization: string | undefined, @Body() body: unknown) {
+    await this.authorize(authorization);
+    return this.service.saveProviderProfile(null, body);
+  }
+
+  @Put('provider-profiles/:id')
+  async updateProviderProfile(@Headers('authorization') authorization: string | undefined, @Param('id') id: string, @Body() body: unknown) {
+    await this.authorize(authorization);
+    return this.service.saveProviderProfile(id, body);
+  }
+
+  @Delete('provider-profiles/:id')
+  async deleteProviderProfile(@Headers('authorization') authorization: string | undefined, @Param('id') id: string) {
+    await this.authorize(authorization);
+    return this.service.deleteProviderProfile(id);
+  }
+
+  @Get('siteconf-references')
+  async siteConfReferences(@Headers('authorization') authorization?: string) {
+    await this.authorize(authorization);
+    return this.service.siteConfReferences();
+  }
+
   @Post('targets')
   async createTarget(@Headers('authorization') authorization: string | undefined, @Body() body: unknown) {
     await this.authorize(authorization);

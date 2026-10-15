@@ -87,6 +87,21 @@ export class SiteConfService implements OnModuleInit {
     return rows.map((r) => r.category);
   }
 
+  async references() {
+    await this.ensureTableAndDefaults();
+    const rows = await this.db.query<Array<Pick<SiteConfRow, 'conf_key' | 'value_type' | 'category' | 'description' | 'is_sensitive' | 'conf_value'>>>(
+      'SELECT conf_key,value_type,category,description,is_sensitive,conf_value FROM dashboard_site_conf ORDER BY category,conf_key',
+    );
+    return rows.map((row) => ({
+      confKey: row.conf_key,
+      valueType: row.value_type,
+      category: row.category || undefined,
+      description: row.description || undefined,
+      isSensitive: Number(row.is_sensitive) === 1,
+      configured: Boolean(String(row.conf_value || '').trim()),
+    }));
+  }
+
   async upsert(input: {
     confKey: string;
     confValue: string;

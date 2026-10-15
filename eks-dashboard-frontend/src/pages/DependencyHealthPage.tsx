@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { createDependencyHealthTarget, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfiles, listDependencyHealthTargets, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthResponse, type DependencyHealthTarget } from '../services/api';
+import { createDependencyHealthProviderProfile, createDependencyHealthTarget, deleteDependencyHealthProviderProfile, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfileRecords, listDependencyHealthProviderProfiles, listDependencyHealthProviderTypes, listDependencyHealthSiteConfReferences, listDependencyHealthTargets, updateDependencyHealthProviderProfile, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthProviderProfileRecord, type DependencyHealthResponse, type DependencyHealthTarget, type SiteConfReference } from '../services/api';
 import { MetricGrid, OpsTable, PageHeader } from '../components/ops';
 
 const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
@@ -28,6 +28,15 @@ const layerTag = (layer?: DependencyHealthLayer) => {
   return <Space><Tag color={color}>{text}</Tag><Typography.Text>{layer.summary}</Typography.Text></Space>;
 };
 
+const profileFields: Record<string, Array<{ key: string; label: string }>> = {
+  jenkins: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'usernameKey', label: '账号' }, { key: 'secretKey', label: 'API Token' }, { key: 'timeoutKey', label: '超时（可选）' }],
+  gitlab: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'secretKey', label: 'Bot Token' }, { key: 'projectIdKey', label: '项目 ID' }, { key: 'targetBranchKey', label: '目标分支' }, { key: 'timeoutKey', label: '超时（可选）' }],
+  grafana: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'secretKey', label: 'Service Account Token' }, { key: 'datasourceUidKey', label: '数据源 UID' }, { key: 'timeoutKey', label: '超时（可选）' }],
+  cliproxy: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'secretKey', label: 'API Key' }, { key: 'modelKey', label: '受控模型' }, { key: 'timeoutKey', label: '超时（可选）' }],
+  'spot-publish': [{ key: 'baseUrlKey', label: '登录地址' }, { key: 'usernameKey', label: '账号' }, { key: 'secretKey', label: '密码' }],
+  bytebase: [{ key: 'baseUrlKey', label: '服务地址' }, { key: 'usernameKey', label: 'Catalog 账号' }, { key: 'secretKey', label: 'Service Key' }],
+};
+
 const DependencyHealthPage: React.FC = () => {
   const { environments } = useContext(EnvironmentContext);
   const [data, setData] = useState<DependencyHealthResponse | null>(null);
@@ -40,6 +49,14 @@ const DependencyHealthPage: React.FC = () => {
   const [targetsOpen, setTargetsOpen] = useState(false);
   const [targets, setTargets] = useState<DependencyHealthTarget[]>([]);
   const [providerProfiles, setProviderProfiles] = useState<DependencyHealthProviderProfile[]>([]);
+  const [profileRecords, setProfileRecords] = useState<DependencyHealthProviderProfileRecord[]>([]);
+  const [siteConfReferences, setSiteConfReferences] = useState<SiteConfReference[]>([]);
+  const [providerTypes, setProviderTypes] = useState<string[]>([]);
+  const [profilesOpen, setProfilesOpen] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<DependencyHealthProviderProfileRecord | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileForm] = Form.useForm();
   const [editingTarget, setEditingTarget] = useState<DependencyHealthTarget | null>(null);
   const [targetEditorOpen, setTargetEditorOpen] = useState(false);
   const [targetSaving, setTargetSaving] = useState(false);
@@ -76,6 +93,25 @@ const DependencyHealthPage: React.FC = () => {
     setTargets(loadedTargets);
     setProviderProfiles(loadedProfiles);
     setTargetsOpen(true);
+  };
+  const openProfileManager = async () => {
+    const [records, references, types] = await Promise.all([listDependencyHealthProviderProfileRecords(), listDependencyHealthSiteConfReferences(), listDependencyHealthProviderTypes()]);
+    setProfileRecords(records); setSiteConfReferences(references); setProviderTypes(types); setProfilesOpen(true);
+  };
+  const editProfile = (profile?: DependencyHealthProviderProfileRecord) => {
+    setEditingProfile(profile || null);
+    profileForm.setFieldsValue(profile || { environmentId: 'global', providerType: 'jenkins', category: 'jenkins', enabled: true, sortOrder: 0, config: {} });
+    setProfileEditorOpen(true);
+  };
+  const saveProfile = async () => {
+    const value = await profileForm.validateFields();
+    setProfileSaving(true);
+    try {
+      if (editingProfile) await updateDependencyHealthProviderProfile(editingProfile.id, value);
+      else await createDependencyHealthProviderProfile(value);
+      setProfileRecords(await listDependencyHealthProviderProfileRecords());
+      setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields();
+    } finally { setProfileSaving(false); }
   };
   const editTarget = (target?: DependencyHealthTarget) => {
     setEditingTarget(target || null);
@@ -213,7 +249,7 @@ const DependencyHealthPage: React.FC = () => {
       ]} />}
     </Modal>
     <Modal title="依赖目标管理" open={targetsOpen} onCancel={() => { setTargetsOpen(false); setEditingTarget(null); }} footer={null} width={1000}>
-      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editTarget()}>新增目标</Button>
+      <Space style={{ marginBottom: 12 }}><Button type="primary" onClick={() => editTarget()}>新增目标</Button><Button onClick={() => void openProfileManager()}>Provider 档案</Button></Space>
       <OpsTable rowKey="key" pagination={false} dataSource={targets} columns={[
         { title: '标识', dataIndex: 'key' }, { title: '名称', dataIndex: 'name' }, { title: '环境', dataIndex: 'environmentId' },
         { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
@@ -235,6 +271,30 @@ const DependencyHealthPage: React.FC = () => {
               if (profile) targetForm.setFieldsValue({ category: profile.category, url: profile.suggestedUrl || undefined, environmentId: profile.environmentId });
             }} options={providerProfiles.map((profile) => ({ value: profile.id, label: `${profile.label}（${profile.configured ? '已配置' : '未完整配置'}）`, title: profile.description }))} />
           </Form.Item>
+          <Form.Item name="sortOrder" label="排序"><InputNumber min={0} /></Form.Item>
+          <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
+        </Form>
+      </Modal>
+    </Modal>
+    <Modal title="Provider 配置档案" open={profilesOpen} onCancel={() => { setProfilesOpen(false); setEditingProfile(null); }} footer={null} width={1050}>
+      <Typography.Paragraph type="secondary">档案只保存 SiteConf 配置项引用，不保存或展示 Token、密码等值。可为同一 Provider 类型创建多个环境实例。</Typography.Paragraph>
+      <Button type="primary" style={{ marginBottom: 12 }} onClick={() => editProfile()}>新增档案</Button>
+      <OpsTable rowKey="id" pagination={false} dataSource={profileRecords} columns={[
+        { title: '标识', dataIndex: 'id' }, { title: '名称', dataIndex: 'name' }, { title: '类型', dataIndex: 'providerType', render: (value: string) => <Tag>{value}</Tag> }, { title: '环境', dataIndex: 'environmentId' },
+        { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
+        { title: '操作', render: (_: unknown, row: DependencyHealthProviderProfileRecord) => <Space><Button type="link" onClick={() => editProfile(row)}>编辑</Button><Popconfirm title="确认删除此 Provider 档案？" onConfirm={async () => { await deleteDependencyHealthProviderProfile(row.id); setProfileRecords(await listDependencyHealthProviderProfileRecords()); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+      ] as any} />
+      <Modal title={editingProfile ? `编辑 ${editingProfile.name}` : '新增 Provider 档案'} open={profileEditorOpen} onCancel={() => { setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields(); }} onOk={() => void saveProfile()} confirmLoading={profileSaving} destroyOnHidden width={680}>
+        <Form form={profileForm} layout="vertical">
+          <Form.Item name="id" label="档案标识" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9._-]{1,63}$/, message: '仅允许小写字母、数字、点、下划线和短横线' }]}><Input disabled={Boolean(editingProfile)} /></Form.Item>
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="providerType" label="Provider 类型" rules={[{ required: true }]}><Select options={providerTypes.map((type) => ({ value: type, label: type }))} onChange={(providerType) => { profileForm.setFieldsValue({ category: providerType, config: {} }); }} /></Form.Item>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.providerType !== current.providerType}>{() => {
+            const providerType = profileForm.getFieldValue('providerType');
+            return <>{(profileFields[providerType] || []).map((field) => <Form.Item key={field.key} name={['config', field.key]} label={field.label} rules={field.key === 'timeoutKey' ? [] : [{ required: true, message: `请选择${field.label}对应的 SiteConf 配置项` }]}><Select showSearch allowClear optionFilterProp="label" options={siteConfReferences.map((reference) => ({ value: reference.confKey, label: `${reference.confKey}${reference.isSensitive ? '（敏感）' : ''}${reference.configured ? '' : '（未配置）'}`, title: reference.description }))} /></Form.Item>)}</>;
+          }}</Form.Item>
+          <Form.Item name="environmentId" label="所属环境" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={[{ value: 'global', label: '全局' }, ...environments.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }))]} /></Form.Item>
+          <Form.Item name="category" label="类型标签" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="sortOrder" label="排序"><InputNumber min={0} /></Form.Item>
           <Form.Item name="enabled" label="启用" valuePropName="checked"><Switch /></Form.Item>
         </Form>
