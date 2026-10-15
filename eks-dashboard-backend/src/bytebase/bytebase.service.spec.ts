@@ -183,6 +183,9 @@ describe('BytebaseService', () => {
           request_id: 'request-1',
           status: 'AWAITING_ADMIN_CONFIRMATION',
           issue_name: 'projects/p/issues/1',
+          database_name: 'instances/i/databases/d',
+          sql_sha256:
+            'e004ebd5b5532a4b85984a62f8ad48a81aa3460c1ca07701f386135d72cdecf5',
         },
       ])
       .mockResolvedValueOnce({ affectedRows: 1 });
@@ -196,7 +199,29 @@ describe('BytebaseService', () => {
     (axios.request as jest.Mock)
       .mockResolvedValueOnce({
         status: 200,
-        data: { planCheckRunStatusCount: { SUCCESS: 2, DONE: 1 } },
+        data: {
+          planCheckRunStatusCount: { SUCCESS: 2, DONE: 1 },
+          specs: [
+            {
+              changeDatabaseConfig: {
+                targets: ['instances/i/databases/d'],
+                sheet: 'projects/p/sheets/1',
+              },
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          name: 'projects/p/issues/1',
+          plan: 'projects/p/plans/1',
+          draft: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { content: Buffer.from('SELECT 1').toString('base64') },
       })
       .mockResolvedValueOnce({
         status: 200,
@@ -225,5 +250,78 @@ describe('BytebaseService', () => {
           request.method === 'POST' && request.url.endsWith('/rollout'),
       ),
     ).toBe(false);
+  });
+
+  it('reconciles a completed rollout without issuing another write request', async () => {
+    db.query
+      .mockResolvedValueOnce([
+        {
+          request_id: 'request-1',
+          environment_id: 'hashex',
+          status: 'ROLLOUT_RUNNING',
+          issue_name: 'projects/p/issues/1',
+          plan_name: 'projects/p/plans/1',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          environment_id: 'hashex',
+          executor_key: 'hashex-bytebase',
+          enabled: 1,
+          base_url_conf_key: 'url',
+          catalog_email_conf_key: 'ce',
+          catalog_key_conf_key: 'ck',
+          reader_email_conf_key: 're',
+          reader_key_conf_key: 'rk',
+          submitter_email_conf_key: 'se',
+          submitter_key_conf_key: 'sk',
+          deployer_email_conf_key: 'de',
+          deployer_key_conf_key: 'dk',
+        },
+      ])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ insertId: 1 });
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key === 'url' ? 'https://bytebase.example.com' : 'configured',
+    );
+    (axios.post as jest.Mock).mockResolvedValue({
+      status: 200,
+      data: { token: 'token' },
+    });
+    (axios.request as jest.Mock)
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { status: 'DONE', approvalStatus: 'SKIPPED' },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          name: 'projects/p/plans/1/rollout',
+          stages: [
+            {
+              tasks: [
+                {
+                  name: 'projects/p/plans/1/rollout/stages/e/tasks/1',
+                  status: 'DONE',
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+    await expect(service.reconcileRequest('request-1')).resolves.toMatchObject({
+      status: 'SUCCEEDED',
+    });
+    expect(db.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('task_summary_json'),
+      expect.arrayContaining(['SUCCEEDED', 'DONE']),
+    );
+    expect(
+      (axios.request as jest.Mock).mock.calls.every(
+        ([request]) => request.method === 'GET',
+      ),
+    ).toBe(true);
   });
 });

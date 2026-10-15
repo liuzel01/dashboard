@@ -33,7 +33,7 @@ export class BytebaseService {
     private readonly mfa: MfaVerificationService,
   ) {}
 
-  private async actor(
+  async actor(
     authorization: string | undefined,
     permission: string,
   ): Promise<Actor> {
@@ -245,14 +245,14 @@ export class BytebaseService {
     const actor = await this.actor(authorization, 'menu:bytebase');
     const admin = actor.permissions.includes('bytebase:rollout:execute');
     return this.db.query<any[]>(
-      `SELECT request_id,environment_id,project_name,database_name,title,sql_sha256,status,actor_username,issue_name,plan_name,rollout_name,last_error,created_at,updated_at FROM bytebase_requests ${admin ? '' : 'WHERE actor_user_id=?'} ORDER BY id DESC LIMIT 200`,
+      `SELECT request_id,environment_id,project_name,database_name,title,sql_sha256,status,actor_username,issue_name,plan_name,rollout_name,issue_status,approval_status,rollout_status,task_summary_json,last_error,release_confirmed_at,last_reconciled_at,terminal_at,created_at,updated_at FROM bytebase_requests ${admin ? '' : 'WHERE actor_user_id=?'} ORDER BY id DESC LIMIT 200`,
       admin ? [] : [actor.userId],
     );
   }
   async request(authorization: string | undefined, requestId: string) {
     const actor = await this.actor(authorization, 'menu:bytebase');
     const rows = await this.db.query<any[]>(
-      `SELECT request_id,environment_id,project_name,database_name,title,sql_sha256,status,actor_user_id,actor_username,issue_name,plan_name,rollout_name,last_error,created_at,updated_at FROM bytebase_requests WHERE request_id=? LIMIT 1`,
+      `SELECT request_id,environment_id,project_name,database_name,title,sql_sha256,status,actor_user_id,actor_username,issue_name,plan_name,rollout_name,issue_status,approval_status,rollout_status,task_summary_json,last_error,release_confirmed_at,last_reconciled_at,terminal_at,created_at,updated_at FROM bytebase_requests WHERE request_id=? LIMIT 1`,
       [requestId],
     );
     const row = rows[0];
@@ -382,8 +382,39 @@ export class BytebaseService {
     // is the authorization boundary; submit the draft with its owning identity.
     const plan = await this.remote(c, 'submitter', 'GET', `/v1/${input.plan}`);
     const counts = plan.planCheckRunStatusCount || {};
-    if (Number(counts.ERROR || 0) > 0 || Number(counts.RUNNING || 0) > 0)
+    if (
+      Number(counts.ERROR || 0) > 0 ||
+      Number(counts.RUNNING || 0) > 0 ||
+      Number(counts.DONE || 0) < 1
+    )
       throw new BadRequestException('Plan Check 尚未通过，禁止发布');
+    const specs = Array.isArray(plan.specs) ? plan.specs : [];
+    if (specs.length !== 1)
+      throw new BadRequestException('远端 Plan 结构已变化，禁止发布');
+    const change = specs[0]?.changeDatabaseConfig;
+    if (
+      !change ||
+      !Array.isArray(change.targets) ||
+      change.targets.length !== 1 ||
+      change.targets[0] !== rows[0].database_name ||
+      !change.sheet
+    )
+      throw new BadRequestException('远端 Plan 目标数据库已变化，禁止发布');
+    const [issueBeforeRelease, sheet] = await Promise.all([
+      this.remote(c, 'submitter', 'GET', `/v1/${rows[0].issue_name}`),
+      this.remote(c, 'submitter', 'GET', `/v1/${change.sheet}`),
+    ]);
+    if (
+      issueBeforeRelease.draft !== true ||
+      issueBeforeRelease.plan !== input.plan
+    )
+      throw new BadRequestException(
+        '远端 Issue 不再是本申请的 Draft，禁止发布',
+      );
+    const statement = Buffer.from(String(sheet.content || ''), 'base64');
+    const remoteHash = createHash('sha256').update(statement).digest('hex');
+    if (remoteHash !== rows[0].sql_sha256)
+      throw new BadRequestException('远端 SQL 内容已变化，禁止发布');
     const issue = await this.remote(
       c,
       'submitter',
@@ -392,14 +423,136 @@ export class BytebaseService {
       { name: rows[0].issue_name, draft: false },
     );
     await this.db.query(
-      `UPDATE bytebase_requests SET status='RELEASE_CONFIRMED',updated_at=UTC_TIMESTAMP(3) WHERE request_id=?`,
+      `UPDATE bytebase_requests SET status='RELEASE_CONFIRMED',release_confirmed_at=UTC_TIMESTAMP(3),last_error=NULL,updated_at=UTC_TIMESTAMP(3) WHERE request_id=?`,
       [rows[0].request_id],
+    );
+    await this.recordEvent(
+      rows[0].request_id,
+      'RELEASE_CONFIRMED',
+      rows[0].status,
+      'RELEASE_CONFIRMED',
+      `管理员 ${actor.username} 已通过 MFA 确认发布`,
     );
     return {
       requestId: rows[0].request_id,
       status: 'RELEASE_CONFIRMED',
       issueName: issue.name || rows[0].issue_name,
     };
+  }
+
+  async reconcileRequest(requestId: string) {
+    const rows = await this.db.query<any[]>(
+      `SELECT * FROM bytebase_requests WHERE request_id=? LIMIT 1`,
+      [requestId],
+    );
+    const row = rows[0];
+    if (!row?.issue_name || !row?.plan_name) return row;
+    const c = await this.config(row.environment_id);
+    try {
+      const issue = await this.remote(
+        c,
+        'submitter',
+        'GET',
+        `/v1/${row.issue_name}`,
+      );
+      let rollout: any;
+      try {
+        rollout = await this.remote(
+          c,
+          'submitter',
+          'GET',
+          `/v1/${row.plan_name}/rollout`,
+        );
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) throw error;
+      }
+      const tasks = (rollout?.stages || []).flatMap((stage: any) =>
+        (stage.tasks || []).map((task: any) => ({
+          name: String(task.name || ''),
+          status: String(task.status || 'UNKNOWN'),
+        })),
+      );
+      const nextStatus = this.requestStatus(tasks, Boolean(rollout));
+      const rolloutStatus = rollout
+        ? nextStatus === 'SUCCEEDED'
+          ? 'DONE'
+          : nextStatus === 'FAILED'
+            ? 'FAILED'
+            : nextStatus === 'CANCELLED'
+              ? 'CANCELLED'
+              : 'RUNNING'
+        : 'PENDING';
+      const terminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(
+        nextStatus,
+      );
+      await this.db.query(
+        `UPDATE bytebase_requests SET status=?,rollout_name=?,issue_status=?,approval_status=?,rollout_status=?,task_summary_json=?,last_error=NULL,last_reconciled_at=UTC_TIMESTAMP(3),terminal_at=IF(?,COALESCE(terminal_at,UTC_TIMESTAMP(3)),NULL),updated_at=IF(status<>?,UTC_TIMESTAMP(3),updated_at) WHERE request_id=?`,
+        [
+          nextStatus,
+          rollout?.name || row.rollout_name,
+          issue.status || null,
+          issue.approvalStatus || null,
+          rolloutStatus,
+          JSON.stringify(tasks),
+          terminal ? 1 : 0,
+          nextStatus,
+          requestId,
+        ],
+      );
+      if (nextStatus !== row.status)
+        await this.recordEvent(
+          requestId,
+          terminal ? 'TERMINAL' : 'STATUS_CHANGED',
+          row.status,
+          nextStatus,
+          terminal
+            ? `Bytebase 发布终态：${nextStatus}`
+            : `Bytebase 发布状态：${nextStatus}`,
+        );
+      return { ...row, status: nextStatus, tasks };
+    } catch (error) {
+      const message = String(
+        error instanceof Error ? error.message : error,
+      ).slice(0, 1000);
+      await this.db.query(
+        `UPDATE bytebase_requests SET status='UNKNOWN',last_error=?,last_reconciled_at=UTC_TIMESTAMP(3),updated_at=IF(status<>'UNKNOWN',UTC_TIMESTAMP(3),updated_at) WHERE request_id=?`,
+        [message, requestId],
+      );
+      if (row.status !== 'UNKNOWN')
+        await this.recordEvent(
+          requestId,
+          'RECONCILE_UNKNOWN',
+          row.status,
+          'UNKNOWN',
+          '远端状态暂时无法确认；后台只读对账将继续，不会重试发布',
+        );
+      throw error;
+    }
+  }
+
+  private requestStatus(tasks: Array<{ status: string }>, hasRollout: boolean) {
+    if (!hasRollout || tasks.length === 0) return 'RELEASE_CONFIRMED';
+    const statuses = tasks.map((task) => task.status.toUpperCase());
+    if (statuses.some((status) => ['FAILED', 'ERROR'].includes(status)))
+      return 'FAILED';
+    if (statuses.some((status) => ['CANCELED', 'CANCELLED'].includes(status)))
+      return 'CANCELLED';
+    if (statuses.every((status) => ['DONE', 'SKIPPED'].includes(status)))
+      return 'SUCCEEDED';
+    return 'ROLLOUT_RUNNING';
+  }
+
+  private async recordEvent(
+    requestId: string,
+    eventType: string,
+    fromStatus: string | null,
+    toStatus: string | null,
+    summary: string,
+  ) {
+    await this.db.query(
+      `INSERT INTO bytebase_request_events (request_id,event_type,from_status,to_status,summary,created_at) VALUES (?,?,?,?,?,UTC_TIMESTAMP(3))`,
+      [requestId, eventType, fromStatus, toStatus, summary.slice(0, 500)],
+    );
   }
 
   async jitCapability(

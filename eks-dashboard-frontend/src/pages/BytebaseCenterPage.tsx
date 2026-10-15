@@ -23,6 +23,7 @@ import {
 import { ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
+import { BytebaseRealtimeContext } from "../contexts/BytebaseRealtimeContextValue";
 import {
   createBytebaseChange,
   diagnoseBytebase,
@@ -54,6 +55,9 @@ const BytebaseCenterPage: React.FC = () => {
   const { message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
   const { permissions } = useContext(AuthContext);
+  const { socket, connected: realtimeConnected } = useContext(
+    BytebaseRealtimeContext,
+  );
   const [projects, setProjects] = useState<BytebaseProject[]>([]),
     [databases, setDatabases] = useState<BytebaseDatabase[]>([]),
     [requests, setRequests] = useState<BytebaseRequest[]>([]);
@@ -89,6 +93,14 @@ const BytebaseCenterPage: React.FC = () => {
     void load();
   }, [env, load]);
   useEffect(() => {
+    if (!socket) return;
+    const refresh = () => void load();
+    socket.on("bytebase-request-updated", refresh);
+    return () => {
+      socket.off("bytebase-request-updated", refresh);
+    };
+  }, [socket, load]);
+  useEffect(() => {
     if (!env || !project) {
       setDatabases([]);
       return;
@@ -118,7 +130,9 @@ const BytebaseCenterPage: React.FC = () => {
     setLoading(true);
     try {
       await createBytebaseChange({ ...values, environmentId: env, project });
-      message.success("已创建 Bytebase Draft Issue，并启动 Plan Check；等待管理员确认发布");
+      message.success(
+        "已创建 Bytebase Draft Issue，并启动 Plan Check；等待管理员确认发布",
+      );
       form.resetFields(["title", "description", "statement"]);
       await load();
     } catch (e) {
@@ -165,6 +179,7 @@ const BytebaseCenterPage: React.FC = () => {
         type="info"
         showIcon
         message="Dashboard 负责统一授权与审计；数据库变更由 Bytebase Issue / Plan / Rollout 执行。"
+        description={`实时状态：${realtimeConnected ? "已连接" : "连接中或不可用"}`}
       />
       <Card>
         <Space wrap>
@@ -315,10 +330,31 @@ const BytebaseCenterPage: React.FC = () => {
                   {
                     title: "状态",
                     dataIndex: "status",
-                    render: (v) => <Tag>{v}</Tag>,
+                    render: (v) => (
+                      <Tag
+                        color={
+                          v === "SUCCEEDED"
+                            ? "success"
+                            : v === "FAILED" || v === "UNKNOWN"
+                              ? "error"
+                              : v === "ROLLOUT_RUNNING"
+                                ? "processing"
+                                : "default"
+                        }
+                      >
+                        {v}
+                      </Tag>
+                    ),
                   },
                   { title: "提交人", dataIndex: "actor_username" },
                   { title: "Plan", dataIndex: "plan_name", ellipsis: true },
+                  {
+                    title: "远端状态",
+                    render: (_, r) =>
+                      [r.issue_status, r.approval_status, r.rollout_status]
+                        .filter(Boolean)
+                        .join(" / ") || "-",
+                  },
                   {
                     title: "操作",
                     fixed: "right",

@@ -45,6 +45,7 @@ import Home from './pages/Home';
 import AppShell from './components/AppShell';
 import { DesktopNotificationPrompt } from './components/DesktopNotificationPrompt';
 import { CicdRealtimeProvider } from './contexts/CicdRealtimeContext';
+import { BytebaseRealtimeProvider } from './contexts/BytebaseRealtimeContext';
 import { getMenuOrder, type MenuOrderMap } from './services/api';
 import { readCachedMenuOrder, writeCachedMenuOrder } from './utils/menuOrderCache';
 
@@ -375,6 +376,7 @@ const AppLayout: React.FC = () => {
 
   return (
     <CicdRealtimeProvider>
+      <BytebaseRealtimeProvider>
       <AppShell
       collapsed={siderCollapsed}
       onCollapsedChange={handleSiderCollapse}
@@ -389,7 +391,7 @@ const AppLayout: React.FC = () => {
     >
       <DesktopNotificationPrompt
         userKey={String(me?.id || me?.username || 'unknown')}
-        visible={permissions.includes('menu:cicd-runs')}
+        visible={permissions.includes('menu:cicd-runs') || permissions.includes('menu:bytebase')}
       />
       <Routes>
               <Route path="/deployments" element={<ProtectedRoute required={['menu:deployments']}><DeploymentListPage /></ProtectedRoute>} />
@@ -447,6 +449,7 @@ const AppLayout: React.FC = () => {
               <Route path="/" element={<Home />} />
       </Routes>
       </AppShell>
+      </BytebaseRealtimeProvider>
     </CicdRealtimeProvider>
   );
 };

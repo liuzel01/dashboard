@@ -30,7 +30,7 @@ export const setAuthToken = (token: string | null) => {
 
 export type BytebaseProject = { name: string; title?: string; state?: string };
 export type BytebaseDatabase = { name: string; databaseName?: string; environment?: string; effectiveEnvironment?: string };
-export type BytebaseRequest = { request_id: string; environment_id: string; project_name: string; database_name: string; title: string; sql_sha256: string; status: string; actor_username: string; issue_name?: string; plan_name?: string; rollout_name?: string; last_error?: string; created_at: string };
+export type BytebaseRequest = { request_id: string; environment_id: string; project_name: string; database_name: string; title: string; sql_sha256: string; status: string; actor_username: string; issue_name?: string; plan_name?: string; rollout_name?: string; issue_status?: string; approval_status?: string; rollout_status?: string; task_summary_json?: Array<{name:string;status:string}> | string; last_error?: string; release_confirmed_at?: string; last_reconciled_at?: string; terminal_at?: string; created_at: string; updated_at?: string };
 export const getBytebaseCatalog = async (environmentId: string) => (await api.get('/bytebase/catalog',{params:{environmentId}})).data as {projects:BytebaseProject[];capabilities:string[];jit:{supported:boolean;reason:string}};
 export const getBytebaseDatabases = async (environmentId:string,project:string) => (await api.get('/bytebase/databases',{params:{environmentId,project}})).data as {databases:BytebaseDatabase[]};
 export const getBytebaseIssues = async (environmentId:string,project:string) => (await api.get('/bytebase/issues',{params:{environmentId,project}})).data;
