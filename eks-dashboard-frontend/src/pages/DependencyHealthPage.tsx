@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { createDependencyHealthProviderProfile, createDependencyHealthTarget, deleteDependencyHealthProviderProfile, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfileRecords, listDependencyHealthProviderProfiles, listDependencyHealthProviderTypes, listDependencyHealthSiteConfReferences, listDependencyHealthTargets, updateDependencyHealthProviderProfile, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthProviderProfileRecord, type DependencyHealthResponse, type DependencyHealthTarget, type SiteConfReference } from '../services/api';
@@ -26,6 +26,18 @@ const layerTag = (layer?: DependencyHealthLayer) => {
   const color = layer.status === 'PASS' ? 'success' : layer.status === 'NOT_CONFIGURED' ? 'warning' : layer.status === 'SKIPPED' ? 'default' : 'error';
   const text = layer.status === 'PASS' ? '通过' : layer.status === 'NOT_CONFIGURED' ? '未配置' : layer.status === 'SKIPPED' ? '已跳过' : '失败';
   return <Space><Tag color={color}>{text}</Tag><Typography.Text>{layer.summary}</Typography.Text></Space>;
+};
+
+const showVerificationResult = (result: any) => {
+  const layers = [
+    `L1 ${result?.l1?.healthy ? '通过' : '失败'}`,
+    ...['L2', 'L3'].map((layer) => {
+      const item = (result?.provider || []).find((entry: any) => entry.layer === layer);
+      return item ? `${layer} ${item.status === 'PASS' ? '通过' : item.status === 'SKIPPED' ? '跳过' : item.status === 'NOT_CONFIGURED' ? '未配置' : '失败'}` : `${layer} 未启用`;
+    }),
+  ];
+  const succeeded = result?.l1?.healthy && (result?.provider || []).every((item: any) => ['PASS', 'SKIPPED'].includes(item.status));
+  message.open({ type: succeeded ? 'success' : 'warning', content: `立即验证完成：${layers.join('；')}`, duration: 6 });
 };
 
 const profileFields: Record<string, Array<{ key: string; label: string }>> = {
@@ -136,7 +148,7 @@ const DependencyHealthPage: React.FC = () => {
     setTargetSaving(true);
     try {
       const saved = editingTarget ? await updateDependencyHealthTarget(editingTarget.key, value) : await createDependencyHealthTarget(value);
-      if (verify) await verifyDependencyHealthTarget(saved.key || editingTarget?.key);
+      if (verify) showVerificationResult(await verifyDependencyHealthTarget(saved.key || editingTarget?.key));
       setTargets(await listDependencyHealthTargets());
       setEditingTarget(null);
       setTargetEditorOpen(false);
@@ -269,7 +281,7 @@ const DependencyHealthPage: React.FC = () => {
         { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
         { title: '连接档案', dataIndex: 'providerProfile', render: (value: string | null) => value ? <Tag color="blue">{providerProfiles.find((profile) => profile.id === value)?.label || value}</Tag> : '-' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" loading={targetVerifying === row.key} onClick={async () => { setTargetVerifying(row.key); try { await verifyDependencyHealthTarget(row.key); await load('manual'); } finally { setTargetVerifying(null); } }}>立即验证</Button><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" loading={targetVerifying === row.key} onClick={async () => { setTargetVerifying(row.key); try { showVerificationResult(await verifyDependencyHealthTarget(row.key)); await load('manual'); } catch (reason: any) { message.error(reason?.response?.data?.message || '立即验证失败'); } finally { setTargetVerifying(null); } }}>立即验证</Button><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
       ] as any} />
       <Modal title={editingTarget ? `编辑 ${editingTarget.name}` : '新增依赖目标'} open={targetEditorOpen} onCancel={() => { setTargetEditorOpen(false); setEditingTarget(null); targetForm.resetFields(); }} onOk={() => void saveTarget()} confirmLoading={targetSaving} okText="仅保存" destroyOnHidden footer={(_, { OkBtn, CancelBtn }) => <Space><CancelBtn /><Button loading={targetSaving} onClick={() => void saveTarget(true)}>保存并立即验证</Button><OkBtn /></Space>}>
         <Form form={targetForm} layout="vertical">
