@@ -5,6 +5,7 @@ import { LogViewer } from '../components/LogViewer';
 import { getDeployments, getDeploymentNamespaces, getDeploymentWorkloadTypes, restartDeployment, getDeploymentImageHistory, rollbackDeploymentImages, getDeploymentRolloutStatus, type DeploymentImage, type DeploymentImageHistory, type DeploymentRolloutDiagnostic, type WorkloadCapabilities, type WorkloadType, type WorkloadTypeOption } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { ColumnSettingsPopover, FilterBar, MetricGrid, OpsTable, PageHeader, StatusBadge, useVisibleColumns } from '../components/ops';
+import { formatDateTime } from '../utils/time';
 
 // 定义 Deployment 对象的接口
 interface Deployment {
@@ -578,14 +579,14 @@ const DeploymentListPage: React.FC = () => {
       dataIndex: 'lastRestartAt',
       key: 'lastRestartAt',
       width: 175,
-      render: (ts?: string | null) => (ts ? new Date(ts).toLocaleString() : '-'),
+      render: (ts?: string | null) => formatDateTime(ts),
     },
     {
       title: '创建时间',
       dataIndex: 'creationTimestamp',
       key: 'creationTimestamp',
       width: 175,
-      render: (ts?: string) => (ts ? new Date(ts).toLocaleString() : '-'),
+      render: (ts?: string) => formatDateTime(ts),
     },
     {
       title: '操作',
@@ -710,7 +711,7 @@ const DeploymentListPage: React.FC = () => {
             <div>
               <div style={{ marginBottom: 8 }}>选择历史镜像版本（默认：上一不同镜像）</div>
               <Select style={{ width: '100%' }} value={selectedImageVersionId ?? undefined} placeholder="没有可回退的历史版本" onChange={setSelectedImageVersionId}
-                options={imageHistory.imageVersions.filter((item) => !item.isCurrent).map((item) => ({ value: item.id, label: `${item.images.map((image) => `${image.name}: ${image.image}`).join(' | ')} · 最近 Revision ${item.revisions[0]?.revision ?? '-'} · ${item.revisions[0]?.createdAt ? new Date(item.revisions[0].createdAt).toLocaleString() : '时间未知'}` }))} />
+                options={imageHistory.imageVersions.filter((item) => !item.isCurrent).map((item) => ({ value: item.id, label: `${item.images.map((image) => `${image.name}: ${image.image}`).join(' | ')} · 最近 Revision ${item.revisions[0]?.revision ?? '-'} · ${item.revisions[0]?.createdAt ? formatDateTime(item.revisions[0].createdAt) : '时间未知'}` }))} />
             </div>
             {selectedImageVersionId !== null && (() => {
               const target = imageHistory.imageVersions.find((item) => item.id === selectedImageVersionId);

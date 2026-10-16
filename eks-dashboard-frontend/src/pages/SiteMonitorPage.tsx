@@ -26,6 +26,7 @@ import {
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { getTenantsForEnvironment } from "../services/api";
 import { FilterBar, MetricGrid, OpsTable, PageHeader, RiskConfirm, StatusBadge } from '../components/ops';
+import { formatDateTime } from '../utils/time';
 
 type SiteRow = {
   id: number;
@@ -106,23 +107,6 @@ const SiteMonitorPage: React.FC = () => {
       editForm.resetFields();
     }
   }, [detailRecord]);
-
-  const toBeijingString = (v?: string | null) => {
-    if (!v) return "-";
-    // Try to parse as ISO; if it's a plain 'YYYY-MM-DD HH:mm:ss', treat it as UTC by appending Z
-    let d: Date;
-    if (typeof v === "string") {
-      if (v.includes("T")) {
-        d = new Date(v);
-      } else {
-        d = new Date(v.replace(" ", "T") + "Z");
-      }
-    } else {
-      d = new Date(v);
-    }
-    if (isNaN(d.getTime())) return "-";
-    return d.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
-  };
 
   const load = async () => {
     if (!currentEnvironment) {
@@ -544,7 +528,7 @@ const SiteMonitorPage: React.FC = () => {
                   {detailRecord.treated_ok ? "可用" : "不可用"}
                 </Tag>
                 <span>
-                  最后检查：{toBeijingString(detailRecord.last_checked_at)}
+                  最后检查：{formatDateTime(detailRecord.last_checked_at)}
                 </span>
               </Space>
               <Form.Item name="tenant_id" label="租户">
@@ -617,10 +601,10 @@ const SiteMonitorPage: React.FC = () => {
                 {detailRecord.ssl_subject || "-"}
               </Descriptions.Item>
               <Descriptions.Item label="证书起始">
-                {toBeijingString(detailRecord.ssl_not_before)}
+                {formatDateTime(detailRecord.ssl_not_before)}
               </Descriptions.Item>
               <Descriptions.Item label="证书到期">
-                {toBeijingString(detailRecord.ssl_not_after)}
+                {formatDateTime(detailRecord.ssl_not_after)}
               </Descriptions.Item>
               <Descriptions.Item label="错误信息" span={2}>
                 {detailRecord.last_error || "-"}

@@ -6,6 +6,7 @@ export type RuntimeConfig = {
 
 export type PublicRuntimeConfig = {
   socketUrl?: string;
+  displayTimeZone?: string;
 };
 
 let cached: RuntimeConfig | null = null;

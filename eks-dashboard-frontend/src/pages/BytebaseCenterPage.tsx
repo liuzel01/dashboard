@@ -24,6 +24,7 @@ import {
 } from "antd";
 import { EyeOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
 import { InlineHelpTooltip } from "../components/ops";
+import { formatDateTime } from '../utils/time';
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { BytebaseRealtimeContext } from "../contexts/BytebaseRealtimeContextValue";
@@ -425,7 +426,7 @@ const BytebaseCenterPage: React.FC = () => {
           />) : <Typography.Text type="secondary">未发现失败或取消的 Bytebase TaskRun</Typography.Text>}
           <Divider plain>流转记录</Divider>
           {detail.events.length ? detail.events.map((event, index) => <Typography.Paragraph key={`${event.created_at}-${index}`} style={{ marginBottom: 4 }}>
-            <Typography.Text type="secondary">{new Date(event.created_at).toLocaleString()} </Typography.Text>
+            <Typography.Text type="secondary">{formatDateTime(event.created_at)} </Typography.Text>
             <Tag>{event.event_type}</Tag>{event.summary}
           </Typography.Paragraph>) : <Typography.Text type="secondary">暂无流转记录</Typography.Text>}
         </Space>}

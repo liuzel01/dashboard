@@ -230,6 +230,7 @@ export class SiteConfService implements OnModuleInit {
   async getPublicRuntimeConfig() {
     return {
       socketUrl: this.normalizePublicHttpUrl(await this.getString('frontend.logs.socket_url', '')),
+      displayTimeZone: this.normalizePublicTimeZone(await this.getString('frontend.display_timezone', 'Asia/Shanghai')),
     };
   }
 
@@ -333,15 +334,16 @@ export class SiteConfService implements OnModuleInit {
     // Existing installations have already completed defaults_seeded_v1. Seed
     // newly introduced runtime entries separately without recreating defaults
     // an administrator deliberately deleted.
-    const metaKey = 'runtime_config_defaults_v1';
+    const metaKey = 'runtime_config_defaults_v2';
     const seededRows = await this.db.query<Array<{ meta_value: string }>>(
       'SELECT meta_value FROM dashboard_site_conf_meta WHERE meta_key = ?',
       [metaKey],
     );
     if (seededRows.length > 0) return;
 
-    const item = SITE_CONF_DEFAULTS_BY_KEY.get('frontend.logs.socket_url');
-    if (item) {
+    for (const key of ['frontend.logs.socket_url', 'frontend.display_timezone']) {
+      const item = SITE_CONF_DEFAULTS_BY_KEY.get(key);
+      if (!item) continue;
       await this.db.query(
         `INSERT IGNORE INTO dashboard_site_conf
           (conf_key, conf_value, value_type, category, description, is_sensitive, is_runtime_editable, default_value, validation_json, created_at, updated_at)
@@ -376,6 +378,17 @@ export class SiteConfService implements OnModuleInit {
     } catch {
       this.logger.warn('Ignoring invalid frontend.logs.socket_url siteconf value');
       return '';
+    }
+  }
+
+  private normalizePublicTimeZone(value: string): string {
+    const candidate = value.trim() || 'Asia/Shanghai';
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: candidate }).format();
+      return candidate;
+    } catch {
+      this.logger.warn('Ignoring invalid frontend.display_timezone siteconf value');
+      return 'Asia/Shanghai';
     }
   }
 

@@ -6,6 +6,7 @@ import { AuthContext } from '../contexts/AuthContextValue';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { createMonitoringRequest, decideMonitoringRequest, getMonitoringEnvironmentOptions, getMonitoringRequest, listMonitoringRequests, submitMonitoringRequest, submitManagedMonitoringRequest, withdrawMonitoringRequest, startMonitoringJenkinsExecution, listMonitoringJenkinsExecutions, refreshMonitoringJenkinsExecution, mergeMonitoringWorkload, refreshMonitoringWorkloadStatus } from '../services/api';
 import type { MonitoringEnvironmentOption, MonitoringJenkinsExecution, MonitoringRequest, MonitoringRequestStatus } from '../services/api';
+import { formatDateTime } from '../utils/time';
 
 const { Text, Paragraph } = Typography;
 const colors: Record<MonitoringRequestStatus, string> = { DRAFT: 'default', SUBMITTED: 'processing', APPROVED: 'success', MERGED_PENDING_DEPLOY: 'gold', COMPLETED: 'cyan', REJECTED: 'error', WITHDRAWN: 'default' };
@@ -63,14 +64,7 @@ spec:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: 1, memory: 1Gi }
 `;
-const beijingTime = (value?: string | null) => {
-  if (!value) return '—';
-  // API uses UTC DATETIME strings (mysql dateStrings=true), which have no offset.
-  // Make that UTC contract explicit before formatting; otherwise browsers parse them
-  // in their local zone and UTC+9 clients show a one-hour-early Beijing time.
-  const utc = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value.replace(' ', 'T')}Z`;
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(utc)).replaceAll('/', '-');
-};
+const beijingTime = (value?: string | null) => value ? formatDateTime(value) : '—';
 
 export default function MonitoringRequestsPage() {
   const { me, permissions } = useContext(AuthContext); const [items, setItems] = useState<MonitoringRequest[]>([]); const [loading, setLoading] = useState(false); const [createOpen, setCreateOpen] = useState(false); const [detailOpen, setDetailOpen] = useState(false); const [detailLoading, setDetailLoading] = useState(false); const [detail, setDetail] = useState<MonitoringRequest | null>(null); const [form] = Form.useForm();

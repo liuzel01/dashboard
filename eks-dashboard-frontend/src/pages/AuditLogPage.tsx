@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { deleteOldAuditLogs, getAuditLogs } from '../services/api';
+import { formatDateTime } from '../utils/time';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -35,15 +36,7 @@ const parseJsonMaybe = (value: unknown): unknown => {
 };
 
 
-const formatBeijingTime = (value?: string) => {
-  if (!value) return '-';
-  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
-  const date = new Date(`${normalized.replace(/Z$/, '')}Z`);
-  if (Number.isNaN(date.getTime())) return value;
-  const beijing = new Date(date.getTime() + 8 * 60 * 60 * 1000);
-  const pad = (num: number) => String(num).padStart(2, '0');
-  return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`;
-};
+const formatBeijingTime = (value?: string) => formatDateTime(value);
 
 
 const renderNoWrap = (value: React.ReactNode) => (
@@ -190,7 +183,7 @@ const AuditLogPage: React.FC = () => {
       <Modal title="审计详情" open={!!selected} onCancel={() => setSelected(null)} footer={null} width={900}>
         {selected && (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="时间">{formatBeijingTime(selected.created_at)} <Text type="secondary">UTC+8</Text></Descriptions.Item>
+            <Descriptions.Item label="时间">{formatBeijingTime(selected.created_at)}</Descriptions.Item>
             <Descriptions.Item label="用户">{selected.actor_display_name || selected.actor_username || '-'}</Descriptions.Item>
             <Descriptions.Item label="环境">{selected.environment_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="方法/路径">{selected.method} {selected.path}</Descriptions.Item>

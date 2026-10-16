@@ -35,6 +35,7 @@ import {
   previewRoute53CnameForLineOnboarding,
   syncRoute53CnameForLineOnboarding,
 } from '../services/api';
+import { formatDateTime, formatTime } from '../utils/time';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { PageHeader } from '../components/ops';
 import TenantLinesTable from '../components/TenantLinesTable';
@@ -505,13 +506,6 @@ const LineOnboardingPage: React.FC = () => {
     if (raw.includes('fail') || raw.includes('error')) return '失败';
     return value;
   };
-  const toDisplayTime = (value?: string | null) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('zh-CN', { hour12: false });
-  };
-
   const stepDone = [
     DOMAIN_REGEX.test(normalizeDomain(rootDomainInput)),
     Boolean(confirmedSubdomain),
@@ -1948,7 +1942,7 @@ const LineOnboardingPage: React.FC = () => {
               {dcdnRefreshing
                 ? '刷新中...'
                 : dcdnLastRefreshAt
-                  ? `最近刷新 ${new Date(dcdnLastRefreshAt).toLocaleTimeString('zh-CN', { hour12: false })}`
+                  ? `最近刷新 ${formatTime(dcdnLastRefreshAt)}`
                   : '未刷新'}
             </Tag>
             <Tag color="blue">类型: 源站域名</Tag>
@@ -1988,12 +1982,12 @@ const LineOnboardingPage: React.FC = () => {
                   <Text>证书状态：{toCertStatusText(dcdnAutoResult.certStatus)}</Text>
                   <Text>证书绑定域名：{dcdnAutoResult.certDomainName || '-'}</Text>
                   <Text>证书到期：{dcdnAutoResult.certExpireTime || '-'}</Text>
-                  <Text>创建时间：{toDisplayTime(dcdnAutoResult.createdAt)}</Text>
-                  <Text>更新时间：{toDisplayTime(dcdnAutoResult.updatedAt)}</Text>
+                  <Text>创建时间：{formatDateTime(dcdnAutoResult.createdAt)}</Text>
+                  <Text>更新时间：{formatDateTime(dcdnAutoResult.updatedAt)}</Text>
                   <Text>资源组：{dcdnAutoResult.resourceGroupId || '-'}</Text>
                   <Text>
                     最近刷新（本地）：
-                    {toDisplayTime(dcdnLastRefreshAt)}
+                    {formatDateTime(dcdnLastRefreshAt)}
                   </Text>
                   <Text>
                     标签：
@@ -2523,7 +2517,7 @@ const LineOnboardingPage: React.FC = () => {
                   <Space direction="vertical" size={4}>
                     <Text>目标：{verifyResult.targetHost}</Text>
                     <Text>源接口：{verifyResult.sourceApi}</Text>
-                    <Text>检查时间：{new Date(verifyResult.checkedAt).toLocaleString('zh-CN', { hour12: false })}</Text>
+                    <Text>检查时间：{formatDateTime(verifyResult.checkedAt)}</Text>
                   </Space>
                 }
               />
@@ -2574,7 +2568,7 @@ const LineOnboardingPage: React.FC = () => {
                 title: '创建时间',
                 dataIndex: 'createdAt',
                 width: 180,
-                render: (value: string | null | undefined) => (value ? toDisplayTime(value) : '-'),
+                render: (value: string | null | undefined) => formatDateTime(value),
               },
             ]}
             size="small"

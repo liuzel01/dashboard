@@ -30,6 +30,7 @@ import {
 } from '../services/api';
 import type { CertStudyQuestionListItem, CertStudyQuestionNote } from '../services/api';
 import { ColumnSettingsPopover, OpsTable, useVisibleColumns } from '../components/ops';
+import { formatDateTime } from '../utils/time';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -197,22 +198,6 @@ const markdownToHtml = (markdown: string) => {
     blocks.push(`<p>${paragraphLines.map((item) => renderInlineMarkdown(item)).join('<br/>')}</p>`);
   }
   return blocks.join('');
-};
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return '-';
-  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).replace(/\//g, '-');
 };
 
 const parseOptionsFromText = (text: string) => {

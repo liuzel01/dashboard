@@ -33,6 +33,7 @@ import {
   updateAccessUser,
   type AccessUserMfaEnrollment,
 } from '../services/api';
+import { formatDateTime } from '../utils/time';
 
 const { Title, Text } = Typography;
 
@@ -65,37 +66,6 @@ type AccessPermission = {
 const statusTag = (status: 'active' | 'disabled') =>
   status === 'active' ? <Tag color="green">启用</Tag> : <Tag color="default">禁用</Tag>;
 
-const formatUtcToBeijing = (value?: string | null) => {
-  if (!value) return '-';
-  const m = String(value).match(
-    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/,
-  );
-  if (!m) return String(value);
-  const [, y, mo, d, h, mi, s] = m;
-  const utcDate = new Date(
-    Date.UTC(
-      Number(y),
-      Number(mo) - 1,
-      Number(d),
-      Number(h),
-      Number(mi),
-      Number(s),
-    ),
-  );
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(utcDate);
-
-  const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
-  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
-};
 
 const AccountManagementPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -428,7 +398,7 @@ const AccountManagementPage: React.FC = () => {
         title: '最近登录(北京时间)',
         dataIndex: 'last_login_at',
         width: 180,
-        render: (value: string | null) => formatUtcToBeijing(value),
+        render: (value: string | null) => formatDateTime(value),
       },
           {
             title: '操作',

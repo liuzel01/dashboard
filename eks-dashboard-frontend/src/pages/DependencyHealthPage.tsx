@@ -4,6 +4,7 @@ import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { createDependencyHealthProviderProfile, createDependencyHealthTarget, deleteDependencyHealthProviderProfile, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfileRecords, listDependencyHealthProviderProfiles, listDependencyHealthProviderTypes, listDependencyHealthSiteConfReferences, listDependencyHealthTargets, updateDependencyHealthProviderProfile, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthProviderProfileRecord, type DependencyHealthResponse, type DependencyHealthTarget, type SiteConfReference } from '../services/api';
 import { ColumnSettingsPopover, MetricGrid, OpsTable, PageHeader, useVisibleColumns } from '../components/ops';
+import { formatDateTime, formatTime } from '../utils/time';
 
 const moduleLabel = (item: DependencyHealthItem) => item.module === 'http_reachable'
   ? 'HTTP 可达性（允许预先核定的认证或业务错误状态码）'
@@ -50,7 +51,7 @@ const trendPointColor: Record<DependencyHealthHistory['trend'][number]['status']
 const trendPointTitle = (point: DependencyHealthHistory['trend'][number]) => {
   const start = new Date(point.hour);
   const end = new Date(start.getTime() + 60 * 60 * 1000);
-  const range = `${start.toLocaleString()} - ${end.toLocaleTimeString()}`;
+  const range = `${formatDateTime(start)} - ${formatTime(end)}`;
   if (point.status === 'NO_DATA') return `${range}\n该小时没有检查记录`;
   const layers = point.layers.map((layer) => `${layer.layer}：${layer.status}（${layer.total} 次）`).join('；');
   return `${range}\n${point.total} 次检查，通过 ${point.passed}，失败 ${point.failed}\n${layers}`;
@@ -255,7 +256,7 @@ const DependencyHealthPage: React.FC = () => {
       actions={<Space>
         {backgroundRefreshing && <Typography.Text type="secondary"><SyncOutlined spin /> 后台更新中</Typography.Text>}
         {data?.stale && <Tag color="orange">显示上次成功结果</Tag>}
-        {data?.checkedAt && <Typography.Text type="secondary">最后更新：{new Date(data.checkedAt).toLocaleTimeString()}</Typography.Text>}
+        {data?.checkedAt && <Typography.Text type="secondary">最后更新：{formatTime(data.checkedAt)}</Typography.Text>}
         <ColumnSettingsPopover options={dependencyHealthColumnOptions} value={visibleHealthColumns} onChange={setVisibleHealthColumns} onReset={resetHealthColumns} />
         <Button onClick={() => void openProfileManager()}>Provider 连接档案</Button>
         <Button icon={<SettingOutlined />} onClick={() => void openTargets()}>目标管理</Button>
@@ -300,11 +301,11 @@ const DependencyHealthPage: React.FC = () => {
         ] : []),
         { key: 'http', label: 'HTTP 状态码', children: selectedItem.httpStatus ?? '-' },
         { key: 'duration', label: '响应耗时', children: selectedItem.durationMs === null ? '-' : `${selectedItem.durationMs} ms` },
-        { key: 'tls', label: 'TLS 证书到期', children: selectedItem.tlsExpiresAt ? new Date(selectedItem.tlsExpiresAt).toLocaleString() : '-' },
-        { key: 'checkedAt', label: '检查时间', children: new Date(selectedItem.checkedAt).toLocaleString() },
+        { key: 'tls', label: 'TLS 证书到期', children: formatDateTime(selectedItem.tlsExpiresAt) },
+        { key: 'checkedAt', label: '检查时间', children: formatDateTime(selectedItem.checkedAt) },
         { key: 'availability', label: '近 24 小时可用率', children: <Space direction="vertical" style={{ width: '100%' }}>{(history?.availability || []).map((item) => <div key={item.layer}><Typography.Text>{item.layer}：{item.percentage ?? '-'}%</Typography.Text><Progress percent={item.percentage || 0} size="small" status={(item.percentage || 0) >= 99 ? 'success' : 'exception'} /></div>)}</Space> },
         { key: 'trend', label: '近 24 小时趋势', children: <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 2, minWidth: 0 }}>{(history?.trend || []).map((point) => <Tooltip key={point.hour} title={<span style={{ whiteSpace: 'pre-line' }}>{trendPointTitle(point)}</span>}><span aria-label={trendPointTitle(point)} style={{ flex: '1 1 0', minWidth: 0, height: 22, display: 'inline-block', borderRadius: 2, background: trendPointColor[point.status] }} /></Tooltip>)}</div> },
-        { key: 'events', label: '告警与恢复', children: history?.events.length ? <Space direction="vertical">{history.events.map((event, index) => <Typography.Text key={`${event.createdAt}-${index}`} type={event.eventType === 'FIRING' ? 'danger' : 'success'}>{new Date(event.createdAt).toLocaleString()} [{event.layer}] {event.summary}</Typography.Text>)}</Space> : '近 24 小时无事件' },
+        { key: 'events', label: '告警与恢复', children: history?.events.length ? <Space direction="vertical">{history.events.map((event, index) => <Typography.Text key={`${event.createdAt}-${index}`} type={event.eventType === 'FIRING' ? 'danger' : 'success'}>{formatDateTime(event.createdAt)} [{event.layer}] {event.summary}</Typography.Text>)}</Space> : '近 24 小时无事件' },
       ]} />}
     </Modal>
     <Modal title="依赖目标管理" open={targetsOpen} onCancel={() => { setTargetsOpen(false); setEditingTarget(null); }} footer={null} width={1000}>

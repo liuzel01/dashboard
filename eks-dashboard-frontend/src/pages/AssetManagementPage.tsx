@@ -24,6 +24,7 @@ import type { FormInstance } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { InlineHelpTooltip } from '../components/ops';
+import { formatDateTime } from '../utils/time';
 import {
   createAssetAccount,
   createAssetDomain,
@@ -225,22 +226,6 @@ const storageTypeOptions = [
   { value: 'manual', label: '人工记录' },
   { value: 'other', label: '其他' },
 ];
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return '-';
-  const normalized = /Z$|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`;
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).replace(/\//g, '-');
-};
 
 const renderValue = (value: unknown) => {
   if (value === undefined || value === null || value === '') return '-';

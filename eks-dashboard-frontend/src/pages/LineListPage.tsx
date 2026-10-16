@@ -4,6 +4,7 @@ import { getLineInventory, getTenantsForEnvironment, previewDcdnSslSyncForLine, 
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { buildProbeDetailUrl } from '../utils/probeDashboard';
 import { PageHeader } from '../components/ops';
+import { formatDateTime } from '../utils/time';
 
 type TenantOption = {
   id: number;
@@ -299,13 +300,6 @@ const LineListPage: React.FC = () => {
     return <Tag>未知</Tag>;
   };
 
-  const toDisplayTime = (value?: string | null) => {
-    if (!value) return '-';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString('zh-CN', { hour12: false });
-  };
-
   const toDisplayDaysLeft = (value?: number | null) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return '-';
     if (value <= 0) return <Text type="danger">{value}</Text>;
@@ -465,7 +459,7 @@ const LineListPage: React.FC = () => {
                 title: '证书到期',
                 dataIndex: 'sslExpireAt',
                 width: 180,
-                render: (value: string | null | undefined) => toDisplayTime(value),
+                render: (value: string | null | undefined) => formatDateTime(value),
               },
               {
                 title: '剩余天数',
@@ -482,7 +476,7 @@ const LineListPage: React.FC = () => {
                 title: '最近检查',
                 dataIndex: 'lastCheckedAt',
                 width: 180,
-                render: (value: string | null | undefined) => toDisplayTime(value),
+                render: (value: string | null | undefined) => formatDateTime(value),
               },
               { title: '错误摘要', dataIndex: 'error', width: 140, render: (value) => value || '-' },
               {
@@ -547,8 +541,8 @@ const LineListPage: React.FC = () => {
             <Descriptions.Item label="Namespace">{sslPreview.namespace || '-'}</Descriptions.Item>
             <Descriptions.Item label="TLS Secret">{sslPreview.tlsSecretName || '-'}</Descriptions.Item>
             <Descriptions.Item label="将上传证书名称">{sslPreview.uploadCertName || '-'}</Descriptions.Item>
-            <Descriptions.Item label="K8s 证书到期时间">{toDisplayTime(sslPreview.k8sCertNotAfter)}</Descriptions.Item>
-            <Descriptions.Item label="DCDN 当前证书到期时间">{toDisplayTime(sslPreview.dcdnCertExpireTime)}</Descriptions.Item>
+            <Descriptions.Item label="K8s 证书到期时间">{formatDateTime(sslPreview.k8sCertNotAfter)}</Descriptions.Item>
+            <Descriptions.Item label="DCDN 当前证书到期时间">{formatDateTime(sslPreview.dcdnCertExpireTime)}</Descriptions.Item>
           </Descriptions>
         ) : (
           <Text type="secondary">正在解析 SSL 同步信息...</Text>

@@ -32,6 +32,7 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'dependency_health.history_retention_days', valueType: 'number', category: 'dependency-health', description: '外部依赖历史保留天数', defaultValue: '30', validation: { min: 1, max: 365 } },
   { key: 'dependency_health.targets_json', valueType: 'json', category: 'dependency-health-legacy', description: '旧版外部依赖目录，仅用于数据库迁移前兼容回退', defaultValue: '[]', runtimeEditable: false },
   { key: 'frontend.logs.socket_url', valueType: 'string', category: 'frontend', description: '前端日志 Socket.IO 服务地址；留空时使用当前页面同源地址', defaultValue: '' },
+  { key: 'frontend.display_timezone', valueType: 'string', category: 'frontend', description: 'Dashboard 前端统一显示时区（IANA 名称）', defaultValue: 'Asia/Shanghai' },
   { key: 'monitoring.requests.jenkins_approval_token', valueType: 'string', category: 'monitoring', description: 'Jenkins 调用监控审批授权接口的共享令牌', defaultValue: '', sensitive: true },
   { key: 'monitoring.requests.jenkins.enabled', valueType: 'boolean', category: 'monitoring', description: '是否允许 Dashboard 触发受控 Jenkins 监控资源执行', defaultValue: 'false' },
   { key: 'monitoring.requests.jenkins.base_url', valueType: 'string', category: 'monitoring', description: '固定 Jenkins 服务地址（仅后端使用）', defaultValue: '' },

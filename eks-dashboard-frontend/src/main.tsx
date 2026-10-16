@@ -4,11 +4,13 @@ import { App as AntApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import { BrowserRouter } from 'react-router-dom';
+import { getPublicRuntimeConfig } from './services/runtimeConfig';
+import { setDisplayTimeZone } from './utils/time';
 import 'antd/dist/reset.css'; // 关键：导入 Ant Design 的全局重置样式
 import '@ant-design/v5-patch-for-react-19';
 
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const render = () => ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {/* 1. 将路由包裹在最外层 */}
     <ConfigProvider
@@ -40,3 +42,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ConfigProvider>
   </React.StrictMode>,
 );
+
+const displayTimeZoneConfig = Promise.race([
+  getPublicRuntimeConfig(),
+  new Promise<{ displayTimeZone?: string }>((resolve) => {
+    window.setTimeout(() => resolve({}), 1500);
+  }),
+]);
+
+void displayTimeZoneConfig
+  .then((config) => setDisplayTimeZone(config.displayTimeZone))
+  .catch(() => setDisplayTimeZone())
+  .finally(render);

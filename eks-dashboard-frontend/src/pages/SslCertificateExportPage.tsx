@@ -10,6 +10,7 @@ import {
   requestSslCertificate,
 } from '../services/api';
 import { InlineHelpTooltip } from '../components/ops';
+import { formatDateTime } from '../utils/time';
 
 const { Text } = Typography;
 
@@ -49,12 +50,6 @@ type EnvOption = {
   aws_region?: string;
   aws_profile?: string;
   aws_access_key_id?: string;
-};
-
-const formatTime = (value?: string | null) => {
-  if (!value) return '-';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
 };
 
 const DOMAIN_PATTERN = /^(\*\.)?(((?!-)[A-Za-z0-9-]{1,63}\.)+([A-Za-z0-9-]{2,63}))$/;
@@ -287,9 +282,9 @@ const SslCertificateExportPage: React.FC = () => {
     },
     { title: '状态', dataIndex: 'status', width: 120, render: (v) => <Tag color={String(v).toLowerCase().includes('issued') ? 'green' : 'blue'}>{v || '-'}</Tag> },
     { title: '证书类型/可导出', width: 170, render: (_, row) => <Space direction="vertical" size={0}><span>{row.certType || '-'}</span><Tag color={row.canExport ? 'green' : 'default'}>{row.canExport ? '可导出' : '受限'}</Tag></Space> },
-    { title: '到期时间', dataIndex: 'endDate', width: 180, render: (v) => formatTime(v) },
+    { title: '到期时间', dataIndex: 'endDate', width: 180, render: (v) => formatDateTime(v) },
     { title: 'ARN', dataIndex: 'arn', width: 320, ellipsis: true },
-    { title: '最近导出时间', dataIndex: 'lastExportedAt', width: 180, render: (v) => formatTime(v) },
+    { title: '最近导出时间', dataIndex: 'lastExportedAt', width: 180, render: (v) => formatDateTime(v) },
     { title: '最近导出人', dataIndex: 'lastExportedBy', width: 140, render: (v) => v || '-' },
     {
       title: '操作',
@@ -397,7 +392,7 @@ const SslCertificateExportPage: React.FC = () => {
               <Descriptions.Item label="是否可导出">{detail.canExport ? '是' : '否'}</Descriptions.Item>
               <Descriptions.Item label="验证方法">{detail.validationMethod || '-'}</Descriptions.Item>
               <Descriptions.Item label="密钥算法">{detail.keyAlgorithm || '-'}</Descriptions.Item>
-              <Descriptions.Item label="到期时间">{formatTime(detail.endDate)}</Descriptions.Item>
+              <Descriptions.Item label="到期时间">{formatDateTime(detail.endDate)}</Descriptions.Item>
               <Descriptions.Item label="ARN">{detail.arn}</Descriptions.Item>
             </Descriptions>
             <div>
