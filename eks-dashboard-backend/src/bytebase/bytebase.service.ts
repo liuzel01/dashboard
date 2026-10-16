@@ -3,6 +3,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -436,6 +437,7 @@ export class BytebaseService {
       ![
         'AWAITING_ADMIN_CONFIRMATION',
         'RELEASE_CONFIRMED',
+        'ROLLOUT_READY',
         'ROLLOUT_RUNNING',
         'UNKNOWN',
       ].includes(row.status)
@@ -671,10 +673,18 @@ export class BytebaseService {
     );
     if (!rows[0])
       throw new NotFoundException('未找到与该 Plan 对应的 Dashboard 申请');
-    if (rows[0].status !== 'AWAITING_ADMIN_CONFIRMATION')
-      throw new BadRequestException('该申请不处于待管理员确认状态');
+    if (
+      ![
+        'AWAITING_ADMIN_CONFIRMATION',
+        'RELEASE_CONFIRMED',
+        'ROLLOUT_READY',
+      ].includes(rows[0].status)
+    )
+      throw new BadRequestException('该申请当前不处于可发布状态');
     if (!rows[0].issue_name)
       throw new BadRequestException('该申请缺少 Bytebase Draft Issue');
+    if (rows[0].status !== 'AWAITING_ADMIN_CONFIRMATION')
+      return this.startRollout(actor, c, rows[0]);
     // The draft belongs to the submitter service account. Dashboard admin + MFA
     // is the authorization boundary; submit the draft with its owning identity.
     const plan = await this.remote(c, 'submitter', 'GET', `/v1/${input.plan}`);
@@ -730,11 +740,142 @@ export class BytebaseService {
       'RELEASE_CONFIRMED',
       `管理员 ${actor.username} 已通过 MFA 确认发布`,
     );
+    rows[0].status = 'RELEASE_CONFIRMED';
+    rows[0].issue_name = issue.name || rows[0].issue_name;
+    return this.startRollout(actor, c, rows[0]);
+  }
+
+  private async startRollout(actor: Actor, c: any, row: any) {
+    if (!row.issue_name || !row.plan_name) {
+      throw new BadRequestException('该申请缺少 Bytebase Issue 或 Plan');
+    }
+    this.assertProject(c, row.issue_name.split('/issues/')[0]);
+    const rollout = await this.waitForRollout(c, row.plan_name);
+    if (!rollout) {
+      return {
+        requestId: row.request_id,
+        status: 'RELEASE_CONFIRMED',
+        executionPending: true,
+      };
+    }
+    let stage: any;
+    for (const candidate of rollout?.stages || []) {
+      const statuses = (candidate.tasks || []).map((task: any) =>
+        String(task.status || '').toUpperCase(),
+      );
+      if (
+        statuses.every((status: string) => ['DONE', 'SKIPPED'].includes(status))
+      )
+        continue;
+      if (
+        statuses.some((status: string) =>
+          ['PENDING', 'RUNNING'].includes(status),
+        )
+      )
+        throw new BadRequestException(
+          'Bytebase 当前部署阶段正在执行，请刷新状态后再试',
+        );
+      if (statuses.includes('NOT_STARTED')) {
+        stage = candidate;
+        break;
+      }
+      throw new BadRequestException(
+        'Bytebase 当前部署阶段不可执行，请刷新状态后重试',
+      );
+    }
+    if (!stage) {
+      throw new BadRequestException(
+        'Bytebase 中没有可执行的未开始部署阶段，请刷新状态后重试',
+      );
+    }
+    const tasks = (stage.tasks || [])
+      .filter(
+        (task: any) =>
+          String(task.status || '').toUpperCase() === 'NOT_STARTED',
+      )
+      .map((task: any) => String(task.name || ''))
+      .filter(Boolean);
+    if (!tasks.length)
+      throw new BadRequestException('Bytebase 中没有可执行任务');
+    try {
+      await this.remote(
+        c,
+        'deployer',
+        'POST',
+        `/v1/${stage.name}/tasks:batchRun`,
+        {
+          parent: stage.name,
+          tasks,
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof BadGatewayException ||
+        !(error instanceof HttpException)
+      ) {
+        const message = String(
+          error.message || 'Bytebase 执行请求结果未知',
+        ).slice(0, 1000);
+        await this.db.query(
+          `UPDATE bytebase_requests SET status='UNKNOWN',last_error=?,updated_at=UTC_TIMESTAMP(3) WHERE request_id=?`,
+          [message, row.request_id],
+        );
+        await this.recordEvent(
+          row.request_id,
+          'EXECUTION_UNKNOWN',
+          row.status,
+          'UNKNOWN',
+          'Bytebase 执行请求结果未知；后台只读对账将继续，不会自动重试',
+        );
+      }
+      throw error;
+    }
+    await this.db.query(
+      `UPDATE bytebase_requests SET status='ROLLOUT_RUNNING',rollout_name=?,rollout_status='STARTING',task_summary_json=?,last_error=NULL,updated_at=UTC_TIMESTAMP(3) WHERE request_id=?`,
+      [
+        rollout.name || row.rollout_name,
+        JSON.stringify(
+          (rollout.stages || []).flatMap((item: any) =>
+            (item.tasks || []).map((task: any) => ({
+              name: String(task.name || ''),
+              status: String(task.status || 'UNKNOWN'),
+            })),
+          ),
+        ),
+        row.request_id,
+      ],
+    );
+    await this.recordEvent(
+      row.request_id,
+      'ROLLOUT_EXECUTION_REQUESTED',
+      row.status,
+      'ROLLOUT_RUNNING',
+      `管理员 ${actor.username} 已请求执行 Bytebase 发布阶段`,
+    );
     return {
-      requestId: rows[0].request_id,
-      status: 'RELEASE_CONFIRMED',
-      issueName: issue.name || rows[0].issue_name,
+      requestId: row.request_id,
+      status: 'ROLLOUT_RUNNING',
+      stage: String(stage.name || ''),
+      taskCount: tasks.length,
     };
+  }
+
+  private async waitForRollout(c: any, planName: string) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        return await this.remote(
+          c,
+          'deployer',
+          'GET',
+          `/v1/${planName}/rollout`,
+        );
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) throw error;
+        if (attempt === 4) return null;
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+    return null;
   }
 
   async reconcileRequest(requestId: string) {
@@ -772,7 +913,9 @@ export class BytebaseService {
       let nextStatus = this.requestStatus(tasks, Boolean(rollout));
       if (
         row.status === 'CANCEL_REQUESTED' &&
-        ['RELEASE_CONFIRMED', 'ROLLOUT_RUNNING'].includes(nextStatus)
+        ['RELEASE_CONFIRMED', 'ROLLOUT_READY', 'ROLLOUT_RUNNING'].includes(
+          nextStatus,
+        )
       )
         nextStatus = 'CANCEL_REQUESTED';
       const rolloutStatus = rollout
@@ -784,7 +927,9 @@ export class BytebaseService {
               ? 'CANCELLED'
               : nextStatus === 'CANCEL_REQUESTED'
                 ? 'CANCEL_REQUESTED'
-              : 'RUNNING'
+                : nextStatus === 'ROLLOUT_READY'
+                  ? 'READY'
+                  : 'RUNNING'
         : 'PENDING';
       const terminal = ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(
         nextStatus,
@@ -837,6 +982,8 @@ export class BytebaseService {
   private requestStatus(tasks: Array<{ status: string }>, hasRollout: boolean) {
     if (!hasRollout || tasks.length === 0) return 'RELEASE_CONFIRMED';
     const statuses = tasks.map((task) => task.status.toUpperCase());
+    if (statuses.every((status) => status === 'NOT_STARTED'))
+      return 'ROLLOUT_READY';
     if (statuses.some((status) => ['FAILED', 'ERROR'].includes(status)))
       return 'FAILED';
     if (statuses.some((status) => ['CANCELED', 'CANCELLED'].includes(status)))

@@ -155,7 +155,7 @@ describe('BytebaseService', () => {
     );
   });
 
-  it('submits the draft only after admin MFA confirmation', async () => {
+  it('submits the draft and starts its first rollout stage after one admin MFA confirmation', async () => {
     access.getMe.mockResolvedValueOnce({
       id: 1,
       username: 'admin',
@@ -183,6 +183,7 @@ describe('BytebaseService', () => {
           request_id: 'request-1',
           status: 'AWAITING_ADMIN_CONFIRMATION',
           issue_name: 'projects/p/issues/1',
+          plan_name: 'projects/p/plans/1',
           database_name: 'instances/i/databases/d',
           sql_sha256:
             'e004ebd5b5532a4b85984a62f8ad48a81aa3460c1ca07701f386135d72cdecf5',
@@ -226,7 +227,25 @@ describe('BytebaseService', () => {
       .mockResolvedValueOnce({
         status: 200,
         data: { name: 'projects/p/issues/1', draft: false },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          name: 'projects/p/plans/1/rollout',
+          stages: [
+            {
+              name: 'projects/p/plans/1/rollout/stages/prod',
+              tasks: [
+                {
+                  name: 'projects/p/plans/1/rollout/stages/prod/tasks/1',
+                  status: 'NOT_STARTED',
+                },
+              ],
+            },
+          ],
+        },
       });
+    (axios.request as jest.Mock).mockResolvedValueOnce({ status: 200, data: {} });
 
     await expect(
       service.createRollout('Bearer dashboard', {
@@ -234,22 +253,106 @@ describe('BytebaseService', () => {
         plan: 'projects/p/plans/1',
         mfaCode: '123456',
       }),
-    ).resolves.toMatchObject({ status: 'RELEASE_CONFIRMED' });
+    ).resolves.toMatchObject({ status: 'ROLLOUT_RUNNING', taskCount: 1 });
 
     expect(mfa.verifyForUser).toHaveBeenCalledWith(1, '123456');
-    expect(axios.request).toHaveBeenLastCalledWith(
+    expect(axios.request).toHaveBeenNthCalledWith(
+      4,
       expect.objectContaining({
         method: 'PATCH',
         url: 'https://bytebase.example.com/v1/projects/p/issues/1?updateMask=draft',
         data: { name: 'projects/p/issues/1', draft: false },
       }),
     );
-    expect(
-      (axios.request as jest.Mock).mock.calls.some(
-        ([request]) =>
-          request.method === 'POST' && request.url.endsWith('/rollout'),
-      ),
-    ).toBe(false);
+    expect(axios.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        url: 'https://bytebase.example.com/v1/projects/p/plans/1/rollout/stages/prod/tasks:batchRun',
+      }),
+    );
+  });
+
+  it('starts only the first runnable Bytebase rollout stage after admin MFA verification', async () => {
+    access.getMe.mockResolvedValueOnce({
+      id: 1,
+      username: 'admin',
+      permissions: ['bytebase:rollout:execute'],
+    });
+    db.query
+      .mockResolvedValueOnce([
+        {
+          environment_id: 'hashex',
+          executor_key: 'hashex-bytebase',
+          enabled: 1,
+          base_url_conf_key: 'url',
+          catalog_email_conf_key: 'ce',
+          catalog_key_conf_key: 'ck',
+          reader_email_conf_key: 're',
+          reader_key_conf_key: 'rk',
+          submitter_email_conf_key: 'se',
+          submitter_key_conf_key: 'sk',
+          deployer_email_conf_key: 'de',
+          deployer_key_conf_key: 'dk',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          request_id: '11111111-1111-4111-8111-111111111111',
+          environment_id: 'hashex',
+          status: 'ROLLOUT_READY',
+          issue_name: 'projects/p/issues/1',
+          plan_name: 'projects/p/plans/1',
+          rollout_name: 'projects/p/plans/1/rollout',
+        },
+      ])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ insertId: 1 });
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key === 'url' ? 'https://bytebase.example.com' : 'configured',
+    );
+    (axios.post as jest.Mock).mockResolvedValue({
+      status: 200,
+      data: { token: 'token' },
+    });
+    (axios.request as jest.Mock)
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          name: 'projects/p/plans/1/rollout',
+          stages: [
+            {
+              name: 'projects/p/plans/1/rollout/stages/prod',
+              tasks: [
+                {
+                  name: 'projects/p/plans/1/rollout/stages/prod/tasks/1',
+                  status: 'NOT_STARTED',
+                },
+              ],
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({ status: 200, data: {} });
+
+    await expect(
+      service.createRollout('Bearer dashboard', {
+        environmentId: 'hashex',
+        plan: 'projects/p/plans/1',
+        mfaCode: '123456',
+      }),
+    ).resolves.toMatchObject({ status: 'ROLLOUT_RUNNING', taskCount: 1 });
+
+    expect(mfa.verifyForUser).toHaveBeenCalledWith(1, '123456');
+    expect(axios.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        url: 'https://bytebase.example.com/v1/projects/p/plans/1/rollout/stages/prod/tasks:batchRun',
+        data: {
+          parent: 'projects/p/plans/1/rollout/stages/prod',
+          tasks: ['projects/p/plans/1/rollout/stages/prod/tasks/1'],
+        },
+      }),
+    );
   });
 
   it('lets an admin cancel a draft issue without creating a rollout', async () => {

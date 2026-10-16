@@ -29,7 +29,7 @@ export class BytebaseReconcilerService {
         try {
           const rows = await this.db.query<any[]>(
             `SELECT request_id FROM bytebase_requests
-             WHERE status IN ('RELEASE_CONFIRMED','ROLLOUT_RUNNING','CANCEL_REQUESTED','UNKNOWN')
+             WHERE status IN ('RELEASE_CONFIRMED','ROLLOUT_READY','ROLLOUT_RUNNING','CANCEL_REQUESTED','UNKNOWN')
              ORDER BY updated_at ASC LIMIT 100`,
           );
           for (const row of rows) {
