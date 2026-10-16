@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as mysql from 'mysql2/promise';
+import { executePaginatedQuery, PaginatedQueryInput } from '../common/database-pagination';
 
 @Injectable()
 export class PlatformDatabaseService {
@@ -39,6 +40,10 @@ export class PlatformDatabaseService {
     this.ensurePool();
     const [rows] = await this.pool!.execute(sql, params);
     return rows as T;
+  }
+
+  paginate<T = any>(input: PaginatedQueryInput) {
+    return executePaginatedQuery<T>((sql, params = []) => this.query(sql, params), input);
   }
 
   async withTransaction<T>(fn: (conn: mysql.PoolConnection) => Promise<T>): Promise<T> {

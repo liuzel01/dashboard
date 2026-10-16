@@ -63,6 +63,7 @@ const createService = (overrides?: Record<string, string>) => {
   };
   const platformDb = {
     query: jest.fn(async () => ({ insertId: 1, affectedRows: 1 })),
+    paginate: jest.fn(async () => ({ items: [], total: 0, page: 1, pageSize: 20 })),
   };
   const authService = {
     verifyToken: jest.fn(),
@@ -249,27 +250,19 @@ describe('AiOpsService previewSql security', () => {
 
   it('lists sql audit only for current user when actor is non-admin', async () => {
     const { service, platformDb } = createService();
-    platformDb.query.mockReset();
-    platformDb.query
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ total: 0 }]);
 
     await service.listSqlAudit('test-env', actor as any, 1, 20);
 
-    const listCall = platformDb.query.mock.calls[0];
-    const totalCall = platformDb.query.mock.calls[1];
-    expect(String(listCall[0])).toContain('environment_id = ? AND actor_user_id = ?');
-    expect(listCall[1]).toEqual(['test-env', 1, 20, 0]);
-    expect(String(totalCall[0])).toContain('environment_id = ? AND actor_user_id = ?');
-    expect(totalCall[1]).toEqual(['test-env', 1]);
+    const input = platformDb.paginate.mock.calls[0][0];
+    expect(String(input.dataSql)).toContain('environment_id = ? AND actor_user_id = ?');
+    expect(String(input.countSql)).toContain('environment_id = ? AND actor_user_id = ?');
+    expect(input.params).toEqual(['test-env', 1]);
+    expect(input.page).toBe(1);
+    expect(input.pageSize).toBe(20);
   });
 
   it('lists sql audit for all users when actor has admin role', async () => {
     const { service, platformDb } = createService();
-    platformDb.query.mockReset();
-    platformDb.query
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ total: 0 }]);
 
     const adminActor = {
       ...actor,
@@ -279,13 +272,11 @@ describe('AiOpsService previewSql security', () => {
     };
     await service.listSqlAudit('test-env', adminActor as any, 1, 20);
 
-    const listCall = platformDb.query.mock.calls[0];
-    const totalCall = platformDb.query.mock.calls[1];
-    expect(String(listCall[0])).toContain('WHERE environment_id = ?');
-    expect(String(listCall[0])).not.toContain('AND actor_user_id = ?');
-    expect(listCall[1]).toEqual(['test-env', 20, 0]);
-    expect(String(totalCall[0])).toContain('WHERE environment_id = ?');
-    expect(totalCall[1]).toEqual(['test-env']);
+    const input = platformDb.paginate.mock.calls[0][0];
+    expect(String(input.dataSql)).toContain('WHERE environment_id = ?');
+    expect(String(input.dataSql)).not.toContain('AND actor_user_id = ?');
+    expect(String(input.countSql)).toContain('WHERE environment_id = ?');
+    expect(input.params).toEqual(['test-env']);
   });
 
   it('lists cliproxy models and only saves a model from the live catalog', async () => {

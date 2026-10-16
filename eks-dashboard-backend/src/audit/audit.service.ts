@@ -100,12 +100,9 @@ export class AuditService {
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const totalRows = await this.db.query<Array<{ total: number }>>(
-      `SELECT COUNT(1) AS total FROM audit_logs ${whereSql}`,
-      values,
-    );
-    const items = await this.db.query(
-      `SELECT id, created_at, actor_user_id, actor_username, actor_display_name,
+    const result = await this.db.paginate({
+      countSql: `SELECT COUNT(1) AS total FROM audit_logs ${whereSql}`,
+      dataSql: `SELECT id, created_at, actor_user_id, actor_username, actor_display_name,
               environment_id, method, path, menu_key, action, action_name,
               target_type, target_id, meta, request_summary, response_summary,
               status, status_code, error_message, duration_ms, ip, user_agent, trace_id
@@ -113,9 +110,11 @@ export class AuditService {
        ${whereSql}
        ORDER BY created_at DESC, id DESC
        LIMIT ? OFFSET ?`,
-      [...values, pageSize, (page - 1) * pageSize],
-    );
-    return { items, total: Number(totalRows?.[0]?.total || 0), page, pageSize };
+      params: values,
+      page,
+      pageSize,
+    });
+    return result;
   }
 
   async cleanupOlderThan(days = 90) {

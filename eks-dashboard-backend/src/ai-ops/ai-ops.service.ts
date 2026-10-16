@@ -251,10 +251,9 @@ export class AiOpsService {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const safePage = Math.max(1, Math.floor(page));
     const safeSize = Math.min(100, Math.max(1, Math.floor(size)));
-    const offset = (safePage - 1) * safeSize;
     const scope = this.buildSqlAuditScope(environmentId, actor);
-    const rows = await this.platformDb.query<any[]>(
-      `SELECT a.id, a.action_id, a.environment_id, a.actor_user_id, a.actor_username,
+    const result = await this.platformDb.paginate<any>({
+      dataSql: `SELECT a.id, a.action_id, a.environment_id, a.actor_user_id, a.actor_username,
               COALESCE(NULLIF(u.display_name, ''), u.username, a.actor_username) AS actor_display_name,
               a.question, a.generated_sql, a.executed_sql, a.limit_applied,
               a.max_execution_time_ms, a.row_count, a.sql_type, a.risk_level, a.status, a.error_message, a.created_at
@@ -263,19 +262,17 @@ export class AiOpsService {
        WHERE ${scope.whereSql}
        ORDER BY a.id DESC
        LIMIT ? OFFSET ?`,
-      [...scope.params, safeSize, offset],
-    );
-
-    const totalRows = await this.platformDb.query<{ total: number }[]>(
-      `SELECT COUNT(1) AS total FROM aiops_sql_audit WHERE ${scope.whereSql}`,
-      scope.params,
-    );
+      countSql: `SELECT COUNT(1) AS total FROM aiops_sql_audit WHERE ${scope.whereSql}`,
+      params: scope.params,
+      page: safePage,
+      pageSize: safeSize,
+    });
 
     return {
-      page: safePage,
-      size: safeSize,
-      total: Number(totalRows?.[0]?.total || 0),
-      items: rows,
+      page: result.page,
+      size: result.pageSize,
+      total: result.total,
+      items: result.items,
     };
   }
 

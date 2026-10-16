@@ -335,9 +335,14 @@ export class MonitoringRequestsService {
     if (query.status) { where.push('r.status=?'); values.push(query.status); }
     if (query.resourceType) { where.push('r.resource_type=?'); values.push(query.resourceType); }
     const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = await this.db.query<any[]>(`SELECT COUNT(*) total FROM monitoring_requests r ${sql}`, values);
-    const items = await this.db.query<any[]>(`SELECT r.*,u.username requester_username,u.display_name requester_display_name,au.username approver_username FROM monitoring_requests r JOIN users u ON u.id=r.requester_user_id LEFT JOIN users au ON au.id=r.approver_user_id ${sql} ORDER BY r.updated_at DESC LIMIT ? OFFSET ?`, [...values, pageSize, (page - 1) * pageSize]);
-    return { items: items.map((item) => this.requestView(item)), total: Number(total[0]?.total || 0), page, pageSize };
+    const result = await this.db.paginate<any>({
+      countSql: `SELECT COUNT(*) total FROM monitoring_requests r ${sql}`,
+      dataSql: `SELECT r.*,u.username requester_username,u.display_name requester_display_name,au.username approver_username FROM monitoring_requests r JOIN users u ON u.id=r.requester_user_id LEFT JOIN users au ON au.id=r.approver_user_id ${sql} ORDER BY r.updated_at DESC LIMIT ? OFFSET ?`,
+      params: values,
+      page,
+      pageSize,
+    });
+    return { ...result, items: result.items.map((item) => this.requestView(item)) };
   }
   async environmentOptions(auth: string | undefined) {
     await this.actor(auth);

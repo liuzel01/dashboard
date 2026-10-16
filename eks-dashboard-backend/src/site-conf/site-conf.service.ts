@@ -69,14 +69,14 @@ export class SiteConfService implements OnModuleInit {
       params.push(query.category.trim());
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const countRows = await this.db.query<{ total: number }[]>(`SELECT COUNT(*) AS total FROM dashboard_site_conf ${whereSql}`, params);
-    const total = Number(countRows?.[0]?.total || 0);
-    const offset = (query.page - 1) * query.size;
-    const rows = await this.db.query<SiteConfRow[]>(
-      `SELECT * FROM dashboard_site_conf ${whereSql} ORDER BY category, conf_key LIMIT ? OFFSET ?`,
-      [...params, query.size, offset],
-    );
-    return { page: query.page, size: query.size, total, list: rows.map((row) => this.mapRow(row)) };
+    const result = await this.db.paginate<SiteConfRow>({
+      countSql: `SELECT COUNT(*) AS total FROM dashboard_site_conf ${whereSql}`,
+      dataSql: `SELECT * FROM dashboard_site_conf ${whereSql} ORDER BY category, conf_key LIMIT ? OFFSET ?`,
+      params,
+      page: query.page,
+      pageSize: query.size,
+    });
+    return { page: result.page, size: result.pageSize, total: result.total, list: result.items.map((row) => this.mapRow(row)) };
   }
 
   async categories() {

@@ -158,7 +158,6 @@ export class CertStudyService {
 
     const page = Math.max(1, Number(query.page || 1));
     const pageSize = Math.min(200, Math.max(1, Number(query.pageSize || 20)));
-    const offset = (page - 1) * pageSize;
     const keyword = (query.keyword || '').trim();
     const status = (query.status || '').trim();
     const source = (query.source || '').trim();
@@ -212,8 +211,8 @@ export class CertStudyService {
     });
     const whereSql = wherePack.where.join(' AND ');
 
-    const rows = await this.db.query<QuestionRecord[]>(
-      `SELECT
+    const paginated = await this.db.paginate<QuestionRecord>({
+      dataSql: `SELECT
          q.id,
          q.exam_id,
          e.code AS exam_code,
@@ -251,16 +250,15 @@ export class CertStudyService {
        WHERE ${whereSql}
        ORDER BY ${orderBySql}
        LIMIT ? OFFSET ?`,
-      [actor.userId, ...wherePack.params, pageSize, offset],
-    );
-
-    const countRows = await this.db.query<{ total: number }[]>(
-      `SELECT COUNT(1) AS total
+      countSql: `SELECT COUNT(1) AS total
        FROM cert_questions q
        ${this.buildLatestUserReviewJoinSql('r')}
        WHERE ${whereSql}`,
-      [actor.userId, ...wherePack.params],
-    );
+      params: [actor.userId, ...wherePack.params],
+      page,
+      pageSize,
+      maxPageSize: 200,
+    });
 
     const summaryRows = await this.db.query<{ status: string; total: number }[]>(
       `SELECT COALESCE(r.status, 'new') AS status, COUNT(1) AS total
@@ -289,13 +287,13 @@ export class CertStudyService {
     const response = {
       exam: { id: exam.id, code: exam.code, name: exam.name, provider: exam.provider },
       pagination: {
-        page,
-        pageSize,
-        total: Number(countRows?.[0]?.total || 0),
+        page: paginated.page,
+        pageSize: paginated.pageSize,
+        total: paginated.total,
       },
       statusSummary,
       availableTags: tagRows.map((row) => row.tag),
-      items: rows.map((row) => this.mapListRow(row)),
+      items: paginated.items.map((row) => this.mapListRow(row)),
     };
     this.setCachedResponse(cacheKey, response, this.listCacheTtlMs);
     return response;

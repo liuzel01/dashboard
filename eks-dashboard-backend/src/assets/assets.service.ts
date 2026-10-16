@@ -933,20 +933,20 @@ export class AssetsService {
     }
 
     const whereSql = where.join(' AND ');
-    const totalRows = await this.db.query<Array<{ total: number }>>(
-      `SELECT COUNT(1) AS total FROM asset_change_logs WHERE ${whereSql}`,
-      params,
-    );
-    const items = await this.db.query<DbRow[]>(
-      `SELECT id, asset_type, asset_id, action, before_data, after_data, operator, remark, created_at
+    const result = await this.db.paginate<DbRow>({
+      countSql: `SELECT COUNT(1) AS total FROM asset_change_logs WHERE ${whereSql}`,
+      dataSql: `SELECT id, asset_type, asset_id, action, before_data, after_data, operator, remark, created_at
        FROM asset_change_logs
        WHERE ${whereSql}
        ORDER BY created_at DESC, id DESC
        LIMIT ? OFFSET ?`,
-      [...params, pageSize, (page - 1) * pageSize],
-    );
+      params,
+      page,
+      pageSize,
+      maxPageSize: 200,
+    });
 
-    return { items: items.map((row) => this.parseJsonColumns(row)), pagination: { page, pageSize, total: Number(totalRows[0]?.total || 0) } };
+    return { items: result.items.map((row) => this.parseJsonColumns(row)), pagination: { page: result.page, pageSize: result.pageSize, total: result.total } };
   }
 
   private buildWangsuAkskHeaders(input: { endpoint: string; method: string; path: string; accessKeyId: string; accessKeySecret: string }) {
@@ -1526,20 +1526,20 @@ export class AssetsService {
     this.addExactFilter(where, params, config.accountField, query.accountId);
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const totalRows = await this.db.query<Array<{ total: number }>>(
-      `SELECT COUNT(1) AS total FROM ${config.table} ${whereSql}`,
-      params,
-    );
-    const items = await this.db.query<DbRow[]>(
-      `SELECT *
+    const result = await this.db.paginate<DbRow>({
+      countSql: `SELECT COUNT(1) AS total FROM ${config.table} ${whereSql}`,
+      dataSql: `SELECT *
        FROM ${config.table}
        ${whereSql}
        ORDER BY deleted_at IS NOT NULL ASC, updated_at DESC, id DESC
        LIMIT ? OFFSET ?`,
-      [...params, pageSize, (page - 1) * pageSize],
-    );
+      params,
+      page,
+      pageSize,
+      maxPageSize: 200,
+    });
 
-    return { items, pagination: { page, pageSize, total: Number(totalRows[0]?.total || 0) } };
+    return { items: result.items, pagination: { page: result.page, pageSize: result.pageSize, total: result.total } };
   }
 
   private async createRow(actor: ActorContext, config: AssetConfig, dto: Record<string, unknown>) {

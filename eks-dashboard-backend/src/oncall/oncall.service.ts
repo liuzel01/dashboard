@@ -204,15 +204,17 @@ export class OncallService {
       values.push(like, like, like);
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const totalRows = await this.db.query<Array<{ total: number }>>(`SELECT COUNT(*) AS total FROM oncall_alerts ${where}`, values as any[]);
-    const items = await this.db.query<any[]>(
-      `SELECT id, fingerprint, environment_id, alert_name, namespace, severity, risk_level, status,
+    const result = await this.db.paginate<any>({
+      countSql: `SELECT COUNT(*) AS total FROM oncall_alerts ${where}`,
+      dataSql: `SELECT id, fingerprint, environment_id, alert_name, namespace, severity, risk_level, status,
               first_fired_at, last_fired_at, resolved_at, created_at, updated_at
        FROM oncall_alerts ${where} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`,
-      [...values, pageSize, (page - 1) * pageSize] as any[],
-    );
-    await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'GET', path: '/oncall/alerts', menuKey: MENU_PERMISSION, action: 'oncall.alerts.list', actionName: '查看 Oncall 告警', targetType: 'oncall_alert', requestSummary: query, responseSummary: { total: Number(totalRows[0]?.total || 0) }, status: 'success', statusCode: 200 });
-    return { items, total: Number(totalRows[0]?.total || 0), page, pageSize };
+      params: values,
+      page,
+      pageSize,
+    });
+    await this.audit.record({ actorUserId: actor.userId, actorUsername: actor.username, actorDisplayName: actor.displayName, method: 'GET', path: '/oncall/alerts', menuKey: MENU_PERMISSION, action: 'oncall.alerts.list', actionName: '查看 Oncall 告警', targetType: 'oncall_alert', requestSummary: query, responseSummary: { total: result.total }, status: 'success', statusCode: 200 });
+    return result;
   }
 
   async getAlert(actor: OncallActor, id: number) {
