@@ -38,7 +38,7 @@ export const getBytebaseIssues = async (environmentId:string,project:string) => 
 export const diagnoseBytebase = async (environmentId:string) => (await api.get('/bytebase/diagnostics',{params:{environmentId}})).data;
 export const listBytebaseRequests = async () => (await api.get('/bytebase/requests')).data as BytebaseRequest[];
 export const createBytebaseChange = async (input:{environmentId:string;project:string;database:string;title:string;description?:string;statement:string}) => (await api.post('/bytebase/changes',{...input,confirmation:'CREATE_BYTEBASE_CHANGE'})).data;
-export const executeBytebaseRollout = async (environmentId:string,plan:string,mfaCode:string) => (await api.post('/bytebase/rollouts',{environmentId,plan,mfaCode,confirmation:'EXECUTE_BYTEBASE_ROLLOUT'})).data;
+export const confirmBytebaseRelease = async (environmentId:string,plan:string,mfaCode:string) => (await api.post('/bytebase/rollouts',{environmentId,plan,mfaCode,confirmation:'EXECUTE_BYTEBASE_ROLLOUT'})).data;
 export const getBytebaseRequestDetail = async (requestId:string) => (await api.get(`/bytebase/requests/${encodeURIComponent(requestId)}/detail`)).data as BytebaseRequestDetail;
 export const cancelBytebaseRequest = async (requestId:string,mfaCode:string,reason?:string) => (await api.post(`/bytebase/requests/${encodeURIComponent(requestId)}/cancel`,{mfaCode,reason,confirmation:'CANCEL_BYTEBASE_REQUEST'})).data as {requestId:string;status:string;bestEffort:boolean};
 

@@ -30,8 +30,8 @@ import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { BytebaseRealtimeContext } from "../contexts/BytebaseRealtimeContextValue";
 import {
   cancelBytebaseRequest,
+  confirmBytebaseRelease,
   createBytebaseChange,
-  executeBytebaseRollout,
   getBytebaseCatalog,
   getBytebaseDatabases,
   getBytebaseRequestDetail,
@@ -60,43 +60,52 @@ const BytebaseCenterPage: React.FC = () => {
   const [projects, setProjects] = useState<BytebaseProject[]>([]),
     [databases, setDatabases] = useState<BytebaseDatabase[]>([]),
     [requests, setRequests] = useState<BytebaseRequest[]>([]);
-  const [project, setProject] = useState<string>(),
-    [loading, setLoading] = useState(false);
+  const [project, setProject] = useState<string>();
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
   const [detail, setDetail] = useState<BytebaseRequestDetail>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [form] = Form.useForm();
   const env = currentEnvironment?.id;
   const canSubmit = permissions.includes("bytebase:change:submit"),
     canRollout = permissions.includes("bytebase:rollout:execute");
-  const load = useCallback(async () => {
+  const loadCatalog = useCallback(async () => {
     if (!env) return;
-    setLoading(true);
+    setCatalogLoading(true);
     try {
-      const [catalog, runs] = await Promise.all([
-        getBytebaseCatalog(env),
-        listBytebaseRequests(),
-      ]);
+      const catalog = await getBytebaseCatalog(env);
       setProjects(catalog.projects);
-      setRequests(runs);
     } catch (e) {
       message.error(errorText(e, "Bytebase 目录加载失败"));
     } finally {
-      setLoading(false);
+      setCatalogLoading(false);
     }
   }, [env, message]);
+  const loadRequests = useCallback(async () => {
+    setRequestsLoading(true);
+    try {
+      setRequests(await listBytebaseRequests());
+    } catch (e) {
+      message.error(errorText(e, "Bytebase 申请记录加载失败"));
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, [message]);
   useEffect(() => {
     setProject(undefined);
     setDatabases([]);
-    void load();
-  }, [env, load]);
+    void loadCatalog();
+    void loadRequests();
+  }, [env, loadCatalog, loadRequests]);
   useEffect(() => {
     if (!socket) return;
-    const refresh = () => void load();
+    const refresh = () => void loadRequests();
     socket.on("bytebase-request-updated", refresh);
     return () => {
       socket.off("bytebase-request-updated", refresh);
     };
-  }, [socket, load]);
+  }, [socket, loadRequests]);
   useEffect(() => {
     if (!env || !project) {
       setDatabases([]);
@@ -124,41 +133,42 @@ const BytebaseCenterPage: React.FC = () => {
   );
   const submit = async (values: ChangeForm) => {
     if (!env || !project) return;
-    setLoading(true);
+    setSubmitLoading(true);
     try {
       await createBytebaseChange({ ...values, environmentId: env, project });
       message.success(
         "已创建 Bytebase Draft Issue，并启动 Plan Check；等待管理员确认发布",
       );
       form.resetFields(["title", "description", "statement"]);
-      await load();
+      await loadRequests();
     } catch (e) {
       message.error(errorText(e, "创建变更失败"));
     } finally {
-      setLoading(false);
+      setSubmitLoading(false);
     }
   };
   const rollout = (row: BytebaseRequest) => {
     let code = "";
     Modal.confirm({
-      title: "确认执行 Bytebase 发布",
+      title: "确认 Bytebase 发布",
       icon: <SafetyCertificateOutlined />,
-      content: (
+      content: <Space direction="vertical" style={{ width: "100%" }}>
+        <Alert type="warning" showIcon message="确认后将立即执行数据库变更" description="Dashboard 会发布 Bytebase Draft，并创建真实 TaskRun 执行当前可运行的部署阶段。" />
         <Input.Password
           placeholder="Google Authenticator 验证码"
           onChange={(e) => {
             code = e.target.value;
           }}
         />
-      ),
+      </Space>,
       okText: "确认发布",
       okButtonProps: { danger: true },
       onOk: async () => {
         if (!row.plan_name) throw new Error("申请缺少 Plan");
         try {
-          await executeBytebaseRollout(row.environment_id, row.plan_name, code);
-          message.success("发布已确认，Bytebase 正在创建并执行 Rollout");
-          await load();
+          const result = await confirmBytebaseRelease(row.environment_id, row.plan_name, code);
+          message.success(result.executionPending ? "发布已确认，Bytebase 正在准备部署阶段，可稍后再次点击确认发布" : "Bytebase 发布已开始，正在追踪执行状态");
+          await loadRequests();
         } catch (e) {
           message.error(errorText(e, "发布失败"));
           throw e;
@@ -198,7 +208,7 @@ const BytebaseCenterPage: React.FC = () => {
           const result = await cancelBytebaseRequest(row.request_id, code, reason);
           message.success(result.bestEffort ? "已提交停止请求，正在确认最终状态" : "申请已撤销");
           setDetail(undefined);
-          await load();
+          await loadRequests();
         } catch (e) {
           message.error(errorText(e, "取消失败"));
           throw e;
@@ -231,8 +241,8 @@ const BytebaseCenterPage: React.FC = () => {
           />
           <Button
             icon={<ReloadOutlined />}
-            loading={loading}
-            onClick={() => void load()}
+            loading={catalogLoading}
+            onClick={() => void loadCatalog()}
           >
             刷新目录
           </Button>
@@ -246,7 +256,7 @@ const BytebaseCenterPage: React.FC = () => {
             children: (
               <Table
                 rowKey="name"
-                loading={loading}
+                loading={catalogLoading}
                 dataSource={databases}
                 pagination={{ pageSize: 20 }}
                 columns={[
@@ -303,7 +313,7 @@ const BytebaseCenterPage: React.FC = () => {
                       placeholder="SQL 将提交给 Bytebase SQL Review，不会由 Dashboard 直连执行"
                     />
                   </Form.Item>
-                  <Button type="primary" htmlType="submit" loading={loading}>
+                  <Button type="primary" htmlType="submit" loading={submitLoading}>
                     创建 Issue 并运行 Plan Check
                   </Button>
                 </Form>
@@ -322,6 +332,7 @@ const BytebaseCenterPage: React.FC = () => {
             children: (
               <Table
                 rowKey="request_id"
+                loading={requestsLoading}
                 dataSource={requests}
                 pagination={{ pageSize: 20 }}
                 scroll={{ x: 1200 }}
@@ -368,17 +379,16 @@ const BytebaseCenterPage: React.FC = () => {
                     width: 230,
                     render: (_, r) => <Space size={4}>
                       <Button size="small" icon={<EyeOutlined />} loading={detailLoading} onClick={() => void openDetail(r)}>详情</Button>
-                      {canRollout && r.plan_name && (
+                      {canRollout && r.plan_name && ["AWAITING_ADMIN_CONFIRMATION", "RELEASE_CONFIRMED", "ROLLOUT_READY"].includes(r.status) && (
                         <Button
                           danger
                           size="small"
-                          disabled={r.status !== "AWAITING_ADMIN_CONFIRMATION"}
                           onClick={() => rollout(r)}
                         >
                           确认发布
                         </Button>
                       )}
-                      {canRollout && ["AWAITING_ADMIN_CONFIRMATION", "RELEASE_CONFIRMED", "ROLLOUT_RUNNING", "UNKNOWN"].includes(r.status) && (
+                      {canRollout && ["AWAITING_ADMIN_CONFIRMATION", "RELEASE_CONFIRMED", "ROLLOUT_READY", "ROLLOUT_RUNNING", "UNKNOWN"].includes(r.status) && (
                         <Button danger size="small" icon={<StopOutlined />} onClick={() => cancelRequest(r)}>
                           {r.status === "AWAITING_ADMIN_CONFIRMATION" ? "撤销" : "停止"}
                         </Button>
