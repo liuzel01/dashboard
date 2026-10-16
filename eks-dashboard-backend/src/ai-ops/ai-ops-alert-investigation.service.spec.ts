@@ -17,7 +17,7 @@ const payload = (alertname = 'KylinBackendServiceHttpLatencyHigh') => ({
   ],
 });
 
-const makeService = (existingId?: number) => {
+const makeService = (existingId?: number, returnJsonObject = false) => {
   let queuedPayload = '';
   let queueClaimed = false;
   let queueInserted = false;
@@ -36,7 +36,18 @@ const makeService = (existingId?: number) => {
     if (sql.includes("status='PENDING'")) {
       if (queueClaimed || !queuedPayload) return [[], []];
       queueClaimed = true;
-      return [[{ id: 11, payload_json: queuedPayload, attempt_count: 0 }], []];
+      return [
+        [
+          {
+            id: 11,
+            payload_json: returnJsonObject
+              ? JSON.parse(queuedPayload)
+              : queuedPayload,
+            attempt_count: 0,
+          },
+        ],
+        [],
+      ];
     }
     if (sql.includes('SELECT id FROM aiops_investigations'))
       return [[...(existingId ? [{ id: existingId }] : [])], []];
@@ -164,6 +175,18 @@ describe('AiOpsAlertInvestigationService', () => {
     expect(report.missingEvidence).not.toEqual(
       expect.arrayContaining(['关联日志', 'release']),
     );
+  });
+
+  it('accepts a JSON column already decoded by the MySQL 8 driver', async () => {
+    const { service, execute } = makeService(undefined, true);
+    await service.receiveAlertmanager('Bearer test-token', payload());
+    await service.processQueuedAlerts();
+
+    expect(
+      execute.mock.calls.some(([sql]) =>
+        String(sql).includes('INSERT INTO aiops_investigations'),
+      ),
+    ).toBe(true);
   });
 
   it('deduplicates the same Alertmanager delivery before investigation work', async () => {

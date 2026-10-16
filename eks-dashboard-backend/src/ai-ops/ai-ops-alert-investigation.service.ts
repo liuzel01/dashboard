@@ -106,7 +106,7 @@ export class AiOpsAlertInvestigationService {
       const job = await this.claimQueuedAlert();
       if (!job) return;
       try {
-        const payload = JSON.parse(job.payload_json) as AlertmanagerPayload;
+        const payload = this.alertmanagerPayload(job.payload_json);
         const alert = payload.alerts?.[0];
         if (!alert) throw new Error('Queued payload has no alert');
         const labels = {
@@ -208,7 +208,7 @@ export class AiOpsAlertInvestigationService {
         Array<
           mysql.RowDataPacket & {
             id: number;
-            payload_json: string;
+            payload_json: unknown;
             attempt_count: number;
           }
         >
@@ -352,7 +352,7 @@ export class AiOpsAlertInvestigationService {
       [id, environmentId],
     );
     if (!rows[0]) throw new NotFoundException('AI investigation not found');
-    const events = await this.db.query<Array<{ payload_json: string }>>(
+    const events = await this.db.query<Array<{ payload_json: unknown }>>(
       `SELECT payload_json FROM aiops_alert_event_queue
        WHERE investigation_id=? AND source_status='FIRING' ORDER BY id DESC LIMIT 1`,
       [id],
@@ -369,7 +369,7 @@ export class AiOpsAlertInvestigationService {
        (event_key, environment_id, alert_name, source_status, payload_json, status, attempt_count, available_at, investigation_id, created_at, updated_at)
        SELECT ?, environment_id, alert_name, source_status, ?, 'PENDING', 0, UTC_TIMESTAMP(), id, UTC_TIMESTAMP(), UTC_TIMESTAMP()
        FROM aiops_investigations WHERE id=?`,
-      [eventKey, events[0].payload_json, id],
+      [eventKey, this.jsonParameter(events[0].payload_json), id],
     );
     return { queued: true, eventId: Number(result.insertId || 0) };
   }
@@ -911,6 +911,15 @@ export class AiOpsAlertInvestigationService {
     const serialized =
       typeof value === 'string' ? value : JSON.stringify(value ?? {}) || '';
     return createHash('sha256').update(serialized).digest('hex');
+  }
+  private alertmanagerPayload(value: unknown): AlertmanagerPayload {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error('Queued payload is not a JSON object');
+    return parsed as AlertmanagerPayload;
+  }
+  private jsonParameter(value: unknown): string {
+    return typeof value === 'string' ? value : JSON.stringify(value ?? null);
   }
   private mysqlDate(value: unknown): string | null {
     const date = new Date(this.text(value, 128));
