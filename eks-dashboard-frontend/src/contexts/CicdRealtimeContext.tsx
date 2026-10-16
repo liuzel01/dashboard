@@ -13,6 +13,14 @@ const terminalStatuses = new Set([
   'UNKNOWN',
 ]);
 
+const notificationWording: Record<string, { title: string; statusLabel: string }> = {
+  SUCCESS: { title: 'CI/CD 执行成功', statusLabel: '执行成功' },
+  FAILURE: { title: 'CI/CD 执行失败', statusLabel: '执行失败' },
+  ABORTED: { title: 'CI/CD 执行已中止', statusLabel: '已中止' },
+  CANCELLED: { title: 'CI/CD 执行已取消', statusLabel: '已取消' },
+  UNKNOWN: { title: 'CI/CD 执行状态待确认', statusLabel: '状态待确认，请在 Jenkins 中核实' },
+};
+
 export const CicdRealtimeProvider: React.FC<React.PropsWithChildren> = ({
   children,
 }) => {
@@ -48,10 +56,11 @@ export const CicdRealtimeProvider: React.FC<React.PropsWithChildren> = ({
       const notifiedKey = `cicd-notified:${me.username}:${run.run_id}:${run.status}`;
       if (localStorage.getItem(notifiedKey)) return;
       localStorage.setItem(notifiedKey, new Date().toISOString());
+      const wording = notificationWording[run.status] || notificationWording.UNKNOWN;
       const notification = new Notification(
-        run.status === 'SUCCESS' ? 'CI/CD 执行成功' : 'CI/CD 执行已结束',
+        wording.title,
         {
-          body: `${run.environment_id} / ${run.job_name}：${run.status}`,
+          body: `${run.environment_id} / ${run.job_name}：${wording.statusLabel}`,
           tag: `cicd-run-${run.run_id}`,
         },
       );
