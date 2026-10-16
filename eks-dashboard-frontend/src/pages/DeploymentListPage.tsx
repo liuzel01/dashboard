@@ -127,6 +127,8 @@ const DeploymentListPage: React.FC = () => {
   const [namespace, setNamespace] = useState('default');
   const [namespaceEnvironmentId, setNamespaceEnvironmentId] = useState<string | null>(null);
   const [namespacesLoading, setNamespacesLoading] = useState(false);
+  const [namespaceListingRestricted, setNamespaceListingRestricted] = useState(false);
+  const [namespaceListingNotice, setNamespaceListingNotice] = useState<string | null>(null);
   const [filterInput, setFilterInput] = useState('kylin-price-kylin-price-impl');
   const [filter, setFilter] = useState('kylin-price-kylin-price-impl');
   const [searchRevision, setSearchRevision] = useState(0);
@@ -159,6 +161,8 @@ const DeploymentListPage: React.FC = () => {
     setWorkloadType('deployment');
     setNamespaceEnvironmentId(currentEnvironment?.id || null);
     setNamespaces(['default']);
+    setNamespaceListingRestricted(false);
+    setNamespaceListingNotice(null);
     setImageHistoryTarget(null);
     setLogTarget(null);
   }, [currentEnvironment?.id]);
@@ -167,6 +171,8 @@ const DeploymentListPage: React.FC = () => {
     if (!currentEnvironment) return;
     let cancelled = false;
     setNamespacesLoading(true);
+    setNamespaceListingRestricted(false);
+    setNamespaceListingNotice(null);
     getDeploymentNamespaces()
       .then((items) => {
         if (cancelled) return;
@@ -174,8 +180,21 @@ const DeploymentListPage: React.FC = () => {
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        const errorMessage = (error as ApiError).response?.data?.message || (error as ApiError).message;
-        message.error(`获取命名空间失败: ${errorMessage || '未知错误'}`);
+        const apiError = error as ApiError;
+        const errorMessage = apiError.response?.data?.message || apiError.message;
+        const status = apiError.response?.status;
+        setNamespaces(['default']);
+        setNamespace('default');
+        if (status === 403) {
+          setNamespaceListingRestricted(true);
+          setNamespaceListingNotice(errorMessage || '当前环境无权列举命名空间，已限制为 default。');
+          return;
+        }
+        if (status === 503) {
+          setNamespaceListingNotice(errorMessage || '当前 Dashboard 运行环境未配置此环境的 Kubernetes 访问链路。');
+          return;
+        }
+        setNamespaceListingNotice(`无法加载命名空间列表，暂时仅显示 default。${errorMessage ? ` ${errorMessage}` : ''}`);
       })
       .finally(() => {
         if (!cancelled) setNamespacesLoading(false);
@@ -653,6 +672,7 @@ const DeploymentListPage: React.FC = () => {
           optionFilterProp="label"
           value={namespace}
           loading={namespacesLoading}
+          disabled={namespaceListingRestricted}
           onChange={(value) => {
             setNamespace(value);
             setAllDeployments([]);
@@ -681,6 +701,15 @@ const DeploymentListPage: React.FC = () => {
           enterButton
         />
       </FilterBar>
+      {namespaceListingNotice && (
+        <Alert
+          showIcon
+          type={namespaceListingRestricted ? "warning" : "error"}
+          message={namespaceListingRestricted ? "命名空间选择受限" : "当前环境无法访问 Kubernetes"}
+          description={namespaceListingNotice}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <MetricGrid items={summaryItems} loading={loading} />
       <OpsTable
         columns={visibleColumns}

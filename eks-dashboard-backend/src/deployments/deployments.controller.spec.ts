@@ -46,4 +46,43 @@ describe('DeploymentsController workload listing', () => {
     const controller = new DeploymentsController({ getWorkloads: jest.fn() } as any);
     await expect(controller.getDeployments('test', undefined, 'default', 'job')).rejects.toMatchObject({ status: 400 });
   });
+
+  it('returns an actionable forbidden response when namespace listing is blocked by RBAC', async () => {
+    const controller = new DeploymentsController({
+      listNamespaces: jest.fn().mockRejectedValue({
+        body: { reason: 'Forbidden', code: 403 },
+      }),
+    } as any);
+
+    await expect(controller.getNamespaces('tb')).rejects.toMatchObject({
+      status: 403,
+      response: expect.stringContaining('default'),
+    });
+  });
+
+  it('reports unavailable Kubernetes access when the selected kubecontext is absent locally', async () => {
+    const controller = new DeploymentsController({
+      listNamespaces: jest.fn().mockRejectedValue(
+        new Error('Kubeconfig context "tb" not found in your kubeconfig file.'),
+      ),
+    } as any);
+
+    await expect(controller.getNamespaces('tb')).rejects.toMatchObject({
+      status: 503,
+      response: expect.stringContaining('Kubernetes 访问链路'),
+    });
+  });
+
+  it('uses the same unavailable-access response for workload listing', async () => {
+    const controller = new DeploymentsController({
+      getWorkloads: jest.fn().mockRejectedValue(
+        new Error('Kubeconfig context "tb" not found in your kubeconfig file.'),
+      ),
+    } as any);
+
+    await expect(controller.getDeployments('tb', undefined, 'default', 'deployment')).rejects.toMatchObject({
+      status: 503,
+      response: expect.stringContaining('Kubernetes 访问链路'),
+    });
+  });
 });

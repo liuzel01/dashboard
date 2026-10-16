@@ -30,6 +30,76 @@ export class DeploymentsController {
     return normalized;
   }
 
+  private isNamespaceListingForbidden(error: any): boolean {
+    const status = Number(
+      error?.statusCode
+      ?? error?.status
+      ?? error?.body?.code
+      ?? error?.body?.statusCode
+      ?? error?.response?.statusCode
+      ?? error?.response?.status,
+    );
+    return status === HttpStatus.FORBIDDEN
+      || String(error?.body?.reason || error?.reason || '').toLowerCase() === 'forbidden';
+  }
+
+  private getKubernetesErrorStatus(error: any): number | undefined {
+    const status = Number(
+      error?.statusCode
+      ?? error?.status
+      ?? error?.body?.code
+      ?? error?.body?.statusCode
+      ?? error?.response?.statusCode
+      ?? error?.response?.status,
+    );
+    return Number.isInteger(status) ? status : undefined;
+  }
+
+  private isKubernetesAccessUnavailable(error: any): boolean {
+    const status = this.getKubernetesErrorStatus(error);
+    if (status === HttpStatus.UNAUTHORIZED) return true;
+    const message = String(
+      error?.message
+      ?? error?.body?.message
+      ?? error?.response?.body?.message
+      ?? error?.response?.message
+      ?? '',
+    );
+    return /kubecontext.*not defined|kubeconfig context.*not found|environment configuration.*not found|could not load.*kubeconfig|no credentials|credential.*(not found|unavailable)|token.*(not found|unavailable|expired)|exec.*(?:aws|credential|token)/i.test(message);
+  }
+
+  private isKubernetesApiUnavailable(error: any): boolean {
+    const status = this.getKubernetesErrorStatus(error);
+    if (status !== undefined && [HttpStatus.BAD_GATEWAY, HttpStatus.SERVICE_UNAVAILABLE, HttpStatus.GATEWAY_TIMEOUT].includes(status)) {
+      return true;
+    }
+    return /ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|ESOCKETTIMEDOUT|socket hang up/i.test(
+      String(error?.code || error?.message || ''),
+    );
+  }
+
+  private mapKubernetesReadError(error: any, fallbackMessage: string): HttpException {
+    if (this.isNamespaceListingForbidden(error)) {
+      return new HttpException(
+        '当前环境的 Kubernetes 凭据无权列举命名空间；已限制为 default 命名空间。请联系集群管理员授予 namespaces 的 list 权限后再使用跨命名空间查询。',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    if (this.isKubernetesAccessUnavailable(error)) {
+      return new HttpException(
+        '当前 Dashboard 运行环境未配置此环境的 Kubernetes 访问链路（kube-context 或凭据不可用）。请切换到已配置的环境，或补齐该环境的访问配置后重试。',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    if (this.isKubernetesApiUnavailable(error)) {
+      return new HttpException(
+        '当前无法连接 Kubernetes API，请稍后重试或检查集群网络与认证状态。',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    return new HttpException(fallbackMessage, HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+
   @Get('namespaces')
   async getNamespaces(@Headers('x-target-environment') environmentId: string) {
     if (!environmentId) {
@@ -45,10 +115,7 @@ export class DeploymentsController {
         `Failed to list namespaces for env "${environmentId}"`,
         error.body || error,
       );
-      throw new HttpException(
-        'Failed to fetch namespaces from Kubernetes',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      throw this.mapKubernetesReadError(error, 'Failed to fetch namespaces from Kubernetes');
     }
   }
 
@@ -201,10 +268,7 @@ export class DeploymentsController {
         `Failed to get deployments for env "${environmentId}"`,
         error.body || error,
       );
-      throw new HttpException(
-        'Failed to fetch deployments from Kubernetes',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      throw this.mapKubernetesReadError(error, 'Failed to fetch deployments from Kubernetes');
     }
   }
 
