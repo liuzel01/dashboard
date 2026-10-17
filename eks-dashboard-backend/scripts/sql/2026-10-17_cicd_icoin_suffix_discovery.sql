@@ -2,7 +2,7 @@
 -- names end with "icoin". This intentionally excludes names ending in
 -- "icointest" and applies to both Jenkins action bindings.
 UPDATE `cicd_environment_bindings`
-SET `job_name_pattern` = '^(icoin-|icoinweb|.*icoin$)',
+SET `job_name_pattern` = '^(icoin-.*|icoinweb.*|.*icoin)$',
     `updated_at` = UTC_TIMESTAMP()
 WHERE `environment_id` = 'icoin'
   AND `provider_type` = 'JENKINS'

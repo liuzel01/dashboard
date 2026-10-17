@@ -80,8 +80,8 @@ VALUES
   ('hashdev', 'PACKAGE_PUBLISH', 'JENKINS', 'hash-jenkins', NULL, 1),
   ('mgbx', 'BUILD_DEPLOY', 'JENKINS', 'mgbx-jenkins', NULL, 1),
   ('mgbx', 'PACKAGE_PUBLISH', 'JENKINS', 'mgbx-jenkins', NULL, 1),
-  ('icoin', 'BUILD_DEPLOY', 'JENKINS', 'icoin-jenkins', '^(icoin-|icoinweb|.*icoin$)', 1),
-  ('icoin', 'PACKAGE_PUBLISH', 'JENKINS', 'icoin-jenkins', '^(icoin-|icoinweb|.*icoin$)', 1)
+  ('icoin', 'BUILD_DEPLOY', 'JENKINS', 'icoin-jenkins', '^(icoin-.*|icoinweb.*|.*icoin)$', 1),
+  ('icoin', 'PACKAGE_PUBLISH', 'JENKINS', 'icoin-jenkins', '^(icoin-.*|icoinweb.*|.*icoin)$', 1)
 ON DUPLICATE KEY UPDATE
   `provider_type` = VALUES(`provider_type`),
   `executor_key` = VALUES(`executor_key`),

@@ -33,6 +33,7 @@ export type JobActionFilter = {
 
 const SAFE_DISCOVERY_PREFIX = /^[A-Za-z0-9_.-]+$/;
 const SAFE_DISCOVERY_SUFFIX = /^\.\*[A-Za-z0-9_.-]+\$$/;
+const SAFE_DISCOVERY_FULL_BRANCH = /^(?:[A-Za-z0-9_.-]+\.\*|\.\*[A-Za-z0-9_.-]+)$/;
 const SAFE_JOB_TOKEN = /^[a-z0-9]{1,64}$/;
 
 export const compileJobDiscoveryPattern = (value: string) => {
@@ -40,18 +41,23 @@ export const compileJobDiscoveryPattern = (value: string) => {
   const alternatives =
     pattern.startsWith('^(') && pattern.endsWith(')')
       ? pattern.slice(2, -1).split('|')
+      : pattern.startsWith('^(') && pattern.endsWith(')$')
+        ? pattern.slice(2, -2).split('|')
       : [];
+  const fullMatch = pattern.endsWith(')$');
   if (
     pattern.length > 128 ||
     alternatives.length === 0 ||
     alternatives.some(
       (alternative) =>
-        !SAFE_DISCOVERY_PREFIX.test(alternative) &&
-        !SAFE_DISCOVERY_SUFFIX.test(alternative),
+        !(fullMatch
+          ? SAFE_DISCOVERY_FULL_BRANCH.test(alternative)
+          : SAFE_DISCOVERY_PREFIX.test(alternative) ||
+            SAFE_DISCOVERY_SUFFIX.test(alternative)),
     )
   ) {
     throw new Error(
-      'Job discovery pattern must be an anchored prefix or suffix alternation',
+      'Job discovery pattern must be a controlled prefix or suffix alternation',
     );
   }
   return new RegExp(pattern);

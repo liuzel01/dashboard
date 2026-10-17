@@ -15,7 +15,7 @@
 - 对发布类操作执行权限、确认、审计和并发控制；
 - 为后续非 Jenkins 推包系统预留 Provider 接口。
 
-不允许用户输入任意 Jenkins URL、Job 名或任意参数直接执行。Job 必须来自 Dashboard 后端读取到的 Jenkins 远端目录：hashex/hashdev 与 mgbx 展示对应实例的全部可读 Job，icoin 只展示 `^(icoin-|icoinweb|.*icoin$)` 范围；用户只能从发现结果中选择。`cicd_job_catalog` 不再是唯一白名单，而是为重点 Job 补充展示名、审批、并发和参数覆盖策略。
+不允许用户输入任意 Jenkins URL、Job 名或任意参数直接执行。Job 必须来自 Dashboard 后端读取到的 Jenkins 远端目录：hashex/hashdev 与 mgbx 展示对应实例的全部可读 Job，icoin 只展示 `^(icoin-.*|icoinweb.*|.*icoin)$` 范围；用户只能从发现结果中选择。`cicd_job_catalog` 不再是唯一白名单，而是为重点 Job 补充展示名、审批、并发和参数覆盖策略。
 
 一期建议只实现：
 
@@ -82,7 +82,7 @@
 | hashex | 全部 | Hash Jenkins 全部可读 Job |
 | hashdev | 全部 | 与 hashex 共用 Hash Jenkins，展示全部可读 Job |
 | mgbx | 全部 | 该 Jenkins 仅承载 mgbx 相关 Job，不再做名称筛选 |
-| icoin | `^(icoin-|icoinweb|.*icoin$)` | 保留 `icoin-`、`icoinweb` 前缀，并纳入名称以 `icoin` 结尾的 Job；不匹配 `icointest` 后缀 |
+| icoin | `^(icoin-.*|icoinweb.*|.*icoin)$` | 保留 `icoin-`、`icoinweb` 前缀，并纳入名称以 `icoin` 结尾的 Job；不匹配 `icointest` 后缀 |
 
 Job 必须来自后端实时发现结果，禁止浏览器提交未发现的自由文本名称。后端仍需校验环境、action type、executor、binding 发现范围和远端 Job 存在性；catalog 只提供增强策略，不能扩大 binding 范围。
 
@@ -405,7 +405,7 @@ interface CicdExecutionProvider {
 当前实现（2026-10-09）：
 
 - 新增 `cicd_executors`、`cicd_environment_bindings`、`cicd_job_catalog`，迁移可重复执行；
-- hashex/hashdev、mgbx、icoin 已建立 executor/binding；前三者采用全部 Job，icoin 使用 `^(icoin-|icoinweb|.*icoin$)`；
+- hashex/hashdev、mgbx、icoin 已建立 executor/binding；前三者采用全部 Job，icoin 使用 `^(icoin-.*|icoinweb.*|.*icoin)$`；
 - 首批六个 hashex/hashdev Job 已录入 catalog 作为增强策略；页面 Job 选择来自实时 Jenkins 目录；
 - 新增独立 `cicd.*` 敏感 SiteConf，不复用监控申请的 Jenkins 配置；支持 SiteConf 优先、运行时环境变量兜底；
 - 后端仅提供 bindings、executors、jobs、diagnostics、reconciliation 五类 GET API，没有构建触发接口；
@@ -413,7 +413,7 @@ interface CicdExecutionProvider {
 - 连接检查和对账要求 `cicd-config:manage`，普通目录查看要求 `menu:cicd-runs`；迁移默认授权给 admin 角色；
 - 本地数据库迁移已应用并二次执行验证幂等：3 个 executor、8 个 binding、6 个 catalog Job、2 个权限；
 - Phase 0 使用的管理员 Token 没有写入 SiteConf。hashex 已改用 `dashboard-cicd-bot` 专用 API Token并写入敏感 SiteConf；机器账号可读取全部 Job，但只有 Read/Discover/Build/Cancel 权限，whoAmI、Crumb、Queue 均验证通过。
-- MGBX、iCoin 也已创建同名专用机器账号并写入各自敏感 SiteConf。MGBX 可见 137 个 Job；iCoin 的 Jenkins 项目角色使用 `^(icoin-|icoinweb|.*icoin$)`，保留原前缀并纳入名称以 `icoin` 结尾的 Job，权限仍限定为 Read/Discover/Build/Cancel。
+- MGBX、iCoin 也已创建同名专用机器账号并写入各自敏感 SiteConf。MGBX 可见 137 个 Job；iCoin 的 Jenkins 项目角色使用 `^(icoin-.*|icoinweb.*|.*icoin)$`，保留原前缀并纳入名称以 `icoin` 结尾的 Job，权限仍限定为 Read/Discover/Build/Cancel。
 
 ### Phase 2：Hashex/Hashdev Jenkins 构建部署
 
@@ -478,7 +478,7 @@ interface CicdExecutionProvider {
 当前实现（2026-10-10）：
 
 - Hashex/Hashdev、MGBX、iCoin 已分别绑定独立执行器；MGBX 与 iCoin 使用专用机器账号，并完成身份、crumb、queue、Job 范围和 Build/Cancel 权限验证；
-- iCoin 使用 `^(icoin-|icoinweb|.*icoin$)` 服务端过滤和 Jenkins 项目角色双重限制；该规则保留原前缀并纳入名称以 `icoin` 结尾的 Job，同时排除 `icointest` 后缀；MGBX 使用该 Jenkins 的全部 Job；
+- iCoin 使用 `^(icoin-.*|icoinweb.*|.*icoin)$` 服务端过滤和 Jenkins 项目角色双重限制；该规则保留原前缀并纳入名称以 `icoin` 结尾的 Job，同时排除 `icointest` 后缀；MGBX 使用该 Jenkins 的全部 Job；
 - VLink 对应 Dashboard 实际环境 ID 为 `tb`。已新增并启用 `tb-jenkins` 执行器、SiteConf 配置和 `tb` 环境的构建部署/制品推包绑定，旧的错误 `vlink` 占位会由迁移清理；
 - TB Jenkins 已创建 `dashboard-cicd-bot` 专用机器账号和独立 Token，whoAmI/root/crumb/queue 均返回 200，可见 121 个 Job；管理员 Token 未写入 SiteConf；
 - TB Jenkins 已从 `FullControlOnceLoggedInAuthorizationStrategy` 切换为 `RoleBasedAuthorizationStrategy`，复用既有 `role-strategy` 插件，无需安装插件或重启。`admin` 仅绑定 `jenkins-admin` 管理角色；`dashboard-cicd-bot` 仅绑定覆盖全部 TB Job 的 `dashboard-cicd-tb` 角色，权限限定为 Overall Read、View Read、Job Discover/Read/Build/Cancel，不包含 Configure、Credentials 或 Administer。切换后验证管理员可见 121 个 Job，机器账号对 121 个 Job 均具备受控权限且匿名 API 返回 403；Dashboard 继续按环境 binding 路由，TB 不做环境级 Job 名称筛选。
