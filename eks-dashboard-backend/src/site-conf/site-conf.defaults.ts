@@ -130,6 +130,8 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'aiops.logs.environments.icoin.mcp_token_parameter', valueType: 'string', category: 'aiops-logs', description: 'icoin Grafana MCP 调用 Token 的 SSM Parameter 名称', defaultValue: '/dashboard/grafana-mcp/icoin/server-auth-token' },
   { key: 'aiops.logs.environments.icoin.mcp_region', valueType: 'string', category: 'aiops-logs', description: 'icoin Grafana MCP Token 所在 AWS Region', defaultValue: 'ap-southeast-1' },
   { key: 'aiops.logs.environments.icoin.mcp_fallback_direct', valueType: 'boolean', category: 'aiops-logs', description: 'MCP 不可用时是否临时回退 Grafana 直连执行器', defaultValue: 'true' },
+  { key: 'aiops.logs.environments.icoin.redact_enabled', valueType: 'boolean', category: 'aiops-logs', description: '是否对 icoin 日志证据中的常见敏感键值执行脱敏', defaultValue: 'false' },
+  { key: 'aiops.logs.environments.icoin.restrict_labels', valueType: 'boolean', category: 'aiops-logs', description: '是否仅保留 icoin 日志证据的常用标签白名单', defaultValue: 'false' },
   { key: 'aiops.alertmanager.bearer_token', envKey: 'AIOPS_ALERTMANAGER_BEARER_TOKEN', valueType: 'string', category: 'aiops-alerts', description: 'Alertmanager 调用 AIOps webhook 的专用 Bearer Token', defaultValue: '', sensitive: true },
   { key: 'aiops.alertmanager.default_environment', envKey: 'AIOPS_ALERTMANAGER_DEFAULT_ENVIRONMENT', valueType: 'string', category: 'aiops-alerts', description: '告警缺少 environment 标签时的环境', defaultValue: 'mgbx' },
   { key: 'aiops.alertmanager.excluded_alerts', envKey: 'AIOPS_ALERTMANAGER_EXCLUDED_ALERTS', valueType: 'string', category: 'aiops-alerts', description: '不创建 AI 调查的内部心跳、抑制或演练告警名，逗号分隔', defaultValue: 'Watchdog,InfoInhibitor,DashboardAiOpsSmokeTest' },

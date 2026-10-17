@@ -451,7 +451,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                 { title: '时间', dataIndex: 'timestamp', width: 210 },
                 { title: '服务', width: 220, render: (_: unknown, row: LogEvidence) => row.labels.service_name || row.labels.app || '-' },
                 { title: 'Evidence ID', dataIndex: 'evidenceId', width: 190 },
-                { title: '脱敏日志', dataIndex: 'line', render: (value: string) => <Text code style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{value}</Text> },
+                { title: '日志内容', dataIndex: 'line', render: (value: string) => <Text code style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{value}</Text> },
               ]}
             />
           </Space>

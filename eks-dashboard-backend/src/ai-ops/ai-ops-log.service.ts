@@ -255,9 +255,19 @@ export class AiOpsLogService {
         );
       }
 
+      const redactEnabled = await this.siteConf.getBoolean(
+        `aiops.logs.environments.${environmentId}.redact_enabled`,
+        false,
+      );
+      const restrictLabels = await this.siteConf.getBoolean(
+        `aiops.logs.environments.${environmentId}.restrict_labels`,
+        false,
+      );
+
       evidence = evidence
         .map((entry) => {
-          const line = this.redact(String(entry.line));
+          const rawLine = String(entry.line).slice(0, 8000);
+          const line = redactEnabled ? this.redact(rawLine) : rawLine;
           return {
             evidenceId: createHash('sha256')
               .update(
@@ -266,7 +276,7 @@ export class AiOpsLogService {
               .digest('hex')
               .slice(0, 20),
             timestamp: entry.timestamp,
-            labels: this.safeLabels(entry.labels || {}),
+            labels: this.safeLabels(entry.labels || {}, restrictLabels),
             line,
           };
         })
@@ -471,7 +481,7 @@ export class AiOpsLogService {
       .slice(0, 8000);
   }
 
-  private safeLabels(labels: Record<string, unknown>) {
+  private safeLabels(labels: Record<string, unknown>, restrict: boolean) {
     const allowed = [
       'namespace',
       'service_name',
@@ -480,8 +490,9 @@ export class AiOpsLogService {
       'container',
       'workload',
     ];
+    const keys = restrict ? allowed : Object.keys(labels).sort().slice(0, 50);
     return Object.fromEntries(
-      allowed
+      keys
         .filter((key) => labels[key] !== undefined)
         .map((key) => [key, String(labels[key]).slice(0, 255)]),
     );

@@ -123,7 +123,10 @@ describe('AiOpsLogService', () => {
         },
       },
     } as any);
-    const { service } = createService();
+    const { service } = createService({
+      'aiops.logs.environments.mgbx.redact_enabled': 'true',
+      'aiops.logs.environments.mgbx.restrict_labels': 'true',
+    });
     const result = await service.search('mgbx', actor, {
       projectId: 'mgbx',
       sourceId: 'mgbx-loki-main',
@@ -216,8 +219,11 @@ describe('AiOpsLogService', () => {
       }),
     );
     expect(mockedAxios.get).not.toHaveBeenCalled();
-    expect(result.evidence[0].labels).toEqual({ app: 'orders' });
-    expect(result.evidence[0].line).toBe('uid=1001 token=[REDACTED]');
+    expect(result.evidence[0].labels).toEqual({
+      app: 'orders',
+      cluster: 'icoin',
+    });
+    expect(result.evidence[0].line).toBe('uid=1001 token=secret-value');
     expect(result.execution).toEqual({
       requested: 'mcp',
       used: 'mcp',
