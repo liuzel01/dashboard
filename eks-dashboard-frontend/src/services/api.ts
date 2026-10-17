@@ -383,6 +383,25 @@ export const getAiOpsLogInvestigationJobs = async (page = 1, pageSize = 20) => {
   return response.data;
 };
 
+export const correlateAiOpsLogInvestigations = async (jobIds: number[]) => {
+  const response = await api.post('/ai-ops/logs/investigations/correlate', {
+    jobIds,
+  });
+  return response.data;
+};
+
+export const getAiOpsLogInvestigationReports = async (page = 1, pageSize = 20) => {
+  const response = await api.get('/ai-ops/logs/investigation-reports', {
+    params: { page, pageSize },
+  });
+  return response.data;
+};
+
+export const getAiOpsLogInvestigationReport = async (reportId: number) => {
+  const response = await api.get(`/ai-ops/logs/investigation-reports/${reportId}`);
+  return response.data;
+};
+
 export type AiOpsInvestigationStatus = 'PENDING' | 'COLLECTING' | 'ANALYZING' | 'COMPLETED' | 'INSUFFICIENT_EVIDENCE' | 'FAILED';
 export type AiOpsInvestigation = {
   id: number;
