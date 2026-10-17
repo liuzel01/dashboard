@@ -56,10 +56,17 @@ const createService = (overrides: Record<string, string> = {}) => {
     ),
   };
   const db = { query: jest.fn(async () => ({ affectedRows: 1 })) };
+  const mcp = {
+    enabled: jest.fn(async () => false),
+    fallbackEnabled: jest.fn(async () => true),
+    callTool: jest.fn(),
+    textPayload: jest.fn(),
+  };
   return {
-    service: new AiOpsLogService(siteConf as any, db as any),
+    service: new AiOpsLogService(siteConf as any, db as any, mcp as any),
     siteConf,
     db,
+    mcp,
   };
 };
 
@@ -170,6 +177,47 @@ describe('AiOpsLogService', () => {
         }),
       }),
     );
+  });
+
+  it('uses the MCP executor and allows an investigation clue without namespace', async () => {
+    const { service, mcp } = createService();
+    mcp.enabled.mockResolvedValue(true);
+    mcp.callTool.mockResolvedValue({
+      content: [{ type: 'text', text: 'payload' }],
+      isError: false,
+    });
+    mcp.textPayload.mockReturnValue([
+      JSON.stringify({
+        data: [
+          {
+            timestamp: '2026-10-17T03:00:00Z',
+            line: 'uid=1001 token=secret-value',
+            labels: { cluster: 'icoin', app: 'orders' },
+          },
+        ],
+      }),
+    ]);
+
+    const result = await service.search('icoin', actor, {
+      projectId: 'icoin',
+      sourceId: 'icoin-loki-main',
+      queryText: '1001',
+      from: '2026-10-17T02:55:00.000Z',
+      to: '2026-10-17T03:00:00.000Z',
+      limit: 20,
+    });
+
+    expect(mcp.callTool).toHaveBeenCalledWith(
+      'icoin',
+      'query_loki_logs',
+      expect.objectContaining({
+        logql: '{cluster=~".+"} |= "1001"',
+        limit: 20,
+      }),
+    );
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+    expect(result.evidence[0].labels).toEqual({ app: 'orders' });
+    expect(result.evidence[0].line).toBe('uid=1001 token=[REDACTED]');
   });
 
   it('allows a service-only bounded query and rejects a namespace-only scan', async () => {

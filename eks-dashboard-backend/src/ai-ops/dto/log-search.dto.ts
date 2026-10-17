@@ -25,10 +25,11 @@ export class LogSearchDto {
   @MaxLength(128)
   sourceId!: string;
 
+  @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(128)
-  namespace!: string;
+  namespace?: string;
 
   @IsOptional()
   @Transform(trim)

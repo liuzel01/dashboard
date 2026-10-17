@@ -14,6 +14,7 @@ import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 import { KubernetesModule } from '../kubernetes/kubernetes.module';
 import { OncallModule } from '../oncall/oncall.module';
 import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
+import { AiOpsGrafanaMcpService } from './ai-ops-grafana-mcp.service';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
     AiOpsPrometheusEvidenceService,
     AiOpsContextEvidenceService,
     AiOpsGroupCallbackService,
+    AiOpsGrafanaMcpService,
   ],
 })
 export class AiOpsModule {}

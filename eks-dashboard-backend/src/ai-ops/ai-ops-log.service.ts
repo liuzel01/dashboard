@@ -11,6 +11,7 @@ import { createHash } from 'crypto';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import { LogSearchDto } from './dto/log-search.dto';
+import { AiOpsGrafanaMcpService } from './ai-ops-grafana-mcp.service';
 
 type ActorContext = {
   userId: number | null;
@@ -53,13 +54,14 @@ export class AiOpsLogService {
   constructor(
     private readonly siteConf: SiteConfService,
     private readonly platformDb: PlatformDatabaseService,
+    private readonly mcp: AiOpsGrafanaMcpService,
   ) {}
 
   async listSources(environmentId: string, actor: ActorContext) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const source = await this.getSource(environmentId);
     if (!source.enabled) return { environmentId, items: [] };
-    this.ensureConfigured(source);
+    this.ensureConfigured(source, !(await this.mcp.enabled(environmentId)));
     return {
       environmentId,
       items: [
@@ -81,7 +83,7 @@ export class AiOpsLogService {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const startedAt = Date.now();
     const source = await this.getSource(environmentId);
-    this.ensureConfigured(source);
+    this.ensureConfigured(source, !(await this.mcp.enabled(environmentId)));
     if (!source.enabled)
       throw new ServiceUnavailableException(
         `环境 ${environmentId} 尚未启用日志调查`,
@@ -92,7 +94,11 @@ export class AiOpsLogService {
     ) {
       throw new BadRequestException('projectId/sourceId 不属于当前环境');
     }
-    if (!source.allowedNamespaces.includes(body.namespace)) {
+    if (
+      body.namespace &&
+      source.allowedNamespaces.length > 0 &&
+      !source.allowedNamespaces.includes(body.namespace)
+    ) {
       throw new BadRequestException(
         `namespace ${body.namespace} 不在当前环境允许范围内`,
       );
@@ -134,50 +140,68 @@ export class AiOpsLogService {
       );
     }
     const limit = Math.min(source.maxLines, body.limit || source.maxLines);
-    const selectorParts = [`namespace=${JSON.stringify(body.namespace)}`];
+    const selectorParts: string[] = [];
+    if (body.namespace)
+      selectorParts.push(`namespace=${JSON.stringify(body.namespace)}`);
     if (body.serviceName)
       selectorParts.push(`service_name=${JSON.stringify(body.serviceName)}`);
-    const query = `{${selectorParts.join(',')}}${queryText ? ` |= ${JSON.stringify(queryText)}` : ''}`;
+    const selector = selectorParts.length
+      ? selectorParts.join(',')
+      : 'cluster=~".+"';
+    const query = `{${selector}}${queryText ? ` |= ${JSON.stringify(queryText)}` : ''}`;
     const endpoint = `${source.baseUrl.replace(/\/+$/, '')}/api/datasources/proxy/uid/${encodeURIComponent(source.datasourceUid)}/loki/api/v1/query_range`;
 
     try {
-      const response = await axios.get(endpoint, {
-        headers: { Authorization: `Bearer ${source.token}` },
-        params: {
+      let evidence: AlertLogSearchResult['evidence'];
+      if (await this.mcp.enabled(environmentId)) {
+        try {
+          evidence = await this.searchViaMcp(
+            environmentId,
+            source,
+            query,
+            from,
+            to,
+            limit,
+          );
+        } catch (error) {
+          if (!(await this.mcp.fallbackEnabled(environmentId))) throw error;
+          this.logger.warn(
+            `Grafana MCP failed for ${environmentId}; falling back to direct executor: ${this.errorMessage(error)}`,
+          );
+          evidence = await this.searchDirect(
+            environmentId,
+            source,
+            endpoint,
+            query,
+            from,
+            to,
+            limit,
+          );
+        }
+      } else {
+        evidence = await this.searchDirect(
+          environmentId,
+          source,
+          endpoint,
           query,
-          start: String(BigInt(from.getTime()) * 1_000_000n),
-          end: String(BigInt(to.getTime()) * 1_000_000n),
+          from,
+          to,
           limit,
-          direction: 'backward',
-        },
-        timeout: source.timeoutMs,
-      });
-      const streams = Array.isArray(response.data?.data?.result)
-        ? response.data.data.result
-        : [];
-      const evidence = streams
-        .flatMap((stream: any) =>
-          (Array.isArray(stream?.values) ? stream.values : []).map(
-            (value: any) => ({ labels: stream.stream || {}, value }),
-          ),
-        )
-        .filter(
-          (entry: any) => Array.isArray(entry.value) && entry.value.length >= 2,
-        )
-        .map((entry: any) => {
-          const timestampNs = String(entry.value[0]);
-          const line = this.redact(String(entry.value[1]));
+        );
+      }
+
+      evidence = evidence
+        .map((entry) => {
+          const line = this.redact(String(entry.line));
           return {
             evidenceId: createHash('sha256')
               .update(
-                `${environmentId}|${source.sourceId}|${timestampNs}|${line}`,
+                `${environmentId}|${source.sourceId}|${entry.timestamp}|${line}`,
               )
               .digest('hex')
               .slice(0, 20),
-            timestamp: new Date(
-              Number(BigInt(timestampNs) / 1_000_000n),
-            ).toISOString(),
-            labels: this.safeLabels(entry.labels),
+            timestamp: entry.timestamp,
+            labels: this.safeLabels(entry.labels || {}),
             line,
           };
         })
@@ -316,13 +340,12 @@ export class AiOpsLogService {
     };
   }
 
-  private ensureConfigured(source: LogSourceConfig) {
+  private ensureConfigured(source: LogSourceConfig, requireDirectToken = true) {
     if (
       !source.baseUrl ||
-      !source.token ||
+      (requireDirectToken && !source.token) ||
       !source.datasourceUid ||
-      !source.serviceAccount ||
-      source.allowedNamespaces.length === 0
+      !source.serviceAccount
     ) {
       throw new ServiceUnavailableException(
         `环境 ${source.environmentId} 的 Grafana 日志源尚未完整配置`,
@@ -410,6 +433,87 @@ export class AiOpsLogService {
     return `${source.baseUrl.replace(/\/+$/, '')}/explore?schemaVersion=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
   }
 
+  private async searchViaMcp(
+    environmentId: string,
+    source: LogSourceConfig,
+    query: string,
+    from: Date,
+    to: Date,
+    limit: number,
+  ): Promise<AlertLogSearchResult['evidence']> {
+    const result = await this.mcp.callTool(environmentId, 'query_loki_logs', {
+      datasourceUid: source.datasourceUid,
+      logql: query,
+      startRfc3339: from.toISOString(),
+      endRfc3339: to.toISOString(),
+      direction: 'backward',
+      format: 'full',
+      limit,
+    });
+    const rows = this.mcp
+      .textPayload(result)
+      .flatMap((text) => {
+        try {
+          const parsed = JSON.parse(text);
+          return Array.isArray(parsed?.data) ? parsed.data : [];
+        } catch {
+          return [];
+        }
+      })
+      .slice(0, limit);
+    return rows.map((row: any) => ({
+      evidenceId: '',
+      timestamp: new Date(String(row?.timestamp || '')).toISOString(),
+      labels: row?.labels || {},
+      line: String(row?.line || ''),
+    }));
+  }
+
+  private async searchDirect(
+    environmentId: string,
+    source: LogSourceConfig,
+    endpoint: string,
+    query: string,
+    from: Date,
+    to: Date,
+    limit: number,
+  ): Promise<AlertLogSearchResult['evidence']> {
+    const response = await axios.get(endpoint, {
+      headers: { Authorization: `Bearer ${source.token}` },
+      params: {
+        query,
+        start: String(BigInt(from.getTime()) * 1_000_000n),
+        end: String(BigInt(to.getTime()) * 1_000_000n),
+        limit,
+        direction: 'backward',
+      },
+      timeout: source.timeoutMs,
+    });
+    const streams = Array.isArray(response.data?.data?.result)
+      ? response.data.data.result
+      : [];
+    return streams
+      .flatMap((stream: any) =>
+        (Array.isArray(stream?.values) ? stream.values : []).map(
+          (value: any) => ({ labels: stream.stream || {}, value }),
+        ),
+      )
+      .filter(
+        (entry: any) => Array.isArray(entry.value) && entry.value.length >= 2,
+      )
+      .map((entry: any) => {
+        const timestampNs = String(entry.value[0]);
+        return {
+          evidenceId: '',
+          timestamp: new Date(
+            Number(BigInt(timestampNs) / 1_000_000n),
+          ).toISOString(),
+          labels: entry.labels || {},
+          line: String(entry.value[1]),
+        };
+      });
+  }
+
   private async insertAudit(input: {
     environmentId: string;
     actor: ActorContext;
@@ -444,7 +548,7 @@ export class AiOpsLogService {
               ),
             )
             .digest('hex'),
-          input.body.namespace,
+          input.body.namespace || '',
           input.body.serviceName || null,
           createHash('sha256').update(input.query).digest('hex'),
           input.from,
