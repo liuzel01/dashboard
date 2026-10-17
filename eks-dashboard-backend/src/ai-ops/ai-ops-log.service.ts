@@ -561,10 +561,28 @@ export class AiOpsLogService {
       .slice(0, limit);
     return rows.map((row: any) => ({
       evidenceId: '',
-      timestamp: new Date(String(row?.timestamp || '')).toISOString(),
+      timestamp: this.normalizeLogTimestamp(row?.timestamp),
       labels: row?.labels || {},
       line: String(row?.line || ''),
     }));
+  }
+
+  private normalizeLogTimestamp(value: unknown) {
+    const raw = String(value ?? '').trim();
+    if (/^\d+$/.test(raw)) {
+      const numeric = BigInt(raw);
+      const milliseconds =
+        raw.length > 13
+          ? numeric / 1_000_000n
+          : raw.length <= 10
+            ? numeric * 1_000n
+            : numeric;
+      const date = new Date(Number(milliseconds));
+      if (!Number.isNaN(date.getTime())) return date.toISOString();
+    }
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+    throw new Error(`Grafana MCP 返回了无效的日志时间戳：${raw.slice(0, 64) || '-'}`);
   }
 
   private async searchDirect(

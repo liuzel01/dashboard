@@ -231,6 +231,34 @@ describe('AiOpsLogService', () => {
     });
   });
 
+  it('normalizes the nanosecond timestamps returned by Grafana MCP', async () => {
+    const { service, mcp } = createService();
+    mcp.enabled.mockResolvedValue(true);
+    mcp.callTool.mockResolvedValue({ content: [], isError: false });
+    mcp.textPayload.mockReturnValue([
+      JSON.stringify({
+        data: [
+          {
+            timestamp: '1792210412553264537',
+            line: 'error',
+            labels: { cluster: 'icoin' },
+          },
+        ],
+      }),
+    ]);
+
+    const result = await service.search('icoin', actor, {
+      projectId: 'icoin',
+      sourceId: 'icoin-loki-main',
+      queryText: 'error',
+      from: '2026-10-17T02:55:00.000Z',
+      to: '2026-10-17T03:00:00.000Z',
+      limit: 20,
+    });
+
+    expect(result.evidence[0].timestamp).toBe('2026-10-17T04:13:32.553Z');
+  });
+
   it('discovers bounded Loki labels and values through MCP', async () => {
     const { service, mcp } = createService();
     mcp.enabled.mockResolvedValue(true);
