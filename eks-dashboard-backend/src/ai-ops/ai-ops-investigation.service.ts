@@ -161,6 +161,7 @@ export class AiOpsInvestigationService {
     let model = '';
     let plan: InvestigationPlan | null = null;
     try {
+      const requestedWindow = this.resolveRequestedWindow(body);
       const sourceResponse = await this.logs.listSources(environmentId, actor);
       const source = sourceResponse.items.find(
         (item) =>
@@ -182,7 +183,16 @@ export class AiOpsInvestigationService {
             namespace: body.namespace?.trim() || null,
             serviceName: body.serviceName?.trim() || null,
             queryText: body.queryText?.trim() || null,
-            rangeMinutes: body.rangeMinutes || null,
+            rangeMinutes: requestedWindow.rangeMinutes,
+            timeMode: requestedWindow.mode,
+            from:
+              requestedWindow.mode === 'absolute'
+                ? requestedWindow.from.toISOString()
+                : null,
+            to:
+              requestedWindow.mode === 'absolute'
+                ? requestedWindow.to.toISOString()
+                : null,
             limit: body.limit || null,
           },
           allowedNamespaces: source.allowedNamespaces,
@@ -194,15 +204,17 @@ export class AiOpsInvestigationService {
       model = planning.model;
       const validatedPlan = this.validatePlan(
         this.parseJson(planning.text, '调查计划'),
-        body,
+        { ...body, rangeMinutes: requestedWindow.rangeMinutes },
         source,
       );
       plan = validatedPlan;
 
-      const to = new Date();
-      const from = new Date(
-        to.getTime() - validatedPlan.rangeMinutes * 60 * 1000,
-      );
+      const to =
+        requestedWindow.mode === 'absolute' ? requestedWindow.to : new Date();
+      const from =
+        requestedWindow.mode === 'absolute'
+          ? requestedWindow.from
+          : new Date(to.getTime() - validatedPlan.rangeMinutes * 60 * 1000);
       const queryTexts =
         validatedPlan.queryTexts.length > 0
           ? validatedPlan.queryTexts
@@ -265,6 +277,11 @@ export class AiOpsInvestigationService {
         planVersion: this.planVersion,
         model,
         plan: validatedPlan,
+        range: {
+          mode: requestedWindow.mode,
+          from: from.toISOString(),
+          to: to.toISOString(),
+        },
         answer,
         evidence,
         exploreUrls: [...new Set(exploreUrls)],
@@ -298,6 +315,45 @@ export class AiOpsInvestigationService {
       'Without a serviceName, rangeMinutes must not exceed 15. Always stay within supplied maxima.',
       'At least serviceName or one queryTexts entry is required.',
     ].join('\n');
+  }
+
+  private resolveRequestedWindow(body: LogInvestigationDto) {
+    const mode =
+      body.timeMode || (body.from || body.to ? 'absolute' : 'relative');
+    if (mode === 'absolute') {
+      if (!body.from || !body.to) {
+        throw new BadRequestException('绝对时间模式必须同时提供开始和结束时间');
+      }
+      const from = new Date(body.from);
+      const to = new Date(body.to);
+      if (
+        !Number.isFinite(from.getTime()) ||
+        !Number.isFinite(to.getTime()) ||
+        from >= to
+      ) {
+        throw new BadRequestException('日志调查绝对时间范围无效');
+      }
+      return {
+        mode,
+        from,
+        to,
+        rangeMinutes: Math.max(
+          1,
+          Math.ceil((to.getTime() - from.getTime()) / 60000),
+        ),
+      } as const;
+    }
+    if (body.from || body.to) {
+      throw new BadRequestException('相对时间模式不能提供绝对开始或结束时间');
+    }
+    const to = new Date();
+    const rangeMinutes = body.rangeMinutes || 15;
+    return {
+      mode,
+      from: new Date(to.getTime() - rangeMinutes * 60000),
+      to,
+      rangeMinutes,
+    } as const;
   }
 
   private validatePlan(

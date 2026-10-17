@@ -144,4 +144,55 @@ describe('AiOpsInvestigationService', () => {
     expect(result.answer.insufficientEvidence).toBe(true);
     expect(result.answer.evidenceIds).toEqual([]);
   });
+
+  it('preserves an explicit absolute investigation window', async () => {
+    const { service, aiOps, logs } = createService();
+    aiOps.completeLogInvestigationJson
+      .mockReset()
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          intent: '调查历史连接失败',
+          namespace: 'default',
+          serviceName: 'orders',
+          queryTexts: ['connection refused'],
+          rangeMinutes: 60,
+          limit: 20,
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          summary: '发现历史连接失败。',
+          findings: [{ text: '连接失败。', evidenceIds: ['ev-1'] }],
+          evidenceIds: ['ev-1'],
+          confidence: 'medium',
+          insufficientEvidence: false,
+        }),
+      });
+
+    const result = await service.investigate('mgbx', actor, {
+      ...request,
+      timeMode: 'absolute',
+      from: '2026-10-12T00:00:00.000Z',
+      to: '2026-10-12T01:00:00.000Z',
+      rangeMinutes: undefined,
+    });
+
+    expect(logs.search).toHaveBeenCalledWith(
+      'mgbx',
+      actor,
+      expect.objectContaining({
+        from: '2026-10-12T00:00:00.000Z',
+        to: '2026-10-12T01:00:00.000Z',
+      }),
+    );
+    expect(result.range).toEqual({
+      mode: 'absolute',
+      from: '2026-10-12T00:00:00.000Z',
+      to: '2026-10-12T01:00:00.000Z',
+    });
+  });
 });

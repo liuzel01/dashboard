@@ -361,6 +361,9 @@ export const investigateAiOpsLogs = async (data: {
   question: string;
   serviceName?: string;
   queryText?: string;
+  timeMode?: 'relative' | 'absolute';
+  from?: string;
+  to?: string;
   rangeMinutes?: number;
   limit?: number;
 }) => {

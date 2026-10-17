@@ -1,6 +1,8 @@
 import { Type } from 'class-transformer';
 import {
   IsInt,
+  IsISO8601,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -39,6 +41,18 @@ export class LogInvestigationDto {
   @IsString()
   @MaxLength(500)
   queryText?: string;
+
+  @IsOptional()
+  @IsIn(['relative', 'absolute'])
+  timeMode?: 'relative' | 'absolute';
+
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
 
   @IsOptional()
   @Type(() => Number)

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, App } from 'antd';
+import { Alert, Button, Card, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Table, Tag, Typography, App } from 'antd';
 import {
   getAiOpsLogSources,
   getAiOpsLogInvestigationJob,
@@ -89,6 +89,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
   const [form] = Form.useForm();
   const [investigationForm] = Form.useForm();
   const selectedInvestigationSourceId = Form.useWatch('sourceId', investigationForm);
+  const investigationTimeMode = Form.useWatch('timeMode', investigationForm) || 'relative';
 
   const loadLogSources = async () => {
     setLogSourceLoading(true);
@@ -130,7 +131,10 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
         question: values.question.trim(),
         serviceName: values.serviceName?.trim() || undefined,
         queryText: values.queryText?.trim() || undefined,
-        rangeMinutes: values.rangeMinutes,
+        timeMode: values.timeMode || 'relative',
+        rangeMinutes: values.timeMode === 'absolute' ? undefined : values.rangeMinutes,
+        from: values.timeMode === 'absolute' ? values.absoluteRange?.[0]?.toISOString() : undefined,
+        to: values.timeMode === 'absolute' ? values.absoluteRange?.[1]?.toISOString() : undefined,
         limit: values.limit,
       });
       const jobId = Number(response?.jobId);
@@ -232,14 +236,27 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
             <Form.Item label="必须包含的日志线索（可选）" name="queryText">
               <Input style={{ width: 340 }} placeholder="错误文本、错误码、UID、traceId 等" />
             </Form.Item>
-            <Form.Item
-              label="调查范围（分钟）"
-              name="rangeMinutes"
-              initialValue={15}
-              tooltip="未指定服务时后端最多允许 15 分钟；指定服务后可在日志源上限内扩大。"
-            >
-              <InputNumber min={1} max={1440} />
+            <Form.Item label="时间模式" name="timeMode" initialValue="relative">
+              <Radio.Group optionType="button" buttonStyle="solid" options={[{ label: '相对时间', value: 'relative' }, { label: '绝对时间', value: 'absolute' }]} />
             </Form.Item>
+            {investigationTimeMode === 'relative' ? (
+              <Form.Item
+                label="调查范围（分钟）"
+                name="rangeMinutes"
+                initialValue={15}
+                tooltip="未指定服务时后端最多允许 15 分钟；指定服务后可在日志源上限内扩大。"
+              >
+                <InputNumber min={1} max={1440} />
+              </Form.Item>
+            ) : (
+              <Form.Item
+                label="绝对时间范围"
+                name="absoluteRange"
+                rules={[{ required: true, message: '请选择开始和结束时间' }]}
+              >
+                <DatePicker.RangePicker showTime allowClear={false} format="YYYY-MM-DD HH:mm:ss" />
+              </Form.Item>
+            )}
             <Form.Item label="最多证据" name="limit" initialValue={100}>
               <InputNumber min={1} max={200} />
             </Form.Item>
