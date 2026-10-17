@@ -390,6 +390,21 @@ export const correlateAiOpsLogInvestigations = async (jobIds: number[]) => {
   return response.data;
 };
 
+export const createAiOpsLogInvestigationCase = async (jobIds: number[]) => {
+  const response = await api.post('/ai-ops/logs/investigation-cases', { jobIds });
+  return response.data;
+};
+
+export const getAiOpsLogInvestigationCases = async (page = 1, pageSize = 20) => {
+  const response = await api.get('/ai-ops/logs/investigation-cases', { params: { page, pageSize } });
+  return response.data;
+};
+
+export const getAiOpsLogInvestigationCase = async (caseId: number) => {
+  const response = await api.get(`/ai-ops/logs/investigation-cases/${caseId}`);
+  return response.data;
+};
+
 export const getAiOpsLogInvestigationReports = async (page = 1, pageSize = 20) => {
   const response = await api.get('/ai-ops/logs/investigation-reports', {
     params: { page, pageSize },

@@ -10,6 +10,9 @@ import {
   getAiOpsLogInvestigationReport,
   getAiOpsLogInvestigationReports,
   correlateAiOpsLogInvestigations,
+  createAiOpsLogInvestigationCase,
+  getAiOpsLogInvestigationCase,
+  getAiOpsLogInvestigationCases,
   getAiOpsSqlAudit,
   investigateAiOpsLogs,
   previewAiOpsSql,
@@ -187,6 +190,19 @@ type InvestigationReportSummary = {
   createdAt: string;
 };
 
+type InvestigationCase = {
+  caseId: number;
+  actorUsername: string;
+  seedJobIds: number[];
+  childJobIds: number[];
+  status: 'CREATING' | 'WAITING' | 'REPORTING' | 'COMPLETED' | 'FAILED';
+  finalReportId?: number | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+
 const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
   const { message } = App.useApp();
   const { currentEnvironment } = useContext(EnvironmentContext);
@@ -205,6 +221,10 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
   const [correlationResult, setCorrelationResult] = useState<InvestigationCorrelation | null>(null);
   const [investigationReports, setInvestigationReports] = useState<InvestigationReportSummary[]>([]);
   const [investigationReportsLoading, setInvestigationReportsLoading] = useState(false);
+  const [investigationCases, setInvestigationCases] = useState<InvestigationCase[]>([]);
+  const [investigationCasesLoading, setInvestigationCasesLoading] = useState(false);
+  const [investigationCaseActionLoading, setInvestigationCaseActionLoading] = useState(false);
+  const [trackingInvestigationCaseId, setTrackingInvestigationCaseId] = useState<number | null>(null);
 
   const [form] = Form.useForm();
   const [investigationForm] = Form.useForm();
@@ -236,6 +256,19 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
       message.error(err.response?.data?.message || err.message || '联合调查报告加载失败');
     } finally {
       setInvestigationReportsLoading(false);
+    }
+  };
+
+  const loadInvestigationCases = async () => {
+    setInvestigationCasesLoading(true);
+    try {
+      const response = await getAiOpsLogInvestigationCases(1, 20);
+      setInvestigationCases(Array.isArray(response?.items) ? response.items : []);
+    } catch (error) {
+      const err = error as ApiError;
+      message.error(err.response?.data?.message || err.message || '深度调查 Case 加载失败');
+    } finally {
+      setInvestigationCasesLoading(false);
     }
   };
 
@@ -273,6 +306,69 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
     throw new Error(`日志调查任务 #${jobId} 仍在后台执行，可稍后从最近调查中继续查看`);
   };
 
+  const waitForInvestigationCase = async (caseId: number) => {
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const investigationCase = await getAiOpsLogInvestigationCase(caseId);
+      setInvestigationCases((items) => [investigationCase, ...items.filter((item) => item.caseId !== caseId)]);
+      if (investigationCase?.status === 'COMPLETED') {
+        if (investigationCase.finalReportId) {
+          setCorrelationResult(await getAiOpsLogInvestigationReport(investigationCase.finalReportId));
+        }
+        await Promise.all([loadInvestigationCases(), loadInvestigationJobs(), loadInvestigationReports()]);
+        message.success(`深度调查 Case #${caseId} 已生成最终报告`);
+        return;
+      }
+      if (investigationCase?.status === 'FAILED') {
+        await loadInvestigationCases();
+        throw new Error(investigationCase.errorMessage || '深度调查执行失败');
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    }
+    throw new Error(`深度调查 Case #${caseId} 仍在后台执行，可稍后继续查看`);
+  };
+
+  const onCreateInvestigationCase = async () => {
+    if (selectedInvestigationJobIds.length < 2) {
+      message.warning('请至少选择两个已完成的调查任务');
+      return;
+    }
+    setInvestigationCaseActionLoading(true);
+    try {
+      const result = await createAiOpsLogInvestigationCase(selectedInvestigationJobIds);
+      const caseId = Number(result?.caseId);
+      if (!Number.isInteger(caseId) || caseId < 1) throw new Error('后端未返回有效的深度调查 Case ID');
+      message.info(`深度调查 Case #${caseId} 已创建，正在执行 ${result.childJobIds?.length || 0} 个补查任务`);
+      await loadInvestigationCases();
+      setTrackingInvestigationCaseId(caseId);
+      await waitForInvestigationCase(caseId);
+    } catch (error) {
+      const err = error as ApiError;
+      message.error(err.response?.data?.message || err.message || '深度调查创建失败');
+    } finally {
+      setTrackingInvestigationCaseId(null);
+      setInvestigationCaseActionLoading(false);
+    }
+  };
+
+  const onOpenInvestigationCase = async (item: InvestigationCase) => {
+    setTrackingInvestigationCaseId(item.caseId);
+    try {
+      if (item.status === 'COMPLETED' && item.finalReportId) {
+        setCorrelationResult(await getAiOpsLogInvestigationReport(item.finalReportId));
+      } else if (item.status === 'FAILED') {
+        message.error(item.errorMessage || '深度调查执行失败');
+      } else {
+        await waitForInvestigationCase(item.caseId);
+      }
+    } catch (error) {
+      const err = error as ApiError;
+      message.error(err.response?.data?.message || err.message || '深度调查读取失败');
+    } finally {
+      setTrackingInvestigationCaseId(null);
+    }
+  };
+
   const onOpenInvestigationJob = async (job: InvestigationJob) => {
     setTrackingInvestigationJobId(job.jobId);
     try {
@@ -294,6 +390,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
     if (mode !== 'logs' || !currentEnvironment?.id) return;
     void loadInvestigationJobs();
     void loadInvestigationReports();
+    void loadInvestigationCases();
     const activeJobId = Number(window.localStorage.getItem(activeJobStorageKey));
     if (Number.isInteger(activeJobId) && activeJobId > 0) {
       setInvestigationLoading(true);
@@ -519,6 +616,9 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                 <Button disabled={selectedInvestigationJobIds.length < 2} loading={correlationLoading} onClick={onCorrelateInvestigations}>
                   关联分析已选任务
                 </Button>
+                <Button type="primary" disabled={selectedInvestigationJobIds.length < 2} loading={investigationCaseActionLoading} onClick={onCreateInvestigationCase}>
+                  深度调查已选任务
+                </Button>
                 <Button onClick={loadInvestigationJobs} loading={investigationJobsLoading}>
                   刷新
                 </Button>
@@ -571,6 +671,35 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                 },
               ]}
               scroll={{ x: 900 }}
+            />
+          </Card>
+
+          <Card title="深度调查 Case" extra={<Button onClick={loadInvestigationCases} loading={investigationCasesLoading}>刷新</Button>}>
+            <Table
+              size="small"
+              rowKey="caseId"
+              loading={investigationCasesLoading && trackingInvestigationCaseId === null}
+              dataSource={investigationCases}
+              pagination={{ pageSize: 10, showSizeChanger: false }}
+              columns={[
+                { title: 'Case', dataIndex: 'caseId', width: 90, render: (value: number) => `#${value}` },
+                { title: '起始任务', dataIndex: 'seedJobIds', width: 220, render: (values: number[]) => values.map((id) => `#${id}`).join('、') },
+                { title: '补查任务', dataIndex: 'childJobIds', ellipsis: true, render: (values: number[]) => values.length ? values.map((id) => `#${id}`).join('、') : '-' },
+                { title: '状态', dataIndex: 'status', width: 120, render: (value: string) => <Tag color={value === 'COMPLETED' ? 'green' : value === 'FAILED' ? 'red' : 'blue'}>{value}</Tag> },
+                { title: '最终报告', dataIndex: 'finalReportId', width: 110, render: (value?: number | null) => value ? `#${value}` : '-' },
+                { title: '创建时间', dataIndex: 'createdAt', width: 190 },
+                {
+                  title: '操作',
+                  width: 110,
+                  fixed: 'right',
+                  render: (_: unknown, row: InvestigationCase) => (
+                    <Button type="link" loading={trackingInvestigationCaseId === row.caseId} disabled={trackingInvestigationCaseId !== null && trackingInvestigationCaseId !== row.caseId} onClick={() => void onOpenInvestigationCase(row)}>
+                      {row.status === 'COMPLETED' ? '查看报告' : row.status === 'FAILED' ? '查看错误' : '继续追踪'}
+                    </Button>
+                  ),
+                },
+              ]}
+              scroll={{ x: 1050 }}
             />
           </Card>
 
