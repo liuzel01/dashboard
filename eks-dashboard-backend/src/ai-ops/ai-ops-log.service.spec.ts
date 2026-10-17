@@ -266,6 +266,7 @@ describe('AiOpsLogService', () => {
           'sum(count_over_time(({cluster="icoin"} |= "1001")[300s]))',
         queryType: 'instant',
       }),
+      60_000,
     );
     expect(result.statistics).toEqual({
       matchingLines: 42,

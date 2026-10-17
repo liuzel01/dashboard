@@ -58,6 +58,12 @@ export type AlertLogSearchResult = {
   };
 };
 
+export type LogCategoryStatistic = {
+  key: string;
+  label: string;
+  matchingLines: number | null;
+};
+
 @Injectable()
 export class AiOpsLogService {
   private readonly logger = new Logger(AiOpsLogService.name);
@@ -366,6 +372,54 @@ export class AiOpsLogService {
     }
   }
 
+  async classifyIngressActivity(
+    environmentId: string,
+    actor: ActorContext,
+    input: {
+      namespace: string;
+      serviceName: string;
+      fixedClue: string;
+      from: Date;
+      to: Date;
+    },
+  ): Promise<LogCategoryStatistic[]> {
+    this.ensurePermissions(actor, ['menu:ai-ops']);
+    if (!(await this.mcp.enabled(environmentId))) return [];
+    const source = await this.getSource(environmentId);
+    this.ensureConfigured(source, false);
+    const selector = `{namespace=${JSON.stringify(input.namespace)},service_name=${JSON.stringify(input.serviceName)}}`;
+    const categories = [
+      { key: 'auth', label: '登录与第三方登录', pattern: 'third/login|login' },
+      { key: 'identity', label: '身份认证 / KYC', pattern: 'identity|kyc' },
+      { key: 'withdraw', label: '提现', pattern: 'withdraw' },
+      { key: 'otc', label: 'OTC', pattern: 'otc' },
+      { key: 'security', label: '2FA 与安全设置', pattern: 'security|google|2fa|phone' },
+      { key: 'writeoff', label: '账号注销', pattern: 'writeOff|writeoff|write-off' },
+      { key: 'callback', label: '回调与通知探测', pattern: 'notify/deposit|callback' },
+      { key: 'probe', label: '异常路径探测', pattern: 'actuator|\\.git|nacos|druid|Nmap|HNAP1|security\\.txt' },
+    ];
+    const results: LogCategoryStatistic[] = [];
+    for (let index = 0; index < categories.length; index += 2) {
+      const batch = categories.slice(index, index + 2);
+      results.push(
+        ...(await Promise.all(
+          batch.map(async (category) => ({
+            key: category.key,
+            label: category.label,
+            matchingLines: await this.countViaMcp(
+              environmentId,
+              source,
+              `${selector} |= ${JSON.stringify(input.fixedClue)} |~ ${JSON.stringify(category.pattern)}`,
+              input.from,
+              input.to,
+            ),
+          })),
+        )),
+      );
+    }
+    return results;
+  }
+
   async searchAlertWindow(
     environmentId: string,
     input: {
@@ -643,6 +697,7 @@ export class AiOpsLogService {
           queryType: 'instant',
           endRfc3339: to.toISOString(),
         },
+        60_000,
       );
       for (const text of this.mcp.textPayload(result)) {
         try {

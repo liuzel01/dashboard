@@ -22,6 +22,7 @@ import { AiOpsInvestigationService } from './ai-ops-investigation.service';
 import { LogInvestigationDto } from './dto/log-investigation.dto';
 import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.service';
 import type { AlertmanagerPayload } from '../oncall/oncall.types';
+import { CorrelateLogInvestigationsDto } from './dto/correlate-log-investigations.dto';
 
 @Controller('ai-ops')
 export class AiOpsController {
@@ -183,6 +184,64 @@ export class AiOpsController {
       actor,
       Number(page || 1),
       Number(pageSize || 20),
+    );
+  }
+
+  @Post('logs/investigations/correlate')
+  async correlateLogInvestigations(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: CorrelateLogInvestigationsDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.correlate(
+      environmentId,
+      actor,
+      body.jobIds,
+    );
+  }
+
+  @Get('logs/investigation-reports')
+  async listLogInvestigationReports(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.listCorrelationReports(
+      environmentId,
+      actor,
+      Number(page || 1),
+      Number(pageSize || 20),
+    );
+  }
+
+  @Get('logs/investigation-reports/:id')
+  async getLogInvestigationReport(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1) {
+      throw new HttpException(
+        'Invalid joint investigation report id',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.getCorrelationReport(
+      environmentId,
+      actor,
+      numericId,
     );
   }
 

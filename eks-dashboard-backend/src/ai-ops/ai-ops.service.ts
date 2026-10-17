@@ -96,8 +96,11 @@ export class AiOpsService {
   private readonly fewshotCacheTtlMs = 2 * 60 * 1000;
   private readonly fewshotPromptMaxCases = 6;
   private readonly fewshotPromptMaxChars = 5000;
-  private fewshotCache: { expiresAt: number; sourcePath: string; rows: FewshotCaseRow[] } | null =
-    null;
+  private fewshotCache: {
+    expiresAt: number;
+    sourcePath: string;
+    rows: FewshotCaseRow[];
+  } | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -109,7 +112,9 @@ export class AiOpsService {
     private readonly siteConf: SiteConfService,
   ) {}
 
-  async resolveActorFromAuthorization(authorization?: string): Promise<ActorContext> {
+  async resolveActorFromAuthorization(
+    authorization?: string,
+  ): Promise<ActorContext> {
     const auth = String(authorization || '');
     if (!auth.toLowerCase().startsWith('bearer ')) {
       throw new UnauthorizedException('Missing token');
@@ -119,9 +124,12 @@ export class AiOpsService {
 
     let userId: number;
     if (payload.source === 'keycloak' || typeof payload.sub !== 'number') {
-      const user = await this.accessControl.ensureUserByUsername(payload.username, {
-        displayName: payload.displayName,
-      });
+      const user = await this.accessControl.ensureUserByUsername(
+        payload.username,
+        {
+          displayName: payload.displayName,
+        },
+      );
       userId = user.id;
     } else {
       userId = Number(payload.sub);
@@ -143,20 +151,35 @@ export class AiOpsService {
   ensurePermissions(actor: ActorContext, required: string[]) {
     const missing = required.filter((key) => !actor.permissions.includes(key));
     if (missing.length > 0) {
-      throw new ForbiddenException(`Missing permissions: ${missing.join(', ')}`);
+      throw new ForbiddenException(
+        `Missing permissions: ${missing.join(', ')}`,
+      );
     }
   }
 
-  async previewSql(environmentId: string, actor: ActorContext, body: SqlPreviewDto) {
+  async previewSql(
+    environmentId: string,
+    actor: ActorContext,
+    body: SqlPreviewDto,
+  ) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const actionStartedAt = Date.now();
     const policy = await this.getSqlPolicy(environmentId, body.maxRows);
-    const llmSessionKey = this.buildLlmSessionKey(environmentId, actor, body.sessionId);
+    const llmSessionKey = this.buildLlmSessionKey(
+      environmentId,
+      actor,
+      body.sessionId,
+    );
 
     let actionId: number | null = null;
     let prepared: PreparedSql | null = null;
     try {
-      prepared = await this.prepareSql(environmentId, body, policy, llmSessionKey);
+      prepared = await this.prepareSql(
+        environmentId,
+        body,
+        policy,
+        llmSessionKey,
+      );
       const sqlMeta = this.classifySql(prepared.normalizedSql);
 
       actionId = await this.safeInsertAction({
@@ -165,7 +188,11 @@ export class AiOpsService {
         sessionId: body.sessionId,
         actionType: 'sql.preview',
         status: 'ok',
-        requestPayload: { question: body.question, sql: body.sql, maxRows: body.maxRows },
+        requestPayload: {
+          question: body.question,
+          sql: body.sql,
+          maxRows: body.maxRows,
+        },
         responsePayload: {
           normalizedSql: prepared.normalizedSql,
           executedSql: prepared.executedSql,
@@ -200,7 +227,8 @@ export class AiOpsService {
         riskLevel: sqlMeta.riskLevel,
       };
     } catch (error) {
-      const fallbackSql = prepared?.normalizedSql || String(body.sql || '').trim();
+      const fallbackSql =
+        prepared?.normalizedSql || String(body.sql || '').trim();
       const sqlMeta = this.classifySql(fallbackSql);
       await this.safeInsertAction({
         environmentId,
@@ -208,7 +236,11 @@ export class AiOpsService {
         sessionId: body.sessionId,
         actionType: 'sql.preview',
         status: 'error',
-        requestPayload: { question: body.question, sql: body.sql, maxRows: body.maxRows },
+        requestPayload: {
+          question: body.question,
+          sql: body.sql,
+          maxRows: body.maxRows,
+        },
         responsePayload: prepared
           ? {
               normalizedSql: prepared.normalizedSql,
@@ -238,7 +270,11 @@ export class AiOpsService {
     }
   }
 
-  async executeSql(environmentId: string, actor: ActorContext, body: SqlExecuteDto) {
+  async executeSql(
+    environmentId: string,
+    actor: ActorContext,
+    body: SqlExecuteDto,
+  ) {
     void environmentId;
     void actor;
     void body;
@@ -247,7 +283,12 @@ export class AiOpsService {
     );
   }
 
-  async listSqlAudit(environmentId: string, actor: ActorContext, page = 1, size = 20) {
+  async listSqlAudit(
+    environmentId: string,
+    actor: ActorContext,
+    page = 1,
+    size = 20,
+  ) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const safePage = Math.max(1, Math.floor(page));
     const safeSize = Math.min(100, Math.max(1, Math.floor(size)));
@@ -278,7 +319,11 @@ export class AiOpsService {
 
   private isAdminActor(actor: ActorContext): boolean {
     const roleNames = (actor.roles || [])
-      .map((role: any) => String(role?.name || role || '').trim().toLowerCase())
+      .map((role: any) =>
+        String(role?.name || role || '')
+          .trim()
+          .toLowerCase(),
+      )
       .filter(Boolean);
     return roleNames.includes('admin') || roleNames.includes('管理员');
   }
@@ -355,7 +400,9 @@ export class AiOpsService {
         models,
       };
     } catch (error) {
-      throw new BadGatewayException(`cliproxy model list failed: ${this.errorMessage(error)}`);
+      throw new BadGatewayException(
+        `cliproxy model list failed: ${this.errorMessage(error)}`,
+      );
     }
   }
 
@@ -365,7 +412,9 @@ export class AiOpsService {
     if (!model) throw new BadRequestException('model is required');
     const catalog = await this.listLlmModels(actor);
     if (!catalog.models.includes(model)) {
-      throw new BadRequestException(`模型 ${model} 不在当前 cliproxy 可用模型列表中`);
+      throw new BadRequestException(
+        `模型 ${model} 不在当前 cliproxy 可用模型列表中`,
+      );
     }
     await this.siteConf.upsertControlled({
       confKey: 'aiops.cliproxy.model',
@@ -387,12 +436,23 @@ export class AiOpsService {
       userPrompt: string;
       sessionId: string;
       maxTokens?: number;
+      timeoutMs?: number;
     },
   ) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const llm = await this.getCliproxyConfig();
     const endpoint = `${llm.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-    const timeoutMs = await this.getCliproxyRequestTimeoutMs();
+    // Log investigations run asynchronously and may include evidence synthesis.
+    // Give them a larger floor than interactive NL2SQL requests without changing
+    // the shared SiteConf timeout contract for other AI Ops features.
+    const timeoutMs = Math.min(
+      180_000,
+      Math.max(
+        60_000,
+        input.timeoutMs || 0,
+        await this.getCliproxyRequestTimeoutMs(),
+      ),
+    );
     try {
       const response = await axios.post(
         endpoint,
@@ -416,7 +476,8 @@ export class AiOpsService {
         },
       );
       const text = this.extractCliproxyText(response.data);
-      if (!text) throw new BadGatewayException('cliproxy returned an empty response');
+      if (!text)
+        throw new BadGatewayException('cliproxy returned an empty response');
       return { provider: llm.provider, model: llm.model, text };
     } catch (error) {
       if (error instanceof BadGatewayException) throw error;
@@ -434,7 +495,8 @@ export class AiOpsService {
     await this.ensureIngestToken(tokenHeader);
 
     const environmentId =
-      (environmentIdHeader || '').trim() || this.inferEnvironmentIdFromCloudWatch(payload);
+      (environmentIdHeader || '').trim() ||
+      this.inferEnvironmentIdFromCloudWatch(payload);
     if (!environmentId) {
       throw new BadRequestException(
         'Unable to infer environmentId. Provide X-Target-Environment header.',
@@ -444,12 +506,18 @@ export class AiOpsService {
     const alarmArn = String(payload.AlarmArn || '').trim();
     const stateChangeTime = String(payload.StateChangeTime || '').trim();
     const newStateValue = String(payload.NewStateValue || '').trim();
-    const dedupeKey = alarmArn && stateChangeTime
-      ? `${alarmArn}::${stateChangeTime}::${newStateValue}`
-      : this.hashPayload(payload);
+    const dedupeKey =
+      alarmArn && stateChangeTime
+        ? `${alarmArn}::${stateChangeTime}::${newStateValue}`
+        : this.hashPayload(payload);
 
     const resourceId = this.extractCloudWatchResourceId(payload);
-    const severity = newStateValue === 'ALARM' ? 'high' : newStateValue === 'OK' ? 'info' : 'medium';
+    const severity =
+      newStateValue === 'ALARM'
+        ? 'high'
+        : newStateValue === 'OK'
+          ? 'info'
+          : 'medium';
     const occurredAt = this.parseDateTime(stateChangeTime);
 
     const inserted = await this.insertIngestEvent({
@@ -492,7 +560,8 @@ export class AiOpsService {
     const normalized = this.normalizeSlowQueryPayload(payload);
     const fingerprint = normalized.fingerprint;
     const occurredAtRaw = normalized.occurredAtRaw;
-    const dedupeKey = normalized.eventId ||
+    const dedupeKey =
+      normalized.eventId ||
       (fingerprint && occurredAtRaw
         ? `${fingerprint}::${occurredAtRaw}`
         : this.hashPayload(payload));
@@ -529,7 +598,8 @@ export class AiOpsService {
       ? (raw.logEvents as Array<Record<string, unknown>>)
       : [];
     const first = logEvents[0] || {};
-    const firstMessageRaw = typeof first.message === 'string' ? first.message : '';
+    const firstMessageRaw =
+      typeof first.message === 'string' ? first.message : '';
     const firstMessage = this.tryParseJson(firstMessageRaw);
     const attr =
       firstMessage && typeof firstMessage.attr === 'object'
@@ -589,7 +659,10 @@ export class AiOpsService {
     };
   }
 
-  private async getSqlPolicy(environmentId: string, requestMaxRows?: number): Promise<SqlPolicy> {
+  private async getSqlPolicy(
+    environmentId: string,
+    requestMaxRows?: number,
+  ): Promise<SqlPolicy> {
     const env = this.environments.getEnvironmentById(environmentId);
     const aiops =
       (env?.database?.aiops as Record<string, unknown>) ||
@@ -611,25 +684,37 @@ export class AiOpsService {
     );
 
     const defaultLimitFromCfg = Number(
-      aiops.default_limit || aiops.defaultLimit || (await this.siteConf.getNumber('aiops.sql.default_limit', 200)),
+      aiops.default_limit ||
+        aiops.defaultLimit ||
+        (await this.siteConf.getNumber('aiops.sql.default_limit', 200)),
     );
     const maxLimitFromCfg = Number(
-      aiops.max_limit || aiops.maxLimit || (await this.siteConf.getNumber('aiops.sql.max_limit', 1000)),
+      aiops.max_limit ||
+        aiops.maxLimit ||
+        (await this.siteConf.getNumber('aiops.sql.max_limit', 1000)),
     );
     const timeoutMs = Number(
-      aiops.timeout_ms || aiops.timeoutMs || (await this.siteConf.getNumber('aiops.sql.timeout_ms', 5000)),
+      aiops.timeout_ms ||
+        aiops.timeoutMs ||
+        (await this.siteConf.getNumber('aiops.sql.timeout_ms', 5000)),
     );
 
     const maxLimit = this.boundNumber(maxLimitFromCfg, 1, 10000, 1000);
-    const requestCap = requestMaxRows ? Math.max(1, Math.min(maxLimit, requestMaxRows)) : maxLimit;
+    const requestCap = requestMaxRows
+      ? Math.max(1, Math.min(maxLimit, requestMaxRows))
+      : maxLimit;
     const defaultLimit = Math.min(
       requestCap,
       this.boundNumber(defaultLimitFromCfg, 1, 10000, 200),
     );
 
     return {
-      whitelistTables: envWhitelistTables.length > 0 ? envWhitelistTables : fallbackTables,
-      whitelistDatabases: envWhitelistDatabases.length > 0 ? envWhitelistDatabases : fallbackDatabases,
+      whitelistTables:
+        envWhitelistTables.length > 0 ? envWhitelistTables : fallbackTables,
+      whitelistDatabases:
+        envWhitelistDatabases.length > 0
+          ? envWhitelistDatabases
+          : fallbackDatabases,
       defaultLimit,
       maxLimit: requestCap,
       timeoutMs: this.boundNumber(timeoutMs, 1000, 60000, 5000),
@@ -665,7 +750,10 @@ export class AiOpsService {
     this.validatePreviewSql(normalizedSql, policy, {
       requireQualifiedTableRefs: false,
     });
-    const { executedSql, appliedLimit } = this.applyPreviewPolicy(normalizedSql, policy);
+    const { executedSql, appliedLimit } = this.applyPreviewPolicy(
+      normalizedSql,
+      policy,
+    );
 
     return {
       rawSql,
@@ -682,7 +770,11 @@ export class AiOpsService {
     policy: SqlPolicy,
     llmSessionKey: string,
   ): Promise<PreparedSql> {
-    const schemaContext = await this.buildSchemaContext(environmentId, policy, question);
+    const schemaContext = await this.buildSchemaContext(
+      environmentId,
+      policy,
+      question,
+    );
     const fewshotContext = await this.buildFewshotContext(question, policy);
 
     let lastValidationMessage = '';
@@ -703,7 +795,10 @@ export class AiOpsService {
         this.validatePreviewSql(normalizedSql, policy, {
           requireQualifiedTableRefs: true,
         });
-        const { executedSql, appliedLimit } = this.applyPreviewPolicy(normalizedSql, policy);
+        const { executedSql, appliedLimit } = this.applyPreviewPolicy(
+          normalizedSql,
+          policy,
+        );
 
         return {
           rawSql,
@@ -713,7 +808,10 @@ export class AiOpsService {
           generatedFromQuestion: true,
         };
       } catch (error) {
-        if (!(error instanceof BadRequestException) || attempt >= this.sqlRewriteMaxAttempts) {
+        if (
+          !(error instanceof BadRequestException) ||
+          attempt >= this.sqlRewriteMaxAttempts
+        ) {
           throw error;
         }
         lastValidationMessage = this.errorMessage(error);
@@ -764,7 +862,9 @@ export class AiOpsService {
     const sqlType = this.classifySql(sql).sqlType;
 
     if (!['read', 'write'].includes(sqlType)) {
-      throw new BadRequestException('Only read/write SQL is allowed in preview. DDL is not allowed.');
+      throw new BadRequestException(
+        'Only read/write SQL is allowed in preview. DDL is not allowed.',
+      );
     }
 
     if (
@@ -779,9 +879,14 @@ export class AiOpsService {
       throw new BadRequestException('Locking clauses are not allowed.');
     }
 
-    const tableRefs = this.filterPhysicalTableRefs(this.extractTableRefs(sql), sql);
+    const tableRefs = this.filterPhysicalTableRefs(
+      this.extractTableRefs(sql),
+      sql,
+    );
     if (options?.requireQualifiedTableRefs) {
-      const unqualifiedRefs = tableRefs.filter((ref) => !this.parseTableRef(ref).database);
+      const unqualifiedRefs = tableRefs.filter(
+        (ref) => !this.parseTableRef(ref).database,
+      );
       if (unqualifiedRefs.length > 0) {
         throw new BadRequestException(
           `Generated SQL must use fully qualified table names (db.table). Missing database for: ${unqualifiedRefs.join(', ')}`,
@@ -869,9 +974,18 @@ export class AiOpsService {
     return Array.from(refs);
   }
 
-  private parseTableRef(ref: string): { database: string | null; table: string; raw: string } {
-    const cleaned = String(ref || '').trim().replace(/[`"']/g, '');
-    const parts = cleaned.split('.').map((p) => p.trim()).filter(Boolean);
+  private parseTableRef(ref: string): {
+    database: string | null;
+    table: string;
+    raw: string;
+  } {
+    const cleaned = String(ref || '')
+      .trim()
+      .replace(/[`"']/g, '');
+    const parts = cleaned
+      .split('.')
+      .map((p) => p.trim())
+      .filter(Boolean);
     if (parts.length >= 2) {
       return {
         database: parts[0].toLowerCase(),
@@ -890,7 +1004,9 @@ export class AiOpsService {
     pattern: string,
     target: { database: string | null; table: string; raw: string },
   ): boolean {
-    const p = String(pattern || '').trim().toLowerCase();
+    const p = String(pattern || '')
+      .trim()
+      .toLowerCase();
     if (!p) return false;
     if (p === '*') return true;
     if (p === target.table || p === target.raw) return true;
@@ -909,18 +1025,25 @@ export class AiOpsService {
 
     // db.table
     if (p.includes('.')) {
-      const parts = p.split('.').map((v) => v.trim()).filter(Boolean);
+      const parts = p
+        .split('.')
+        .map((v) => v.trim())
+        .filter(Boolean);
       if (parts.length >= 2) {
         const db = parts[0];
         const table = parts[parts.length - 1];
-        return !!target.database && target.database === db && target.table === table;
+        return (
+          !!target.database && target.database === db && target.table === table
+        );
       }
     }
     return false;
   }
 
   private matchDatabasePattern(pattern: string, database: string): boolean {
-    const p = String(pattern || '').trim().toLowerCase();
+    const p = String(pattern || '')
+      .trim()
+      .toLowerCase();
     if (!p) return false;
     if (p === '*') return true;
     if (p.endsWith('.*')) {
@@ -929,7 +1052,10 @@ export class AiOpsService {
     return database === p;
   }
 
-  private enforceLimit(sql: string, policy: SqlPolicy): { sql: string; appliedLimit: number | null } {
+  private enforceLimit(
+    sql: string,
+    policy: SqlPolicy,
+  ): { sql: string; appliedLimit: number | null } {
     const limitRegex = /\blimit\s+(\d+)(\s*,\s*(\d+))?/i;
     const match = sql.match(limitRegex);
 
@@ -965,7 +1091,10 @@ export class AiOpsService {
 
   private attachExecutionHint(sql: string, timeoutMs: number) {
     if (/^select\b/i.test(sql)) {
-      return sql.replace(/^select\b/i, `SELECT /*+ MAX_EXECUTION_TIME(${timeoutMs}) */`);
+      return sql.replace(
+        /^select\b/i,
+        `SELECT /*+ MAX_EXECUTION_TIME(${timeoutMs}) */`,
+      );
     }
     return sql;
   }
@@ -976,7 +1105,10 @@ export class AiOpsService {
   ): { executedSql: string; appliedLimit: number | null } {
     const type = this.classifySql(normalizedSql).sqlType;
     if (type === 'read') {
-      const { sql: limitedSql, appliedLimit } = this.enforceLimit(normalizedSql, policy);
+      const { sql: limitedSql, appliedLimit } = this.enforceLimit(
+        normalizedSql,
+        policy,
+      );
       return {
         executedSql: this.attachExecutionHint(limitedSql, policy.timeoutMs),
         appliedLimit,
@@ -1003,12 +1135,14 @@ export class AiOpsService {
 
     const llm = await this.getCliproxyConfig();
 
-    const tableHint = policy.whitelistTables.length > 0
-      ? `Allowed tables: ${policy.whitelistTables.join(', ')}`
-      : 'Allowed tables: use only business tables configured for the environment.';
-    const databaseHint = policy.whitelistDatabases.length > 0
-      ? `Allowed databases: ${policy.whitelistDatabases.join(', ')}`
-      : 'Allowed databases: use only databases configured for the selected environment.';
+    const tableHint =
+      policy.whitelistTables.length > 0
+        ? `Allowed tables: ${policy.whitelistTables.join(', ')}`
+        : 'Allowed tables: use only business tables configured for the environment.';
+    const databaseHint =
+      policy.whitelistDatabases.length > 0
+        ? `Allowed databases: ${policy.whitelistDatabases.join(', ')}`
+        : 'Allowed databases: use only databases configured for the selected environment.';
 
     const systemPrompt = [
       'You are a SQL assistant for operations engineers.',
@@ -1103,7 +1237,10 @@ export class AiOpsService {
     policy: SqlPolicy,
     question: string,
   ): Promise<string> {
-    const allTables = await this.getSchemaTablesFromCache(environmentId, policy);
+    const allTables = await this.getSchemaTablesFromCache(
+      environmentId,
+      policy,
+    );
     if (allTables.length === 0) {
       return '';
     }
@@ -1152,9 +1289,18 @@ export class AiOpsService {
     return tables;
   }
 
-  private buildSchemaCacheKey(environmentId: string, policy: SqlPolicy): string {
-    const dbPart = [...policy.whitelistDatabases].map((v) => v.trim().toLowerCase()).sort().join(',');
-    const tablePart = [...policy.whitelistTables].map((v) => v.trim().toLowerCase()).sort().join(',');
+  private buildSchemaCacheKey(
+    environmentId: string,
+    policy: SqlPolicy,
+  ): string {
+    const dbPart = [...policy.whitelistDatabases]
+      .map((v) => v.trim().toLowerCase())
+      .sort()
+      .join(',');
+    const tablePart = [...policy.whitelistTables]
+      .map((v) => v.trim().toLowerCase())
+      .sort()
+      .join(',');
     return `${environmentId}::db=${dbPart}::tbl=${tablePart}`;
   }
 
@@ -1180,9 +1326,15 @@ export class AiOpsService {
 
       const byTable = new Map<string, SchemaTableSummary>();
       for (const row of rows as SchemaColumnRow[]) {
-        const database = String(row.tableSchema || '').trim().toLowerCase();
-        const table = String(row.tableName || '').trim().toLowerCase();
-        const column = String(row.columnName || '').trim().toLowerCase();
+        const database = String(row.tableSchema || '')
+          .trim()
+          .toLowerCase();
+        const table = String(row.tableName || '')
+          .trim()
+          .toLowerCase();
+        const column = String(row.columnName || '')
+          .trim()
+          .toLowerCase();
         if (!database || !table || !column) continue;
         if (!this.isTableAllowedByPolicy(database, table, policy)) continue;
 
@@ -1205,12 +1357,18 @@ export class AiOpsService {
         `${a.database}.${a.table}`.localeCompare(`${b.database}.${b.table}`),
       );
     } catch (error) {
-      this.logger.warn(`Failed to load schema metadata: ${this.errorMessage(error)}`);
+      this.logger.warn(
+        `Failed to load schema metadata: ${this.errorMessage(error)}`,
+      );
       return [];
     }
   }
 
-  private isTableAllowedByPolicy(database: string, table: string, policy: SqlPolicy): boolean {
+  private isTableAllowedByPolicy(
+    database: string,
+    table: string,
+    policy: SqlPolicy,
+  ): boolean {
     const target = {
       database,
       table,
@@ -1300,7 +1458,9 @@ export class AiOpsService {
       'show',
       'explain',
     ]);
-    return Array.from(new Set(matches.filter((token) => !stopWords.has(token))));
+    return Array.from(
+      new Set(matches.filter((token) => !stopWords.has(token))),
+    );
   }
 
   private extractExplicitQuestionRefs(question: string): Set<string> {
@@ -1323,7 +1483,9 @@ export class AiOpsService {
       return '';
     }
 
-    const normalizedQuestion = String(question || '').trim().toLowerCase();
+    const normalizedQuestion = String(question || '')
+      .trim()
+      .toLowerCase();
     const questionTokens = this.extractQuestionTokens(question);
     const questionNumbers = this.extractNumericTokens(question);
 
@@ -1344,11 +1506,19 @@ export class AiOpsService {
     const scored = candidateRows
       .map((row) => ({
         row,
-        score: this.scoreFewshotCase(row, normalizedQuestion, questionTokens, questionNumbers),
+        score: this.scoreFewshotCase(
+          row,
+          normalizedQuestion,
+          questionTokens,
+          questionNumbers,
+        ),
       }))
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
-        return this.scorePriority(b.row.priority) - this.scorePriority(a.row.priority);
+        return (
+          this.scorePriority(b.row.priority) -
+          this.scorePriority(a.row.priority)
+        );
       });
 
     if (scored.length === 0) {
@@ -1387,7 +1557,10 @@ export class AiOpsService {
   }
 
   private async getFewshotMaxCases(): Promise<number> {
-    const configured = await this.siteConf.getNumber('aiops.nl2sql.fewshot_max_cases', this.fewshotPromptMaxCases);
+    const configured = await this.siteConf.getNumber(
+      'aiops.nl2sql.fewshot_max_cases',
+      this.fewshotPromptMaxCases,
+    );
     if (Number.isFinite(configured) && configured > 0) {
       return Math.min(12, Math.floor(configured));
     }
@@ -1395,8 +1568,14 @@ export class AiOpsService {
   }
 
   private async getCliproxyRequestTimeoutMs(): Promise<number> {
-    const legacyTimeoutMs = await this.siteConf.getNumber('aiops.openclaw.timeout_ms', 20000);
-    const timeoutMs = await this.siteConf.getNumber('aiops.cliproxy.timeout_ms', legacyTimeoutMs);
+    const legacyTimeoutMs = await this.siteConf.getNumber(
+      'aiops.openclaw.timeout_ms',
+      20000,
+    );
+    const timeoutMs = await this.siteConf.getNumber(
+      'aiops.cliproxy.timeout_ms',
+      legacyTimeoutMs,
+    );
     return this.boundNumber(timeoutMs, 1000, 120000, 20000);
   }
 
@@ -1419,7 +1598,9 @@ export class AiOpsService {
     try {
       content = await fs.readFile(sourcePath, 'utf8');
     } catch (error) {
-      this.logger.warn(`Failed to read few-shot CSV: ${this.errorMessage(error)}`);
+      this.logger.warn(
+        `Failed to read few-shot CSV: ${this.errorMessage(error)}`,
+      );
       return [];
     }
 
@@ -1438,9 +1619,18 @@ export class AiOpsService {
     ).trim();
     const candidates = [
       configured ? path.resolve(configured) : '',
-      path.resolve(process.cwd(), 'docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv'),
-      path.resolve(process.cwd(), '../docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv'),
-      path.resolve(__dirname, '../../../docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv'),
+      path.resolve(
+        process.cwd(),
+        'docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv',
+      ),
+      path.resolve(
+        process.cwd(),
+        '../docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv',
+      ),
+      path.resolve(
+        __dirname,
+        '../../../docs/ai-ops-fewshot-data/nl2sql_fewshot_cases.csv',
+      ),
     ].filter(Boolean);
 
     for (const candidate of candidates) {
@@ -1529,7 +1719,9 @@ export class AiOpsService {
   }
 
   private parseCsvRows(csvText: string): string[][] {
-    const text = String(csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const text = String(csvText || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
     const rows: string[][] = [];
     let row: string[] = [];
     let cell = '';
@@ -1604,15 +1796,22 @@ export class AiOpsService {
         this.extractTableRefs(row.expectedSql),
         row.expectedSql,
       );
-      const hasUnqualified = refs.some((ref) => !this.parseTableRef(ref).database);
+      const hasUnqualified = refs.some(
+        (ref) => !this.parseTableRef(ref).database,
+      );
       if (hasUnqualified) {
         return false;
       }
     }
 
-    if (policy.whitelistDatabases.length > 0 && row.allowedDatabases.length > 0) {
+    if (
+      policy.whitelistDatabases.length > 0 &&
+      row.allowedDatabases.length > 0
+    ) {
       const dbMatched = row.allowedDatabases.some((db) =>
-        policy.whitelistDatabases.some((pattern) => this.matchDatabasePattern(pattern, db)),
+        policy.whitelistDatabases.some((pattern) =>
+          this.matchDatabasePattern(pattern, db),
+        ),
       );
       if (!dbMatched) return false;
     }
@@ -1627,25 +1826,41 @@ export class AiOpsService {
     return true;
   }
 
-  private isFewshotTablePatternAllowed(tablePattern: string, policyPatterns: string[]): boolean {
-    const normalized = String(tablePattern || '').trim().toLowerCase();
+  private isFewshotTablePatternAllowed(
+    tablePattern: string,
+    policyPatterns: string[],
+  ): boolean {
+    const normalized = String(tablePattern || '')
+      .trim()
+      .toLowerCase();
     if (!normalized) return false;
     if (normalized === '*') {
-      return policyPatterns.some((pattern) => String(pattern || '').trim().toLowerCase() === '*');
+      return policyPatterns.some(
+        (pattern) =>
+          String(pattern || '')
+            .trim()
+            .toLowerCase() === '*',
+      );
     }
     if (normalized.endsWith('.*')) {
       const db = normalized.slice(0, -2);
       return policyPatterns.some((pattern) => {
-        const p = String(pattern || '').trim().toLowerCase();
+        const p = String(pattern || '')
+          .trim()
+          .toLowerCase();
         return p === '*' || p === `${db}.*` || p.startsWith(`${db}.`);
       });
     }
     if (normalized.includes('.')) {
       const target = this.parseTableRef(normalized);
-      return policyPatterns.some((pattern) => this.matchTablePattern(pattern, target));
+      return policyPatterns.some((pattern) =>
+        this.matchTablePattern(pattern, target),
+      );
     }
     return policyPatterns.some((pattern) => {
-      const p = String(pattern || '').trim().toLowerCase();
+      const p = String(pattern || '')
+        .trim()
+        .toLowerCase();
       return p === '*' || p === normalized || p === `*.${normalized}`;
     });
   }
@@ -1676,15 +1891,21 @@ export class AiOpsService {
     ]);
     for (const token of questionTokens) {
       if (rowTokens.has(token)) score += 6;
-      else if (rowQuestion.includes(token) || rowSql.includes(token)) score += 2;
+      else if (rowQuestion.includes(token) || rowSql.includes(token))
+        score += 2;
     }
 
-    const rowNumbers = new Set(this.extractNumericTokens(`${row.userQuestion} ${row.expectedSql}`));
+    const rowNumbers = new Set(
+      this.extractNumericTokens(`${row.userQuestion} ${row.expectedSql}`),
+    );
     for (const num of questionNumbers) {
       if (rowNumbers.has(num)) score += 8;
     }
 
-    if (row.intentType && normalizedQuestion.includes(row.intentType.toLowerCase())) {
+    if (
+      row.intentType &&
+      normalizedQuestion.includes(row.intentType.toLowerCase())
+    ) {
       score += 4;
     }
     return score;
@@ -1696,7 +1917,9 @@ export class AiOpsService {
   }
 
   private scorePriority(priority: string): number {
-    const p = String(priority || '').trim().toLowerCase();
+    const p = String(priority || '')
+      .trim()
+      .toLowerCase();
     if (p === 'p0') return 5;
     if (p === 'p1') return 3;
     if (p === 'p2') return 1;
@@ -1729,7 +1952,9 @@ export class AiOpsService {
   }
 
   private async getCliproxyConfig(): Promise<CliproxyConfig> {
-    const provider = (await this.siteConf.getString('aiops.llm.provider', 'cliproxy'))
+    const provider = (
+      await this.siteConf.getString('aiops.llm.provider', 'cliproxy')
+    )
       .trim()
       .toLowerCase();
     if (!['cliproxy', 'openclaw'].includes(provider)) {
@@ -1738,18 +1963,38 @@ export class AiOpsService {
       );
     }
 
-    const legacyBaseUrl = (await this.siteConf.getString('aiops.openclaw.base_url', '')).trim();
-    const baseUrl = (await this.siteConf.getString('aiops.cliproxy.base_url', legacyBaseUrl)).trim();
+    const legacyBaseUrl = (
+      await this.siteConf.getString('aiops.openclaw.base_url', '')
+    ).trim();
+    const baseUrl = (
+      await this.siteConf.getString('aiops.cliproxy.base_url', legacyBaseUrl)
+    ).trim();
     if (!baseUrl) {
-      throw new BadRequestException('AIOPS_CLIPROXY_BASE_URL is not configured.');
+      throw new BadRequestException(
+        'AIOPS_CLIPROXY_BASE_URL is not configured.',
+      );
     }
-    const legacyApiKey = (await this.siteConf.getString('aiops.openclaw.token', '')).trim();
-    const apiKey = (await this.siteConf.getString('aiops.cliproxy.api_key', legacyApiKey)).trim();
+    const legacyApiKey = (
+      await this.siteConf.getString('aiops.openclaw.token', '')
+    ).trim();
+    const apiKey = (
+      await this.siteConf.getString('aiops.cliproxy.api_key', legacyApiKey)
+    ).trim();
     if (!apiKey) {
-      throw new BadRequestException('AIOPS_CLIPROXY_API_KEY is not configured.');
+      throw new BadRequestException(
+        'AIOPS_CLIPROXY_API_KEY is not configured.',
+      );
     }
-    const legacyModel = (await this.siteConf.getString('aiops.openclaw.model', '')).trim();
-    const model = (await this.siteConf.getString('aiops.cliproxy.model', legacyModel || 'gpt-5.6-terra')).trim() || 'gpt-5.6-terra';
+    const legacyModel = (
+      await this.siteConf.getString('aiops.openclaw.model', '')
+    ).trim();
+    const model =
+      (
+        await this.siteConf.getString(
+          'aiops.cliproxy.model',
+          legacyModel || 'gpt-5.6-terra',
+        )
+      ).trim() || 'gpt-5.6-terra';
 
     return {
       provider: 'cliproxy',
@@ -1760,7 +2005,9 @@ export class AiOpsService {
   }
 
   private extractCliproxyText(responseData: any): string {
-    const choices = Array.isArray(responseData?.choices) ? responseData.choices : [];
+    const choices = Array.isArray(responseData?.choices)
+      ? responseData.choices
+      : [];
     const first = choices[0];
     const content = first?.message?.content;
     if (typeof content === 'string' && content.trim()) {
@@ -1778,13 +2025,13 @@ export class AiOpsService {
 
   private extractCliproxyModels(responseData: any): string[] {
     const data = Array.isArray(responseData?.data) ? responseData.data : [];
-    return data
-      .map((item) => String(item?.id || '').trim())
-      .filter(Boolean);
+    return data.map((item) => String(item?.id || '').trim()).filter(Boolean);
   }
 
   private async ensureIngestToken(tokenHeader?: string) {
-    const expected = (await this.siteConf.getString('aiops.event_ingest.token', '')).trim();
+    const expected = (
+      await this.siteConf.getString('aiops.event_ingest.token', '')
+    ).trim();
     if (!expected) {
       return;
     }
@@ -1793,7 +2040,9 @@ export class AiOpsService {
     }
   }
 
-  private inferEnvironmentIdFromCloudWatch(payload: CloudWatchEventDto): string {
+  private inferEnvironmentIdFromCloudWatch(
+    payload: CloudWatchEventDto,
+  ): string {
     const alarmName = String(payload.AlarmName || '').trim();
     if (!alarmName) return '';
 
@@ -1804,15 +2053,21 @@ export class AiOpsService {
     return byDash || '';
   }
 
-  private extractCloudWatchResourceId(payload: CloudWatchEventDto): string | null {
+  private extractCloudWatchResourceId(
+    payload: CloudWatchEventDto,
+  ): string | null {
     const dimensions = payload?.Trigger?.Dimensions;
     if (Array.isArray(dimensions)) {
       for (const d of dimensions) {
         if (!d || typeof d !== 'object') continue;
-        const name = String((d as any).name || (d as any).Name || '').toLowerCase();
+        const name = String(
+          (d as any).name || (d as any).Name || '',
+        ).toLowerCase();
         if (!name) continue;
         if (name.includes('instance') || name.includes('resource')) {
-          const value = String((d as any).value || (d as any).Value || '').trim();
+          const value = String(
+            (d as any).value || (d as any).Value || '',
+          ).trim();
           if (value) return value;
         }
       }
@@ -1823,9 +2078,10 @@ export class AiOpsService {
   private parseDateTime(value: string): string | null {
     if (!value) return null;
     const numeric = Number(value);
-    const d = Number.isFinite(numeric) && /^\d+$/.test(value.trim())
-      ? new Date(numeric > 1_000_000_000_000 ? numeric : numeric * 1000)
-      : new Date(value);
+    const d =
+      Number.isFinite(numeric) && /^\d+$/.test(value.trim())
+        ? new Date(numeric > 1_000_000_000_000 ? numeric : numeric * 1000)
+        : new Date(value);
     if (Number.isNaN(d.getTime())) return null;
     return d.toISOString().slice(0, 19).replace('T', ' ');
   }
@@ -1860,9 +2116,7 @@ export class AiOpsService {
 
   private normalizeStringArray(input: unknown): string[] {
     if (Array.isArray(input)) {
-      return input
-        .map((v) => String(v || '').trim())
-        .filter(Boolean);
+      return input.map((v) => String(v || '').trim()).filter(Boolean);
     }
     const text = String(input || '').trim();
     if (!text) return [];
@@ -1872,12 +2126,21 @@ export class AiOpsService {
       .filter(Boolean);
   }
 
-  private boundNumber(value: number, min: number, max: number, fallback: number) {
+  private boundNumber(
+    value: number,
+    min: number,
+    max: number,
+    fallback: number,
+  ) {
     if (!Number.isFinite(value)) return fallback;
     return Math.max(min, Math.min(max, Math.floor(value)));
   }
 
-  private async ensureSession(environmentId: string, actor: ActorContext, externalSessionId?: string) {
+  private async ensureSession(
+    environmentId: string,
+    actor: ActorContext,
+    externalSessionId?: string,
+  ) {
     const result = await this.platformDb.query<mysql.ResultSetHeader>(
       `INSERT INTO aiops_sessions
         (external_session_id, environment_id, actor_user_id, actor_username, title, status, created_at, updated_at)
@@ -2017,8 +2280,13 @@ export class AiOpsService {
     }
   }
 
-  private classifySql(sql: string | null | undefined): { sqlType: SqlType; riskLevel: RiskLevel } {
-    const text = String(sql || '').trim().toLowerCase();
+  private classifySql(sql: string | null | undefined): {
+    sqlType: SqlType;
+    riskLevel: RiskLevel;
+  } {
+    const text = String(sql || '')
+      .trim()
+      .toLowerCase();
     if (!text) {
       return { sqlType: 'unknown', riskLevel: 'medium' };
     }

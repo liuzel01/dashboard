@@ -41,19 +41,23 @@ export class AiOpsGrafanaMcpService {
     environmentId: string,
     toolName: string,
     args: Record<string, unknown>,
+    timeoutOverrideMs?: number,
   ) {
     const prefix = `aiops.logs.environments.${environmentId}`;
     const endpoint = await this.siteConf.getString(
       `${prefix}.mcp_url`,
       'http://127.0.0.1:8102/mcp',
     );
-    const timeoutMs = Math.min(
+    const configuredTimeoutMs = Math.min(
       60000,
       Math.max(
         1000,
         await this.siteConf.getNumber(`${prefix}.timeout_ms`, 15000),
       ),
     );
+    const timeoutMs = timeoutOverrideMs
+      ? Math.min(120000, Math.max(configuredTimeoutMs, timeoutOverrideMs))
+      : configuredTimeoutMs;
     const token = await this.resolveToken(environmentId);
     try {
       const response = await axios.post<{ result?: McpCallResult }>(

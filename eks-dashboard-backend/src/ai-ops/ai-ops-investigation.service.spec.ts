@@ -206,22 +206,26 @@ describe('AiOpsInvestigationService', () => {
       });
     logs.search
       .mockResolvedValueOnce({
-        evidence: [{
-          evidenceId: 'ev-1',
-          timestamp: '2026-10-12T00:00:00.000Z',
-          labels: { service_name: 'orders' },
-          line: 'user=80420234 action=pre-binding-google',
-        }],
+        evidence: [
+          {
+            evidenceId: 'ev-1',
+            timestamp: '2026-10-12T00:00:00.000Z',
+            labels: { service_name: 'orders' },
+            line: 'user=80420234 action=pre-binding-google',
+          },
+        ],
         exploreUrl: '',
         statistics: { matchingLines: 10, sampledLines: 1, truncated: true },
       })
       .mockResolvedValueOnce({
-        evidence: [{
-          evidenceId: 'ev-2',
-          timestamp: '2026-10-12T00:01:00.000Z',
-          labels: { service_name: 'orders' },
-          line: 'user=80420234 pre-binding-google',
-        }],
+        evidence: [
+          {
+            evidenceId: 'ev-2',
+            timestamp: '2026-10-12T00:01:00.000Z',
+            labels: { service_name: 'orders' },
+            line: 'user=80420234 pre-binding-google',
+          },
+        ],
         exploreUrl: '',
         statistics: { matchingLines: 1, sampledLines: 1, truncated: false },
       });
@@ -267,7 +271,12 @@ describe('AiOpsInvestigationService', () => {
       .mockResolvedValueOnce({
         provider: 'cliproxy',
         model: 'gpt-5.6-terra',
-        text: JSON.stringify({ done: true, reason: '证据足够', serviceName: 'orders', queryTexts: [] }),
+        text: JSON.stringify({
+          done: true,
+          reason: '证据足够',
+          serviceName: 'orders',
+          queryTexts: [],
+        }),
       })
       .mockResolvedValueOnce({
         provider: 'cliproxy',
@@ -316,7 +325,8 @@ describe('AiOpsInvestigationService', () => {
           namespace: 'default',
           serviceName: 'orders',
           queryTexts: ['connection refused'],
-          rangeMinutes: 60,
+          // The model is not authoritative for an explicit user time window.
+          rangeMinutes: 15,
           limit: 20,
         }),
       })
@@ -363,5 +373,98 @@ describe('AiOpsInvestigationService', () => {
       from: '2026-10-12T00:00:00.000Z',
       to: '2026-10-12T01:00:00.000Z',
     });
+    expect(result.plan.rangeMinutes).toBe(60);
+  });
+
+  it('builds and persists a generic evidence-backed joint report', async () => {
+    const { service, aiOps, platformDb } = createService();
+    platformDb.query
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: 16,
+          actor_user_id: 1,
+          status: 'COMPLETED',
+          request_json: JSON.stringify({ question: '入口异常调查' }),
+          result_json: JSON.stringify({
+            evidence: [
+              {
+                evidenceId: 'ingress-1',
+                timestamp: '2026-10-16T01:00:00.000Z',
+                labels: { service_name: 'ingress-nginx' },
+                line: 'clientip=157.254.53.237 xff=143.109.37.118 host=www.example.com',
+              },
+            ],
+            answer: { summary: '入口异常。' },
+            queryStatistics: [{ matchingLines: 42 }],
+          }),
+        },
+        {
+          id: 17,
+          actor_user_id: 1,
+          status: 'COMPLETED',
+          request_json: JSON.stringify({ question: '用户活动调查' }),
+          result_json: JSON.stringify({
+            evidence: [
+              {
+                evidenceId: 'user-1',
+                timestamp: '2026-10-16T01:01:00.000Z',
+                labels: { service_name: 'users' },
+                line: 'userId=80420234 tenant=12 source_ip=143.109.37.118 email=demo@example.com',
+              },
+            ],
+            answer: { summary: '用户活动。' },
+            queryStatistics: [{ matchingLines: 10 }],
+          }),
+        },
+      ])
+      .mockResolvedValueOnce({ insertId: 9 });
+    aiOps.completeLogInvestigationJson.mockReset().mockResolvedValueOnce({
+      provider: 'cliproxy',
+      model: 'gpt-5.6-terra',
+      text: JSON.stringify({
+        reportType: 'security',
+        title: '联合调查报告',
+        summary: '两个任务存在共同来源 IP。',
+        sections: [
+          {
+            key: 'association',
+            title: '关联发现',
+            findings: [
+              {
+                text: '来源 IP 在入口和用户日志中共同出现。',
+                evidenceIds: ['ingress-1', 'user-1'],
+              },
+            ],
+          },
+        ],
+        timeline: [],
+        uncertainties: [],
+        recommendations: ['继续核实。'],
+        confidence: 'medium',
+      }),
+    });
+
+    const result = await service.correlate('mgbx', actor, [16, 17]);
+
+    expect(result.reportId).toBe(9);
+    expect(result.report.summary).toContain('共同来源 IP');
+    expect(aiOps.completeLogInvestigationJson).toHaveBeenCalledWith(
+      actor,
+      expect.objectContaining({ timeoutMs: 120_000 }),
+    );
+    expect(result.sharedEntities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'ip',
+          normalizedValue: '143.109.37.118',
+          jobIds: [16, 17],
+        }),
+      ]),
+    );
+    expect(platformDb.query).toHaveBeenLastCalledWith(
+      expect.stringContaining('aiops_log_correlation_reports'),
+      expect.arrayContaining(['mgbx', 1, 'admin']),
+    );
   });
 });
