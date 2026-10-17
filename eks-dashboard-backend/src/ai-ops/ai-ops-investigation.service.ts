@@ -36,6 +36,14 @@ type Evidence = {
   line: string;
 };
 
+type InvestigationRound = {
+  round: number;
+  reason: string;
+  serviceName: string | null;
+  queryTexts: string[];
+  newEvidenceCount: number;
+};
+
 @Injectable()
 export class AiOpsInvestigationService {
   private readonly logger = new Logger(AiOpsInvestigationService.name);
@@ -223,6 +231,15 @@ export class AiOpsInvestigationService {
       if (!source) {
         throw new BadRequestException('所选日志源不属于当前环境');
       }
+      const labelDiscovery = await this.logs.discoverLabels(
+        environmentId,
+        actor,
+        {
+          from: requestedWindow.from.toISOString(),
+          to: requestedWindow.to.toISOString(),
+          namespace: body.namespace?.trim() || undefined,
+        },
+      );
 
       const planning = await this.aiOps.completeLogInvestigationJson(actor, {
         sessionId: this.sessionId(environmentId, actor),
@@ -250,6 +267,7 @@ export class AiOpsInvestigationService {
           },
           allowedNamespaces: source.allowedNamespaces,
           allowedServices: source.allowedServices,
+          discoveredLabels: labelDiscovery,
           maximumRangeMinutes: source.maxRangeHours * 60,
           maximumLines: Math.min(200, source.maxLines),
         }),
@@ -259,6 +277,7 @@ export class AiOpsInvestigationService {
         this.parseJson(planning.text, '调查计划'),
         { ...body, rangeMinutes: requestedWindow.rangeMinutes },
         source,
+        labelDiscovery,
       );
       plan = validatedPlan;
 
@@ -277,8 +296,13 @@ export class AiOpsInvestigationService {
       const executorRequested = new Set<string>();
       const executorUsed = new Set<string>();
       const fallbackReasons = new Set<string>();
+      const rounds: InvestigationRound[] = [];
+      const executedQueries = new Set<string>();
 
       for (const queryText of queryTexts) {
+        const queryKey = `${validatedPlan.serviceName || ''}\u0000${queryText || ''}`;
+        if (executedQueries.has(queryKey)) continue;
+        executedQueries.add(queryKey);
         const result = await this.logs.search(environmentId, actor, {
           projectId: body.projectId,
           sourceId: body.sourceId,
@@ -299,6 +323,55 @@ export class AiOpsInvestigationService {
         if (result.execution?.used) executorUsed.add(result.execution.used);
         if (result.execution?.fallbackReason)
           fallbackReasons.add(result.execution.fallbackReason);
+      }
+
+      for (let round = 1; round <= 2 && evidenceMap.size > 0; round += 1) {
+        const refinement = await this.refinePlan(
+          actor,
+          environmentId,
+          body.question,
+          validatedPlan,
+          [...evidenceMap.values()],
+          labelDiscovery,
+          executedQueries,
+        );
+        if (refinement.done || refinement.queryTexts.length === 0) break;
+        let newEvidenceCount = 0;
+        for (const queryText of refinement.queryTexts) {
+          if (executedQueries.size >= 6) break;
+          const queryKey = `${refinement.serviceName || ''}\u0000${queryText}`;
+          if (executedQueries.has(queryKey)) continue;
+          executedQueries.add(queryKey);
+          const result = await this.logs.search(environmentId, actor, {
+            projectId: body.projectId,
+            sourceId: body.sourceId,
+            namespace: validatedPlan.namespace || undefined,
+            serviceName: refinement.serviceName || undefined,
+            queryText,
+            from: from.toISOString(),
+            to: to.toISOString(),
+            limit: validatedPlan.limit,
+          });
+          for (const item of result.evidence as Evidence[]) {
+            if (evidenceMap.size >= validatedPlan.limit) break;
+            if (!evidenceMap.has(item.evidenceId)) newEvidenceCount += 1;
+            evidenceMap.set(item.evidenceId, item);
+          }
+          if (result.exploreUrl) exploreUrls.push(result.exploreUrl);
+          if (result.execution?.requested)
+            executorRequested.add(result.execution.requested);
+          if (result.execution?.used) executorUsed.add(result.execution.used);
+          if (result.execution?.fallbackReason)
+            fallbackReasons.add(result.execution.fallbackReason);
+        }
+        rounds.push({
+          round,
+          reason: refinement.reason,
+          serviceName: refinement.serviceName,
+          queryTexts: refinement.queryTexts,
+          newEvidenceCount,
+        });
+        if (newEvidenceCount === 0) break;
       }
 
       const evidence = [...evidenceMap.values()].sort((a, b) =>
@@ -348,6 +421,8 @@ export class AiOpsInvestigationService {
           used: [...executorUsed],
           fallbackReasons: [...fallbackReasons],
         },
+        labelDiscovery,
+        rounds,
         answer,
         evidence,
         exploreUrls: [...new Set(exploreUrls)],
@@ -426,6 +501,7 @@ export class AiOpsInvestigationService {
     raw: any,
     body: LogInvestigationDto,
     source: any,
+    labelDiscovery?: { values?: Record<string, string[]> } | null,
   ): InvestigationPlan {
     const intent = String(raw?.intent || '')
       .trim()
@@ -466,6 +542,13 @@ export class AiOpsInvestigationService {
       !source.allowedServices.includes(serviceName)
     )
       reject('服务不在允许范围内');
+    if (
+      serviceName &&
+      !body.serviceName?.trim() &&
+      (labelDiscovery?.values?.service_name?.length || 0) > 0 &&
+      !labelDiscovery?.values?.service_name?.includes(serviceName)
+    )
+      reject('服务不在 MCP 实时发现结果内');
     if (body.queryText?.trim() && !queryTexts.includes(body.queryText.trim()))
       reject('遗漏或修改了用户指定的调查线索');
     if (queryTexts.length > 3 || queryTexts.some((value) => value.length > 500))
@@ -495,6 +578,78 @@ export class AiOpsInvestigationService {
       rangeMinutes,
       limit,
     } satisfies InvestigationPlan;
+  }
+
+  private async refinePlan(
+    actor: ActorContext,
+    environmentId: string,
+    question: string,
+    plan: InvestigationPlan,
+    evidence: Evidence[],
+    labelDiscovery: { values?: Record<string, string[]> } | null,
+    executedQueries: Set<string>,
+  ) {
+    const response = await this.aiOps.completeLogInvestigationJson(actor, {
+      sessionId: this.sessionId(environmentId, actor),
+      maxTokens: 700,
+      systemPrompt: [
+        'You decide whether one additional bounded Loki investigation round is useful.',
+        'Return JSON only: {"done":boolean,"reason":string,"serviceName":string|null,"queryTexts":string[]}.',
+        'Never return LogQL. Return at most two literal query strings.',
+        'Every new query string must occur verbatim in the user question or supplied evidence.',
+        'serviceName must be null, the current service, or an exact discovered service_name value.',
+        'Set done=true when evidence is sufficient, no trustworthy pivot exists, or another query would repeat prior work.',
+      ].join('\n'),
+      userPrompt: JSON.stringify({
+        question,
+        currentPlan: plan,
+        executedQueries: [...executedQueries].map(
+          (value) => value.split('\u0000')[1],
+        ),
+        discoveredServiceNames: labelDiscovery?.values?.service_name || [],
+        evidence: evidence.slice(-30).map((item) => ({
+          evidenceId: item.evidenceId,
+          labels: item.labels,
+          line: item.line.slice(0, 1200),
+        })),
+      }),
+    });
+    const raw = this.parseJson(response.text, '调查细化计划');
+    const done = raw?.done === true;
+    const reason = String(raw?.reason || '')
+      .trim()
+      .slice(0, 300);
+    const serviceName = raw?.serviceName
+      ? String(raw.serviceName).trim()
+      : plan.serviceName;
+    const queryTexts = Array.isArray(raw?.queryTexts)
+      ? [
+          ...new Set<string>(
+            raw.queryTexts.map((value: unknown) => String(value).trim()),
+          ),
+        ]
+          .filter(Boolean)
+          .slice(0, 2)
+      : [];
+    const searchableText =
+      `${question}\n${evidence.map((item) => item.line).join('\n')}`.toLowerCase();
+    if (
+      queryTexts.some(
+        (value) =>
+          value.length > 500 || !searchableText.includes(value.toLowerCase()),
+      )
+    ) {
+      throw new BadGatewayException('模型生成了没有证据来源的调查细化线索');
+    }
+    const discoveredServices = labelDiscovery?.values?.service_name || [];
+    if (
+      serviceName &&
+      serviceName !== plan.serviceName &&
+      !discoveredServices.includes(serviceName)
+    ) {
+      throw new BadGatewayException('模型生成了未经 MCP 发现的服务名称');
+    }
+    return { done, reason, serviceName, queryTexts };
   }
 
   private async claimJob() {

@@ -81,6 +81,17 @@ type InvestigationResult = {
     used: string[];
     fallbackReasons: string[];
   };
+  labelDiscovery?: {
+    names: string[];
+    values: Record<string, string[]>;
+  } | null;
+  rounds?: Array<{
+    round: number;
+    reason: string;
+    serviceName: string | null;
+    queryTexts: string[];
+    newEvidenceCount: number;
+  }>;
 };
 
 type InvestigationJob = {
@@ -410,6 +421,19 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                 </ul>
               </div>
             )}
+            {investigationResult.rounds?.length ? (
+              <div>
+                <Text strong>Agent 调查轮次：</Text>
+                <ul>
+                  {investigationResult.rounds.map((round) => (
+                    <li key={round.round}>
+                      第 {round.round} 轮：{round.reason || '根据已有证据继续追踪'}；
+                      线索 {round.queryTexts.join('、') || '-'}；新增证据 {round.newEvidenceCount} 条
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <Text type="secondary">
               调查意图：{investigationResult.plan.intent}；线索：{investigationResult.plan.queryTexts.join('、') || '-'}；引用证据：{investigationResult.answer.evidenceIds.join('、') || '-'}
             </Text>

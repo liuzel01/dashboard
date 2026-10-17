@@ -38,6 +38,16 @@ const createService = () => {
         provider: 'cliproxy',
         model: 'gpt-5.6-terra',
         text: JSON.stringify({
+          done: true,
+          reason: '现有证据足够',
+          serviceName: 'orders',
+          queryTexts: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
           summary: 'orders 服务出现连接拒绝。',
           findings: [{ text: '连接目标拒绝连接。', evidenceIds: ['ev-1'] }],
           evidenceIds: ['ev-1'],
@@ -60,6 +70,7 @@ const createService = () => {
         },
       ],
     }),
+    discoverLabels: jest.fn().mockResolvedValue(null),
     search: jest.fn().mockResolvedValue({
       evidence: [
         {
@@ -159,6 +170,16 @@ describe('AiOpsInvestigationService', () => {
           queryTexts: ['connection refused'],
           rangeMinutes: 60,
           limit: 20,
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          done: true,
+          reason: '现有证据足够',
+          serviceName: 'orders',
+          queryTexts: [],
         }),
       })
       .mockResolvedValueOnce({

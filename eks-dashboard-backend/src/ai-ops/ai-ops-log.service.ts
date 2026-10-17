@@ -84,6 +84,61 @@ export class AiOpsLogService {
     };
   }
 
+  async discoverLabels(
+    environmentId: string,
+    actor: ActorContext,
+    input: { from: string; to: string; namespace?: string },
+  ) {
+    this.ensurePermissions(actor, ['menu:ai-ops']);
+    if (!(await this.mcp.enabled(environmentId))) return null;
+    const source = await this.getSource(environmentId);
+    this.ensureConfigured(source, false);
+    const matcherParts = [`cluster=${JSON.stringify(environmentId)}`];
+    if (input.namespace)
+      matcherParts.push(`namespace=${JSON.stringify(input.namespace)}`);
+    const matcher = `{${matcherParts.join(',')}}`;
+    try {
+      const namesResult = await this.mcp.callTool(
+        environmentId,
+        'list_loki_label_names',
+        {
+          datasourceUid: source.datasourceUid,
+          matcher,
+          startRfc3339: input.from,
+          endRfc3339: input.to,
+        },
+      );
+      const names = this.mcpStringArray(namesResult).slice(0, 100);
+      const values: Record<string, string[]> = {};
+      for (const labelName of [
+        'namespace',
+        'service_name',
+        'app',
+        'container',
+      ]) {
+        if (!names.includes(labelName)) continue;
+        const valueResult = await this.mcp.callTool(
+          environmentId,
+          'list_loki_label_values',
+          {
+            datasourceUid: source.datasourceUid,
+            labelName,
+            matcher,
+            startRfc3339: input.from,
+            endRfc3339: input.to,
+          },
+        );
+        values[labelName] = this.mcpStringArray(valueResult).slice(0, 100);
+      }
+      return { matcher, names, values };
+    } catch (error) {
+      this.logger.warn(
+        `Grafana MCP label discovery failed for ${environmentId}: ${this.errorMessage(error)}`,
+      );
+      return null;
+    }
+  }
+
   async search(environmentId: string, actor: ActorContext, body: LogSearchDto) {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const startedAt = Date.now();
@@ -150,9 +205,9 @@ export class AiOpsLogService {
       selectorParts.push(`namespace=${JSON.stringify(body.namespace)}`);
     if (body.serviceName)
       selectorParts.push(`service_name=${JSON.stringify(body.serviceName)}`);
-    const selector = selectorParts.length
-      ? selectorParts.join(',')
-      : 'cluster=~".+"';
+    if (selectorParts.length === 0)
+      selectorParts.push(`cluster=${JSON.stringify(environmentId)}`);
+    const selector = selectorParts.join(',');
     const query = `{${selector}}${queryText ? ` |= ${JSON.stringify(queryText)}` : ''}`;
     const endpoint = `${source.baseUrl.replace(/\/+$/, '')}/api/datasources/proxy/uid/${encodeURIComponent(source.datasourceUid)}/loki/api/v1/query_range`;
 
@@ -430,6 +485,23 @@ export class AiOpsLogService {
         .filter((key) => labels[key] !== undefined)
         .map((key) => [key, String(labels[key]).slice(0, 255)]),
     );
+  }
+
+  private mcpStringArray(result: unknown) {
+    return this.mcp
+      .textPayload(
+        result as Parameters<AiOpsGrafanaMcpService['textPayload']>[0],
+      )
+      .flatMap((text) => {
+        try {
+          const parsed: unknown = JSON.parse(text);
+          return Array.isArray(parsed) ? parsed.map(String) : [];
+        } catch {
+          return [];
+        }
+      })
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 
   private buildExploreUrl(

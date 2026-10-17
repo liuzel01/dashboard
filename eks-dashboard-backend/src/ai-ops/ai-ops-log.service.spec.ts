@@ -211,7 +211,7 @@ describe('AiOpsLogService', () => {
       'icoin',
       'query_loki_logs',
       expect.objectContaining({
-        logql: '{cluster=~".+"} |= "1001"',
+        logql: '{cluster="icoin"} |= "1001"',
         limit: 20,
       }),
     );
@@ -223,6 +223,32 @@ describe('AiOpsLogService', () => {
       used: 'mcp',
       fallbackReason: null,
     });
+  });
+
+  it('discovers bounded Loki labels and values through MCP', async () => {
+    const { service, mcp } = createService();
+    mcp.enabled.mockResolvedValue(true);
+    mcp.callTool.mockResolvedValue({ content: [], isError: false });
+    mcp.textPayload
+      .mockReturnValueOnce([
+        JSON.stringify(['cluster', 'namespace', 'service_name', 'app']),
+      ])
+      .mockReturnValueOnce([JSON.stringify(['default', 'monitoring'])])
+      .mockReturnValueOnce([JSON.stringify(['orders', 'users'])])
+      .mockReturnValueOnce([JSON.stringify(['orders-api'])]);
+
+    const result = await service.discoverLabels('icoin', actor, {
+      from: '2026-10-17T02:55:00.000Z',
+      to: '2026-10-17T03:00:00.000Z',
+    });
+
+    expect(result?.matcher).toBe('{cluster="icoin"}');
+    expect(result?.values.service_name).toEqual(['orders', 'users']);
+    expect(mcp.callTool).toHaveBeenCalledWith(
+      'icoin',
+      'list_loki_label_names',
+      expect.objectContaining({ datasourceUid: 'icoin-loki' }),
+    );
   });
 
   it('allows a service-only bounded query and rejects a namespace-only scan', async () => {
