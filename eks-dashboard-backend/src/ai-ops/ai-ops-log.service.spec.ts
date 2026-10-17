@@ -262,8 +262,7 @@ describe('AiOpsLogService', () => {
       'icoin',
       'query_loki_logs',
       expect.objectContaining({
-        logql:
-          'sum(count_over_time(({cluster="icoin"} |= "1001")[300s]))',
+        logql: 'sum(count_over_time(({cluster="icoin"} |= "1001")[300s]))',
         queryType: 'instant',
       }),
       60_000,
@@ -273,7 +272,83 @@ describe('AiOpsLogService', () => {
       sampledLines: 1,
       sampleLimit: 20,
       truncated: true,
+      samplingStrategy: 'latest',
+      timeSlices: 1,
     });
+  });
+
+  it('samples truncated MCP results across bounded time slices', async () => {
+    const { service, mcp } = createService();
+    mcp.enabled.mockResolvedValue(true);
+    mcp.callTool.mockResolvedValue({ content: [], isError: false });
+    mcp.textPayload
+      .mockReturnValueOnce([
+        JSON.stringify({
+          data: [
+            {
+              timestamp: '2026-10-17T03:59:00Z',
+              line: 'latest',
+              labels: { service_name: 'ingress-nginx' },
+            },
+          ],
+        }),
+      ])
+      .mockReturnValueOnce([
+        JSON.stringify({ data: [{ value: 4905, labels: {} }] }),
+      ])
+      .mockReturnValueOnce([
+        JSON.stringify({
+          data: [
+            { timestamp: '2026-10-17T02:10:00Z', line: 'slice-1', labels: {} },
+          ],
+        }),
+      ])
+      .mockReturnValueOnce([
+        JSON.stringify({
+          data: [
+            { timestamp: '2026-10-17T02:40:00Z', line: 'slice-2', labels: {} },
+          ],
+        }),
+      ])
+      .mockReturnValueOnce([
+        JSON.stringify({
+          data: [
+            { timestamp: '2026-10-17T03:10:00Z', line: 'slice-3', labels: {} },
+          ],
+        }),
+      ])
+      .mockReturnValueOnce([
+        JSON.stringify({
+          data: [
+            { timestamp: '2026-10-17T03:40:00Z', line: 'slice-4', labels: {} },
+          ],
+        }),
+      ]);
+
+    const result = await service.search('icoin', actor, {
+      projectId: 'icoin',
+      sourceId: 'icoin-loki-main',
+      namespace: 'ingress-nginx',
+      serviceName: 'ingress-nginx',
+      queryText: '143.109.37.118',
+      from: '2026-10-17T02:00:00.000Z',
+      to: '2026-10-17T04:00:00.000Z',
+      limit: 20,
+    });
+
+    expect(result.evidence.map((item) => item.line)).toEqual([
+      'slice-1',
+      'slice-2',
+      'slice-3',
+      'slice-4',
+    ]);
+    expect(result.statistics).toEqual(
+      expect.objectContaining({
+        matchingLines: 4905,
+        samplingStrategy: 'time-sliced',
+        timeSlices: 4,
+      }),
+    );
   });
 
   it('normalizes the nanosecond timestamps returned by Grafana MCP', async () => {

@@ -55,6 +55,8 @@ export type AlertLogSearchResult = {
     sampledLines: number;
     sampleLimit: number;
     truncated: boolean | null;
+    samplingStrategy?: 'latest' | 'time-sliced';
+    timeSlices?: number;
   };
 };
 
@@ -234,6 +236,8 @@ export class AiOpsLogService {
       let executorUsed: 'mcp' | 'direct' = mcpEnabled ? 'mcp' : 'direct';
       let fallbackReason: string | null = null;
       let matchingLines: number | null = null;
+      let samplingStrategy: 'latest' | 'time-sliced' = 'latest';
+      let timeSlices = 1;
       if (mcpEnabled) {
         try {
           evidence = await this.searchViaMcp(
@@ -251,6 +255,32 @@ export class AiOpsLogService {
             from,
             to,
           );
+          if (
+            matchingLines !== null &&
+            matchingLines > evidence.length &&
+            to.getTime() - from.getTime() >= 30 * 60 * 1000 &&
+            limit >= 4
+          ) {
+            try {
+              const sliced = await this.sampleViaMcpTimeSlices(
+                environmentId,
+                source,
+                query,
+                from,
+                to,
+                limit,
+              );
+              if (sliced.evidence.length > 0) {
+                evidence = sliced.evidence;
+                samplingStrategy = 'time-sliced';
+                timeSlices = sliced.timeSlices;
+              }
+            } catch (error) {
+              this.logger.warn(
+                `Grafana MCP time-sliced sampling failed for ${environmentId}; keeping latest sample: ${this.errorMessage(error)}`,
+              );
+            }
+          }
         } catch (error) {
           if (!(await this.mcp.fallbackEnabled(environmentId))) throw error;
           fallbackReason = this.errorMessage(error);
@@ -344,6 +374,8 @@ export class AiOpsLogService {
           sampleLimit: limit,
           truncated:
             matchingLines === null ? null : matchingLines > evidence.length,
+          samplingStrategy,
+          timeSlices,
         },
       };
     } catch (error: any) {
@@ -393,10 +425,26 @@ export class AiOpsLogService {
       { key: 'identity', label: '身份认证 / KYC', pattern: 'identity|kyc' },
       { key: 'withdraw', label: '提现', pattern: 'withdraw' },
       { key: 'otc', label: 'OTC', pattern: 'otc' },
-      { key: 'security', label: '2FA 与安全设置', pattern: 'security|google|2fa|phone' },
-      { key: 'writeoff', label: '账号注销', pattern: 'writeOff|writeoff|write-off' },
-      { key: 'callback', label: '回调与通知探测', pattern: 'notify/deposit|callback' },
-      { key: 'probe', label: '异常路径探测', pattern: 'actuator|\\.git|nacos|druid|Nmap|HNAP1|security\\.txt' },
+      {
+        key: 'security',
+        label: '2FA 与安全设置',
+        pattern: 'security|google|2fa|phone',
+      },
+      {
+        key: 'writeoff',
+        label: '账号注销',
+        pattern: 'writeOff|writeoff|write-off',
+      },
+      {
+        key: 'callback',
+        label: '回调与通知探测',
+        pattern: 'notify/deposit|callback',
+      },
+      {
+        key: 'probe',
+        label: '异常路径探测',
+        pattern: 'actuator|\\.git|nacos|druid|Nmap|HNAP1|security\\.txt',
+      },
     ];
     const results: LogCategoryStatistic[] = [];
     for (let index = 0; index < categories.length; index += 2) {
@@ -676,6 +724,52 @@ export class AiOpsLogService {
     }));
   }
 
+  private async sampleViaMcpTimeSlices(
+    environmentId: string,
+    source: LogSourceConfig,
+    query: string,
+    from: Date,
+    to: Date,
+    limit: number,
+  ) {
+    const rangeMs = to.getTime() - from.getTime();
+    const timeSlices = Math.min(
+      4,
+      Math.max(2, Math.floor(rangeMs / (30 * 60 * 1000))),
+    );
+    const perSliceLimit = Math.max(1, Math.ceil(limit / timeSlices));
+    const evidence = new Map<
+      string,
+      AlertLogSearchResult['evidence'][number]
+    >();
+    for (let index = 0; index < timeSlices; index += 1) {
+      const sliceFrom = new Date(
+        from.getTime() + Math.floor((rangeMs * index) / timeSlices),
+      );
+      const sliceTo = new Date(
+        from.getTime() + Math.floor((rangeMs * (index + 1)) / timeSlices),
+      );
+      const rows = await this.searchViaMcp(
+        environmentId,
+        source,
+        query,
+        sliceFrom,
+        sliceTo,
+        perSliceLimit,
+      );
+      for (const row of rows) {
+        const key = `${row.timestamp}\u0000${row.line}\u0000${JSON.stringify(row.labels)}`;
+        if (!evidence.has(key)) evidence.set(key, row);
+      }
+    }
+    return {
+      evidence: [...evidence.values()]
+        .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+        .slice(0, limit),
+      timeSlices,
+    };
+  }
+
   private async countViaMcp(
     environmentId: string,
     source: LogSourceConfig,
@@ -731,7 +825,9 @@ export class AiOpsLogService {
     }
     const date = new Date(raw);
     if (!Number.isNaN(date.getTime())) return date.toISOString();
-    throw new Error(`Grafana MCP 返回了无效的日志时间戳：${raw.slice(0, 64) || '-'}`);
+    throw new Error(
+      `Grafana MCP 返回了无效的日志时间戳：${raw.slice(0, 64) || '-'}`,
+    );
   }
 
   private async searchDirect(
