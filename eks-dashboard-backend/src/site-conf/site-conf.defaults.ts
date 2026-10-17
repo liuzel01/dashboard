@@ -123,6 +123,7 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   { key: 'aiops.logs.environments.icoin.max_range_hours', valueType: 'number', category: 'aiops-logs', description: 'icoin 单次日志调查最大时间范围（小时）', defaultValue: '24', validation: { min: 1, max: 168 } },
   { key: 'aiops.logs.environments.icoin.max_lines', valueType: 'number', category: 'aiops-logs', description: 'icoin 单次日志调查最大返回行数', defaultValue: '200', validation: { min: 1, max: 1000 } },
   { key: 'aiops.logs.environments.icoin.timeout_ms', valueType: 'number', category: 'aiops-logs', description: 'icoin Grafana/Loki 查询超时（毫秒）', defaultValue: '15000', validation: { min: 1000, max: 60000 } },
+  { key: 'aiops.logs.investigation.worker_concurrency', valueType: 'number', category: 'aiops-logs', description: '日志调查后台任务受控并发数', defaultValue: '2', validation: { min: 1, max: 3 } },
   { key: 'aiops.logs.environments.icoin.executor', valueType: 'string', category: 'aiops-logs', description: 'icoin 日志执行器：mcp 或 direct', defaultValue: 'mcp', validation: { enum: ['mcp', 'direct'] } },
   { key: 'aiops.logs.environments.icoin.mcp_url', valueType: 'string', category: 'aiops-logs', description: 'icoin Grafana MCP Streamable HTTP 地址', defaultValue: 'http://127.0.0.1:8102/mcp' },
   { key: 'aiops.logs.environments.icoin.mcp_token_source', valueType: 'string', category: 'aiops-logs', description: 'icoin Grafana MCP Token 来源：siteconf 或 ssm', defaultValue: 'siteconf', validation: { enum: ['siteconf', 'ssm'] } },

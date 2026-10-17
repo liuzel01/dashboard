@@ -87,15 +87,18 @@ const createService = () => {
     query: jest.fn().mockResolvedValue({ affectedRows: 1 }),
     paginate: jest.fn(),
   };
+  const siteConf = { getNumber: jest.fn().mockResolvedValue(2) };
   return {
     service: new AiOpsInvestigationService(
       aiOps as any,
       logs as any,
       platformDb as any,
+      siteConf as any,
     ),
     aiOps,
     logs,
     platformDb,
+    siteConf,
   };
 };
 
@@ -598,6 +601,100 @@ describe('AiOpsInvestigationService', () => {
         seedJobIds: [16, 17],
         childJobIds: [21, 22],
       }),
+    );
+  });
+
+  it('paginates report metadata before loading large report JSON payloads', async () => {
+    const { service, platformDb } = createService();
+    platformDb.query
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: 4,
+          actor_username: 'admin',
+          job_ids_json: '[16,17,18]',
+          created_at: '2026-10-17 07:07:46',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 4,
+          report_json: JSON.stringify({
+            report: {
+              title: '深度调查报告',
+              reportType: 'security',
+              confidence: 'medium',
+            },
+          }),
+        },
+      ]);
+
+    const result = await service.listCorrelationReports('icoin', actor, 1, 20);
+
+    expect(platformDb.query).toHaveBeenNthCalledWith(
+      1,
+      expect.not.stringContaining('report_json'),
+      ['icoin'],
+    );
+    expect(platformDb.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('WHERE id IN (?)'),
+      [4],
+    );
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        reportId: 4,
+        title: '深度调查报告',
+        reportType: 'security',
+      }),
+    );
+  });
+
+  it('runs claimed investigation jobs with bounded concurrency', async () => {
+    const { service, platformDb, siteConf } = createService();
+    const jobs = [
+      {
+        id: 31,
+        environment_id: 'icoin',
+        actor_json: JSON.stringify(actor),
+        request_json: JSON.stringify(request),
+        attempt_count: 1,
+      },
+      {
+        id: 32,
+        environment_id: 'icoin',
+        actor_json: JSON.stringify(actor),
+        request_json: JSON.stringify(request),
+        attempt_count: 1,
+      },
+    ];
+    jest
+      .spyOn(service as any, 'claimJob')
+      .mockResolvedValueOnce(jobs[0])
+      .mockResolvedValueOnce(jobs[1]);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const investigate = jest
+      .spyOn(service, 'investigate')
+      .mockImplementation(async () => {
+        await gate;
+        return { ok: true } as any;
+      });
+
+    const running = service.processQueue();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(siteConf.getNumber).toHaveBeenCalledWith(
+      'aiops.logs.investigation.worker_concurrency',
+      2,
+    );
+    expect(investigate).toHaveBeenCalledTimes(2);
+    release();
+    await running;
+    expect(platformDb.query).toHaveBeenCalledWith(
+      expect.stringContaining("stage='COMPLETED'"),
+      expect.any(Array),
     );
   });
 });

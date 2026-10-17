@@ -69,6 +69,29 @@ type LogEvidence = {
   line: string;
 };
 
+type EvidenceMatrix = {
+  coverage: {
+    firstSeen: string | null;
+    lastSeen: string | null;
+    evidenceCount: number;
+    largestMeasuredQuery: number | null;
+    truncatedQueries: number;
+    timeSlicedQueries: number;
+    queryCount: number;
+  };
+  entities: Record<string, Array<{ value: string; role?: string | null; evidenceCount: number }>>;
+  requests: {
+    hosts: string[];
+    paths: string[];
+    statusCodes: string[];
+    requestIds: string[];
+    sessionIds: string[];
+  };
+  behaviors: Array<{ key: string; label: string; matchingLines: number | null }>;
+  outcomeSignals: Array<{ key: string; label: string; evidenceCount: number }>;
+  limitations: string[];
+};
+
 type InvestigationResult = {
   planVersion: string;
   model: string;
@@ -111,6 +134,8 @@ type InvestigationResult = {
     matchingLines: number | null;
     sampledLines: number;
     truncated: boolean | null;
+    samplingStrategy?: 'latest' | 'time-sliced';
+    timeSlices?: number;
   }>;
   categoryStatistics?: Array<{
     key: string;
@@ -125,6 +150,7 @@ type InvestigationResult = {
     confidence?: 'low' | 'medium' | 'high';
     evidenceIds: string[];
   }>;
+  evidenceMatrix?: EvidenceMatrix;
 };
 
 type InvestigationJob = {
@@ -132,6 +158,8 @@ type InvestigationJob = {
   question: string;
   actorUsername: string;
   status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  stage?: string | null;
+  stageDetail?: { current?: number; total?: number; message?: string } | null;
   attemptCount: number;
   errorMessage?: string | null;
   createdAt: string;
@@ -178,6 +206,7 @@ type InvestigationCorrelation = {
     confidence: 'low' | 'medium' | 'high';
   };
   generatedAt: string;
+  evidenceMatrix?: EvidenceMatrix;
 };
 
 type InvestigationReportSummary = {
@@ -190,17 +219,91 @@ type InvestigationReportSummary = {
   createdAt: string;
 };
 
+const EvidenceMatrixView: React.FC<{ matrix?: EvidenceMatrix }> = ({ matrix }) => {
+  if (!matrix) return null;
+  const entityTypes = [
+    ['ip', 'IP'],
+    ['user_id', 'UID'],
+    ['tenant_id', 'Tenant'],
+    ['email', '邮箱'],
+    ['phone', '手机'],
+    ['host', '域名'],
+  ] as const;
+  return (
+    <Card size="small" title="结构化证据矩阵">
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag>证据 {matrix.coverage.evidenceCount}</Tag>
+          <Tag color="blue">最大单项命中 {matrix.coverage.largestMeasuredQuery ?? '不可用'}</Tag>
+          <Tag color={matrix.coverage.truncatedQueries ? 'gold' : 'green'}>截断查询 {matrix.coverage.truncatedQueries}</Tag>
+          <Tag color="cyan">时间分片查询 {matrix.coverage.timeSlicedQueries}</Tag>
+        </Space>
+        {entityTypes.map(([key, label]) => matrix.entities[key]?.length ? (
+          <div key={key}>
+            <Text strong>{label}：</Text>
+            <Space wrap style={{ marginLeft: 8 }}>
+              {matrix.entities[key].slice(0, 20).map((item) => (
+                <Tag key={`${key}-${item.value}-${item.role || ''}`}>{item.value}{item.role ? ` (${item.role})` : ''}</Tag>
+              ))}
+            </Space>
+          </div>
+        ) : null)}
+        {matrix.requests.paths.length ? <div><Text strong>请求路径：</Text> {matrix.requests.paths.slice(0, 20).join('、')}</div> : null}
+        {matrix.requests.statusCodes.length ? <div><Text strong>状态码：</Text> {matrix.requests.statusCodes.join('、')}</div> : null}
+        {matrix.behaviors.length ? (
+          <div>
+            <Text strong>行为统计：</Text>
+            <Space wrap style={{ marginLeft: 8 }}>
+              {matrix.behaviors.map((item) => <Tag key={item.key}>{item.label}：{item.matchingLines ?? '不可用'}</Tag>)}
+            </Space>
+          </div>
+        ) : null}
+        {matrix.outcomeSignals.length ? (
+          <div>
+            <Text strong>结果信号：</Text>
+            <Space wrap style={{ marginLeft: 8 }}>
+              {matrix.outcomeSignals.map((item) => <Tag key={item.key}>{item.label}：{item.evidenceCount} 条证据</Tag>)}
+            </Space>
+          </div>
+        ) : null}
+        {matrix.limitations.length ? <Alert type="warning" showIcon message="证据边界" description={matrix.limitations.join('；')} /> : null}
+      </Space>
+    </Card>
+  );
+};
+
 type InvestigationCase = {
   caseId: number;
   actorUsername: string;
   seedJobIds: number[];
   childJobIds: number[];
+  childJobs?: Array<{
+    jobId: number;
+    status: string;
+    stage?: string | null;
+    stageDetail?: { current?: number; total?: number; message?: string } | null;
+    attemptCount: number;
+  }>;
   status: 'CREATING' | 'WAITING' | 'REPORTING' | 'COMPLETED' | 'FAILED';
   finalReportId?: number | null;
   errorMessage?: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;
+};
+
+const investigationStageLabel = (stage?: string | null, detail?: { current?: number; total?: number; message?: string } | null) => {
+  const labels: Record<string, string> = {
+    PLANNING: '生成计划',
+    QUERYING: '查询日志',
+    REFINING: '细化线索',
+    SUMMARIZING: '生成结论',
+    RETRY_WAIT: '等待重试',
+    COMPLETED: '已完成',
+    FAILED: '已失败',
+  };
+  const base = detail?.message || labels[String(stage || '')] || '等待执行';
+  return detail?.total ? `${base} ${detail.current || 0}/${detail.total}` : base;
 };
 
 const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
@@ -649,8 +752,13 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                 {
                   title: '状态',
                   dataIndex: 'status',
-                  width: 120,
-                  render: (value: string) => <Tag color={value === 'COMPLETED' ? 'green' : value === 'FAILED' ? 'red' : 'blue'}>{value}</Tag>,
+                  width: 220,
+                  render: (value: string, row: InvestigationJob) => (
+                    <Space size={4} wrap>
+                      <Tag color={value === 'COMPLETED' ? 'green' : value === 'FAILED' ? 'red' : value === 'PENDING' ? 'default' : 'blue'}>{value}</Tag>
+                      {value !== 'COMPLETED' ? <Text type="secondary">{investigationStageLabel(row.stage, row.stageDetail)}</Text> : null}
+                    </Space>
+                  ),
                 },
                 { title: '发起人', dataIndex: 'actorUsername', width: 140 },
                 { title: '创建时间', dataIndex: 'createdAt', width: 200 },
@@ -684,8 +792,38 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
               columns={[
                 { title: 'Case', dataIndex: 'caseId', width: 90, render: (value: number) => `#${value}` },
                 { title: '起始任务', dataIndex: 'seedJobIds', width: 220, render: (values: number[]) => values.map((id) => `#${id}`).join('、') },
-                { title: '补查任务', dataIndex: 'childJobIds', ellipsis: true, render: (values: number[]) => values.length ? values.map((id) => `#${id}`).join('、') : '-' },
-                { title: '状态', dataIndex: 'status', width: 120, render: (value: string) => <Tag color={value === 'COMPLETED' ? 'green' : value === 'FAILED' ? 'red' : 'blue'}>{value}</Tag> },
+                {
+                  title: '补查任务',
+                  dataIndex: 'childJobIds',
+                  width: 330,
+                  render: (values: number[], row: InvestigationCase) => {
+                    if (!values.length) return '-';
+                    const children = row.childJobs || [];
+                    const completed = children.filter((item) => item.status === 'COMPLETED').length;
+                    const running = children.filter((item) => item.status === 'RUNNING').length;
+                    const retrying = children.filter((item) => item.stage === 'RETRY_WAIT').length;
+                    const failed = children.filter((item) => item.status === 'FAILED').length;
+                    const active = children.find((item) => item.status === 'RUNNING');
+                    return (
+                      <Space size={4} wrap>
+                        <Tag color="green">完成 {completed}/{values.length}</Tag>
+                        {running ? <Tag color="processing">执行中 {running}</Tag> : null}
+                        {retrying ? <Tag color="gold">重试 {retrying}</Tag> : null}
+                        {failed ? <Tag color="red">失败 {failed}</Tag> : null}
+                        {active ? <Text type="secondary">{investigationStageLabel(active.stage, active.stageDetail)}</Text> : null}
+                      </Space>
+                    );
+                  },
+                },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  width: 140,
+                  render: (value: string) => {
+                    const labels: Record<string, string> = { CREATING: '创建任务', WAITING: '执行补查', REPORTING: '生成报告', COMPLETED: '已完成', FAILED: '已失败' };
+                    return <Tag color={value === 'COMPLETED' ? 'green' : value === 'FAILED' ? 'red' : 'blue'}>{labels[value] || value}</Tag>;
+                  },
+                },
                 { title: '最终报告', dataIndex: 'finalReportId', width: 110, render: (value?: number | null) => value ? `#${value}` : '-' },
                 { title: '创建时间', dataIndex: 'createdAt', width: 190 },
                 {
@@ -699,7 +837,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                   ),
                 },
               ]}
-              scroll={{ x: 1050 }}
+              scroll={{ x: 1250 }}
             />
           </Card>
 
@@ -747,6 +885,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                   {correlationResult.model ? <Tag color="cyan">{correlationResult.model}</Tag> : null}
                 </Space>
                 <Alert type="info" showIcon message={correlationResult.report.summary} />
+                <EvidenceMatrixView matrix={correlationResult.evidenceMatrix} />
                 {correlationResult.report.sections.map((section) => (
                   <div key={section.key}>
                     <Text strong>{section.title}：</Text>
@@ -857,6 +996,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                   message={investigationResult.answer.summary}
                   description={investigationResult.answer.insufficientEvidence ? '当前结论不能作为故障根因判断，请缩小范围、补充服务或调查线索后重试。' : undefined}
                 />
+                <EvidenceMatrixView matrix={investigationResult.evidenceMatrix} />
                 {investigationResult.answer.findings.length > 0 && (
                   <div>
                     <Text strong>证据发现：</Text>
@@ -890,6 +1030,7 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                         <li key={`${index}-${item.queryTexts.join('-')}`}>
                           {item.serviceName || '未限定服务'} / {item.queryTexts.join(' + ') || '全部日志'}： 命中 {item.matchingLines === null ? '暂不可用' : item.matchingLines} 条， 展示证据{' '}
                           {item.sampledLines} 条{item.truncated ? '（证据已截断）' : ''}
+                          {item.samplingStrategy === 'time-sliced' ? `（已按 ${item.timeSlices || '-'} 个时间片采样）` : ''}
                         </li>
                       ))}
                     </ul>
