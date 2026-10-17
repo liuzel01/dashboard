@@ -92,6 +92,13 @@ type InvestigationResult = {
     queryTexts: string[];
     newEvidenceCount: number;
   }>;
+  queryStatistics?: Array<{
+    serviceName: string | null;
+    queryTexts: string[];
+    matchingLines: number | null;
+    sampledLines: number;
+    truncated: boolean | null;
+  }>;
 };
 
 type InvestigationJob = {
@@ -433,6 +440,21 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
                     <li key={round.round}>
                       第 {round.round} 轮：{round.reason || '根据已有证据继续追踪'}；
                       线索 {round.queryTexts.join('、') || '-'}；新增证据 {round.newEvidenceCount} 条
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {investigationResult.queryStatistics?.length ? (
+              <div>
+                <Text strong>查询统计：</Text>
+                <ul>
+                  {investigationResult.queryStatistics.map((item, index) => (
+                    <li key={`${index}-${item.queryTexts.join('-')}`}>
+                      {item.serviceName || '未限定服务'} / {item.queryTexts.join(' + ') || '全部日志'}：
+                      命中 {item.matchingLines === null ? '暂不可用' : item.matchingLines} 条，
+                      展示证据 {item.sampledLines} 条
+                      {item.truncated ? '（证据已截断）' : ''}
                     </li>
                   ))}
                 </ul>
