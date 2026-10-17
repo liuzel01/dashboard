@@ -377,6 +377,7 @@ export class AiOpsInvestigationService {
       const evidence = [...evidenceMap.values()].sort((a, b) =>
         a.timestamp.localeCompare(b.timestamp),
       );
+      let summaryFallbackReason: string | null = null;
       const answer = evidence.length
         ? await this.summarize(
             actor,
@@ -384,7 +385,21 @@ export class AiOpsInvestigationService {
             body.question,
             validatedPlan,
             evidence,
-          )
+          ).catch((error) => {
+            summaryFallbackReason = this.errorMessage(error);
+            this.logger.warn(
+              `Log evidence collected but AI summary failed env=${environmentId}: ${summaryFallbackReason}`,
+            );
+            return {
+              summary: `已获取 ${evidence.length} 条日志证据，但 AI 总结暂时不可用；请直接查看下方证据。`,
+              findings: [],
+              evidenceIds: evidence
+                .slice(0, 60)
+                .map((item) => item.evidenceId),
+              confidence: 'low',
+              insufficientEvidence: false,
+            };
+          })
         : {
             summary: '当前受控查询范围内没有找到可支持结论的日志证据。',
             findings: [],
@@ -420,6 +435,7 @@ export class AiOpsInvestigationService {
           requested: executorRequested.has('mcp') ? 'mcp' : 'direct',
           used: [...executorUsed],
           fallbackReasons: [...fallbackReasons],
+          summaryFallbackReason,
         },
         labelDiscovery,
         rounds,

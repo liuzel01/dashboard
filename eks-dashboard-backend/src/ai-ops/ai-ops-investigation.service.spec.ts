@@ -121,6 +121,42 @@ describe('AiOpsInvestigationService', () => {
     );
   });
 
+  it('returns collected evidence when the AI summary times out', async () => {
+    const { service, aiOps } = createService();
+    aiOps.completeLogInvestigationJson
+      .mockReset()
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          intent: '定位连接失败',
+          namespace: 'default',
+          serviceName: 'orders',
+          queryTexts: ['connection refused'],
+          rangeMinutes: 30,
+          limit: 20,
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          done: true,
+          reason: '现有证据足够',
+          serviceName: 'orders',
+          queryTexts: [],
+        }),
+      })
+      .mockRejectedValueOnce(new Error('timeout of 20000ms exceeded'));
+
+    const result = await service.investigate('mgbx', actor, request);
+
+    expect(result.evidence).toHaveLength(1);
+    expect(result.answer.insufficientEvidence).toBe(false);
+    expect(result.answer.evidenceIds).toEqual(['ev-1']);
+    expect(result.execution.summaryFallbackReason).toContain('timeout');
+  });
+
   it('rejects an out-of-scope namespace before querying logs', async () => {
     const { service, aiOps, logs, platformDb } = createService();
     aiOps.completeLogInvestigationJson.mockReset().mockResolvedValue({
