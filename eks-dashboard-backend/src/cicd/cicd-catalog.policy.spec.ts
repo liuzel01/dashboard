@@ -12,6 +12,9 @@ describe('CI/CD catalog policy', () => {
     ['^(icoin-|icoinweb)', 'icoin-kylin-price', true],
     ['^(icoin-|icoinweb)', 'icoinweb-partner-admin', true],
     ['^(icoin-|icoinweb)', 'devops-kylin-script-icoin', false],
+    ['^(icoin-|icoinweb|.*icoin$)', 'devops-kylin-script-icoin', true],
+    ['^(icoin-|icoinweb|.*icoin$)', 'devops-kylin-script-icointest', false],
+    ['^(icoin-|icoinweb|.*icoin$)', 'unrelated-icoin-job', false],
     ['^(mega-|megaweb)', 'mega-kylin-price', true],
   ])('applies controlled prefix pattern %s to %s', (pattern, job, expected) => {
     expect(compileJobDiscoveryPattern(pattern).test(job)).toBe(expected);
@@ -20,6 +23,7 @@ describe('CI/CD catalog policy', () => {
   it('rejects unbounded or feature-rich regular expressions', () => {
     expect(() => compileJobDiscoveryPattern('icoin-')).toThrow();
     expect(() => compileJobDiscoveryPattern('^(icoin-.*|icoinweb)')).toThrow();
+    expect(() => compileJobDiscoveryPattern('^(icoin-|.*icoin)')).toThrow();
   });
 
   it('detects Jenkins parameter drift', () => {
