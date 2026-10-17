@@ -97,13 +97,13 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download backend build
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: dashboard-backend-dist-${{ github.sha }}
           path: build-release/eks-dashboard-backend/dist
 
       - name: Download frontend build
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: dashboard-frontend-dist-${{ github.sha }}
           path: build-release/eks-dashboard-frontend/dist
@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download release archive
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: dashboard-release-${{ github.sha }}
           path: .
