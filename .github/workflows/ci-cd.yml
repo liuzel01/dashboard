@@ -24,10 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -46,7 +46,7 @@ jobs:
         run: npm run build
 
       - name: Upload backend build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dashboard-backend-dist-${{ github.sha }}
           path: eks-dashboard-backend/dist
@@ -58,10 +58,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -76,7 +76,7 @@ jobs:
         run: npm run build
 
       - name: Upload frontend build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dashboard-frontend-dist-${{ github.sha }}
           path: eks-dashboard-frontend/dist
@@ -94,16 +94,16 @@ jobs:
       script_sha256: ${{ steps.package.outputs.script_sha256 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download backend build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dashboard-backend-dist-${{ github.sha }}
           path: build-release/eks-dashboard-backend/dist
 
       - name: Download frontend build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dashboard-frontend-dist-${{ github.sha }}
           path: build-release/eks-dashboard-frontend/dist
@@ -127,7 +127,7 @@ jobs:
           echo "script_sha256=${SCRIPT_SHA256}" >> "$GITHUB_OUTPUT"
 
       - name: Upload release archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dashboard-release-${{ github.sha }}
           path: dashboard-${{ github.sha }}.tar.gz
@@ -150,10 +150,10 @@ jobs:
       SCRIPT_SHA256: ${{ needs.package-release.outputs.script_sha256 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download release archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dashboard-release-${{ github.sha }}
           path: .
@@ -166,7 +166,7 @@ jobs:
           test -n "$DEPLOY_PREFIX" || { echo "DEPLOY_S3_PREFIX is not configured" >&2; exit 1; }
 
       - name: Configure AWS credentials with OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
