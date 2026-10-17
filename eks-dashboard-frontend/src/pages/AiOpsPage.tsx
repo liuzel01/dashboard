@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Alert, Button, Card, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Table, Tag, Typography, App } from 'antd';
 import {
   getAiOpsLogSources,
   getAiOpsLogInvestigationJob,
+  getAiOpsLogInvestigationJobs,
   getAiOpsSqlAudit,
   investigateAiOpsLogs,
   previewAiOpsSql,
 } from '../services/api';
 import { InlineHelpTooltip } from '../components/ops';
+import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -81,8 +83,19 @@ type InvestigationResult = {
   };
 };
 
+type InvestigationJob = {
+  jobId: number;
+  question: string;
+  actorUsername: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  attemptCount: number;
+  errorMessage?: string | null;
+  createdAt: string;
+};
+
 const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
   const { message } = App.useApp();
+  const { currentEnvironment } = useContext(EnvironmentContext);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
@@ -90,11 +103,63 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
   const [logSources, setLogSources] = useState<LogSource[]>([]);
   const [investigationLoading, setInvestigationLoading] = useState(false);
   const [investigationResult, setInvestigationResult] = useState<InvestigationResult | null>(null);
+  const [investigationJobs, setInvestigationJobs] = useState<InvestigationJob[]>([]);
+  const [investigationJobsLoading, setInvestigationJobsLoading] = useState(false);
 
   const [form] = Form.useForm();
   const [investigationForm] = Form.useForm();
   const selectedInvestigationSourceId = Form.useWatch('sourceId', investigationForm);
   const investigationTimeMode = Form.useWatch('timeMode', investigationForm) || 'relative';
+  const activeJobStorageKey = `aiops.activeLogInvestigationJobId.${currentEnvironment?.id || 'unknown'}`;
+
+  const loadInvestigationJobs = async () => {
+    setInvestigationJobsLoading(true);
+    try {
+      const response = await getAiOpsLogInvestigationJobs(1, 20);
+      setInvestigationJobs(Array.isArray(response?.items) ? response.items : []);
+    } catch (error) {
+      const err = error as ApiError;
+      message.error(err.response?.data?.message || err.message || '调查任务加载失败');
+    } finally {
+      setInvestigationJobsLoading(false);
+    }
+  };
+
+  const waitForInvestigation = async (jobId: number) => {
+    window.localStorage.setItem(activeJobStorageKey, String(jobId));
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const job = await getAiOpsLogInvestigationJob(jobId);
+      if (job?.status === 'COMPLETED') {
+        window.localStorage.removeItem(activeJobStorageKey);
+        setInvestigationResult(job.result);
+        await loadInvestigationJobs();
+        message.success(job.result?.answer?.insufficientEvidence ? '调查完成，但当前证据不足' : 'AI 日志调查完成');
+        return;
+      }
+      if (job?.status === 'FAILED') {
+        window.localStorage.removeItem(activeJobStorageKey);
+        await loadInvestigationJobs();
+        throw new Error(job.errorMessage || '后台日志调查失败');
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    }
+    throw new Error(`日志调查任务 #${jobId} 仍在后台执行，可稍后从最近调查中继续查看`);
+  };
+
+  useEffect(() => {
+    if (mode !== 'logs' || !currentEnvironment?.id) return;
+    void loadInvestigationJobs();
+    const activeJobId = Number(window.localStorage.getItem(activeJobStorageKey));
+    if (Number.isInteger(activeJobId) && activeJobId > 0) {
+      setInvestigationLoading(true);
+      void waitForInvestigation(activeJobId)
+        .catch((error: Error) => message.error(error.message || '恢复日志调查失败'))
+        .finally(() => setInvestigationLoading(false));
+    }
+    // This page owns the recovery lifecycle; environment changes remount the route.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, currentEnvironment?.id]);
 
   const loadLogSources = async () => {
     setLogSourceLoading(true);
@@ -145,18 +210,8 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
       const jobId = Number(response?.jobId);
       if (!Number.isInteger(jobId) || jobId < 1) throw new Error('后端未返回有效调查任务 ID');
       message.info(`日志调查任务 #${jobId} 已进入后台队列`);
-      const deadline = Date.now() + 10 * 60 * 1000;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
-        const job = await getAiOpsLogInvestigationJob(jobId);
-        if (job?.status === 'COMPLETED') {
-          setInvestigationResult(job.result);
-          message.success(job.result?.answer?.insufficientEvidence ? '调查完成，但当前证据不足' : 'AI 日志调查完成');
-          return;
-        }
-        if (job?.status === 'FAILED') throw new Error(job.errorMessage || '后台日志调查失败');
-      }
-      throw new Error('日志调查仍在后台执行，请稍后重试');
+      await loadInvestigationJobs();
+      await waitForInvestigation(jobId);
     } catch (error) {
       const err = error as ApiError;
       message.error(err.response?.data?.message || err.message || 'AI 日志调查失败');
@@ -270,6 +325,46 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
             开始受控调查
           </Button>
         </Form>
+      </Card>
+
+      <Card
+        title="最近日志调查"
+        extra={<Button onClick={loadInvestigationJobs} loading={investigationJobsLoading}>刷新</Button>}
+      >
+        <Table
+          size="small"
+          rowKey="jobId"
+          loading={investigationJobsLoading}
+          dataSource={investigationJobs}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          columns={[
+            { title: '任务', dataIndex: 'jobId', width: 90, render: (value: number) => `#${value}` },
+            { title: '调查问题', dataIndex: 'question', ellipsis: true },
+            { title: '状态', dataIndex: 'status', width: 120, render: (value: string) => <Tag color={value === 'COMPLETED' ? 'green' : value === 'FAILED' ? 'red' : 'blue'}>{value}</Tag> },
+            { title: '发起人', dataIndex: 'actorUsername', width: 140 },
+            { title: '创建时间', dataIndex: 'createdAt', width: 200 },
+            {
+              title: '操作',
+              width: 110,
+              fixed: 'right',
+              render: (_: unknown, row: InvestigationJob) => (
+                <Button
+                  type="link"
+                  disabled={investigationLoading}
+                  onClick={() => {
+                    setInvestigationLoading(true);
+                    void waitForInvestigation(row.jobId)
+                      .catch((error: Error) => message.error(error.message || '调查任务读取失败'))
+                      .finally(() => setInvestigationLoading(false));
+                  }}
+                >
+                  {row.status === 'COMPLETED' ? '查看' : '继续追踪'}
+                </Button>
+              ),
+            },
+          ]}
+          scroll={{ x: 900 }}
+        />
       </Card>
 
       {investigationResult && (

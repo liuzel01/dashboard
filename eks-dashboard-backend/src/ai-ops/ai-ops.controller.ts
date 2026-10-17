@@ -168,6 +168,24 @@ export class AiOpsController {
     return this.investigationService.getJob(environmentId, actor, numericId);
   }
 
+  @Get('logs/investigations')
+  async listLogInvestigationJobs(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.listJobs(
+      environmentId,
+      actor,
+      Number(page || 1),
+      Number(pageSize || 20),
+    );
+  }
+
   @Post('events/cloudwatch')
   async ingestCloudWatch(
     @Headers('x-target-environment') environmentId: string | undefined,

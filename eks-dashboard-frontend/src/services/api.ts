@@ -376,6 +376,13 @@ export const getAiOpsLogInvestigationJob = async (jobId: number) => {
   return response.data;
 };
 
+export const getAiOpsLogInvestigationJobs = async (page = 1, pageSize = 20) => {
+  const response = await api.get('/ai-ops/logs/investigations', {
+    params: { page, pageSize },
+  });
+  return response.data;
+};
+
 export type AiOpsInvestigationStatus = 'PENDING' | 'COLLECTING' | 'ANALYZING' | 'COMPLETED' | 'INSUFFICIENT_EVIDENCE' | 'FAILED';
 export type AiOpsInvestigation = {
   id: number;

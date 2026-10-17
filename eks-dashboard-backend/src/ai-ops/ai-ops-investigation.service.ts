@@ -111,6 +111,59 @@ export class AiOpsInvestigationService {
     };
   }
 
+  async listJobs(
+    environmentId: string,
+    actor: ActorContext,
+    page = 1,
+    pageSize = 20,
+  ) {
+    const safePage = Math.max(1, Math.trunc(page) || 1);
+    const safePageSize = Math.min(100, Math.max(1, Math.trunc(pageSize) || 20));
+    const isAdmin = actor.roles.some(
+      (role) => String(role).toLowerCase() === 'admin',
+    );
+    const actorWhere = isAdmin ? '' : ' AND actor_user_id=?';
+    const params = isAdmin
+      ? [environmentId]
+      : [environmentId, Number(actor.userId || 0)];
+    const countRows = await this.platformDb.query<any[]>(
+      `SELECT COUNT(*) total FROM aiops_log_investigation_jobs WHERE environment_id=?${actorWhere}`,
+      params,
+    );
+    const rows = await this.platformDb.query<any[]>(
+      `SELECT id, project_id, source_id, actor_username, request_json, status, attempt_count,
+              error_message, created_at, started_at, completed_at, updated_at
+       FROM aiops_log_investigation_jobs
+       WHERE environment_id=?${actorWhere}
+       ORDER BY id DESC LIMIT ${safePageSize} OFFSET ${(safePage - 1) * safePageSize}`,
+      params,
+    );
+    return {
+      page: safePage,
+      pageSize: safePageSize,
+      total: Number(countRows[0]?.total || 0),
+      items: rows.map((row) => {
+        const request = this.jsonValue(row.request_json) || {};
+        return {
+          jobId: Number(row.id),
+          projectId: row.project_id,
+          sourceId: row.source_id,
+          actorUsername: row.actor_username,
+          question: String(request.question || ''),
+          timeMode:
+            request.timeMode || (request.from ? 'absolute' : 'relative'),
+          status: row.status,
+          attemptCount: Number(row.attempt_count || 0),
+          errorMessage: row.error_message || null,
+          createdAt: row.created_at,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+          updatedAt: row.updated_at,
+        };
+      }),
+    };
+  }
+
   @Interval(1_500)
   async processQueue() {
     if (this.queueRunning) return;
