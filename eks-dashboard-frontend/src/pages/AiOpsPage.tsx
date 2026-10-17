@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Table, Tag, Typography, App } from 'antd';
 import {
   getAiOpsLogSources,
+  getAiOpsLogInvestigationJob,
   getAiOpsSqlAudit,
   investigateAiOpsLogs,
   previewAiOpsSql,
@@ -125,15 +126,28 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
       const response = await investigateAiOpsLogs({
         projectId: source.projectId,
         sourceId: source.sourceId,
-        namespace: values.namespace,
+        namespace: values.namespace || undefined,
         question: values.question.trim(),
         serviceName: values.serviceName?.trim() || undefined,
         queryText: values.queryText?.trim() || undefined,
         rangeMinutes: values.rangeMinutes,
         limit: values.limit,
       });
-      setInvestigationResult(response);
-      message.success(response?.answer?.insufficientEvidence ? '调查完成，但当前证据不足' : 'AI 日志调查完成');
+      const jobId = Number(response?.jobId);
+      if (!Number.isInteger(jobId) || jobId < 1) throw new Error('后端未返回有效调查任务 ID');
+      message.info(`日志调查任务 #${jobId} 已进入后台队列`);
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        const job = await getAiOpsLogInvestigationJob(jobId);
+        if (job?.status === 'COMPLETED') {
+          setInvestigationResult(job.result);
+          message.success(job.result?.answer?.insufficientEvidence ? '调查完成，但当前证据不足' : 'AI 日志调查完成');
+          return;
+        }
+        if (job?.status === 'FAILED') throw new Error(job.errorMessage || '后台日志调查失败');
+      }
+      throw new Error('日志调查仍在后台执行，请稍后重试');
     } catch (error) {
       const err = error as ApiError;
       message.error(err.response?.data?.message || err.message || 'AI 日志调查失败');
@@ -177,15 +191,15 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {mode === 'logs' && <>
       <Card
-        title="AI 项目日志调查（Phase 2）"
+        title="AI 项目日志调查"
         extra={<Button onClick={loadLogSources} loading={logSourceLoading}>加载当前环境日志源</Button>}
       >
         <Alert
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="自然语言问题，受控计划，证据引用"
-          description="模型只负责生成结构化调查计划和总结脱敏证据；后端固定当前环境、日志源和 Namespace，并限制服务、时间范围、查询数量。模型不能直接提交 LogQL，也不会关联发布或告警。"
+          message="自然语言问题，异步调查，证据引用"
+          description="用户只需提供当前已知线索。Namespace、服务、UID、邮箱、接口、IP 等均为可选条件；后台 Agent 会生成受控计划，通过只读 Grafana MCP 查询并基于证据形成结论。"
         />
         <Form form={investigationForm} layout="vertical" requiredMark={false}>
           <Form.Item
@@ -204,9 +218,10 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
             <Form.Item label="日志源" name="sourceId" rules={[{ required: true, message: '请先加载日志源' }]}>
               <Select style={{ width: 220 }} options={logSources.map((item) => ({ value: item.sourceId, label: `${item.projectId} / ${item.sourceId}` }))} />
             </Form.Item>
-            <Form.Item label="Namespace" name="namespace" rules={[{ required: true }]}>
+            <Form.Item label="Namespace（可选）" name="namespace">
               <Select
                 showSearch
+                allowClear
                 style={{ width: 180 }}
                 options={(logSources.find((item) => item.sourceId === selectedInvestigationSourceId)?.allowedNamespaces || []).map((value) => ({ value, label: value }))}
               />

@@ -357,7 +357,7 @@ export const getAiOpsLogSources = async () => {
 export const investigateAiOpsLogs = async (data: {
   projectId: string;
   sourceId: string;
-  namespace: string;
+  namespace?: string;
   question: string;
   serviceName?: string;
   queryText?: string;
@@ -365,6 +365,11 @@ export const investigateAiOpsLogs = async (data: {
   limit?: number;
 }) => {
   const response = await api.post('/ai-ops/logs/investigate', data);
+  return response.data;
+};
+
+export const getAiOpsLogInvestigationJob = async (jobId: number) => {
+  const response = await api.get(`/ai-ops/logs/investigations/${jobId}`);
   return response.data;
 };
 
