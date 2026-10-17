@@ -469,7 +469,7 @@ export class AiOpsInvestigationService {
       'If fixed namespace/serviceName/queryText/rangeMinutes/limit is present, preserve it exactly. Optional fields may remain null.',
       'queryTexts contains zero to three literal substrings to find in logs; each must be at most 500 characters.',
       'Do not invent identifiers. Use only identifiers explicitly present in the question or fixed constraints.',
-      'Without a serviceName, rangeMinutes must not exceed 15. Always stay within supplied maxima.',
+      'Without a serviceName, rangeMinutes must not exceed 60. Always stay within supplied maxima.',
       'At least serviceName or one queryTexts entry is required.',
     ].join('\n');
   }
@@ -544,12 +544,6 @@ export class AiOpsInvestigationService {
     if (!intent) reject('缺少 intent');
     if (body.namespace?.trim() && namespace !== body.namespace.trim())
       reject('修改了用户指定的 namespace');
-    if (
-      namespace &&
-      source.allowedNamespaces.length > 0 &&
-      !source.allowedNamespaces.includes(namespace)
-    )
-      reject('namespace 超出当前日志源建议范围');
     if (body.serviceName?.trim() && serviceName !== body.serviceName.trim())
       reject('修改了用户指定的服务');
     if (
@@ -576,8 +570,8 @@ export class AiOpsInvestigationService {
       reject('修改了用户指定的时间范围');
     if (rangeMinutes > source.maxRangeHours * 60)
       reject('时间范围超过日志源上限');
-    if (!serviceName && rangeMinutes > 15)
-      reject('未指定服务时不能查询超过 15 分钟');
+    if (!serviceName && rangeMinutes > 60)
+      reject('未指定服务时不能查询超过 60 分钟');
     if (
       !Number.isInteger(limit) ||
       limit < 1 ||

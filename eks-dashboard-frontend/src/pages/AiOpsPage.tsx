@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Alert, Button, Card, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Table, Tag, Typography, App } from 'antd';
+import { Alert, AutoComplete, Button, Card, DatePicker, Form, Input, InputNumber, Radio, Select, Space, Table, Tag, Typography, App } from 'antd';
 import {
   getAiOpsLogSources,
   getAiOpsLogInvestigationJob,
@@ -179,10 +179,11 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
       const items = Array.isArray(response?.items) ? response.items : [];
       setLogSources(items);
       if (items.length === 1) {
+        const namespaces = items[0].allowedNamespaces || [];
         investigationForm.setFieldsValue({
           sourceId: items[0].sourceId,
-          namespace: items[0].allowedNamespaces?.[0],
-          rangeMinutes: 15,
+          namespace: namespaces.includes('default') ? 'default' : namespaces[0],
+          rangeMinutes: 60,
           limit: Math.min(100, items[0].maxLines || 100),
         });
       }
@@ -294,10 +295,13 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
               <Select style={{ width: 220 }} options={logSources.map((item) => ({ value: item.sourceId, label: `${item.projectId} / ${item.sourceId}` }))} />
             </Form.Item>
             <Form.Item label="Namespace（可选）" name="namespace">
-              <Select
-                showSearch
+              <AutoComplete
                 allowClear
                 style={{ width: 180 }}
+                placeholder="选择或输入 Namespace"
+                filterOption={(inputValue, option) =>
+                  String(option?.value || '').toLowerCase().includes(inputValue.toLowerCase())
+                }
                 options={(logSources.find((item) => item.sourceId === selectedInvestigationSourceId)?.allowedNamespaces || []).map((value) => ({ value, label: value }))}
               />
             </Form.Item>
@@ -314,8 +318,8 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
               <Form.Item
                 label="调查范围（分钟）"
                 name="rangeMinutes"
-                initialValue={15}
-                tooltip="未指定服务时后端最多允许 15 分钟；指定服务后可在日志源上限内扩大。"
+                initialValue={60}
+                tooltip="未指定服务时后端最多允许 60 分钟；指定服务后可在日志源上限内扩大。"
               >
                 <InputNumber min={1} max={1440} />
               </Form.Item>

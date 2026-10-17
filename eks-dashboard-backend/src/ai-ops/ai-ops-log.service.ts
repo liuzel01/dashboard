@@ -66,7 +66,11 @@ export class AiOpsLogService {
     this.ensurePermissions(actor, ['menu:ai-ops']);
     const source = await this.getSource(environmentId);
     if (!source.enabled) return { environmentId, items: [] };
-    this.ensureConfigured(source, !(await this.mcp.enabled(environmentId)));
+    const mcpEnabled = await this.mcp.enabled(environmentId);
+    this.ensureConfigured(source, !mcpEnabled);
+    const discoveredNamespaces = mcpEnabled
+      ? await this.discoverNamespaces(environmentId, source)
+      : [];
     return {
       environmentId,
       items: [
@@ -75,7 +79,10 @@ export class AiOpsLogService {
           sourceId: source.sourceId,
           provider: 'loki',
           serviceAccount: source.serviceAccount,
-          allowedNamespaces: source.allowedNamespaces,
+          allowedNamespaces:
+            discoveredNamespaces.length > 0
+              ? discoveredNamespaces
+              : source.allowedNamespaces,
           allowedServices: source.allowedServices,
           maxRangeHours: source.maxRangeHours,
           maxLines: source.maxLines,
@@ -155,15 +162,6 @@ export class AiOpsLogService {
       throw new BadRequestException('projectId/sourceId 不属于当前环境');
     }
     if (
-      body.namespace &&
-      source.allowedNamespaces.length > 0 &&
-      !source.allowedNamespaces.includes(body.namespace)
-    ) {
-      throw new BadRequestException(
-        `namespace ${body.namespace} 不在当前环境允许范围内`,
-      );
-    }
-    if (
       body.serviceName &&
       source.allowedServices.length > 0 &&
       !source.allowedServices.includes(body.serviceName)
@@ -181,7 +179,7 @@ export class AiOpsLogService {
     const maxRangeMs = source.maxRangeHours * 60 * 60 * 1000;
     const effectiveMaxRangeMs = body.serviceName
       ? maxRangeMs
-      : Math.min(maxRangeMs, 15 * 60 * 1000);
+      : Math.min(maxRangeMs, 60 * 60 * 1000);
     const from = body.from
       ? new Date(body.from)
       : new Date(to.getTime() - Math.min(60 * 60 * 1000, effectiveMaxRangeMs));
@@ -196,7 +194,7 @@ export class AiOpsLogService {
       throw new BadRequestException(
         body.serviceName
           ? `日志查询范围不能超过 ${source.maxRangeHours} 小时`
-          : '未指定服务时日志查询范围不能超过 15 分钟；如需扩大范围，请先选择服务',
+          : '未指定服务时日志查询范围不能超过 60 分钟；如需扩大范围，请先选择服务',
       );
     }
     const limit = Math.min(source.maxLines, body.limit || source.maxLines);
@@ -513,6 +511,35 @@ export class AiOpsLogService {
       })
       .map((value) => value.trim())
       .filter(Boolean);
+  }
+
+  private async discoverNamespaces(
+    environmentId: string,
+    source: LogSourceConfig,
+  ) {
+    const to = new Date();
+    const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+    try {
+      const result = await this.mcp.callTool(
+        environmentId,
+        'list_loki_label_values',
+        {
+          datasourceUid: source.datasourceUid,
+          labelName: 'namespace',
+          matcher: `{cluster=${JSON.stringify(environmentId)}}`,
+          startRfc3339: from.toISOString(),
+          endRfc3339: to.toISOString(),
+        },
+      );
+      return [...new Set(this.mcpStringArray(result))]
+        .sort((a, b) => a.localeCompare(b))
+        .slice(0, 200);
+    } catch (error) {
+      this.logger.warn(
+        `Grafana MCP namespace discovery failed for ${environmentId}: ${this.errorMessage(error)}`,
+      );
+      return [];
+    }
   }
 
   private buildExploreUrl(

@@ -157,29 +157,50 @@ describe('AiOpsInvestigationService', () => {
     expect(result.execution.summaryFallbackReason).toContain('timeout');
   });
 
-  it('rejects an out-of-scope namespace before querying logs', async () => {
+  it('accepts a user-selected namespace outside the legacy static suggestions', async () => {
     const { service, aiOps, logs, platformDb } = createService();
-    aiOps.completeLogInvestigationJson.mockReset().mockResolvedValue({
-      provider: 'cliproxy',
-      model: 'gpt-5.6-terra',
-      text: JSON.stringify({
-        intent: '跨环境扫描',
-        namespace: 'kube-system',
-        serviceName: 'orders',
-        queryTexts: ['error'],
-        rangeMinutes: 30,
-        limit: 20,
-      }),
+    aiOps.completeLogInvestigationJson
+      .mockReset()
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          intent: '调查入口日志',
+          namespace: 'ingress-nginx',
+          serviceName: 'orders',
+          queryTexts: ['error'],
+          rangeMinutes: 30,
+          limit: 20,
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({ done: true, reason: '证据足够', serviceName: 'orders', queryTexts: [] }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          summary: '发现入口错误。',
+          findings: [{ text: '入口日志包含错误。', evidenceIds: ['ev-1'] }],
+          evidenceIds: ['ev-1'],
+          confidence: 'medium',
+          insufficientEvidence: false,
+        }),
+      });
+
+    await service.investigate('mgbx', actor, {
+      ...request,
+      namespace: 'ingress-nginx',
     });
 
-    await expect(service.investigate('mgbx', actor, request)).rejects.toThrow(
-      BadRequestException,
+    expect(logs.search).toHaveBeenCalledWith(
+      'mgbx',
+      actor,
+      expect.objectContaining({ namespace: 'ingress-nginx' }),
     );
-    expect(logs.search).not.toHaveBeenCalled();
-    expect(platformDb.query).toHaveBeenCalledWith(
-      expect.stringContaining('aiops_log_investigation_audit'),
-      expect.arrayContaining(['rejected_or_failed']),
-    );
+    expect(platformDb.query).toHaveBeenCalled();
   });
 
   it('returns deterministic insufficient evidence without asking the model to guess', async () => {

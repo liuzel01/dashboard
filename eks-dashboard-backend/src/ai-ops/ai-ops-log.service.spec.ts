@@ -83,6 +83,31 @@ describe('AiOpsLogService', () => {
     expect(requestedKeys.some((key) => key.includes('.icoin.'))).toBe(false);
   });
 
+  it('returns namespaces discovered from the selected Grafana MCP source', async () => {
+    const { service, mcp } = createService();
+    mcp.enabled.mockResolvedValue(true);
+    mcp.callTool.mockResolvedValue({ content: [], isError: false });
+    mcp.textPayload.mockReturnValue([
+      JSON.stringify(['default', 'ingress-nginx', 'monitoring']),
+    ]);
+
+    const result = await service.listSources('icoin', actor);
+
+    expect(mcp.callTool).toHaveBeenCalledWith(
+      'icoin',
+      'list_loki_label_values',
+      expect.objectContaining({
+        labelName: 'namespace',
+        matcher: '{cluster="icoin"}',
+      }),
+    );
+    expect(result.items[0].allowedNamespaces).toEqual([
+      'default',
+      'ingress-nginx',
+      'monitoring',
+    ]);
+  });
+
   it('fails closed when the selected environment has no token', async () => {
     const { service } = createService({
       'aiops.logs.environments.mgbx.grafana_token': '',
@@ -329,7 +354,7 @@ describe('AiOpsLogService', () => {
     expect(mockedAxios.get).not.toHaveBeenCalled();
   });
 
-  it('limits clue-only scans without a service to 15 minutes', async () => {
+  it('limits clue-only scans without a service to 60 minutes', async () => {
     const { service } = createService();
     await expect(
       service.search('mgbx', actor, {
@@ -338,9 +363,9 @@ describe('AiOpsLogService', () => {
         namespace: 'default',
         queryText: 'connection refused',
         from: '2025-01-01T00:00:00.000Z',
-        to: '2025-01-01T00:16:00.000Z',
+        to: '2025-01-01T01:01:00.000Z',
       }),
-    ).rejects.toThrow('未指定服务时日志查询范围不能超过 15 分钟');
+    ).rejects.toThrow('未指定服务时日志查询范围不能超过 60 分钟');
     expect(mockedAxios.get).not.toHaveBeenCalled();
   });
 });
