@@ -157,6 +157,97 @@ describe('AiOpsInvestigationService', () => {
     expect(result.execution.summaryFallbackReason).toContain('timeout');
   });
 
+  it('keeps the user fixed clue in every refinement query', async () => {
+    const { service, aiOps, logs } = createService();
+    aiOps.completeLogInvestigationJson
+      .mockReset()
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          intent: '调查目标用户',
+          namespace: 'default',
+          serviceName: 'orders',
+          queryTexts: ['80420234'],
+          rangeMinutes: 30,
+          limit: 100,
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          done: false,
+          reason: '继续检查绑定操作',
+          serviceName: 'orders',
+          queryTexts: ['pre-binding-google'],
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          done: true,
+          reason: '证据足够',
+          serviceName: 'orders',
+          queryTexts: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        provider: 'cliproxy',
+        model: 'gpt-5.6-terra',
+        text: JSON.stringify({
+          summary: '发现目标用户绑定操作。',
+          findings: [{ text: '存在绑定操作。', evidenceIds: ['ev-2'] }],
+          evidenceIds: ['ev-2'],
+          confidence: 'medium',
+          insufficientEvidence: false,
+        }),
+      });
+    logs.search
+      .mockResolvedValueOnce({
+        evidence: [{
+          evidenceId: 'ev-1',
+          timestamp: '2026-10-12T00:00:00.000Z',
+          labels: { service_name: 'orders' },
+          line: 'user=80420234 action=pre-binding-google',
+        }],
+        exploreUrl: '',
+        statistics: { matchingLines: 10, sampledLines: 1, truncated: true },
+      })
+      .mockResolvedValueOnce({
+        evidence: [{
+          evidenceId: 'ev-2',
+          timestamp: '2026-10-12T00:01:00.000Z',
+          labels: { service_name: 'orders' },
+          line: 'user=80420234 pre-binding-google',
+        }],
+        exploreUrl: '',
+        statistics: { matchingLines: 1, sampledLines: 1, truncated: false },
+      });
+
+    const result = await service.investigate('mgbx', actor, {
+      ...request,
+      queryText: '80420234',
+      limit: 100,
+    });
+
+    expect(logs.search).toHaveBeenNthCalledWith(
+      2,
+      'mgbx',
+      actor,
+      expect.objectContaining({
+        queryTexts: ['80420234', 'pre-binding-google'],
+      }),
+    );
+    expect(result.queryStatistics[1]).toEqual(
+      expect.objectContaining({
+        queryTexts: ['80420234', 'pre-binding-google'],
+        matchingLines: 1,
+      }),
+    );
+  });
+
   it('accepts a user-selected namespace outside the legacy static suggestions', async () => {
     const { service, aiOps, logs, platformDb } = createService();
     aiOps.completeLogInvestigationJson

@@ -214,17 +214,21 @@ describe('AiOpsLogService', () => {
       content: [{ type: 'text', text: 'payload' }],
       isError: false,
     });
-    mcp.textPayload.mockReturnValue([
-      JSON.stringify({
-        data: [
-          {
-            timestamp: '2026-10-17T03:00:00Z',
-            line: 'uid=1001 token=secret-value',
-            labels: { cluster: 'icoin', app: 'orders' },
-          },
-        ],
-      }),
-    ]);
+    mcp.textPayload
+      .mockReturnValueOnce([
+        JSON.stringify({
+          data: [
+            {
+              timestamp: '2026-10-17T03:00:00Z',
+              line: 'uid=1001 token=secret-value',
+              labels: { cluster: 'icoin', app: 'orders' },
+            },
+          ],
+        }),
+      ])
+      .mockReturnValueOnce([
+        JSON.stringify({ data: [{ value: 42, labels: {} }] }),
+      ]);
 
     const result = await service.search('icoin', actor, {
       projectId: 'icoin',
@@ -253,6 +257,21 @@ describe('AiOpsLogService', () => {
       requested: 'mcp',
       used: 'mcp',
       fallbackReason: null,
+    });
+    expect(mcp.callTool).toHaveBeenCalledWith(
+      'icoin',
+      'query_loki_logs',
+      expect.objectContaining({
+        logql:
+          'sum(count_over_time(({cluster="icoin"} |= "1001")[300s]))',
+        queryType: 'instant',
+      }),
+    );
+    expect(result.statistics).toEqual({
+      matchingLines: 42,
+      sampledLines: 1,
+      sampleLimit: 20,
+      truncated: true,
     });
   });
 

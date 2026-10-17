@@ -44,6 +44,14 @@ type InvestigationRound = {
   newEvidenceCount: number;
 };
 
+type QueryStatistic = {
+  serviceName: string | null;
+  queryTexts: string[];
+  matchingLines: number | null;
+  sampledLines: number;
+  truncated: boolean | null;
+};
+
 @Injectable()
 export class AiOpsInvestigationService {
   private readonly logger = new Logger(AiOpsInvestigationService.name);
@@ -297,7 +305,12 @@ export class AiOpsInvestigationService {
       const executorUsed = new Set<string>();
       const fallbackReasons = new Set<string>();
       const rounds: InvestigationRound[] = [];
+      const queryStatistics: QueryStatistic[] = [];
       const executedQueries = new Set<string>();
+      const initialSampleLimit = Math.min(
+        validatedPlan.limit,
+        Math.max(20, Math.floor(validatedPlan.limit / 2)),
+      );
 
       for (const queryText of queryTexts) {
         const queryKey = `${validatedPlan.serviceName || ''}\u0000${queryText || ''}`;
@@ -311,7 +324,7 @@ export class AiOpsInvestigationService {
           queryText,
           from: from.toISOString(),
           to: to.toISOString(),
-          limit: validatedPlan.limit,
+          limit: initialSampleLimit,
         });
         for (const item of result.evidence as Evidence[]) {
           if (evidenceMap.size >= validatedPlan.limit) break;
@@ -323,6 +336,13 @@ export class AiOpsInvestigationService {
         if (result.execution?.used) executorUsed.add(result.execution.used);
         if (result.execution?.fallbackReason)
           fallbackReasons.add(result.execution.fallbackReason);
+        queryStatistics.push({
+          serviceName: validatedPlan.serviceName,
+          queryTexts: queryText ? [queryText] : [],
+          matchingLines: result.statistics?.matchingLines ?? null,
+          sampledLines: result.statistics?.sampledLines ?? result.evidence.length,
+          truncated: result.statistics?.truncated ?? null,
+        });
       }
 
       for (let round = 1; round <= 2 && evidenceMap.size > 0; round += 1) {
@@ -339,18 +359,24 @@ export class AiOpsInvestigationService {
         let newEvidenceCount = 0;
         for (const queryText of refinement.queryTexts) {
           if (executedQueries.size >= 6) break;
-          const queryKey = `${refinement.serviceName || ''}\u0000${queryText}`;
+          const combinedQueryTexts = [
+            body.queryText?.trim(),
+            queryText,
+          ].filter((value): value is string => Boolean(value));
+          const queryKey = `${refinement.serviceName || ''}\u0000${combinedQueryTexts.join('\u0000')}`;
           if (executedQueries.has(queryKey)) continue;
           executedQueries.add(queryKey);
+          const remainingEvidence = validatedPlan.limit - evidenceMap.size;
+          if (remainingEvidence <= 0) break;
           const result = await this.logs.search(environmentId, actor, {
             projectId: body.projectId,
             sourceId: body.sourceId,
             namespace: validatedPlan.namespace || undefined,
             serviceName: refinement.serviceName || undefined,
-            queryText,
+            queryTexts: combinedQueryTexts,
             from: from.toISOString(),
             to: to.toISOString(),
-            limit: validatedPlan.limit,
+            limit: Math.min(50, remainingEvidence),
           });
           for (const item of result.evidence as Evidence[]) {
             if (evidenceMap.size >= validatedPlan.limit) break;
@@ -363,6 +389,14 @@ export class AiOpsInvestigationService {
           if (result.execution?.used) executorUsed.add(result.execution.used);
           if (result.execution?.fallbackReason)
             fallbackReasons.add(result.execution.fallbackReason);
+          queryStatistics.push({
+            serviceName: refinement.serviceName,
+            queryTexts: combinedQueryTexts,
+            matchingLines: result.statistics?.matchingLines ?? null,
+            sampledLines:
+              result.statistics?.sampledLines ?? result.evidence.length,
+            truncated: result.statistics?.truncated ?? null,
+          });
         }
         rounds.push({
           round,
@@ -385,6 +419,7 @@ export class AiOpsInvestigationService {
             body.question,
             validatedPlan,
             evidence,
+            queryStatistics,
           ).catch((error) => {
             summaryFallbackReason = this.errorMessage(error);
             this.logger.warn(
@@ -439,6 +474,7 @@ export class AiOpsInvestigationService {
         },
         labelDiscovery,
         rounds,
+        queryStatistics,
         answer,
         evidence,
         exploreUrls: [...new Set(exploreUrls)],
@@ -699,6 +735,7 @@ export class AiOpsInvestigationService {
     question: string,
     plan: InvestigationPlan,
     evidence: Evidence[],
+    queryStatistics: QueryStatistic[],
   ) {
     const response = await this.aiOps.completeLogInvestigationJson(actor, {
       sessionId: this.sessionId(environmentId, actor),
@@ -714,6 +751,7 @@ export class AiOpsInvestigationService {
       userPrompt: JSON.stringify({
         question,
         plan,
+        queryStatistics,
         evidence: evidence.slice(0, 60).map((item) => ({
           evidenceId: item.evidenceId,
           timestamp: item.timestamp,

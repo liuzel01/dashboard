@@ -50,6 +50,12 @@ export type AlertLogSearchResult = {
     used: 'mcp' | 'direct';
     fallbackReason: string | null;
   };
+  statistics?: {
+    matchingLines: number | null;
+    sampledLines: number;
+    sampleLimit: number;
+    truncated: boolean | null;
+  };
 };
 
 @Injectable()
@@ -170,8 +176,15 @@ export class AiOpsLogService {
         `service ${body.serviceName} 不在当前项目允许范围内`,
       );
     }
-    const queryText = String(body.queryText || body.entityValue || '').trim();
-    if (!queryText && !body.serviceName) {
+    const queryTexts = [
+      ...(Array.isArray(body.queryTexts) ? body.queryTexts : []),
+      body.queryText || body.entityValue || '',
+    ]
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .slice(0, 4);
+    if (queryTexts.length === 0 && !body.serviceName) {
       throw new BadRequestException('请至少填写服务名称或调查线索');
     }
 
@@ -206,7 +219,7 @@ export class AiOpsLogService {
     if (selectorParts.length === 0)
       selectorParts.push(`cluster=${JSON.stringify(environmentId)}`);
     const selector = selectorParts.join(',');
-    const query = `{${selector}}${queryText ? ` |= ${JSON.stringify(queryText)}` : ''}`;
+    const query = `{${selector}}${queryTexts.map((value) => ` |= ${JSON.stringify(value)}`).join('')}`;
     const endpoint = `${source.baseUrl.replace(/\/+$/, '')}/api/datasources/proxy/uid/${encodeURIComponent(source.datasourceUid)}/loki/api/v1/query_range`;
 
     try {
@@ -214,6 +227,7 @@ export class AiOpsLogService {
       const mcpEnabled = await this.mcp.enabled(environmentId);
       let executorUsed: 'mcp' | 'direct' = mcpEnabled ? 'mcp' : 'direct';
       let fallbackReason: string | null = null;
+      let matchingLines: number | null = null;
       if (mcpEnabled) {
         try {
           evidence = await this.searchViaMcp(
@@ -223,6 +237,13 @@ export class AiOpsLogService {
             from,
             to,
             limit,
+          );
+          matchingLines = await this.countViaMcp(
+            environmentId,
+            source,
+            query,
+            from,
+            to,
           );
         } catch (error) {
           if (!(await this.mcp.fallbackEnabled(environmentId))) throw error;
@@ -299,7 +320,7 @@ export class AiOpsLogService {
         querySummary: {
           namespace: body.namespace,
           serviceName: body.serviceName || null,
-          queryText: queryText || null,
+          queryTexts,
           from: from.toISOString(),
           to: to.toISOString(),
           limit,
@@ -310,6 +331,13 @@ export class AiOpsLogService {
           requested: mcpEnabled ? 'mcp' : 'direct',
           used: executorUsed,
           fallbackReason,
+        },
+        statistics: {
+          matchingLines,
+          sampledLines: evidence.length,
+          sampleLimit: limit,
+          truncated:
+            matchingLines === null ? null : matchingLines > evidence.length,
         },
       };
     } catch (error: any) {
@@ -592,6 +620,45 @@ export class AiOpsLogService {
       labels: row?.labels || {},
       line: String(row?.line || ''),
     }));
+  }
+
+  private async countViaMcp(
+    environmentId: string,
+    source: LogSourceConfig,
+    query: string,
+    from: Date,
+    to: Date,
+  ) {
+    try {
+      const rangeSeconds = Math.max(
+        1,
+        Math.ceil((to.getTime() - from.getTime()) / 1000),
+      );
+      const result = await this.mcp.callTool(
+        environmentId,
+        'query_loki_logs',
+        {
+          datasourceUid: source.datasourceUid,
+          logql: `sum(count_over_time((${query})[${rangeSeconds}s]))`,
+          queryType: 'instant',
+          endRfc3339: to.toISOString(),
+        },
+      );
+      for (const text of this.mcp.textPayload(result)) {
+        try {
+          const parsed = JSON.parse(text);
+          const value = Number(parsed?.data?.[0]?.value);
+          if (Number.isFinite(value) && value >= 0) return value;
+        } catch {
+          // Ignore a malformed optional statistics response.
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Grafana MCP matching-line count failed for ${environmentId}: ${this.errorMessage(error)}`,
+      );
+    }
+    return null;
   }
 
   private normalizeLogTimestamp(value: unknown) {

@@ -1,5 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsISO8601,
@@ -58,6 +60,13 @@ export class LogSearchDto {
     message: 'queryText 包含不允许的控制字符',
   })
   queryText?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  @IsString({ each: true })
+  @MaxLength(512, { each: true })
+  queryTexts?: string[];
 
   @IsOptional()
   @IsISO8601()
