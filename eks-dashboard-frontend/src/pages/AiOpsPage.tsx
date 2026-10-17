@@ -74,6 +74,11 @@ type InvestigationResult = {
   };
   evidence: LogEvidence[];
   exploreUrls: string[];
+  execution?: {
+    requested: 'mcp' | 'direct';
+    used: string[];
+    fallbackReasons: string[];
+  };
 };
 
 const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
@@ -278,7 +283,20 @@ const AiOpsPage: React.FC<{ mode?: 'logs' | 'sql' }> = ({ mode = 'logs' }) => {
               </Tag>
               <Tag color="purple">{investigationResult.plan.rangeMinutes} 分钟</Tag>
               <Tag>{investigationResult.plan.serviceName || '未限定服务'}</Tag>
+              {investigationResult.execution && (
+                <Tag color={investigationResult.execution.used.includes('direct') && investigationResult.execution.requested === 'mcp' ? 'gold' : 'cyan'}>
+                  执行器 {investigationResult.execution.used.join(' + ') || investigationResult.execution.requested}
+                </Tag>
+              )}
             </Space>
+            {investigationResult.execution?.fallbackReasons?.length ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="Grafana MCP 调用失败，本次调查使用了直连回退"
+                description={investigationResult.execution.fallbackReasons.join('；')}
+              />
+            ) : null}
             <Alert
               type={investigationResult.answer.insufficientEvidence ? 'warning' : 'success'}
               showIcon

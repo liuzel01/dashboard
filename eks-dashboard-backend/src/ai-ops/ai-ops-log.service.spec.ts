@@ -218,6 +218,11 @@ describe('AiOpsLogService', () => {
     expect(mockedAxios.get).not.toHaveBeenCalled();
     expect(result.evidence[0].labels).toEqual({ app: 'orders' });
     expect(result.evidence[0].line).toBe('uid=1001 token=[REDACTED]');
+    expect(result.execution).toEqual({
+      requested: 'mcp',
+      used: 'mcp',
+      fallbackReason: null,
+    });
   });
 
   it('allows a service-only bounded query and rejects a namespace-only scan', async () => {

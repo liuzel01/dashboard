@@ -45,6 +45,11 @@ export type AlertLogSearchResult = {
     line: string;
   }>;
   exploreUrl: string;
+  execution: {
+    requested: 'mcp' | 'direct';
+    used: 'mcp' | 'direct';
+    fallbackReason: string | null;
+  };
 };
 
 @Injectable()
@@ -153,7 +158,10 @@ export class AiOpsLogService {
 
     try {
       let evidence: AlertLogSearchResult['evidence'];
-      if (await this.mcp.enabled(environmentId)) {
+      const mcpEnabled = await this.mcp.enabled(environmentId);
+      let executorUsed: 'mcp' | 'direct' = mcpEnabled ? 'mcp' : 'direct';
+      let fallbackReason: string | null = null;
+      if (mcpEnabled) {
         try {
           evidence = await this.searchViaMcp(
             environmentId,
@@ -165,8 +173,10 @@ export class AiOpsLogService {
           );
         } catch (error) {
           if (!(await this.mcp.fallbackEnabled(environmentId))) throw error;
+          fallbackReason = this.errorMessage(error);
+          executorUsed = 'direct';
           this.logger.warn(
-            `Grafana MCP failed for ${environmentId}; falling back to direct executor: ${this.errorMessage(error)}`,
+            `Grafana MCP failed for ${environmentId}; falling back to direct executor: ${fallbackReason}`,
           );
           evidence = await this.searchDirect(
             environmentId,
@@ -233,6 +243,11 @@ export class AiOpsLogService {
         },
         evidence,
         exploreUrl: this.buildExploreUrl(source, query, from, to),
+        execution: {
+          requested: mcpEnabled ? 'mcp' : 'direct',
+          used: executorUsed,
+          fallbackReason,
+        },
       };
     } catch (error: any) {
       await this.insertAudit({

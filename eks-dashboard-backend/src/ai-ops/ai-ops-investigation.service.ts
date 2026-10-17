@@ -221,6 +221,9 @@ export class AiOpsInvestigationService {
           : [undefined];
       const evidenceMap = new Map<string, Evidence>();
       const exploreUrls: string[] = [];
+      const executorRequested = new Set<string>();
+      const executorUsed = new Set<string>();
+      const fallbackReasons = new Set<string>();
 
       for (const queryText of queryTexts) {
         const result = await this.logs.search(environmentId, actor, {
@@ -238,6 +241,11 @@ export class AiOpsInvestigationService {
           evidenceMap.set(item.evidenceId, item);
         }
         if (result.exploreUrl) exploreUrls.push(result.exploreUrl);
+        if (result.execution?.requested)
+          executorRequested.add(result.execution.requested);
+        if (result.execution?.used) executorUsed.add(result.execution.used);
+        if (result.execution?.fallbackReason)
+          fallbackReasons.add(result.execution.fallbackReason);
       }
 
       const evidence = [...evidenceMap.values()].sort((a, b) =>
@@ -281,6 +289,11 @@ export class AiOpsInvestigationService {
           mode: requestedWindow.mode,
           from: from.toISOString(),
           to: to.toISOString(),
+        },
+        execution: {
+          requested: executorRequested.has('mcp') ? 'mcp' : 'direct',
+          used: [...executorUsed],
+          fallbackReasons: [...fallbackReasons],
         },
         answer,
         evidence,
