@@ -4,6 +4,7 @@ import {
   Get,
   Headers,
   HttpException,
+  HttpCode,
   HttpStatus,
   Post,
   Param,
@@ -135,6 +136,7 @@ export class AiOpsController {
   }
 
   @Post('logs/investigate')
+  @HttpCode(HttpStatus.ACCEPTED)
   async investigateLogs(
     @Headers('x-target-environment') environmentId: string,
     @Headers('authorization') authorization: string,
@@ -144,7 +146,26 @@ export class AiOpsController {
     this.ensureEnvironmentHeader(environmentId);
     const actor =
       await this.service.resolveActorFromAuthorization(authorization);
-    return this.investigationService.investigate(environmentId, actor, body);
+    return this.investigationService.enqueue(environmentId, actor, body);
+  }
+
+  @Get('logs/investigations/:id')
+  async getLogInvestigationJob(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1) {
+      throw new HttpException(
+        'Invalid log investigation job id',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.getJob(environmentId, actor, numericId);
   }
 
   @Post('events/cloudwatch')

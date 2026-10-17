@@ -18,9 +18,10 @@ export class LogInvestigationDto {
   @MaxLength(128)
   sourceId!: string;
 
+  @IsOptional()
   @IsString()
   @MaxLength(128)
-  namespace!: string;
+  namespace?: string;
 
   @IsString()
   @MaxLength(2000)

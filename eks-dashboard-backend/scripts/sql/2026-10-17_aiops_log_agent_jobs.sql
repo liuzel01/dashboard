@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS `aiops_log_investigation_jobs` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `environment_id` varchar(64) NOT NULL,
+  `project_id` varchar(64) NOT NULL,
+  `source_id` varchar(128) NOT NULL,
+  `actor_user_id` bigint DEFAULT NULL,
+  `actor_username` varchar(128) NOT NULL,
+  `actor_json` json NOT NULL,
+  `request_json` json NOT NULL,
+  `result_json` json DEFAULT NULL,
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING',
+  `attempt_count` int unsigned NOT NULL DEFAULT 0,
+  `available_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `started_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `error_message` varchar(1000) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_aiops_log_jobs_queue` (`status`, `available_at`, `id`),
+  KEY `idx_aiops_log_jobs_actor` (`actor_user_id`, `created_at`),
+  KEY `idx_aiops_log_jobs_environment` (`environment_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
