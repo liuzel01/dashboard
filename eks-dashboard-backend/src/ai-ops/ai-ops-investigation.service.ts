@@ -64,6 +64,7 @@ export class AiOpsInvestigationService {
   private readonly logger = new Logger(AiOpsInvestigationService.name);
   private readonly planVersion = 'phase3-mcp-v1';
   private queueRunning = false;
+  private caseWorkerRunning = false;
 
   constructor(
     private readonly aiOps: AiOpsService,
@@ -349,6 +350,355 @@ export class AiOpsInvestigationService {
         };
       }),
     };
+  }
+
+  async createInvestigationCase(
+    environmentId: string,
+    actor: ActorContext,
+    jobIds: number[],
+  ) {
+    const ids = [...new Set(jobIds)].slice(0, 10);
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await this.platformDb.query<any[]>(
+      `SELECT id, actor_user_id, project_id, source_id, request_json, result_json, status
+       FROM aiops_log_investigation_jobs
+       WHERE environment_id=? AND id IN (${placeholders})`,
+      [environmentId, ...ids],
+    );
+    if (
+      rows.length !== ids.length ||
+      rows.some((row) => row.status !== 'COMPLETED')
+    )
+      throw new BadRequestException(
+        '只能基于当前环境中已完成的调查任务创建深度调查',
+      );
+    const isAdmin = actor.roles.some(
+      (role) => String(role).toLowerCase() === 'admin',
+    );
+    if (
+      !isAdmin &&
+      rows.some(
+        (row) => Number(row.actor_user_id || 0) !== Number(actor.userId || 0),
+      )
+    )
+      throw new NotFoundException('日志调查任务不存在');
+
+    const evidence: CorrelationEvidence[] = [];
+    const templates = rows.map((row) => {
+      const request = this.jsonValue(row.request_json) || {};
+      const result = this.jsonValue(row.result_json) || {};
+      evidence.push(
+        ...(Array.isArray(result.evidence) ? result.evidence : []).map(
+          (item: Evidence) => ({ ...item, jobId: Number(row.id) }),
+        ),
+      );
+      return {
+        jobId: Number(row.id),
+        projectId: row.project_id,
+        sourceId: row.source_id,
+        namespace: request.namespace || undefined,
+        serviceName: request.serviceName || undefined,
+        timeMode: request.timeMode || (request.from ? 'absolute' : 'relative'),
+        from: request.from || undefined,
+        to: request.to || undefined,
+        rangeMinutes: request.rangeMinutes || undefined,
+        limit: Math.min(300, Math.max(100, Number(request.limit || 100))),
+        originalQueryText: String(request.queryText || '').trim(),
+      };
+    });
+    const graph = buildEvidenceGraph(evidence);
+    const priority = (entity: CorrelationEntity) => {
+      if (
+        entity.type === 'ip' &&
+        ['xff', 'peer', 'multiple'].includes(entity.role || '')
+      )
+        return 0;
+      if (entity.type === 'user_id') return 1;
+      if (entity.type === 'email') return 2;
+      if (entity.type === 'phone') return 3;
+      if (['trace_id', 'order_id'].includes(entity.type)) return 4;
+      return 9;
+    };
+    const candidates = graph.entities
+      .filter(
+        (entity) =>
+          entity.jobIds.length > 1 &&
+          ['ip', 'user_id', 'email', 'phone', 'trace_id', 'order_id'].includes(
+            entity.type,
+          ),
+      )
+      .sort(
+        (left, right) =>
+          priority(left) - priority(right) ||
+          right.jobIds.length - left.jobIds.length ||
+          right.evidenceIds.length - left.evidenceIds.length,
+      )
+      .slice(0, 5);
+    const emailDomains = [
+      ...new Set(
+        graph.entities
+          .filter((entity) => entity.type === 'email')
+          .map((entity) => entity.normalizedValue.split('@')[1])
+          .filter(Boolean),
+      ),
+    ].slice(0, 1);
+    const clues = [
+      ...candidates.map((entity) => ({
+        type: entity.type,
+        value: entity.normalizedValue,
+      })),
+      ...emailDomains.map((value) => ({ type: 'email_domain', value })),
+    ];
+    const uniqueTemplates = [
+      ...new Map(
+        templates.map((item) => [
+          `${item.projectId}:${item.sourceId}:${item.namespace || ''}:${item.serviceName || ''}`,
+          item,
+        ]),
+      ).values(),
+    ];
+    const followUps: Array<LogInvestigationDto & { clueType: string }> = [];
+    for (const clue of clues) {
+      for (const template of uniqueTemplates) {
+        if (followUps.length >= 6) break;
+        if (
+          templates.some(
+            (item) =>
+              item.serviceName === template.serviceName &&
+              item.originalQueryText === clue.value,
+          )
+        )
+          continue;
+        followUps.push({
+          projectId: template.projectId,
+          sourceId: template.sourceId,
+          namespace: template.namespace,
+          serviceName: template.serviceName,
+          question: `围绕共同${clue.type} ${clue.value} 补查跨服务、跨租户或跨会话证据；提取可连接现有调查任务的实体、时间和操作结果，明确区分已确认事实与待验证假设。`,
+          queryText: clue.value,
+          timeMode: template.timeMode,
+          from: template.from,
+          to: template.to,
+          rangeMinutes:
+            template.timeMode === 'absolute'
+              ? undefined
+              : template.rangeMinutes,
+          limit: template.limit,
+          clueType: clue.type,
+        });
+      }
+      if (followUps.length >= 6) break;
+    }
+    if (followUps.length === 0)
+      throw new BadRequestException('当前证据中没有可用于深度补查的共同实体');
+
+    const caseResult = await this.platformDb.query<mysql.ResultSetHeader>(
+      `INSERT INTO aiops_log_investigation_cases
+       (environment_id, actor_user_id, actor_username, actor_json, seed_job_ids_json,
+        child_job_ids_json, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, '[]', 'CREATING', UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+      [
+        environmentId,
+        actor.userId,
+        actor.username,
+        JSON.stringify(actor),
+        JSON.stringify(ids),
+      ],
+    );
+    const caseId = Number(caseResult.insertId);
+    const childJobIds: number[] = [];
+    try {
+      for (const followUp of followUps) {
+        const { clueType: _clueType, ...body } = followUp;
+        const child = await this.enqueue(environmentId, actor, body);
+        childJobIds.push(child.jobId);
+      }
+      await this.platformDb.query(
+        `UPDATE aiops_log_investigation_cases
+         SET child_job_ids_json=?, status='WAITING', updated_at=UTC_TIMESTAMP()
+         WHERE id=?`,
+        [JSON.stringify(childJobIds), caseId],
+      );
+    } catch (error) {
+      await this.platformDb.query(
+        `UPDATE aiops_log_investigation_cases
+         SET child_job_ids_json=?, status='FAILED', error_message=?, updated_at=UTC_TIMESTAMP()
+         WHERE id=?`,
+        [
+          JSON.stringify(childJobIds),
+          this.errorMessage(error).slice(0, 1000),
+          caseId,
+        ],
+      );
+      throw error;
+    }
+    return {
+      caseId,
+      status: 'WAITING',
+      seedJobIds: ids,
+      childJobIds,
+      followUps: followUps.map((item, index) => ({
+        jobId: childJobIds[index],
+        serviceName: item.serviceName || null,
+        namespace: item.namespace || null,
+        clueType: item.clueType,
+        queryText: item.queryText,
+      })),
+    };
+  }
+
+  async getInvestigationCase(
+    environmentId: string,
+    actor: ActorContext,
+    caseId: number,
+  ) {
+    const rows = await this.platformDb.query<any[]>(
+      `SELECT id, actor_user_id, actor_username, seed_job_ids_json, child_job_ids_json,
+              status, final_report_id, error_message, created_at, updated_at, completed_at
+       FROM aiops_log_investigation_cases
+       WHERE id=? AND environment_id=? LIMIT 1`,
+      [caseId, environmentId],
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException('深度调查 Case 不存在');
+    const isAdmin = actor.roles.some(
+      (role) => String(role).toLowerCase() === 'admin',
+    );
+    if (
+      !isAdmin &&
+      Number(row.actor_user_id || 0) !== Number(actor.userId || 0)
+    )
+      throw new NotFoundException('深度调查 Case 不存在');
+    const childJobIds: number[] = this.jsonValue(row.child_job_ids_json) || [];
+    const childStatuses = childJobIds.length
+      ? await this.platformDb.query<any[]>(
+          `SELECT id, status, error_message FROM aiops_log_investigation_jobs
+           WHERE id IN (${childJobIds.map(() => '?').join(',')}) ORDER BY id`,
+          childJobIds,
+        )
+      : [];
+    return {
+      caseId: Number(row.id),
+      status: row.status,
+      actorUsername: row.actor_username,
+      seedJobIds: this.jsonValue(row.seed_job_ids_json) || [],
+      childJobIds,
+      childJobs: childStatuses.map((item) => ({
+        jobId: Number(item.id),
+        status: item.status,
+        errorMessage: item.error_message || null,
+      })),
+      finalReportId: row.final_report_id ? Number(row.final_report_id) : null,
+      errorMessage: row.error_message || null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+    };
+  }
+
+  async listInvestigationCases(
+    environmentId: string,
+    actor: ActorContext,
+    page = 1,
+    pageSize = 20,
+  ) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
+    const isAdmin = actor.roles.some(
+      (role) => String(role).toLowerCase() === 'admin',
+    );
+    const actorFilter = isAdmin ? '' : ' AND actor_user_id=?';
+    const actorParams = isAdmin ? [] : [actor.userId];
+    const result = await this.platformDb.paginate<any>({
+      dataSql: `SELECT id, actor_username, seed_job_ids_json, child_job_ids_json, status,
+              final_report_id, error_message, created_at, updated_at, completed_at
+       FROM aiops_log_investigation_cases
+       WHERE environment_id=?${actorFilter}
+       ORDER BY id DESC LIMIT ? OFFSET ?`,
+      countSql: `SELECT COUNT(*) AS total FROM aiops_log_investigation_cases
+       WHERE environment_id=?${actorFilter}`,
+      params: [environmentId, ...actorParams],
+      page: safePage,
+      pageSize: safePageSize,
+    });
+    return {
+      page: result.page,
+      pageSize: result.pageSize,
+      total: result.total,
+      items: result.items.map((row) => ({
+        caseId: Number(row.id),
+        actorUsername: row.actor_username,
+        seedJobIds: this.jsonValue(row.seed_job_ids_json) || [],
+        childJobIds: this.jsonValue(row.child_job_ids_json) || [],
+        status: row.status,
+        finalReportId: row.final_report_id ? Number(row.final_report_id) : null,
+        errorMessage: row.error_message || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        completedAt: row.completed_at,
+      })),
+    };
+  }
+
+  @Interval(3_000)
+  async processInvestigationCases() {
+    if (this.caseWorkerRunning) return;
+    this.caseWorkerRunning = true;
+    try {
+      const rows = await this.platformDb.query<any[]>(
+        `SELECT id, environment_id, actor_json, seed_job_ids_json, child_job_ids_json
+         FROM aiops_log_investigation_cases
+         WHERE status='WAITING' ORDER BY id LIMIT 1`,
+      );
+      const item = rows[0];
+      if (!item) return;
+      const childJobIds: number[] =
+        this.jsonValue(item.child_job_ids_json) || [];
+      if (childJobIds.length === 0) return;
+      const jobs = await this.platformDb.query<any[]>(
+        `SELECT id, status FROM aiops_log_investigation_jobs
+         WHERE id IN (${childJobIds.map(() => '?').join(',')})`,
+        childJobIds,
+      );
+      if (
+        jobs.length !== childJobIds.length ||
+        jobs.some((job) => ['PENDING', 'RUNNING'].includes(job.status))
+      )
+        return;
+      const completedChildIds = jobs
+        .filter((job) => job.status === 'COMPLETED')
+        .map((job) => Number(job.id));
+      const seedJobIds: number[] = this.jsonValue(item.seed_job_ids_json) || [];
+      const claim = await this.platformDb.query<mysql.ResultSetHeader>(
+        `UPDATE aiops_log_investigation_cases
+         SET status='REPORTING', updated_at=UTC_TIMESTAMP()
+         WHERE id=? AND status='WAITING'`,
+        [item.id],
+      );
+      if (!claim.affectedRows) return;
+      try {
+        const report = await this.correlate(
+          item.environment_id,
+          this.jsonValue(item.actor_json),
+          [...seedJobIds, ...completedChildIds].slice(0, 10),
+        );
+        await this.platformDb.query(
+          `UPDATE aiops_log_investigation_cases
+           SET status='COMPLETED', final_report_id=?, completed_at=UTC_TIMESTAMP(), updated_at=UTC_TIMESTAMP()
+           WHERE id=?`,
+          [report.reportId, item.id],
+        );
+      } catch (error) {
+        await this.platformDb.query(
+          `UPDATE aiops_log_investigation_cases
+           SET status='FAILED', error_message=?, updated_at=UTC_TIMESTAMP()
+           WHERE id=?`,
+          [this.errorMessage(error).slice(0, 1000), item.id],
+        );
+      }
+    } finally {
+      this.caseWorkerRunning = false;
+    }
   }
 
   @Interval(1_500)

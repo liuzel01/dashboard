@@ -23,6 +23,7 @@ import { LogInvestigationDto } from './dto/log-investigation.dto';
 import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.service';
 import type { AlertmanagerPayload } from '../oncall/oncall.types';
 import { CorrelateLogInvestigationsDto } from './dto/correlate-log-investigations.dto';
+import { CreateLogInvestigationCaseDto } from './dto/create-log-investigation-case.dto';
 
 @Controller('ai-ops')
 export class AiOpsController {
@@ -201,6 +202,64 @@ export class AiOpsController {
       environmentId,
       actor,
       body.jobIds,
+    );
+  }
+
+  @Post('logs/investigation-cases')
+  async createLogInvestigationCase(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: CreateLogInvestigationCaseDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.createInvestigationCase(
+      environmentId,
+      actor,
+      body.jobIds,
+    );
+  }
+
+  @Get('logs/investigation-cases')
+  async listLogInvestigationCases(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.listInvestigationCases(
+      environmentId,
+      actor,
+      Number(page || 1),
+      Number(pageSize || 20),
+    );
+  }
+
+  @Get('logs/investigation-cases/:id')
+  async getLogInvestigationCase(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const numericId = Number(id);
+    if (!Number.isInteger(numericId) || numericId < 1) {
+      throw new HttpException(
+        'Invalid log investigation case id',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.investigationService.getInvestigationCase(
+      environmentId,
+      actor,
+      numericId,
     );
   }
 

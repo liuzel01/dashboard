@@ -85,6 +85,7 @@ const createService = () => {
   };
   const platformDb = {
     query: jest.fn().mockResolvedValue({ affectedRows: 1 }),
+    paginate: jest.fn(),
   };
   return {
     service: new AiOpsInvestigationService(
@@ -465,6 +466,138 @@ describe('AiOpsInvestigationService', () => {
     expect(platformDb.query).toHaveBeenLastCalledWith(
       expect.stringContaining('aiops_log_correlation_reports'),
       expect.arrayContaining(['mgbx', 1, 'admin']),
+    );
+  });
+
+  it('creates bounded follow-up jobs for shared evidence entities', async () => {
+    const { service, platformDb } = createService();
+    platformDb.query
+      .mockReset()
+      .mockResolvedValueOnce([
+        {
+          id: 16,
+          actor_user_id: 1,
+          project_id: 'icoin',
+          source_id: 'icoin-loki',
+          status: 'COMPLETED',
+          request_json: JSON.stringify({
+            namespace: 'ingress-nginx',
+            serviceName: 'ingress-nginx',
+            timeMode: 'absolute',
+            from: '2026-10-16T00:00:00.000Z',
+            to: '2026-10-16T01:00:00.000Z',
+          }),
+          result_json: JSON.stringify({
+            evidence: [
+              {
+                evidenceId: 'ingress-1',
+                timestamp: '2026-10-16T00:10:00.000Z',
+                labels: { service_name: 'ingress-nginx' },
+                line: 'xff=143.109.37.118 host=www.icoin.vip',
+              },
+            ],
+          }),
+        },
+        {
+          id: 17,
+          actor_user_id: 1,
+          project_id: 'icoin',
+          source_id: 'icoin-loki',
+          status: 'COMPLETED',
+          request_json: JSON.stringify({
+            namespace: 'default',
+            serviceName: 'kylin-user-center',
+            timeMode: 'absolute',
+            from: '2026-10-16T00:00:00.000Z',
+            to: '2026-10-16T01:00:00.000Z',
+          }),
+          result_json: JSON.stringify({
+            evidence: [
+              {
+                evidenceId: 'user-1',
+                timestamp: '2026-10-16T00:12:00.000Z',
+                labels: { service_name: 'kylin-user-center' },
+                line: 'source_ip=143.109.37.118 userId=80420234 email=demo@example.com',
+              },
+            ],
+          }),
+        },
+      ])
+      .mockResolvedValueOnce({ insertId: 5 })
+      .mockResolvedValueOnce({ affectedRows: 1 });
+    jest
+      .spyOn(service, 'enqueue')
+      .mockResolvedValueOnce({ jobId: 21, status: 'PENDING' })
+      .mockResolvedValueOnce({ jobId: 22, status: 'PENDING' })
+      .mockResolvedValueOnce({ jobId: 23, status: 'PENDING' })
+      .mockResolvedValueOnce({ jobId: 24, status: 'PENDING' });
+
+    const result = await service.createInvestigationCase(
+      'icoin',
+      actor,
+      [16, 17],
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        caseId: 5,
+        status: 'WAITING',
+        seedJobIds: [16, 17],
+        childJobIds: [21, 22, 23, 24],
+      }),
+    );
+    expect(service.enqueue).toHaveBeenCalledTimes(4);
+    expect(service.enqueue).toHaveBeenCalledWith(
+      'icoin',
+      actor,
+      expect.objectContaining({
+        queryText: '143.109.37.118',
+        timeMode: 'absolute',
+      }),
+    );
+    expect(platformDb.query).toHaveBeenLastCalledWith(
+      expect.stringContaining("status='WAITING'"),
+      [JSON.stringify([21, 22, 23, 24]), 5],
+    );
+  });
+
+  it('lists investigation cases through the shared database pagination helper', async () => {
+    const { service, platformDb } = createService();
+    platformDb.paginate.mockResolvedValueOnce({
+      page: 1,
+      pageSize: 20,
+      total: 1,
+      items: [
+        {
+          id: 5,
+          actor_username: 'admin',
+          seed_job_ids_json: '[16,17]',
+          child_job_ids_json: '[21,22]',
+          status: 'WAITING',
+          final_report_id: null,
+          error_message: null,
+          created_at: '2026-10-17 07:00:00',
+          updated_at: '2026-10-17 07:01:00',
+          completed_at: null,
+        },
+      ],
+    });
+
+    const result = await service.listInvestigationCases('icoin', actor, 1, 20);
+
+    expect(platformDb.paginate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: ['icoin'],
+        page: 1,
+        pageSize: 20,
+      }),
+    );
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        caseId: 5,
+        seedJobIds: [16, 17],
+        childJobIds: [21, 22],
+      }),
     );
   });
 });
