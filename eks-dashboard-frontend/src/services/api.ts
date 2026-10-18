@@ -1,7 +1,7 @@
-import axios from 'axios';
+import axios from "axios";
 
 const api = axios.create({
-  baseURL: '/api', // 使用相对路径，让 Vite 代理处理请求
+  baseURL: "/api", // 使用相对路径，让 Vite 代理处理请求
 });
 
 let _environmentId: string | null = null;
@@ -14,63 +14,266 @@ export const setApiEnvironment = (environmentId: string | null) => {
   _environmentId = environmentId;
   // 为需要它的端点（如 jump-servers）设置一个默认 header
   if (environmentId) {
-    api.defaults.headers.common['X-Target-Environment'] = environmentId;
+    api.defaults.headers.common["X-Target-Environment"] = environmentId;
   } else {
-    delete api.defaults.headers.common['X-Target-Environment'];
+    delete api.defaults.headers.common["X-Target-Environment"];
   }
 };
 
 export const setAuthToken = (token: string | null) => {
   if (token) {
-    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   } else {
-    delete api.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common["Authorization"];
   }
 };
 
 export type BytebaseProject = { name: string; title?: string; state?: string };
-export type BytebaseDatabase = { name: string; databaseName?: string; environment?: string; effectiveEnvironment?: string };
-export type BytebaseRequest = { request_id: string; environment_id: string; project_name: string; database_name: string; title: string; sql_sha256: string; status: string; actor_username: string; issue_name?: string; plan_name?: string; rollout_name?: string; issue_status?: string; approval_status?: string; rollout_status?: string; task_summary_json?: Array<{name:string;status:string}> | string; last_error?: string; release_confirmed_at?: string; last_reconciled_at?: string; terminal_at?: string; created_at: string; updated_at?: string };
-export type BytebaseRequestDetail = { request: BytebaseRequest; issue?: Record<string,unknown> | null; plan?: Record<string,unknown> | null; statement?: string | null; statementIntegrity: 'VERIFIED'|'CHANGED'|'UNAVAILABLE'; deploymentDiagnostics:Array<{name:string;status:string;detail?:string|null;errors:string[];timeline:Array<{type:string;action?:string;status:string;error?:string;logTime?:string|null}>}>; events:Array<{event_type:string;from_status?:string;to_status?:string;summary:string;created_at:string}> };
-export const getBytebaseCatalog = async (environmentId: string) => (await api.get('/bytebase/catalog',{params:{environmentId}})).data as {projects:BytebaseProject[];capabilities:string[];jit:{supported:boolean;reason:string}};
-export const getBytebaseDatabases = async (environmentId:string,project:string) => (await api.get('/bytebase/databases',{params:{environmentId,project}})).data as {databases:BytebaseDatabase[]};
-export const getBytebaseIssues = async (environmentId:string,project:string) => (await api.get('/bytebase/issues',{params:{environmentId,project}})).data;
-export const diagnoseBytebase = async (environmentId:string) => (await api.get('/bytebase/diagnostics',{params:{environmentId}})).data;
-export const listBytebaseRequests = async () => (await api.get('/bytebase/requests')).data as BytebaseRequest[];
-export const createBytebaseChange = async (input:{environmentId:string;project:string;database:string;title:string;description?:string;statement:string}) => (await api.post('/bytebase/changes',{...input,confirmation:'CREATE_BYTEBASE_CHANGE'})).data;
-export const confirmBytebaseRelease = async (environmentId:string,plan:string,mfaCode:string) => (await api.post('/bytebase/rollouts',{environmentId,plan,mfaCode,confirmation:'EXECUTE_BYTEBASE_ROLLOUT'})).data;
-export const getBytebaseRequestDetail = async (requestId:string) => (await api.get(`/bytebase/requests/${encodeURIComponent(requestId)}/detail`)).data as BytebaseRequestDetail;
-export const cancelBytebaseRequest = async (requestId:string,mfaCode:string,reason?:string) => (await api.post(`/bytebase/requests/${encodeURIComponent(requestId)}/cancel`,{mfaCode,reason,confirmation:'CANCEL_BYTEBASE_REQUEST'})).data as {requestId:string;status:string;bestEffort:boolean};
+export type BytebaseDatabase = {
+  name: string;
+  databaseName?: string;
+  environment?: string;
+  effectiveEnvironment?: string;
+};
+export type BytebaseRequest = {
+  request_id: string;
+  environment_id: string;
+  project_name: string;
+  database_name: string;
+  title: string;
+  sql_sha256: string;
+  status: string;
+  actor_username: string;
+  issue_name?: string;
+  plan_name?: string;
+  rollout_name?: string;
+  issue_status?: string;
+  approval_status?: string;
+  rollout_status?: string;
+  task_summary_json?: Array<{ name: string; status: string }> | string;
+  last_error?: string;
+  release_confirmed_at?: string;
+  last_reconciled_at?: string;
+  terminal_at?: string;
+  created_at: string;
+  updated_at?: string;
+};
+export type BytebaseRequestDetail = {
+  request: BytebaseRequest;
+  issue?: Record<string, unknown> | null;
+  plan?: Record<string, unknown> | null;
+  statement?: string | null;
+  statementIntegrity: "VERIFIED" | "CHANGED" | "UNAVAILABLE";
+  deploymentDiagnostics: Array<{
+    name: string;
+    status: string;
+    detail?: string | null;
+    errors: string[];
+    timeline: Array<{
+      type: string;
+      action?: string;
+      status: string;
+      error?: string;
+      logTime?: string | null;
+    }>;
+  }>;
+  events: Array<{
+    event_type: string;
+    from_status?: string;
+    to_status?: string;
+    summary: string;
+    created_at: string;
+  }>;
+};
+export const getBytebaseCatalog = async (environmentId: string) =>
+  (await api.get("/bytebase/catalog", { params: { environmentId } })).data as {
+    projects: BytebaseProject[];
+    capabilities: string[];
+    jit: { supported: boolean; reason: string };
+  };
+export const getBytebaseDatabases = async (
+  environmentId: string,
+  project: string,
+) =>
+  (await api.get("/bytebase/databases", { params: { environmentId, project } }))
+    .data as { databases: BytebaseDatabase[] };
+export const getBytebaseIssues = async (
+  environmentId: string,
+  project: string,
+) =>
+  (await api.get("/bytebase/issues", { params: { environmentId, project } }))
+    .data;
+export const diagnoseBytebase = async (environmentId: string) =>
+  (await api.get("/bytebase/diagnostics", { params: { environmentId } })).data;
+export const listBytebaseRequests = async () =>
+  (await api.get("/bytebase/requests")).data as BytebaseRequest[];
+export const createBytebaseChange = async (input: {
+  environmentId: string;
+  project: string;
+  database: string;
+  title: string;
+  description?: string;
+  statement: string;
+}) =>
+  (
+    await api.post("/bytebase/changes", {
+      ...input,
+      confirmation: "CREATE_BYTEBASE_CHANGE",
+    })
+  ).data;
+export const confirmBytebaseRelease = async (
+  environmentId: string,
+  plan: string,
+  mfaCode: string,
+) =>
+  (
+    await api.post("/bytebase/rollouts", {
+      environmentId,
+      plan,
+      mfaCode,
+      confirmation: "EXECUTE_BYTEBASE_ROLLOUT",
+    })
+  ).data;
+export const getBytebaseRequestDetail = async (requestId: string) =>
+  (await api.get(`/bytebase/requests/${encodeURIComponent(requestId)}/detail`))
+    .data as BytebaseRequestDetail;
+export const cancelBytebaseRequest = async (
+  requestId: string,
+  mfaCode: string,
+  reason?: string,
+) =>
+  (
+    await api.post(
+      `/bytebase/requests/${encodeURIComponent(requestId)}/cancel`,
+      { mfaCode, reason, confirmation: "CANCEL_BYTEBASE_REQUEST" },
+    )
+  ).data as { requestId: string; status: string; bestEffort: boolean };
+
+export type JumpserverCatalogItem = {
+  id: string;
+  name: string;
+  username?: string;
+  address?: string;
+  isActive: boolean;
+};
+export type JumpserverConfiguration = {
+  mappings: Array<Record<string, unknown>>;
+  bundles: Array<Record<string, unknown>>;
+  roles: Array<{ id: number; name: string; description?: string }>;
+};
+const jumpserverSession = () => {
+  const key = "dashboard_jumpserver_session";
+  let value = sessionStorage.getItem(key);
+  if (!value) {
+    value = crypto.randomUUID();
+    sessionStorage.setItem(key, value);
+  }
+  return value;
+};
+export const diagnoseJumpserver = async () =>
+  (await api.get("/jumpserver-access/diagnostics")).data;
+export const getJumpserverCatalog = async (
+  kind: "users" | "groups" | "nodes" | "assets",
+  keyword = "",
+) =>
+  (await api.get("/jumpserver-access/catalog", { params: { kind, keyword } }))
+    .data as { kind: string; count: number; items: JumpserverCatalogItem[] };
+export const getJumpserverConfiguration = async () =>
+  (await api.get("/jumpserver-access/configuration"))
+    .data as JumpserverConfiguration;
+export const upsertJumpserverMapping = async (input: {
+  dashboardUserId: number;
+  remoteUsername: string;
+  status?: "ACTIVE" | "DISABLED";
+}) => (await api.post("/jumpserver-access/mappings", input)).data;
+export const createJumpserverBundle = async (input: {
+  name: string;
+  description?: string;
+  targets: Array<{ type: "ASSET" | "NODE"; id: string; name: string }>;
+  accounts: string[];
+  protocols: string[];
+}) => (await api.post("/jumpserver-access/bundles", input)).data;
+export const bindJumpserverRole = async (bundleId: number, roleId: number) =>
+  (await api.post(`/jumpserver-access/bundles/${bundleId}/roles`, { roleId }))
+    .data;
+export const syncJumpserverUser = async (userId: number) =>
+  (await api.post(`/jumpserver-access/users/${userId}/sync`)).data;
+export const getMyJumpserverStatus = async () =>
+  (await api.get("/jumpserver-access/me")).data as {
+    mapped: boolean;
+    eligible: boolean;
+    remoteUsername?: string;
+    grants: Array<{ bundleId: number; bundleName: string; status: string }>;
+  };
+export const prepareJumpserverPortal = async () =>
+  (
+    await api.post(
+      "/jumpserver-access/portal/prepare",
+      {},
+      { headers: { "X-Dashboard-Session": jumpserverSession() } },
+    )
+  ).data as { ticket: string; expiresInSeconds: number };
+export const consumeJumpserverPortal = async (ticket: string) =>
+  (
+    await api.post(
+      "/jumpserver-access/portal/consume",
+      { ticket },
+      { headers: { "X-Dashboard-Session": jumpserverSession() } },
+    )
+  ).data as { portalUrl: string };
 
 /**
  * 获取应用列表
  * @param params - 包含查询参数的对象, 例如 { name: 'filter-text' }
  */
-export type WorkloadType = 'deployment' | 'statefulset' | 'daemonset';
-export type WorkloadCapabilities = { logs: boolean; restart: boolean; restartReason?: string; imageHistory: boolean; imageRollback: boolean; rolloutTracking: boolean };
-export type WorkloadTypeOption = { value: WorkloadType; label: string; kind: string; capabilities: WorkloadCapabilities };
+export type WorkloadType = "deployment" | "statefulset" | "daemonset";
+export type WorkloadCapabilities = {
+  logs: boolean;
+  restart: boolean;
+  restartReason?: string;
+  imageHistory: boolean;
+  imageRollback: boolean;
+  rolloutTracking: boolean;
+};
+export type WorkloadTypeOption = {
+  value: WorkloadType;
+  label: string;
+  kind: string;
+  capabilities: WorkloadCapabilities;
+};
 
-export const getDeployments = async (params: { name?: string; namespace?: string; type?: WorkloadType } = {}) => {
+export const getDeployments = async (
+  params: { name?: string; namespace?: string; type?: WorkloadType } = {},
+) => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
   }
   // axios 会自动将 `params` 对象序列化为 URL 查询字符串.
   // The environmentId is passed via the 'X-Target-Environment' header, set by setApiEnvironment.
-  const response = await api.get('/deployments', { params });
+  const response = await api.get("/deployments", { params });
   return response.data;
 };
 
-export const getDeploymentWorkloadTypes = async (): Promise<WorkloadTypeOption[]> => {
-  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
-  const response = await api.get('/deployments/types');
+export const getDeploymentWorkloadTypes = async (): Promise<
+  WorkloadTypeOption[]
+> => {
+  if (!_environmentId)
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
+  const response = await api.get("/deployments/types");
   return response.data;
 };
 
 export const getDeploymentNamespaces = async (): Promise<string[]> => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
   }
-  const response = await api.get('/deployments/namespaces');
+  const response = await api.get("/deployments/namespaces");
   return response.data;
 };
 
@@ -78,24 +281,48 @@ export const getDeploymentNamespaces = async (): Promise<string[]> => {
  * 重启一个应用
  * @param name - 需要重启的应用名称
  */
-export const restartDeployment = async (name: string, namespace = 'default', type: WorkloadType = 'deployment'): Promise<{ targetGeneration?: number | null }> => {
+export const restartDeployment = async (
+  name: string,
+  namespace = "default",
+  type: WorkloadType = "deployment",
+): Promise<{ targetGeneration?: number | null }> => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
   }
   // The environmentId is passed via the 'X-Target-Environment' header, set by setApiEnvironment.
-  const response = await api.post(`/deployments/${encodeURIComponent(name)}/restart`, undefined, {
-    params: { namespace, type },
-  });
+  const response = await api.post(
+    `/deployments/${encodeURIComponent(name)}/restart`,
+    undefined,
+    {
+      params: { namespace, type },
+    },
+  );
   return response.data;
 };
 
 export type DeploymentImage = { name: string; image: string };
-export type DeploymentImageRevision = { revision: number; replicaSetName: string; createdAt: string | null };
-export type DeploymentImageVersion = { id: string; images: DeploymentImage[]; isCurrent: boolean; revisions: DeploymentImageRevision[] };
-export type DeploymentImageHistory = { deployment: string; namespace: string; currentImages: DeploymentImage[]; imageVersions: DeploymentImageVersion[] };
+export type DeploymentImageRevision = {
+  revision: number;
+  replicaSetName: string;
+  createdAt: string | null;
+};
+export type DeploymentImageVersion = {
+  id: string;
+  images: DeploymentImage[];
+  isCurrent: boolean;
+  revisions: DeploymentImageRevision[];
+};
+export type DeploymentImageHistory = {
+  deployment: string;
+  namespace: string;
+  currentImages: DeploymentImage[];
+  imageVersions: DeploymentImageVersion[];
+};
 export type DeploymentRolloutDiagnostic = {
-  source: 'container' | 'event' | 'deployment';
-  severity: 'error' | 'warning';
+  source: "container" | "event" | "deployment";
+  severity: "error" | "warning";
   reason: string;
   message: string;
   pod?: string;
@@ -103,7 +330,7 @@ export type DeploymentRolloutDiagnostic = {
   timestamp?: string;
 };
 export type DeploymentRolloutStatus = {
-  phase: 'completed' | 'progressing' | 'blocked' | 'failed';
+  phase: "completed" | "progressing" | "blocked" | "failed";
   targetGeneration: number;
   progressDeadlineSeconds: number;
   deployment: {
@@ -116,27 +343,47 @@ export type DeploymentRolloutStatus = {
     readyReplicas?: number;
     availableReplicas?: number;
     unavailableReplicas?: number;
-    progressingStatus?: 'True' | 'False' | 'Unknown' | null;
+    progressingStatus?: "True" | "False" | "Unknown" | null;
     progressingReason?: string | null;
-    availableStatus?: 'True' | 'False' | 'Unknown' | null;
+    availableStatus?: "True" | "False" | "Unknown" | null;
     availableReason?: string | null;
   };
   diagnostics: DeploymentRolloutDiagnostic[];
 };
 
-export const getDeploymentImageHistory = async (name: string, namespace = 'default'): Promise<DeploymentImageHistory> => {
-  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
-  const response = await api.get(`/deployments/${encodeURIComponent(name)}/image-history`, {
-    params: { namespace },
-  });
+export const getDeploymentImageHistory = async (
+  name: string,
+  namespace = "default",
+): Promise<DeploymentImageHistory> => {
+  if (!_environmentId)
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
+  const response = await api.get(
+    `/deployments/${encodeURIComponent(name)}/image-history`,
+    {
+      params: { namespace },
+    },
+  );
   return response.data;
 };
 
-export const rollbackDeploymentImages = async (name: string, images: DeploymentImage[], namespace = 'default') => {
-  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
-  const response = await api.post(`/deployments/${encodeURIComponent(name)}/rollback-images`, { images }, {
-    params: { namespace },
-  });
+export const rollbackDeploymentImages = async (
+  name: string,
+  images: DeploymentImage[],
+  namespace = "default",
+) => {
+  if (!_environmentId)
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
+  const response = await api.post(
+    `/deployments/${encodeURIComponent(name)}/rollback-images`,
+    { images },
+    {
+      params: { namespace },
+    },
+  );
   return response.data as {
     previousImages: DeploymentImage[];
     targetImages: DeploymentImage[];
@@ -147,13 +394,19 @@ export const rollbackDeploymentImages = async (name: string, images: DeploymentI
 export const getDeploymentRolloutStatus = async (
   name: string,
   generation?: number | null,
-  namespace = 'default',
-  type: WorkloadType = 'deployment',
+  namespace = "default",
+  type: WorkloadType = "deployment",
 ): Promise<DeploymentRolloutStatus> => {
-  if (!_environmentId) throw new Error('Environment ID has not been set. Please call setApiEnvironment first.');
-  const response = await api.get(`/deployments/${encodeURIComponent(name)}/rollout-status`, {
-    params: { ...(generation ? { generation } : {}), namespace, type },
-  });
+  if (!_environmentId)
+    throw new Error(
+      "Environment ID has not been set. Please call setApiEnvironment first.",
+    );
+  const response = await api.get(
+    `/deployments/${encodeURIComponent(name)}/rollout-status`,
+    {
+      params: { ...(generation ? { generation } : {}), namespace, type },
+    },
+  );
   return response.data;
 };
 
@@ -164,10 +417,10 @@ export const getDeploymentRolloutStatus = async (
  */
 export const aggregateQuery = async (
   identifier: string,
-  type: 'UID' | 'EMAIL' | 'PHONE',
+  type: "UID" | "EMAIL" | "PHONE",
   tenantId?: number,
 ) => {
-  const response = await api.post('/query/aggregate', {
+  const response = await api.post("/query/aggregate", {
     identifier,
     type,
     tenantId,
@@ -186,22 +439,32 @@ export const updateUser = async (
   tenantId: number,
   data: { email?: string; tel?: string; tel_country_code?: string },
 ) => {
-  const response = await api.patch(`/query/users/${uid}`, { ...data, tenantId });
+  const response = await api.patch(`/query/users/${uid}`, {
+    ...data,
+    tenantId,
+  });
   return response.data;
 };
 
 export const deactivateUser = async (uid: string, tenantId: number) => {
-  const response = await api.post(`/query/users/${uid}/deactivate`, { tenantId });
+  const response = await api.post(`/query/users/${uid}/deactivate`, {
+    tenantId,
+  });
   return response.data;
 };
 
 export const clearUserInviteBy = async (uid: string, tenantId: number) => {
-  const response = await api.post(`/query/users/${uid}/invite-by/clear`, { tenantId });
+  const response = await api.post(`/query/users/${uid}/invite-by/clear`, {
+    tenantId,
+  });
   return response.data;
 };
 
 export const resetPartnerPassword = async (uid: string, tenantId: number) => {
-  const response = await api.post(`/query/users/${uid}/partner-password/reset`, { tenantId });
+  const response = await api.post(
+    `/query/users/${uid}/partner-password/reset`,
+    { tenantId },
+  );
   return response.data;
 };
 
@@ -211,9 +474,9 @@ export const resetPartnerPassword = async (uid: string, tenantId: number) => {
  */
 export const deleteRedisKey = async (key: string) => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set.');
+    throw new Error("Environment ID has not been set.");
   }
-  const response = await api.delete('/query/redis-key', { params: { key } });
+  const response = await api.delete("/query/redis-key", { params: { key } });
   return response.data;
 };
 
@@ -223,15 +486,22 @@ export const deleteRedisKey = async (key: string) => {
  * @param value - 键值
  * @param ttlSeconds - 可选，过期秒数
  */
-export const createRedisKey = async (key: string, value: string, ttlSeconds?: number) => {
+export const createRedisKey = async (
+  key: string,
+  value: string,
+  ttlSeconds?: number,
+) => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set.');
+    throw new Error("Environment ID has not been set.");
   }
-  const payload: { key: string; value: string; ttlSeconds?: number } = { key, value };
+  const payload: { key: string; value: string; ttlSeconds?: number } = {
+    key,
+    value,
+  };
   if (ttlSeconds !== undefined && ttlSeconds !== null) {
     payload.ttlSeconds = ttlSeconds;
   }
-  const response = await api.post('/query/redis-key', payload);
+  const response = await api.post("/query/redis-key", payload);
   return response.data;
 };
 
@@ -241,9 +511,9 @@ export const createRedisKey = async (key: string, value: string, ttlSeconds?: nu
  */
 export const getRedisKey = async (key: string) => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set.');
+    throw new Error("Environment ID has not been set.");
   }
-  const response = await api.get('/query/redis-key', { params: { key } });
+  const response = await api.get("/query/redis-key", { params: { key } });
   return response.data;
 };
 
@@ -253,18 +523,20 @@ export type UserOrderRedisResult = {
   tenantId: number;
   orderLimit: number;
   redisKeyLimit: number;
-  orders: Array<Record<string, unknown> & {
-    order_no: string;
-    redisLookupOrderNo: string;
-    redisLookupTruncated: boolean;
-    redisKeys: Array<{
-      key: string;
-      value?: string | object | null;
-      ttlSeconds: number;
-      valueTruncated?: boolean;
-    }>;
-    redisKeySearchTruncated?: boolean;
-  }>;
+  orders: Array<
+    Record<string, unknown> & {
+      order_no: string;
+      redisLookupOrderNo: string;
+      redisLookupTruncated: boolean;
+      redisKeys: Array<{
+        key: string;
+        value?: string | object | null;
+        ttlSeconds: number;
+        valueTruncated?: boolean;
+      }>;
+      redisKeySearchTruncated?: boolean;
+    }
+  >;
 };
 
 /** Query existing BALANCE_EXCHANGE_BIZ Redis records associated with a user's recent orders. */
@@ -283,25 +555,43 @@ export const getUserOrderRedis = async (
  * @param uid - tbl_user.tenant_user_id
  */
 export const getTraderInfo = async (uid: string, tenantId: number) => {
-  const response = await api.get(`/query/users/${uid}/trader`, { params: { tenantId } });
+  const response = await api.get(`/query/users/${uid}/trader`, {
+    params: { tenantId },
+  });
   return response.data;
 };
 
 /**
  * 更新指定用户的交易员 nick_name 字段
  */
-export const updateTraderNickName = async (uid: string, nickName: string, tenantId: number) => {
-  const response = await api.patch(`/query/users/${uid}/trader`, { nick_name: nickName, tenantId });
+export const updateTraderNickName = async (
+  uid: string,
+  nickName: string,
+  tenantId: number,
+) => {
+  const response = await api.patch(`/query/users/${uid}/trader`, {
+    nick_name: nickName,
+    tenantId,
+  });
   return response.data;
 };
 
 export const getOtcMerchantInfo = async (uid: string, tenantId: number) => {
-  const response = await api.get(`/query/users/${uid}/otc-merchant`, { params: { tenantId } });
+  const response = await api.get(`/query/users/${uid}/otc-merchant`, {
+    params: { tenantId },
+  });
   return response.data;
 };
 
-export const updateOtcMerchantName = async (uid: string, name: string, tenantId: number) => {
-  const response = await api.patch(`/query/users/${uid}/otc-merchant/name`, { name, tenantId });
+export const updateOtcMerchantName = async (
+  uid: string,
+  name: string,
+  tenantId: number,
+) => {
+  const response = await api.patch(`/query/users/${uid}/otc-merchant/name`, {
+    name,
+    tenantId,
+  });
   return response.data;
 };
 
@@ -315,8 +605,14 @@ export const enableOtcUserTrade = async (uid: string) => {
   return response.data;
 };
 
-export const getAuthRecord = async (uid: string, tenantId: number, userId?: number) => {
-  const response = await api.get(`/query/users/${uid}/auth-record`, { params: { tenantId, userId } });
+export const getAuthRecord = async (
+  uid: string,
+  tenantId: number,
+  userId?: number,
+) => {
+  const response = await api.get(`/query/users/${uid}/auth-record`, {
+    params: { tenantId, userId },
+  });
   return response.data;
 };
 
@@ -325,32 +621,41 @@ export const updateAuthRecord = async (
   tenantId: number,
   data: { realName?: string; cardNo?: string; userId?: number },
 ) => {
-  const response = await api.patch(`/query/users/${uid}/auth-record`, { tenantId, ...data });
+  const response = await api.patch(`/query/users/${uid}/auth-record`, {
+    tenantId,
+    ...data,
+  });
   return response.data;
 };
 
-export const previewAiOpsSql = async (data: { question?: string; sql?: string; maxRows?: number }) => {
-  const response = await api.post('/ai-ops/sql/preview', data);
+export const previewAiOpsSql = async (data: {
+  question?: string;
+  sql?: string;
+  maxRows?: number;
+}) => {
+  const response = await api.post("/ai-ops/sql/preview", data);
   return response.data;
 };
 
 export const getAiOpsSqlAudit = async (page = 1, size = 20) => {
-  const response = await api.get('/ai-ops/audit/sql', { params: { page, size } });
+  const response = await api.get("/ai-ops/audit/sql", {
+    params: { page, size },
+  });
   return response.data;
 };
 
 export const getAiOpsLlmModels = async () => {
-  const response = await api.get('/ai-ops/llm/models');
+  const response = await api.get("/ai-ops/llm/models");
   return response.data;
 };
 
 export const saveAiOpsLlmModel = async (model: string) => {
-  const response = await api.post('/ai-ops/llm/model', { model });
+  const response = await api.post("/ai-ops/llm/model", { model });
   return response.data;
 };
 
 export const getAiOpsLogSources = async () => {
-  const response = await api.get('/ai-ops/log-sources');
+  const response = await api.get("/ai-ops/log-sources");
   return response.data;
 };
 
@@ -361,13 +666,13 @@ export const investigateAiOpsLogs = async (data: {
   question: string;
   serviceName?: string;
   queryText?: string;
-  timeMode?: 'relative' | 'absolute';
+  timeMode?: "relative" | "absolute";
   from?: string;
   to?: string;
   rangeMinutes?: number;
   limit?: number;
 }) => {
-  const response = await api.post('/ai-ops/logs/investigate', data);
+  const response = await api.post("/ai-ops/logs/investigate", data);
   return response.data;
 };
 
@@ -377,26 +682,33 @@ export const getAiOpsLogInvestigationJob = async (jobId: number) => {
 };
 
 export const getAiOpsLogInvestigationJobs = async (page = 1, pageSize = 20) => {
-  const response = await api.get('/ai-ops/logs/investigations', {
+  const response = await api.get("/ai-ops/logs/investigations", {
     params: { page, pageSize },
   });
   return response.data;
 };
 
 export const correlateAiOpsLogInvestigations = async (jobIds: number[]) => {
-  const response = await api.post('/ai-ops/logs/investigations/correlate', {
+  const response = await api.post("/ai-ops/logs/investigations/correlate", {
     jobIds,
   });
   return response.data;
 };
 
 export const createAiOpsLogInvestigationCase = async (jobIds: number[]) => {
-  const response = await api.post('/ai-ops/logs/investigation-cases', { jobIds });
+  const response = await api.post("/ai-ops/logs/investigation-cases", {
+    jobIds,
+  });
   return response.data;
 };
 
-export const getAiOpsLogInvestigationCases = async (page = 1, pageSize = 20) => {
-  const response = await api.get('/ai-ops/logs/investigation-cases', { params: { page, pageSize } });
+export const getAiOpsLogInvestigationCases = async (
+  page = 1,
+  pageSize = 20,
+) => {
+  const response = await api.get("/ai-ops/logs/investigation-cases", {
+    params: { page, pageSize },
+  });
   return response.data;
 };
 
@@ -405,19 +717,30 @@ export const getAiOpsLogInvestigationCase = async (caseId: number) => {
   return response.data;
 };
 
-export const getAiOpsLogInvestigationReports = async (page = 1, pageSize = 20) => {
-  const response = await api.get('/ai-ops/logs/investigation-reports', {
+export const getAiOpsLogInvestigationReports = async (
+  page = 1,
+  pageSize = 20,
+) => {
+  const response = await api.get("/ai-ops/logs/investigation-reports", {
     params: { page, pageSize },
   });
   return response.data;
 };
 
 export const getAiOpsLogInvestigationReport = async (reportId: number) => {
-  const response = await api.get(`/ai-ops/logs/investigation-reports/${reportId}`);
+  const response = await api.get(
+    `/ai-ops/logs/investigation-reports/${reportId}`,
+  );
   return response.data;
 };
 
-export type AiOpsInvestigationStatus = 'PENDING' | 'COLLECTING' | 'ANALYZING' | 'COMPLETED' | 'INSUFFICIENT_EVIDENCE' | 'FAILED';
+export type AiOpsInvestigationStatus =
+  | "PENDING"
+  | "COLLECTING"
+  | "ANALYZING"
+  | "COMPLETED"
+  | "INSUFFICIENT_EVIDENCE"
+  | "FAILED";
 export type AiOpsInvestigation = {
   id: number;
   environment_id: string;
@@ -440,10 +763,44 @@ export type AiOpsInvestigation = {
   created_at: string;
   updated_at: string;
   report_json?: Record<string, unknown> | string | null;
-  steps?: Array<{ id: number; step_key: string; tool_name?: string | null; status: string; result_count?: number | null; summary?: string | null; error_summary?: string | null; started_at?: string | null; completed_at?: string | null }>;
-  evidence?: Array<{ id: number; evidence_id: string; evidence_type: string; source_system: string; observed_at?: string | null; title: string; content_json: Record<string, unknown> | string; source_url?: string | null }>;
-  feedback?: Array<{ id: number; actor_username?: string | null; rating: string; comment?: string | null; created_at: string }>;
-  attempts?: Array<{ id: number; status: string; attempt_count: number; error_code?: string | null; error_summary?: string | null; created_at: string; started_at?: string | null; completed_at?: string | null }>;
+  steps?: Array<{
+    id: number;
+    step_key: string;
+    tool_name?: string | null;
+    status: string;
+    result_count?: number | null;
+    summary?: string | null;
+    error_summary?: string | null;
+    started_at?: string | null;
+    completed_at?: string | null;
+  }>;
+  evidence?: Array<{
+    id: number;
+    evidence_id: string;
+    evidence_type: string;
+    source_system: string;
+    observed_at?: string | null;
+    title: string;
+    content_json: Record<string, unknown> | string;
+    source_url?: string | null;
+  }>;
+  feedback?: Array<{
+    id: number;
+    actor_username?: string | null;
+    rating: string;
+    comment?: string | null;
+    created_at: string;
+  }>;
+  attempts?: Array<{
+    id: number;
+    status: string;
+    attempt_count: number;
+    error_code?: string | null;
+    error_summary?: string | null;
+    created_at: string;
+    started_at?: string | null;
+    completed_at?: string | null;
+  }>;
 };
 
 export type AiOpsReplayCase = {
@@ -455,46 +812,111 @@ export type AiOpsReplayCase = {
 };
 
 const aiOpsEnvironmentHeaders = (environmentId: string) => ({
-  'X-Target-Environment': environmentId,
+  "X-Target-Environment": environmentId,
 });
 
 export const listAiOpsInvestigations = async (
   environmentId: string,
-  params: { status?: string; keyword?: string; page?: number; pageSize?: number } = {},
+  params: {
+    status?: string;
+    keyword?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
 ) =>
-  (await api.get('/ai-ops/investigations', { params, headers: aiOpsEnvironmentHeaders(environmentId) })).data as {
+  (
+    await api.get("/ai-ops/investigations", {
+      params,
+      headers: aiOpsEnvironmentHeaders(environmentId),
+    })
+  ).data as {
     items: AiOpsInvestigation[];
     total: number;
     page: number;
     pageSize: number;
   };
 
-export const getAiOpsInvestigation = async (environmentId: string, id: number) =>
-  (await api.get(`/ai-ops/investigations/${id}`, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as AiOpsInvestigation;
+export const getAiOpsInvestigation = async (
+  environmentId: string,
+  id: number,
+) =>
+  (
+    await api.get(`/ai-ops/investigations/${id}`, {
+      headers: aiOpsEnvironmentHeaders(environmentId),
+    })
+  ).data as AiOpsInvestigation;
 
-export const addAiOpsInvestigationFeedback = async (environmentId: string, id: number, rating: string, comment?: string) =>
-  (await api.post(`/ai-ops/investigations/${id}/feedback`, { rating, comment }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { ok: boolean };
+export const addAiOpsInvestigationFeedback = async (
+  environmentId: string,
+  id: number,
+  rating: string,
+  comment?: string,
+) =>
+  (
+    await api.post(
+      `/ai-ops/investigations/${id}/feedback`,
+      { rating, comment },
+      { headers: aiOpsEnvironmentHeaders(environmentId) },
+    )
+  ).data as { ok: boolean };
 
-export const retryAiOpsInvestigation = async (environmentId: string, id: number) =>
-  (await api.post(`/ai-ops/investigations/${id}/retry`, {}, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { queued: boolean; eventId: number };
+export const retryAiOpsInvestigation = async (
+  environmentId: string,
+  id: number,
+) =>
+  (
+    await api.post(
+      `/ai-ops/investigations/${id}/retry`,
+      {},
+      { headers: aiOpsEnvironmentHeaders(environmentId) },
+    )
+  ).data as { queued: boolean; eventId: number };
 
 export type AiOpsQualitySummary = {
-  overview: { total?: number; completed?: number; insufficient_evidence?: number; replay_count?: number; synthetic_count?: number };
-  evidenceCoverage: Array<{ source_system: string; investigation_count: number; evidence_count: number }>;
+  overview: {
+    total?: number;
+    completed?: number;
+    insufficient_evidence?: number;
+    replay_count?: number;
+    synthetic_count?: number;
+  };
+  evidenceCoverage: Array<{
+    source_system: string;
+    investigation_count: number;
+    evidence_count: number;
+  }>;
   feedback: Array<{ rating: string; count: number }>;
-  partialOrFailedSteps: Array<{ step_key: string; status: string; count: number }>;
+  partialOrFailedSteps: Array<{
+    step_key: string;
+    status: string;
+    count: number;
+  }>;
   queue: Array<{ status: string; count: number }>;
   note: string;
 };
 
 export const getAiOpsQualitySummary = async (environmentId: string) =>
-  (await api.get('/ai-ops/investigations-quality-summary', { headers: aiOpsEnvironmentHeaders(environmentId) })).data as AiOpsQualitySummary;
+  (
+    await api.get("/ai-ops/investigations-quality-summary", {
+      headers: aiOpsEnvironmentHeaders(environmentId),
+    })
+  ).data as AiOpsQualitySummary;
 
 export const listAiOpsReplayCases = async (environmentId: string) =>
-  (await api.get('/ai-ops/replay-cases', { headers: aiOpsEnvironmentHeaders(environmentId) })).data as { items: AiOpsReplayCase[] };
+  (
+    await api.get("/ai-ops/replay-cases", {
+      headers: aiOpsEnvironmentHeaders(environmentId),
+    })
+  ).data as { items: AiOpsReplayCase[] };
 
 export const replayAiOpsCase = async (environmentId: string, caseKey: string) =>
-  (await api.post('/ai-ops/replays', { caseKey }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data as {
+  (
+    await api.post(
+      "/ai-ops/replays",
+      { caseKey },
+      { headers: aiOpsEnvironmentHeaders(environmentId) },
+    )
+  ).data as {
     caseKey: string;
     investigationId: number;
     created: boolean;
@@ -504,7 +926,7 @@ export const replayAiOpsCase = async (environmentId: string, caseKey: string) =>
  * 获取当前环境的所有可管理平台
  */
 export const getPlatforms = async () => {
-  const response = await api.get('/security-groups/platforms');
+  const response = await api.get("/security-groups/platforms");
   return response.data;
 };
 
@@ -514,9 +936,11 @@ export const getPlatforms = async () => {
 export const getTenantsForEnvironment = async (environmentId?: string) => {
   const resolvedEnvironmentId = environmentId || _environmentId;
   if (!resolvedEnvironmentId) {
-    throw new Error('Environment ID has not been set.');
+    throw new Error("Environment ID has not been set.");
   }
-  const response = await api.get(`/environments/${resolvedEnvironmentId}/tenants`);
+  const response = await api.get(
+    `/environments/${resolvedEnvironmentId}/tenants`,
+  );
   return response.data;
 };
 
@@ -533,11 +957,13 @@ let environmentConfigsRequest: Promise<EnvironmentConfig[]> | null = null;
 export const getEnvironmentConfigs = async () => {
   if (environmentConfigsCache) return environmentConfigsCache;
   if (environmentConfigsRequest) return environmentConfigsRequest;
-  environmentConfigsRequest = api.get('/environments/config').then((response) => {
-    const data = Array.isArray(response.data) ? response.data : [];
-    environmentConfigsCache = data;
-    return data;
-  });
+  environmentConfigsRequest = api
+    .get("/environments/config")
+    .then((response) => {
+      const data = Array.isArray(response.data) ? response.data : [];
+      environmentConfigsCache = data;
+      return data;
+    });
   try {
     return await environmentConfigsRequest;
   } finally {
@@ -551,7 +977,7 @@ export const getEnvironmentConfig = async (id: string) => {
 };
 
 export const createEnvironmentConfig = async (data: JsonRecord) => {
-  const response = await api.post('/environments/config', data);
+  const response = await api.post("/environments/config", data);
   return response.data;
 };
 
@@ -560,22 +986,28 @@ export const updateEnvironmentConfig = async (id: string, data: JsonRecord) => {
   return response.data;
 };
 
-
 // Dashboard SiteConf
-export const getDashboardSiteConfList = async (params: { page?: number; size?: number; keyword?: string; category?: string } = {}) => {
-  const response = await api.get('/site-conf', { params });
+export const getDashboardSiteConfList = async (
+  params: {
+    page?: number;
+    size?: number;
+    keyword?: string;
+    category?: string;
+  } = {},
+) => {
+  const response = await api.get("/site-conf", { params });
   return response.data;
 };
 
 export const getDashboardSiteConfCategories = async () => {
-  const response = await api.get('/site-conf/categories');
+  const response = await api.get("/site-conf/categories");
   return response.data;
 };
 
 export const saveDashboardSiteConf = async (data: {
   confKey: string;
   confValue: string;
-  valueType: 'string' | 'number' | 'boolean' | 'json';
+  valueType: "string" | "number" | "boolean" | "json";
   category?: string;
   description?: string;
   isSensitive?: boolean;
@@ -583,46 +1015,57 @@ export const saveDashboardSiteConf = async (data: {
   defaultValue?: string;
   validationJson?: string;
 }) => {
-  const response = await api.post('/site-conf', data);
+  const response = await api.post("/site-conf", data);
   return response.data;
 };
 
 export const deleteDashboardSiteConf = async (confKey: string) => {
-  const response = await api.delete(`/site-conf/${encodeURIComponent(confKey)}`);
+  const response = await api.delete(
+    `/site-conf/${encodeURIComponent(confKey)}`,
+  );
   return response.data;
 };
 
 export type MenuOrderMap = Record<string, string[]>;
 
-export const getMenuOrder = async (): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
-  const response = await api.get('/menu-order');
+export const getMenuOrder = async (): Promise<{
+  groups: MenuOrderMap;
+  isDefault: boolean;
+}> => {
+  const response = await api.get("/menu-order");
   return response.data;
 };
 
-export const saveMenuOrder = async (groups: MenuOrderMap): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
-  const response = await api.put('/menu-order', { groups });
+export const saveMenuOrder = async (
+  groups: MenuOrderMap,
+): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
+  const response = await api.put("/menu-order", { groups });
   return response.data;
 };
 
-export const resetMenuOrder = async (): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
-  const response = await api.delete('/menu-order');
+export const resetMenuOrder = async (): Promise<{
+  groups: MenuOrderMap;
+  isDefault: boolean;
+}> => {
+  const response = await api.delete("/menu-order");
   return response.data;
 };
 
 // S3 Upload
 export const getS3Buckets = async () => {
-  const response = await api.get('/s3/buckets');
+  const response = await api.get("/s3/buckets");
   return response.data;
 };
 
-
 export const getS3Prefixes = async (bucket: string, prefix?: string) => {
-  const response = await api.get('/s3/prefixes', { params: { bucket, prefix: prefix || '' } });
+  const response = await api.get("/s3/prefixes", {
+    params: { bucket, prefix: prefix || "" },
+  });
   return response.data;
 };
 
 export const checkS3ObjectExists = async (bucket: string, key: string) => {
-  const response = await api.post('/s3/object-exists', { bucket, key });
+  const response = await api.post("/s3/object-exists", { bucket, key });
   return response.data;
 };
 
@@ -632,15 +1075,15 @@ export const uploadS3Object = async (
   file: File,
   onProgress?: (percent: number) => void,
 ) => {
-  const contentType = file.type || 'application/octet-stream';
-  const presignedResp = await api.post('/s3/presigned-upload', {
+  const contentType = file.type || "application/octet-stream";
+  const presignedResp = await api.post("/s3/presigned-upload", {
     bucket,
     key,
     contentType,
   });
 
   await axios.put(presignedResp.data.uploadUrl, file, {
-    headers: { 'Content-Type': presignedResp.data.contentType || contentType },
+    headers: { "Content-Type": presignedResp.data.contentType || contentType },
     onUploadProgress: (evt) => {
       if (!evt.total) return;
       const percent = Math.round((evt.loaded / evt.total) * 100);
@@ -656,15 +1099,14 @@ export const uploadS3Object = async (
   };
 };
 
-
 // Audit Logs
 export const getAuditLogs = async (params: JsonRecord) => {
-  const response = await api.get('/audit-logs', { params });
+  const response = await api.get("/audit-logs", { params });
   return response.data;
 };
 
 export const deleteOldAuditLogs = async () => {
-  const response = await api.post('/audit-logs/cleanup');
+  const response = await api.post("/audit-logs/cleanup");
   return response.data;
 };
 
@@ -672,7 +1114,7 @@ export const deleteOldAuditLogs = async () => {
  * 获取当前环境 LB 的安全组规则
  */
 export const getSecurityGroupRules = async (loadBalancerArn: string) => {
-  const response = await api.get('/security-groups/rules', {
+  const response = await api.get("/security-groups/rules", {
     params: { loadBalancerArn },
   });
   return response.data;
@@ -691,7 +1133,7 @@ export const addSecurityGroupRule = async (
     description?: string;
   },
 ) => {
-  const response = await api.post('/security-groups/rules', rule, {
+  const response = await api.post("/security-groups/rules", rule, {
     params: { loadBalancerArn },
   });
   return response.data;
@@ -700,8 +1142,11 @@ export const addSecurityGroupRule = async (
 /**
  * 移除一条安全组规则
  */
-export const removeSecurityGroupRule = async (loadBalancerArn: string, rule: JsonRecord) => {
-  const response = await api.delete('/security-groups/rules', {
+export const removeSecurityGroupRule = async (
+  loadBalancerArn: string,
+  rule: JsonRecord,
+) => {
+  const response = await api.delete("/security-groups/rules", {
     data: { loadBalancerArn, rule },
   });
   return response.data;
@@ -728,7 +1173,10 @@ export const addRuleToSg = async (
     description?: string;
   },
 ) => {
-  const response = await api.post(`/security-groups/by-id/${groupId}/rules`, rule);
+  const response = await api.post(
+    `/security-groups/by-id/${groupId}/rules`,
+    rule,
+  );
   return response.data;
 };
 
@@ -736,7 +1184,9 @@ export const addRuleToSg = async (
  * 从指定安全组移除一条规则
  */
 export const removeRuleFromSg = async (groupId: string, rule: JsonRecord) => {
-  const response = await api.delete(`/security-groups/by-id/${groupId}/rules`, { data: rule });
+  const response = await api.delete(`/security-groups/by-id/${groupId}/rules`, {
+    data: rule,
+  });
   return response.data;
 };
 
@@ -744,7 +1194,7 @@ export const removeRuleFromSg = async (groupId: string, rule: JsonRecord) => {
  * 获取 Windows 跳板机列表
  */
 export const getJumpServers = async () => {
-  const response = await api.get('/jump-servers');
+  const response = await api.get("/jump-servers");
   return response.data;
 };
 
@@ -761,8 +1211,13 @@ export const resetJumpServerPassword = async (instanceId: string) => {
  * 获取线路列表
  * @param params - 包含分页和租户ID的参数
  */
-export const getLines = async (params: { page: number; size: number; tenantId: number; lineUrl?: string }) => {
-  const response = await api.get('/lines', { params });
+export const getLines = async (params: {
+  page: number;
+  size: number;
+  tenantId: number;
+  lineUrl?: string;
+}) => {
+  const response = await api.get("/lines", { params });
   return response.data;
 };
 
@@ -772,17 +1227,17 @@ export const getLineInventory = async (params: {
   tenantId?: number;
   status?: boolean;
   lineUrl?: string;
-  provider?: 'aliyun_dcdn' | 'aws_global' | 'aliyun_esa' | 'unknown';
-  availability?: 'up' | 'down' | 'unknown';
+  provider?: "aliyun_dcdn" | "aws_global" | "aliyun_esa" | "unknown";
+  availability?: "up" | "down" | "unknown";
   certExpireDaysLt?: number;
   refresh?: boolean;
 }) => {
-  const response = await api.get('/lines/inventory', { params });
+  const response = await api.get("/lines/inventory", { params });
   return response.data;
 };
 
 export const verifyExternalLine = async (lineUrl: string) => {
-  const response = await api.get('/lines/external/check', {
+  const response = await api.get("/lines/external/check", {
     params: { lineUrl },
   });
   return response.data;
@@ -795,10 +1250,10 @@ export const registerSuperAdminLine = async (data: {
   en: string;
   status: boolean;
   tenantId: number;
-  mode?: 'detect' | 'update';
+  mode?: "detect" | "update";
   verifyConnectivity?: boolean;
 }) => {
-  const response = await api.post('/lines/super-admin/register', data);
+  const response = await api.post("/lines/super-admin/register", data);
   return response.data;
 };
 
@@ -808,12 +1263,16 @@ export const getSuperAdminLines = async (params: {
   lineUrl?: string;
   tenantId?: number;
 }) => {
-  const response = await api.get('/lines/super-admin/list', { params });
+  const response = await api.get("/lines/super-admin/list", { params });
   return response.data;
 };
 
-export const getIngressOriginCandidates = async (params?: { keyword?: string }) => {
-  const response = await api.get('/lines/ingress/origin-candidates', { params });
+export const getIngressOriginCandidates = async (params?: {
+  keyword?: string;
+}) => {
+  const response = await api.get("/lines/ingress/origin-candidates", {
+    params,
+  });
   return response.data;
 };
 
@@ -822,7 +1281,7 @@ export const getIngressSourceCandidatesForLineOnboarding = async (data: {
   namespace?: string;
   keyword?: string;
 }) => {
-  const response = await api.post('/lines/ingress/source-candidates', data);
+  const response = await api.post("/lines/ingress/source-candidates", data);
   return response.data;
 };
 
@@ -832,7 +1291,7 @@ export const resolveIngressSourceForLineOnboarding = async (data: {
   lineUrl?: string;
   keyword?: string;
 }) => {
-  const response = await api.post('/lines/ingress/resolve-source', data);
+  const response = await api.post("/lines/ingress/resolve-source", data);
   return response.data;
 };
 
@@ -843,10 +1302,10 @@ export const previewCloneIngressForLineOnboarding = async (data: {
   newHost: string;
   newIngressName?: string;
   namePrefix?: string;
-  tlsSecretMode?: 'new' | 'reuse' | 'custom';
+  tlsSecretMode?: "new" | "reuse" | "custom";
   tlsSecretName?: string;
 }) => {
-  const response = await api.post('/lines/ingress/clone-preview', data);
+  const response = await api.post("/lines/ingress/clone-preview", data);
   return response.data;
 };
 
@@ -856,11 +1315,11 @@ export const cloneIngressForLineOnboarding = async (data: {
   sourceIngressName: string;
   newHost: string;
   newIngressName?: string;
-  tlsSecretMode?: 'new' | 'reuse' | 'custom';
+  tlsSecretMode?: "new" | "reuse" | "custom";
   tlsSecretName?: string;
   confirmed?: boolean;
 }) => {
-  const response = await api.post('/lines/ingress/clone', data);
+  const response = await api.post("/lines/ingress/clone", data);
   return response.data;
 };
 
@@ -870,7 +1329,7 @@ export const applyIngressManifestForLineOnboarding = async (data: {
   sourceIngressName?: string;
   confirmed: boolean;
 }) => {
-  const response = await api.post('/lines/ingress/manifest/apply', data);
+  const response = await api.post("/lines/ingress/manifest/apply", data);
   return response.data;
 };
 
@@ -880,33 +1339,35 @@ export const applyTenantDomainForLineOnboarding = async (data: {
   domain: string;
   otpCode: string;
 }) => {
-  const response = await api.post('/lines/tenant-domain/apply', data);
+  const response = await api.post("/lines/tenant-domain/apply", data);
   return response.data;
 };
 
 export const provisionDcdnDomain = async (data: {
   domainName: string;
   originDomain: string;
-  scope?: 'global' | 'domestic' | 'overseas';
+  scope?: "global" | "domestic" | "overseas";
 }) => {
-  const response = await api.post('/lines/dcdn/provision', data);
+  const response = await api.post("/lines/dcdn/provision", data);
   return response.data;
 };
 
 export const getDcdnDomainStatus = async (domainName: string) => {
-  const response = await api.get('/lines/dcdn/status', {
+  const response = await api.get("/lines/dcdn/status", {
     params: { domainName, _ts: Date.now() },
   });
   return response.data;
 };
 
-export const getDcdnCasCertificates = async (rootDomain: string, targetDomain?: string) => {
-  const response = await api.get('/lines/dcdn/cas-certificates', {
+export const getDcdnCasCertificates = async (
+  rootDomain: string,
+  targetDomain?: string,
+) => {
+  const response = await api.get("/lines/dcdn/cas-certificates", {
     params: { rootDomain, targetDomain, _ts: Date.now() },
   });
   return response.data;
 };
-
 
 export const previewRoute53CnameForLineOnboarding = async (data: {
   rootDomain: string;
@@ -914,7 +1375,7 @@ export const previewRoute53CnameForLineOnboarding = async (data: {
   cnameValue: string;
   hostedZoneId?: string;
 }) => {
-  const response = await api.post('/lines/route53/cname/preview', data);
+  const response = await api.post("/lines/route53/cname/preview", data);
   return response.data;
 };
 
@@ -925,17 +1386,23 @@ export const syncRoute53CnameForLineOnboarding = async (data: {
   hostedZoneId?: string;
   confirmed: boolean;
 }) => {
-  const response = await api.post('/lines/route53/cname/sync', data);
+  const response = await api.post("/lines/route53/cname/sync", data);
   return response.data;
 };
 
-export const previewDcdnSslSyncForLine = async (data: { lineUrl: string; namespace?: string }) => {
-  const response = await api.post('/lines/dcdn/ssl-sync/preview', data);
+export const previewDcdnSslSyncForLine = async (data: {
+  lineUrl: string;
+  namespace?: string;
+}) => {
+  const response = await api.post("/lines/dcdn/ssl-sync/preview", data);
   return response.data;
 };
 
-export const syncDcdnSslForLine = async (data: { lineUrl: string; namespace?: string }) => {
-  const response = await api.post('/lines/dcdn/ssl-sync', data);
+export const syncDcdnSslForLine = async (data: {
+  lineUrl: string;
+  namespace?: string;
+}) => {
+  const response = await api.post("/lines/dcdn/ssl-sync", data);
   return response.data;
 };
 
@@ -944,29 +1411,29 @@ export const applyDcdnSecurity = async (data: {
   sslPub?: string;
   sslPri?: string;
   certName?: string;
-  certSource?: 'k8s-secret' | 'cas' | 'upload';
+  certSource?: "k8s-secret" | "cas" | "upload";
   tlsSecretName?: string;
   tlsSecretNamespace?: string;
   casCertificateId?: number;
   casCertificateName?: string;
   enableWebsocket?: boolean;
   enableWaf?: boolean;
-  websocketOriginScheme?: 'http' | 'https' | 'follow';
+  websocketOriginScheme?: "http" | "https" | "follow";
   websocketHeartbeat?: number;
   enableCache?: boolean;
 }) => {
-  const response = await api.post('/lines/dcdn/security/apply', data);
+  const response = await api.post("/lines/dcdn/security/apply", data);
   return response.data;
 };
 
 // Site Monitors
 export const getSiteMonitors = async (tenantId?: number) => {
   if (!_environmentId) {
-    throw new Error('Environment ID has not been set.');
+    throw new Error("Environment ID has not been set.");
   }
-  const response = await api.get('/site-monitors', {
+  const response = await api.get("/site-monitors", {
     params: tenantId !== undefined ? { tenantId } : undefined,
-    headers: { 'X-Target-Environment': _environmentId },
+    headers: { "X-Target-Environment": _environmentId },
   });
   return response.data;
 };
@@ -981,57 +1448,80 @@ export const createSiteMonitor = async (data: {
   tenantId?: number;
   acceptableStatusCodes?: string;
 }) => {
-  const response = await api.post('/site-monitors', data, {
-    headers: { 'X-Target-Environment': _environmentId },
+  const response = await api.post("/site-monitors", data, {
+    headers: { "X-Target-Environment": _environmentId },
   });
   return response.data;
 };
 
 export const deleteSiteMonitor = async (id: number) => {
   const response = await api.delete(`/site-monitors/${id}`, {
-    headers: { 'X-Target-Environment': _environmentId },
+    headers: { "X-Target-Environment": _environmentId },
   });
   return response.data;
 };
 
 export const checkSiteMonitor = async (id: number) => {
   const response = await api.post(`/site-monitors/${id}/check`, undefined, {
-    headers: { 'X-Target-Environment': _environmentId },
+    headers: { "X-Target-Environment": _environmentId },
   });
   return response.data;
 };
 
-export const updateSiteMonitor = async (id: number, data: Partial<{ tenantId: number; name: string; host: string; port: number; isHttps: boolean; notes: string; acceptableStatusCodes: string }>) => {
+export const updateSiteMonitor = async (
+  id: number,
+  data: Partial<{
+    tenantId: number;
+    name: string;
+    host: string;
+    port: number;
+    isHttps: boolean;
+    notes: string;
+    acceptableStatusCodes: string;
+  }>,
+) => {
   const response = await api.patch(`/site-monitors/${id}`, data, {
-    headers: { 'X-Target-Environment': _environmentId },
+    headers: { "X-Target-Environment": _environmentId },
   });
   return response.data;
 };
 
 export const getSiteMonitorById = async (id: number) => {
-  if (!_environmentId) throw new Error('Environment ID has not been set.');
+  if (!_environmentId) throw new Error("Environment ID has not been set.");
   const response = await api.get(`/site-monitors/${id}`, {
-    headers: { 'X-Target-Environment': _environmentId },
+    headers: { "X-Target-Environment": _environmentId },
   });
   return response.data;
 };
 
 // Alerts config APIs
 export const getAlertConfig = async () => {
-  if (!_environmentId) throw new Error('Environment ID has not been set.');
-  const resp = await api.get('/alerts/config', { headers: { 'X-Target-Environment': _environmentId } });
+  if (!_environmentId) throw new Error("Environment ID has not been set.");
+  const resp = await api.get("/alerts/config", {
+    headers: { "X-Target-Environment": _environmentId },
+  });
   return resp.data;
 };
 
-export const saveAlertConfig = async (data: { lark_webhook_url?: string | null; failure_threshold?: number | null; cooldown_minutes?: number | null; probe_timeout_ms?: number | null; acceptable_status_codes?: string | null }) => {
-  if (!_environmentId) throw new Error('Environment ID has not been set.');
-  const resp = await api.post('/alerts/config', data, { headers: { 'X-Target-Environment': _environmentId } });
+export const saveAlertConfig = async (data: {
+  lark_webhook_url?: string | null;
+  failure_threshold?: number | null;
+  cooldown_minutes?: number | null;
+  probe_timeout_ms?: number | null;
+  acceptable_status_codes?: string | null;
+}) => {
+  if (!_environmentId) throw new Error("Environment ID has not been set.");
+  const resp = await api.post("/alerts/config", data, {
+    headers: { "X-Target-Environment": _environmentId },
+  });
   return resp.data;
 };
 
 export const testAlert = async () => {
-  if (!_environmentId) throw new Error('Environment ID has not been set.');
-  const resp = await api.post('/alerts/test', undefined, { headers: { 'X-Target-Environment': _environmentId } });
+  if (!_environmentId) throw new Error("Environment ID has not been set.");
+  const resp = await api.post("/alerts/test", undefined, {
+    headers: { "X-Target-Environment": _environmentId },
+  });
   return resp.data;
 };
 
@@ -1053,14 +1543,14 @@ export type CertStudyQuestionNote = {
 };
 
 export type CertStudyQuestionReview = {
-  status: 'new' | 'reviewing' | 'uncertain' | 'mastered' | 'archived' | string;
+  status: "new" | "reviewing" | "uncertain" | "mastered" | "archived" | string;
   isImportant: boolean;
   myFinalAnswer: string | null;
-  confidence: 'low' | 'medium' | 'high' | null;
+  confidence: "low" | "medium" | "high" | null;
   reviewCount: number;
   wrongCount: number;
   correctStreak: number;
-  lastResult: 'correct' | 'wrong' | 'uncertain' | 'skipped' | null;
+  lastResult: "correct" | "wrong" | "uncertain" | "skipped" | null;
   lastReviewedAt: string | null;
   nextReviewAt: string | null;
 };
@@ -1091,8 +1581,8 @@ type CertStudyQuestionsParams = {
   reviewedOnly?: 0 | 1;
   source?: string;
   tag?: string;
-  sortBy?: 'reviewCount';
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: "reviewCount";
+  sortOrder?: "asc" | "desc";
   page?: number;
   pageSize?: number;
 };
@@ -1107,15 +1597,20 @@ type CertStudyQuestionsResponse = {
 
 // StrictMode development remounts can request the same initial list concurrently.
 // Reuse only in-flight requests; completed results are not cached on the client.
-const pendingCertStudyQuestionRequests = new Map<string, Promise<CertStudyQuestionsResponse>>();
+const pendingCertStudyQuestionRequests = new Map<
+  string,
+  Promise<CertStudyQuestionsResponse>
+>();
 
-export const getCertStudyQuestions = async (params: CertStudyQuestionsParams) => {
+export const getCertStudyQuestions = async (
+  params: CertStudyQuestionsParams,
+) => {
   const requestKey = JSON.stringify(params);
   const existingRequest = pendingCertStudyQuestionRequests.get(requestKey);
   if (existingRequest) return existingRequest;
 
   const request = api
-    .get('/cert-study/questions', { params })
+    .get("/cert-study/questions", { params })
     .then((response) => response.data as CertStudyQuestionsResponse);
   pendingCertStudyQuestionRequests.set(requestKey, request);
 
@@ -1151,7 +1646,7 @@ export const createCertStudyQuestion = async (data: {
   rawHtml?: string;
   tags?: string[];
 }) => {
-  const response = await api.post('/cert-study/questions', data);
+  const response = await api.post("/cert-study/questions", data);
   return response.data as { created: boolean; questionId: number };
 };
 
@@ -1178,11 +1673,11 @@ export const updateCertStudyQuestion = async (
 export const updateCertStudyReview = async (
   id: number,
   data: {
-    status?: 'new' | 'reviewing' | 'uncertain' | 'mastered' | 'archived';
+    status?: "new" | "reviewing" | "uncertain" | "mastered" | "archived";
     isImportant?: boolean;
     myFinalAnswer?: string;
-    confidence?: 'low' | 'medium' | 'high';
-    lastResult?: 'correct' | 'wrong' | 'uncertain' | 'skipped';
+    confidence?: "low" | "medium" | "high";
+    lastResult?: "correct" | "wrong" | "uncertain" | "skipped";
     nextReviewAt?: string | null;
   },
 ) => {
@@ -1194,7 +1689,10 @@ export const createCertStudyNote = async (
   questionId: number,
   data: { noteType: string; title?: string; content: string; url?: string },
 ) => {
-  const response = await api.post(`/cert-study/questions/${questionId}/notes`, data);
+  const response = await api.post(
+    `/cert-study/questions/${questionId}/notes`,
+    data,
+  );
   return response.data as { ok: boolean; noteId: number };
 };
 
@@ -1225,72 +1723,107 @@ export const importCertStudyManual = async (data: {
   rawHtml?: string;
   tags?: string[];
 }) => {
-  const response = await api.post('/cert-study/import/manual', data);
+  const response = await api.post("/cert-study/import/manual", data);
   return response.data as {
     total: number;
     imported: number;
     duplicated: number;
     failed: number;
-    items: Array<{ index: number; questionId?: number; created?: boolean; error?: string }>;
+    items: Array<{
+      index: number;
+      questionId?: number;
+      created?: boolean;
+      error?: string;
+    }>;
   };
 };
 
-export const importCertStudyJson = async (items: Array<{
-  examCode?: string;
-  source: string;
-  sourceUrl?: string;
-  sourceQuestionNo?: string;
-  sourceTopic?: string;
-  domain?: string;
-  stem: string;
-  options: Record<string, string>;
-  sourceAnswer?: string;
-  explanation?: string;
-  rawHtml?: string;
-  tags?: string[];
-}>) => {
-  const response = await api.post('/cert-study/import/json', { items });
+export const importCertStudyJson = async (
+  items: Array<{
+    examCode?: string;
+    source: string;
+    sourceUrl?: string;
+    sourceQuestionNo?: string;
+    sourceTopic?: string;
+    domain?: string;
+    stem: string;
+    options: Record<string, string>;
+    sourceAnswer?: string;
+    explanation?: string;
+    rawHtml?: string;
+    tags?: string[];
+  }>,
+) => {
+  const response = await api.post("/cert-study/import/json", { items });
   return response.data as {
     total: number;
     imported: number;
     duplicated: number;
     failed: number;
-    items: Array<{ index: number; questionId?: number; created?: boolean; error?: string }>;
+    items: Array<{
+      index: number;
+      questionId?: number;
+      created?: boolean;
+      error?: string;
+    }>;
   };
 };
 
 // Access control (users/roles/permissions)
 export const getAccessUsers = async () => {
-  const response = await api.get('/users');
+  const response = await api.get("/users");
   return response.data;
 };
 
-export const createAccessUser = async (data: { username: string; displayName?: string; password?: string; status?: 'active' | 'disabled'; roleIds?: number[] }) => {
-  const response = await api.post('/users', data);
+export const createAccessUser = async (data: {
+  username: string;
+  displayName?: string;
+  password?: string;
+  status?: "active" | "disabled";
+  roleIds?: number[];
+}) => {
+  const response = await api.post("/users", data);
   return response.data;
 };
 
-export const updateAccessUser = async (id: number, data: { username?: string; displayName?: string; status?: 'active' | 'disabled'; roleIds?: number[] }) => {
+export const updateAccessUser = async (
+  id: number,
+  data: {
+    username?: string;
+    displayName?: string;
+    status?: "active" | "disabled";
+    roleIds?: number[];
+  },
+) => {
   const response = await api.patch(`/users/${id}`, data);
   return response.data;
 };
 
-export const resetAccessUserPassword = async (id: number, password?: string) => {
+export const resetAccessUserPassword = async (
+  id: number,
+  password?: string,
+) => {
   const response = await api.post(`/users/${id}/reset-password`, { password });
   return response.data;
 };
 
 export const getAccessRoles = async () => {
-  const response = await api.get('/roles');
+  const response = await api.get("/roles");
   return response.data;
 };
 
-export const createAccessRole = async (data: { name: string; description?: string }) => {
-  const response = await api.post('/roles', data);
+export const createAccessRole = async (data: {
+  name: string;
+  description?: string;
+}) => {
+  const response = await api.post("/roles", data);
   return response.data;
 };
 
-export const updateAccessRole = async (id: number, data: { name?: string; description?: string }) => {
+export const updateAccessRole = async (
+  id: number,
+  data: { name?: string; description?: string },
+) => {
   const response = await api.patch(`/roles/${id}`, data);
   return response.data;
 };
@@ -1300,13 +1833,16 @@ export const deleteAccessRole = async (id: number) => {
   return response.data;
 };
 
-export const updateAccessRolePermissions = async (id: number, permissionIds: number[]) => {
+export const updateAccessRolePermissions = async (
+  id: number,
+  permissionIds: number[],
+) => {
   const response = await api.put(`/roles/${id}/permissions`, { permissionIds });
   return response.data;
 };
 
 export const getAccessPermissions = async () => {
-  const response = await api.get('/permissions');
+  const response = await api.get("/permissions");
   return response.data;
 };
 
@@ -1350,9 +1886,14 @@ export type AssetAccount = {
 };
 
 export type AccountAliyunEsaDomainPreviewResponse = {
-  provider: 'aliyun_esa';
-  service: 'esa';
-  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  provider: "aliyun_esa";
+  service: "esa";
+  account: {
+    id: number;
+    account_name: string;
+    account_identifier: string;
+    provider: string;
+  };
   endpoint: string;
   fetchedAt: string;
   total: number;
@@ -1362,9 +1903,14 @@ export type AccountAliyunEsaDomainPreviewResponse = {
 };
 
 export type AccountAliyunDcdnDomainPreviewResponse = {
-  provider: 'aliyun_dcdn';
-  service?: 'dcdn' | 'esa' | string;
-  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  provider: "aliyun_dcdn";
+  service?: "dcdn" | "esa" | string;
+  account: {
+    id: number;
+    account_name: string;
+    account_identifier: string;
+    provider: string;
+  };
   endpoint: string;
   fetchedAt: string;
   total: number;
@@ -1373,27 +1919,73 @@ export type AccountAliyunDcdnDomainPreviewResponse = {
 };
 
 export type AccountAliyunEsaDomainSyncResponse = {
-  provider: 'aliyun_esa';
-  service: 'esa';
-  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  provider: "aliyun_esa";
+  service: "esa";
+  account: {
+    id: number;
+    account_name: string;
+    account_identifier: string;
+    provider: string;
+  };
   fetchedAt: string;
-  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; accountConflicts: number; dryRun: boolean };
-  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict' | 'account_conflict'; id?: number; conflictProvider?: string | null; conflictAccountId?: number | null }>;
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+    conflicts: number;
+    accountConflicts: number;
+    dryRun: boolean;
+  };
+  items: Array<{
+    domain: string;
+    action:
+      | "create"
+      | "update"
+      | "unchanged"
+      | "provider_conflict"
+      | "account_conflict";
+    id?: number;
+    conflictProvider?: string | null;
+    conflictAccountId?: number | null;
+  }>;
 };
 
 export type AccountAliyunDcdnDomainSyncResponse = {
-  provider: 'aliyun_dcdn';
-  service?: 'dcdn' | 'esa' | string;
-  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  provider: "aliyun_dcdn";
+  service?: "dcdn" | "esa" | string;
+  account: {
+    id: number;
+    account_name: string;
+    account_identifier: string;
+    provider: string;
+  };
   fetchedAt: string;
-  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; dryRun: boolean };
-  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }>;
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+    conflicts: number;
+    dryRun: boolean;
+  };
+  items: Array<{
+    domain: string;
+    action: "create" | "update" | "unchanged" | "provider_conflict";
+    id?: number;
+    conflictProvider?: string | null;
+  }>;
 };
 
 export type AccountWangsuDomainPreviewResponse = {
-  provider: 'wangsu';
-  service?: 'cdn' | string;
-  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  provider: "wangsu";
+  service?: "cdn" | string;
+  account: {
+    id: number;
+    account_name: string;
+    account_identifier: string;
+    provider: string;
+  };
   endpoint: string;
   fetchedAt: string;
   total: number;
@@ -1401,12 +1993,29 @@ export type AccountWangsuDomainPreviewResponse = {
 };
 
 export type AccountWangsuDomainSyncResponse = {
-  provider: 'wangsu';
-  service?: 'cdn' | string;
-  account: { id: number; account_name: string; account_identifier: string; provider: string };
+  provider: "wangsu";
+  service?: "cdn" | string;
+  account: {
+    id: number;
+    account_name: string;
+    account_identifier: string;
+    provider: string;
+  };
   fetchedAt: string;
-  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; dryRun: boolean };
-  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }>;
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+    conflicts: number;
+    dryRun: boolean;
+  };
+  items: Array<{
+    domain: string;
+    action: "create" | "update" | "unchanged" | "provider_conflict";
+    id?: number;
+    conflictProvider?: string | null;
+  }>;
 };
 
 export type AssetResource = {
@@ -1491,12 +2100,12 @@ export type WangsuCdnDomainPreviewItem = {
   enabled?: string;
   lastModified?: string;
   billingAreas?: string;
-  provider: 'wangsu';
+  provider: "wangsu";
   raw: Record<string, unknown>;
 };
 
 export type WangsuCdnDomainPreviewResponse = {
-  provider: 'wangsu';
+  provider: "wangsu";
   endpoint: string;
   enabled: boolean;
   fetchedAt: string;
@@ -1505,14 +2114,24 @@ export type WangsuCdnDomainPreviewResponse = {
 };
 
 export type WangsuCdnDomainSyncResponse = {
-  provider: 'wangsu';
+  provider: "wangsu";
   fetchedAt: string;
-  summary: { total: number; created: number; updated: number; unchanged: number; dryRun: boolean };
-  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged'; id?: number }>;
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+    dryRun: boolean;
+  };
+  items: Array<{
+    domain: string;
+    action: "create" | "update" | "unchanged";
+    id?: number;
+  }>;
 };
 
 export type AliyunEsaDomainPreviewItem = {
-  provider: 'aliyun_esa';
+  provider: "aliyun_esa";
   domain: string;
   recordId?: string;
   siteId?: string;
@@ -1533,7 +2152,7 @@ export type AliyunEsaDomainPreviewItem = {
 };
 
 export type AliyunDcdnDomainPreviewItem = {
-  provider: 'aliyun_dcdn';
+  provider: "aliyun_dcdn";
   domain: string;
   domainId?: string;
   cname?: string;
@@ -1548,7 +2167,7 @@ export type AliyunDcdnDomainPreviewItem = {
 };
 
 export type AliyunDcdnDomainPreviewResponse = {
-  provider: 'aliyun_dcdn';
+  provider: "aliyun_dcdn";
   endpoint: string;
   fetchedAt: string;
   total: number;
@@ -1557,12 +2176,23 @@ export type AliyunDcdnDomainPreviewResponse = {
 };
 
 export type AliyunDcdnDomainSyncResponse = {
-  provider: 'aliyun_dcdn';
+  provider: "aliyun_dcdn";
   fetchedAt: string;
-  summary: { total: number; created: number; updated: number; unchanged: number; conflicts: number; dryRun: boolean };
-  items: Array<{ domain: string; action: 'create' | 'update' | 'unchanged' | 'provider_conflict'; id?: number; conflictProvider?: string | null }>;
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+    conflicts: number;
+    dryRun: boolean;
+  };
+  items: Array<{
+    domain: string;
+    action: "create" | "update" | "unchanged" | "provider_conflict";
+    id?: number;
+    conflictProvider?: string | null;
+  }>;
 };
-
 
 export type AssetListResponse<T> = {
   items: T[];
@@ -1570,28 +2200,37 @@ export type AssetListResponse<T> = {
 };
 
 export const getAssetOverview = async () => {
-  const response = await api.get('/assets/overview');
+  const response = await api.get("/assets/overview");
   return response.data as {
     accounts: { total: number; byStatus: Record<string, number> };
     resources: { total: number; byStatus: Record<string, number> };
     domains: { total: number; byStatus: Record<string, number> };
     credentialRefs: { total: number; byStatus: Record<string, number> };
-    missingOwners: { accounts: number; resources: number; domains: number; credentialRefs: number; total: number };
+    missingOwners: {
+      accounts: number;
+      resources: number;
+      domains: number;
+      credentialRefs: number;
+      total: number;
+    };
     recentChanges: AssetChangeLog[];
   };
 };
 
 export const getAssetAccounts = async (params: AssetListParams = {}) => {
-  const response = await api.get('/assets/accounts', { params });
+  const response = await api.get("/assets/accounts", { params });
   return response.data as AssetListResponse<AssetAccount>;
 };
 
 export const createAssetAccount = async (data: Partial<AssetAccount>) => {
-  const response = await api.post('/assets/accounts', data);
+  const response = await api.post("/assets/accounts", data);
   return response.data;
 };
 
-export const updateAssetAccount = async (id: number, data: Partial<AssetAccount>) => {
+export const updateAssetAccount = async (
+  id: number,
+  data: Partial<AssetAccount>,
+) => {
   const response = await api.patch(`/assets/accounts/${id}`, data);
   return response.data;
 };
@@ -1607,16 +2246,19 @@ export const restoreAssetAccount = async (id: number) => {
 };
 
 export const getAssetResources = async (params: AssetListParams = {}) => {
-  const response = await api.get('/assets/resources', { params });
+  const response = await api.get("/assets/resources", { params });
   return response.data as AssetListResponse<AssetResource>;
 };
 
 export const createAssetResource = async (data: Partial<AssetResource>) => {
-  const response = await api.post('/assets/resources', data);
+  const response = await api.post("/assets/resources", data);
   return response.data;
 };
 
-export const updateAssetResource = async (id: number, data: Partial<AssetResource>) => {
+export const updateAssetResource = async (
+  id: number,
+  data: Partial<AssetResource>,
+) => {
   const response = await api.patch(`/assets/resources/${id}`, data);
   return response.data;
 };
@@ -1632,16 +2274,19 @@ export const restoreAssetResource = async (id: number) => {
 };
 
 export const getAssetDomains = async (params: AssetListParams = {}) => {
-  const response = await api.get('/assets/domains', { params });
+  const response = await api.get("/assets/domains", { params });
   return response.data as AssetListResponse<AssetDomain>;
 };
 
 export const createAssetDomain = async (data: Partial<AssetDomain>) => {
-  const response = await api.post('/assets/domains', data);
+  const response = await api.post("/assets/domains", data);
   return response.data;
 };
 
-export const updateAssetDomain = async (id: number, data: Partial<AssetDomain>) => {
+export const updateAssetDomain = async (
+  id: number,
+  data: Partial<AssetDomain>,
+) => {
   const response = await api.patch(`/assets/domains/${id}`, data);
   return response.data;
 };
@@ -1657,16 +2302,19 @@ export const restoreAssetDomain = async (id: number) => {
 };
 
 export const getCredentialRefs = async (params: AssetListParams = {}) => {
-  const response = await api.get('/assets/credential-refs', { params });
+  const response = await api.get("/assets/credential-refs", { params });
   return response.data as AssetListResponse<CredentialRef>;
 };
 
 export const createCredentialRef = async (data: Partial<CredentialRef>) => {
-  const response = await api.post('/assets/credential-refs', data);
+  const response = await api.post("/assets/credential-refs", data);
   return response.data;
 };
 
-export const updateCredentialRef = async (id: number, data: Partial<CredentialRef>) => {
+export const updateCredentialRef = async (
+  id: number,
+  data: Partial<CredentialRef>,
+) => {
   const response = await api.patch(`/assets/credential-refs/${id}`, data);
   return response.data;
 };
@@ -1681,69 +2329,107 @@ export const restoreCredentialRef = async (id: number) => {
   return response.data;
 };
 
-export const getAssetChangeLogs = async (params: { assetType?: string; assetId?: number; action?: string; page?: number; pageSize?: number } = {}) => {
-  const response = await api.get('/assets/change-logs', { params });
+export const getAssetChangeLogs = async (
+  params: {
+    assetType?: string;
+    assetId?: number;
+    action?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
+) => {
+  const response = await api.get("/assets/change-logs", { params });
   return response.data as AssetListResponse<AssetChangeLog>;
 };
 
 export const previewWangsuCdnDomains = async () => {
-  const response = await api.get('/assets/cdn/wangsu/domains/preview');
+  const response = await api.get("/assets/cdn/wangsu/domains/preview");
   return response.data as WangsuCdnDomainPreviewResponse;
 };
 
 export const syncWangsuCdnDomains = async (data: { dryRun?: boolean } = {}) => {
-  const response = await api.post('/assets/cdn/wangsu/domains/sync', data);
+  const response = await api.post("/assets/cdn/wangsu/domains/sync", data);
   return response.data as WangsuCdnDomainSyncResponse;
 };
 
 export const previewAliyunDcdnDomains = async () => {
-  const response = await api.get('/assets/cdn/aliyun/dcdn/domains/preview');
+  const response = await api.get("/assets/cdn/aliyun/dcdn/domains/preview");
   return response.data as AliyunDcdnDomainPreviewResponse;
 };
 
-export const syncAliyunDcdnDomains = async (data: { dryRun?: boolean } = {}) => {
-  const response = await api.post('/assets/cdn/aliyun/dcdn/domains/sync', data);
+export const syncAliyunDcdnDomains = async (
+  data: { dryRun?: boolean } = {},
+) => {
+  const response = await api.post("/assets/cdn/aliyun/dcdn/domains/sync", data);
   return response.data as AliyunDcdnDomainSyncResponse;
 };
 
 export const previewAccountAliyunDcdnDomains = async (accountId: number) => {
-  const response = await api.get(`/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`);
+  const response = await api.get(
+    `/assets/accounts/${accountId}/aliyun-dcdn/domains/preview`,
+  );
   return response.data as AccountAliyunDcdnDomainPreviewResponse;
 };
 
 export const previewAccountAliyunEsaDomains = async (accountId: number) => {
-  const response = await api.get(`/assets/accounts/${accountId}/aliyun-esa/domains/preview`);
+  const response = await api.get(
+    `/assets/accounts/${accountId}/aliyun-esa/domains/preview`,
+  );
   return response.data as AccountAliyunEsaDomainPreviewResponse;
 };
 
-export const syncAccountAliyunDcdnDomains = async (accountId: number, data: { dryRun?: boolean; service?: 'dcdn' | 'esa' } = {}) => {
-  const response = await api.post(`/assets/accounts/${accountId}/aliyun-dcdn/domains/sync`, data);
+export const syncAccountAliyunDcdnDomains = async (
+  accountId: number,
+  data: { dryRun?: boolean; service?: "dcdn" | "esa" } = {},
+) => {
+  const response = await api.post(
+    `/assets/accounts/${accountId}/aliyun-dcdn/domains/sync`,
+    data,
+  );
   return response.data as AccountAliyunDcdnDomainSyncResponse;
 };
 
-export const syncAccountAliyunEsaDomains = async (accountId: number, data: { dryRun?: boolean } = {}) => {
-  const response = await api.post(`/assets/accounts/${accountId}/aliyun-esa/domains/sync`, data);
+export const syncAccountAliyunEsaDomains = async (
+  accountId: number,
+  data: { dryRun?: boolean } = {},
+) => {
+  const response = await api.post(
+    `/assets/accounts/${accountId}/aliyun-esa/domains/sync`,
+    data,
+  );
   return response.data as AccountAliyunEsaDomainSyncResponse;
 };
 
 export const previewAccountWangsuDomains = async (accountId: number) => {
-  const response = await api.get(`/assets/accounts/${accountId}/wangsu/domains/preview`);
+  const response = await api.get(
+    `/assets/accounts/${accountId}/wangsu/domains/preview`,
+  );
   return response.data as AccountWangsuDomainPreviewResponse;
 };
 
-export const syncAccountWangsuDomains = async (accountId: number, data: { dryRun?: boolean } = {}) => {
-  const response = await api.post(`/assets/accounts/${accountId}/wangsu/domains/sync`, data);
+export const syncAccountWangsuDomains = async (
+  accountId: number,
+  data: { dryRun?: boolean } = {},
+) => {
+  const response = await api.post(
+    `/assets/accounts/${accountId}/wangsu/domains/sync`,
+    data,
+  );
   return response.data as AccountWangsuDomainSyncResponse;
 };
 
 // Auth / Me
 export const getMe = async () => {
-  const response = await api.get('/me');
+  const response = await api.get("/me");
   return response.data;
 };
 
-export const login = async (data: { username: string; password: string; otpCode?: string }) => {
-  const response = await api.post('/auth/login', data);
+export const login = async (data: {
+  username: string;
+  password: string;
+  otpCode?: string;
+}) => {
+  const response = await api.post("/auth/login", data);
   return response.data;
 };
 
@@ -1754,13 +2440,20 @@ export type AccessUserMfaEnrollment = {
   qrCodeDataUrl: string;
 };
 
-export const startAccessUserMfaEnrollment = async (id: number): Promise<AccessUserMfaEnrollment> => {
+export const startAccessUserMfaEnrollment = async (
+  id: number,
+): Promise<AccessUserMfaEnrollment> => {
   const response = await api.post(`/auth/users/${id}/mfa/enroll/start`);
   return response.data;
 };
 
-export const confirmAccessUserMfaEnrollment = async (id: number, otpCode: string) => {
-  const response = await api.post(`/auth/users/${id}/mfa/enroll/confirm`, { otpCode });
+export const confirmAccessUserMfaEnrollment = async (
+  id: number,
+  otpCode: string,
+) => {
+  const response = await api.post(`/auth/users/${id}/mfa/enroll/confirm`, {
+    otpCode,
+  });
   return response.data;
 };
 
@@ -1769,31 +2462,64 @@ export const disableAccessUserMfa = async (id: number) => {
   return response.data;
 };
 
-export const getSslCertificates = async (params: { environmentId: string; region?: string; keyword?: string; page?: number; pageSize?: number }) => {
-  const response = await api.get('/ssl-certificates', { params });
+export const getSslCertificates = async (params: {
+  environmentId: string;
+  region?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}) => {
+  const response = await api.get("/ssl-certificates", { params });
   return response.data;
 };
 
-export const requestSslCertificate = async (data: { environmentId: string; region?: string; domain: string; sans?: string }) => {
-  const response = await api.post('/ssl-certificates/request-certificate', data);
+export const requestSslCertificate = async (data: {
+  environmentId: string;
+  region?: string;
+  domain: string;
+  sans?: string;
+}) => {
+  const response = await api.post(
+    "/ssl-certificates/request-certificate",
+    data,
+  );
   return response.data;
 };
 
-export const encryptKmsValue = async (data: { environmentId: string; value: string }) => (await api.post('/kms-values/encrypt', data)).data;
-export const decryptKmsValue = async (data: { environmentId: string; value: string; otpCode: string }) => (await api.post('/kms-values/decrypt', data)).data;
+export const encryptKmsValue = async (data: {
+  environmentId: string;
+  value: string;
+}) => (await api.post("/kms-values/encrypt", data)).data;
+export const decryptKmsValue = async (data: {
+  environmentId: string;
+  value: string;
+  otpCode: string;
+}) => (await api.post("/kms-values/decrypt", data)).data;
 type KmsValueConfiguration = {
-  supported: boolean; environmentId: string; reason?: string; keyAlias?: string; keyId?: string; region?: string;
-  encryptionContext?: Record<string, string>; ciphertextPrefix?: string; targetRoleConfigured?: boolean;
+  supported: boolean;
+  environmentId: string;
+  reason?: string;
+  keyAlias?: string;
+  keyId?: string;
+  region?: string;
+  encryptionContext?: Record<string, string>;
+  ciphertextPrefix?: string;
+  targetRoleConfigured?: boolean;
 };
 const kmsValueConfigurationCache = new Map<string, KmsValueConfiguration>();
-const kmsValueConfigurationRequests = new Map<string, Promise<KmsValueConfiguration>>();
-export const getKmsValueConfiguration = async (environmentId: string): Promise<KmsValueConfiguration> => {
+const kmsValueConfigurationRequests = new Map<
+  string,
+  Promise<KmsValueConfiguration>
+>();
+export const getKmsValueConfiguration = async (
+  environmentId: string,
+): Promise<KmsValueConfiguration> => {
   const cached = kmsValueConfigurationCache.get(environmentId);
   if (cached) return cached;
   const existing = kmsValueConfigurationRequests.get(environmentId);
   if (existing) return existing;
   const request = api
-    .get('/kms-values/config', { params: { environmentId } })
+    .get("/kms-values/config", { params: { environmentId } })
     .then((response) => {
       const data = response.data as KmsValueConfiguration;
       kmsValueConfigurationCache.set(environmentId, data);
@@ -1807,17 +2533,29 @@ export const getKmsValueConfiguration = async (environmentId: string): Promise<K
   }
 };
 
-export const getSslCertificateDetail = async (params: { environmentId: string; region?: string; certificateArn: string }) => {
-  const response = await api.get('/ssl-certificates/detail', { params });
+export const getSslCertificateDetail = async (params: {
+  environmentId: string;
+  region?: string;
+  certificateArn: string;
+}) => {
+  const response = await api.get("/ssl-certificates/detail", { params });
   return response.data;
 };
 
-export const createSslCertificateDecryptedDownload = async (data: { environmentId: string; region?: string; certificateArn: string; otpCode: string; passphrase: string }) => {
-  const response = await api.post('/ssl-certificates/decrypt-download', data, { responseType: 'blob' });
+export const createSslCertificateDecryptedDownload = async (data: {
+  environmentId: string;
+  region?: string;
+  certificateArn: string;
+  otpCode: string;
+  passphrase: string;
+}) => {
+  const response = await api.post("/ssl-certificates/decrypt-download", data, {
+    responseType: "blob",
+  });
   return response;
 };
 
-export type OncallAlertStatus = 'FIRING' | 'ACKED' | 'RESOLVED';
+export type OncallAlertStatus = "FIRING" | "ACKED" | "RESOLVED";
 export type OncallAlert = {
   id: number;
   fingerprint: string;
@@ -1832,29 +2570,117 @@ export type OncallAlert = {
   resolved_at?: string | null;
   labels_json?: Record<string, unknown> | string;
   annotations_json?: Record<string, unknown> | string;
-  events?: Array<{ id: number; event_type: string; source_status?: string | null; occurred_at: string }>;
-  acknowledgements?: Array<{ id: number; actor_username?: string | null; source: string; result: string; comment?: string | null; acknowledged_at: string }>;
-  notifications?: Array<{ id: number; channel: string; status: string; error_message?: string | null; sent_at?: string | null; created_at: string }>;
-  escalations?: Array<{ id: number; level: string; status: 'SENT' | 'SKIPPED' | 'UNSUPPORTED' | 'FAILED' | 'PENDING' | 'SENDING' | 'CANCELLED'; scheduled_at: string; executed_at?: string | null; attempt_count: number; error_message?: string | null; created_at: string }>;
+  events?: Array<{
+    id: number;
+    event_type: string;
+    source_status?: string | null;
+    occurred_at: string;
+  }>;
+  acknowledgements?: Array<{
+    id: number;
+    actor_username?: string | null;
+    source: string;
+    result: string;
+    comment?: string | null;
+    acknowledged_at: string;
+  }>;
+  notifications?: Array<{
+    id: number;
+    channel: string;
+    status: string;
+    error_message?: string | null;
+    sent_at?: string | null;
+    created_at: string;
+  }>;
+  escalations?: Array<{
+    id: number;
+    level: string;
+    status:
+      | "SENT"
+      | "SKIPPED"
+      | "UNSUPPORTED"
+      | "FAILED"
+      | "PENDING"
+      | "SENDING"
+      | "CANCELLED";
+    scheduled_at: string;
+    executed_at?: string | null;
+    attempt_count: number;
+    error_message?: string | null;
+    created_at: string;
+  }>;
 };
-export type OncallAlertList = { items: OncallAlert[]; total: number; page: number; pageSize: number };
-export const listOncallAlerts = async (params: { page?: number; pageSize?: number; status?: OncallAlertStatus; environmentId?: string; keyword?: string } = {}) =>
-  (await api.get('/oncall/alerts', { params })).data as OncallAlertList;
+export type OncallAlertList = {
+  items: OncallAlert[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+export const listOncallAlerts = async (
+  params: {
+    page?: number;
+    pageSize?: number;
+    status?: OncallAlertStatus;
+    environmentId?: string;
+    keyword?: string;
+  } = {},
+) => (await api.get("/oncall/alerts", { params })).data as OncallAlertList;
 export const getOncallAlert = async (id: number) =>
   (await api.get(`/oncall/alerts/${id}`)).data as OncallAlert;
 export const acknowledgeOncallAlert = async (id: number, comment?: string) =>
-  (await api.post(`/oncall/alerts/${id}/ack`, { comment })).data as { acknowledged: boolean; status: OncallAlertStatus; result: string };
-export type OncallRosterLevel = 'L1' | 'L2' | 'OWNER';
-export type OncallRosterBinding = { id: number; environment_id: string; level: OncallRosterLevel; email: string; display_name: string | null; active_from: string | null; active_until: string | null; enabled: number };
+  (await api.post(`/oncall/alerts/${id}/ack`, { comment })).data as {
+    acknowledged: boolean;
+    status: OncallAlertStatus;
+    result: string;
+  };
+export type OncallRosterLevel = "L1" | "L2" | "OWNER";
+export type OncallRosterBinding = {
+  id: number;
+  environment_id: string;
+  level: OncallRosterLevel;
+  email: string;
+  display_name: string | null;
+  active_from: string | null;
+  active_until: string | null;
+  enabled: number;
+};
 export const listOncallRoster = async (environmentId?: string) =>
-  (await api.get('/oncall/roster', { params: environmentId ? { environmentId } : undefined })).data as OncallRosterBinding[];
-export const saveOncallRoster = async (data: { id?: number; environmentId: string; level: OncallRosterLevel; email: string; displayName?: string; enabled?: boolean }) =>
-  (await api.post('/oncall/roster', data)).data as { ok: boolean; id?: number; environmentId: string; level: OncallRosterLevel; email: string };
+  (
+    await api.get("/oncall/roster", {
+      params: environmentId ? { environmentId } : undefined,
+    })
+  ).data as OncallRosterBinding[];
+export const saveOncallRoster = async (data: {
+  id?: number;
+  environmentId: string;
+  level: OncallRosterLevel;
+  email: string;
+  displayName?: string;
+  enabled?: boolean;
+}) =>
+  (await api.post("/oncall/roster", data)).data as {
+    ok: boolean;
+    id?: number;
+    environmentId: string;
+    level: OncallRosterLevel;
+    email: string;
+  };
 export const deleteOncallRoster = async (id: number) =>
-  (await api.delete(`/oncall/roster/${id}`)).data as { ok: boolean; deleted: number };
+  (await api.delete(`/oncall/roster/${id}`)).data as {
+    ok: boolean;
+    deleted: number;
+  };
 
-export type MonitoringRequestStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'MERGED_PENDING_DEPLOY' | 'COMPLETED' | 'REJECTED' | 'WITHDRAWN';
-export type MonitoringRequestResourceType = 'ServiceMonitor' | 'PodMonitor' | 'PrometheusRule' | 'WorkloadBundle';
+export type MonitoringRequestStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "APPROVED"
+  | "MERGED_PENDING_DEPLOY"
+  | "COMPLETED"
+  | "REJECTED"
+  | "WITHDRAWN";
+export type MonitoringRequestResourceType =
+  "ServiceMonitor" | "PodMonitor" | "PrometheusRule" | "WorkloadBundle";
 export type MonitoringEnvironmentOption = {
   environmentId: string;
   label: string;
@@ -1867,51 +2693,233 @@ export type MonitoringPrometheusRuleFields = {
   alertName: string;
   expr: string;
   forDuration: string;
-  severity: 'warning' | 'critical';
+  severity: "warning" | "critical";
   summary: string;
   description: string;
   owner: string;
   runbookUrl: string;
 };
 export type MonitoringRequest = {
-  request_id: string; status: MonitoringRequestStatus; app_id: string; resource_type: MonitoringRequestResourceType;
-  environment_id: string; environment_name?: string; target_branch: string; repository_environment_path: string; executor_key: string; execution_enabled: boolean;
-  resource_name: string; resource_path: string; reason: string; mr_iid?: number | null; commit_sha?: string | null; gitlab_merged_at?: string | null; gitlab_merge_commit_sha?: string | null;
-  prometheus_rule_alert_name?: string | null; prometheus_rule_expr?: string | null; prometheus_rule_for?: string | null; prometheus_rule_severity?: 'warning' | 'critical' | null;
-  prometheus_rule_summary?: string | null; prometheus_rule_description?: string | null; prometheus_rule_owner?: string | null; prometheus_rule_runbook_url?: string | null;
-  workload_yaml?: string | null; workload_namespace?: string | null; workload_deployment_name?: string | null; workload_service_name?: string | null; workload_service_job_name?: string | null; workload_last_checked_at?: string | null;
-  workload_status?: { phase: 'pending'|'progressing'|'blocked'|'failed'|'completed'; deploymentFound: boolean; serviceFound: boolean; readyEndpointCount: number; diagnostics?: Array<{ source: string; severity: 'warning'|'error'; reason: string; message: string; pod?: string; container?: string }> } | null;
-  requester_user_id: number; requester_username?: string; requester_display_name?: string; approver_username?: string | null;
-  approval_comment?: string | null; approved_at?: string | null; created_at: string; updated_at: string;
-  events?: Array<{ event_type: string; actor_username: string; from_status?: string | null; to_status?: string | null; comment?: string | null; created_at: string }>;
+  request_id: string;
+  status: MonitoringRequestStatus;
+  app_id: string;
+  resource_type: MonitoringRequestResourceType;
+  environment_id: string;
+  environment_name?: string;
+  target_branch: string;
+  repository_environment_path: string;
+  executor_key: string;
+  execution_enabled: boolean;
+  resource_name: string;
+  resource_path: string;
+  reason: string;
+  mr_iid?: number | null;
+  commit_sha?: string | null;
+  gitlab_merged_at?: string | null;
+  gitlab_merge_commit_sha?: string | null;
+  prometheus_rule_alert_name?: string | null;
+  prometheus_rule_expr?: string | null;
+  prometheus_rule_for?: string | null;
+  prometheus_rule_severity?: "warning" | "critical" | null;
+  prometheus_rule_summary?: string | null;
+  prometheus_rule_description?: string | null;
+  prometheus_rule_owner?: string | null;
+  prometheus_rule_runbook_url?: string | null;
+  workload_yaml?: string | null;
+  workload_namespace?: string | null;
+  workload_deployment_name?: string | null;
+  workload_service_name?: string | null;
+  workload_service_job_name?: string | null;
+  workload_last_checked_at?: string | null;
+  workload_status?: {
+    phase: "pending" | "progressing" | "blocked" | "failed" | "completed";
+    deploymentFound: boolean;
+    serviceFound: boolean;
+    readyEndpointCount: number;
+    diagnostics?: Array<{
+      source: string;
+      severity: "warning" | "error";
+      reason: string;
+      message: string;
+      pod?: string;
+      container?: string;
+    }>;
+  } | null;
+  requester_user_id: number;
+  requester_username?: string;
+  requester_display_name?: string;
+  approver_username?: string | null;
+  approval_comment?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  events?: Array<{
+    event_type: string;
+    actor_username: string;
+    from_status?: string | null;
+    to_status?: string | null;
+    comment?: string | null;
+    created_at: string;
+  }>;
 };
-export const listMonitoringRequests = async (params: {
-  environmentId?: string;
-  resourceType?: MonitoringRequestResourceType;
-  status?: MonitoringRequestStatus;
-  page?: number;
-  pageSize?: number;
-} = {}) => (await api.get('/monitoring-requests', { params })).data as { items: MonitoringRequest[]; total: number; page: number; pageSize: number };
-export const getMonitoringEnvironmentOptions = async () => (await api.get('/monitoring-requests/environment-options')).data as MonitoringEnvironmentOption[];
-export const getMonitoringRequest = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`)).data as MonitoringRequest;
-export type MonitoringWorkloadBundleInput = { filePath: string; yaml: string; serviceJobName: string };
-export const createMonitoringRequest = async (data: { environmentId: string; targetBranch: string; appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields; workload?: MonitoringWorkloadBundleInput }) => (await api.post('/monitoring-requests', data)).data as MonitoringRequest;
-export const updateMonitoringRequest = async (requestId: string, data: Partial<{ appId: string; resourceType: Exclude<MonitoringRequestResourceType, 'PodMonitor'>; resourceName?: string; reason: string; prometheusRule?: MonitoringPrometheusRuleFields; workload?: MonitoringWorkloadBundleInput }>) => (await api.patch(`/monitoring-requests/${encodeURIComponent(requestId)}`, data)).data as MonitoringRequest;
-export const submitMonitoringRequest = async (requestId: string, data: { mrIid: number; commitSha: string }) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/submit`, data)).data as MonitoringRequest;
-export const submitManagedMonitoringRequest = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/managed-submit`)).data as MonitoringRequest;
-export const decideMonitoringRequest = async (requestId: string, decision: 'approve' | 'reject', comment?: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/${decision}`, { comment })).data as MonitoringRequest;
-export const withdrawMonitoringRequest = async (requestId: string, comment?: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/withdraw`, { comment })).data as MonitoringRequest;
-export type MonitoringJenkinsExecution = { id: number; mode: 'preview'|'apply'; mr_iid: number; commit_sha: string; application_id: string; executor_key: string; job_name: string; queue_id: number; build_number?: number; status: string; diff_text?: string | null; created_at: string; updated_at: string; finished_at?: string | null; };
-export const startMonitoringJenkinsExecution = async (requestId: string, mode: 'preview'|'apply', data: { comment?: string; confirmation?: string } = {}) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions`, { mode, ...data })).data as MonitoringJenkinsExecution;
-export const listMonitoringJenkinsExecutions = async (requestId: string) => (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions`)).data as MonitoringJenkinsExecution[];
-export const refreshMonitoringJenkinsExecution = async (requestId: string, id: number) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions/${id}/refresh`)).data as MonitoringJenkinsExecution;
-export const mergeMonitoringWorkload = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/merge-workload`)).data as MonitoringRequest;
-export const refreshMonitoringWorkloadStatus = async (requestId: string) => (await api.post(`/monitoring-requests/${encodeURIComponent(requestId)}/workload-status/refresh`)).data as MonitoringRequest;
+export const listMonitoringRequests = async (
+  params: {
+    environmentId?: string;
+    resourceType?: MonitoringRequestResourceType;
+    status?: MonitoringRequestStatus;
+    page?: number;
+    pageSize?: number;
+  } = {},
+) =>
+  (await api.get("/monitoring-requests", { params })).data as {
+    items: MonitoringRequest[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+export const getMonitoringEnvironmentOptions = async () =>
+  (await api.get("/monitoring-requests/environment-options"))
+    .data as MonitoringEnvironmentOption[];
+export const getMonitoringRequest = async (requestId: string) =>
+  (await api.get(`/monitoring-requests/${encodeURIComponent(requestId)}`))
+    .data as MonitoringRequest;
+export type MonitoringWorkloadBundleInput = {
+  filePath: string;
+  yaml: string;
+  serviceJobName: string;
+};
+export const createMonitoringRequest = async (data: {
+  environmentId: string;
+  targetBranch: string;
+  appId: string;
+  resourceType: Exclude<MonitoringRequestResourceType, "PodMonitor">;
+  resourceName?: string;
+  reason: string;
+  prometheusRule?: MonitoringPrometheusRuleFields;
+  workload?: MonitoringWorkloadBundleInput;
+}) => (await api.post("/monitoring-requests", data)).data as MonitoringRequest;
+export const updateMonitoringRequest = async (
+  requestId: string,
+  data: Partial<{
+    appId: string;
+    resourceType: Exclude<MonitoringRequestResourceType, "PodMonitor">;
+    resourceName?: string;
+    reason: string;
+    prometheusRule?: MonitoringPrometheusRuleFields;
+    workload?: MonitoringWorkloadBundleInput;
+  }>,
+) =>
+  (
+    await api.patch(
+      `/monitoring-requests/${encodeURIComponent(requestId)}`,
+      data,
+    )
+  ).data as MonitoringRequest;
+export const submitMonitoringRequest = async (
+  requestId: string,
+  data: { mrIid: number; commitSha: string },
+) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/submit`,
+      data,
+    )
+  ).data as MonitoringRequest;
+export const submitManagedMonitoringRequest = async (requestId: string) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/managed-submit`,
+    )
+  ).data as MonitoringRequest;
+export const decideMonitoringRequest = async (
+  requestId: string,
+  decision: "approve" | "reject",
+  comment?: string,
+) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/${decision}`,
+      { comment },
+    )
+  ).data as MonitoringRequest;
+export const withdrawMonitoringRequest = async (
+  requestId: string,
+  comment?: string,
+) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/withdraw`,
+      { comment },
+    )
+  ).data as MonitoringRequest;
+export type MonitoringJenkinsExecution = {
+  id: number;
+  mode: "preview" | "apply";
+  mr_iid: number;
+  commit_sha: string;
+  application_id: string;
+  executor_key: string;
+  job_name: string;
+  queue_id: number;
+  build_number?: number;
+  status: string;
+  diff_text?: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string | null;
+};
+export const startMonitoringJenkinsExecution = async (
+  requestId: string,
+  mode: "preview" | "apply",
+  data: { comment?: string; confirmation?: string } = {},
+) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions`,
+      { mode, ...data },
+    )
+  ).data as MonitoringJenkinsExecution;
+export const listMonitoringJenkinsExecutions = async (requestId: string) =>
+  (
+    await api.get(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions`,
+    )
+  ).data as MonitoringJenkinsExecution[];
+export const refreshMonitoringJenkinsExecution = async (
+  requestId: string,
+  id: number,
+) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/jenkins-executions/${id}/refresh`,
+    )
+  ).data as MonitoringJenkinsExecution;
+export const mergeMonitoringWorkload = async (requestId: string) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/merge-workload`,
+    )
+  ).data as MonitoringRequest;
+export const refreshMonitoringWorkloadStatus = async (requestId: string) =>
+  (
+    await api.post(
+      `/monitoring-requests/${encodeURIComponent(requestId)}/workload-status/refresh`,
+    )
+  ).data as MonitoringRequest;
 
-export type CicdActionType = 'BUILD_DEPLOY' | 'PACKAGE_PUBLISH' | 'IMAGE_BUILD_PUBLISH';
+export type CicdActionType =
+  "BUILD_DEPLOY" | "PACKAGE_PUBLISH" | "IMAGE_BUILD_PUBLISH";
 export type CicdParameterSchema = {
   version: number;
-  parameters: Array<{ name: string; type: 'string' | 'boolean' | 'enum' | 'git_branch'; required?: boolean; default?: unknown; pattern?: string; maxLength?: number; choices?: string[] }>;
+  parameters: Array<{
+    name: string;
+    type: "string" | "boolean" | "enum" | "git_branch";
+    required?: boolean;
+    default?: unknown;
+    pattern?: string;
+    maxLength?: number;
+    choices?: string[];
+  }>;
 };
 export type CicdEnvironmentBinding = {
   environment_id: string;
@@ -1951,7 +2959,11 @@ export type CicdExecutorDiagnostic = {
   checkedAt: string;
   latencyMs: number;
   version?: string | null;
-  identity: { name?: string | null; authenticated: boolean; authorities: string[] };
+  identity: {
+    name?: string | null;
+    authenticated: boolean;
+    authorities: string[];
+  };
   api: { root: boolean; crumb: boolean; queue: boolean };
   jobCount: number;
   disabledJobCount: number;
@@ -1975,7 +2987,7 @@ export type CicdDiscoveredJobs = {
   environmentId: string;
   actionType: CicdActionType;
   executorKey: string;
-  filterMode: 'ALL' | 'PATTERN';
+  filterMode: "ALL" | "PATTERN";
   pattern?: string | null;
   actionFilter?: { includeAnyTokens?: string[]; excludeAnyTokens?: string[] };
   total: number;
@@ -1989,7 +3001,12 @@ export type CicdDiscoveredJobDetail = {
   color?: string | null;
   buildable: boolean;
   concurrentBuild: boolean;
-  remoteParameters: Array<{ name: string; type: string; default: unknown; choices?: string[] }>;
+  remoteParameters: Array<{
+    name: string;
+    type: string;
+    default: unknown;
+    choices?: string[];
+  }>;
   registered: boolean;
   catalog?: {
     jobKey: string;
@@ -1997,7 +3014,12 @@ export type CicdDiscoveredJobDetail = {
     requiresApproval: boolean;
     concurrencyPolicy: string;
     schema: CicdParameterSchema;
-    reconciliation: { matches: boolean; missing: string[]; unexpected: string[]; mismatched: Array<Record<string, unknown>> };
+    reconciliation: {
+      matches: boolean;
+      missing: string[];
+      unexpected: string[];
+      mismatched: Array<Record<string, unknown>>;
+    };
   } | null;
 };
 export type CicdReconciliation = {
@@ -2017,23 +3039,71 @@ export type CicdReconciliation = {
     exists: boolean;
     buildable: boolean;
     concurrentBuild?: boolean;
-    remoteParameters?: Array<{ name: string; type: string; default: unknown; choices?: string[] }>;
-    schema: { matches: boolean; missing: string[]; unexpected: string[]; mismatched: Array<Record<string, unknown>> };
+    remoteParameters?: Array<{
+      name: string;
+      type: string;
+      default: unknown;
+      choices?: string[];
+    }>;
+    schema: {
+      matches: boolean;
+      missing: string[];
+      unexpected: string[];
+      mismatched: Array<Record<string, unknown>>;
+    };
   }>;
 };
 
-export const getCicdEnvironmentBindings = async () => (await api.get('/cicd/environment-bindings')).data as CicdEnvironmentBinding[];
-export const getCicdExecutors = async () => (await api.get('/cicd/executors')).data as CicdExecutor[];
-export const getCicdJobs = async (environmentId: string, actionType: CicdActionType, keyword?: string) =>
-  (await api.get('/cicd/jobs', { params: { environmentId, actionType, ...(keyword ? { keyword } : {}) } })).data as CicdCatalogJob[];
-export const discoverCicdJobs = async (environmentId: string, actionType: CicdActionType, keyword?: string) =>
-  (await api.get('/cicd/discovered-jobs', { params: { environmentId, actionType, ...(keyword ? { keyword } : {}) } })).data as CicdDiscoveredJobs;
-export const getCicdDiscoveredJobDetail = async (environmentId: string, actionType: CicdActionType, jobName: string) =>
-  (await api.get('/cicd/job-detail', { params: { environmentId, actionType, jobName } })).data as CicdDiscoveredJobDetail;
+export const getCicdEnvironmentBindings = async () =>
+  (await api.get("/cicd/environment-bindings"))
+    .data as CicdEnvironmentBinding[];
+export const getCicdExecutors = async () =>
+  (await api.get("/cicd/executors")).data as CicdExecutor[];
+export const getCicdJobs = async (
+  environmentId: string,
+  actionType: CicdActionType,
+  keyword?: string,
+) =>
+  (
+    await api.get("/cicd/jobs", {
+      params: { environmentId, actionType, ...(keyword ? { keyword } : {}) },
+    })
+  ).data as CicdCatalogJob[];
+export const discoverCicdJobs = async (
+  environmentId: string,
+  actionType: CicdActionType,
+  keyword?: string,
+) =>
+  (
+    await api.get("/cicd/discovered-jobs", {
+      params: { environmentId, actionType, ...(keyword ? { keyword } : {}) },
+    })
+  ).data as CicdDiscoveredJobs;
+export const getCicdDiscoveredJobDetail = async (
+  environmentId: string,
+  actionType: CicdActionType,
+  jobName: string,
+) =>
+  (
+    await api.get("/cicd/job-detail", {
+      params: { environmentId, actionType, jobName },
+    })
+  ).data as CicdDiscoveredJobDetail;
 export const diagnoseCicdExecutor = async (executorKey: string) =>
-  (await api.get(`/cicd/executors/${encodeURIComponent(executorKey)}/diagnostics`)).data as CicdExecutorDiagnostic;
-export const reconcileCicdCatalog = async (environmentId: string, actionType: CicdActionType) =>
-  (await api.get('/cicd/reconciliation', { params: { environmentId, actionType } })).data as CicdReconciliation;
+  (
+    await api.get(
+      `/cicd/executors/${encodeURIComponent(executorKey)}/diagnostics`,
+    )
+  ).data as CicdExecutorDiagnostic;
+export const reconcileCicdCatalog = async (
+  environmentId: string,
+  actionType: CicdActionType,
+) =>
+  (
+    await api.get("/cicd/reconciliation", {
+      params: { environmentId, actionType },
+    })
+  ).data as CicdReconciliation;
 export type CicdRemoteParameterSync = {
   jobKey: string;
   environmentId: string;
@@ -2041,17 +3111,30 @@ export type CicdRemoteParameterSync = {
   jobName: string;
   updated: boolean;
   schema: CicdParameterSchema;
-  remoteParameters: Array<{ name: string; type: string; default: unknown; choices?: string[] }>;
-  reconciliation: { matches: boolean; missing: string[]; unexpected: string[]; mismatched: Array<Record<string, unknown>> };
+  remoteParameters: Array<{
+    name: string;
+    type: string;
+    default: unknown;
+    choices?: string[];
+  }>;
+  reconciliation: {
+    matches: boolean;
+    missing: string[];
+    unexpected: string[];
+    mismatched: Array<Record<string, unknown>>;
+  };
 };
 export const syncCicdRemoteParameterSchema = async (data: {
   environmentId: string;
   actionType: CicdActionType;
   jobName: string;
-}) => (await api.post('/cicd/catalog/sync-remote-parameters', {
-  ...data,
-  confirmation: 'SYNC_REMOTE_PARAMETERS',
-})).data as CicdRemoteParameterSync;
+}) =>
+  (
+    await api.post("/cicd/catalog/sync-remote-parameters", {
+      ...data,
+      confirmation: "SYNC_REMOTE_PARAMETERS",
+    })
+  ).data as CicdRemoteParameterSync;
 
 export type CicdRun = {
   run_id: string;
@@ -2081,15 +3164,25 @@ export const triggerCicdRun = async (data: {
   clientRequestId: string;
   parameters: Record<string, unknown>;
   otpCode?: string;
-}) => (await api.post('/cicd/runs', data)).data as CicdRun;
+}) => (await api.post("/cicd/runs", data)).data as CicdRun;
 export const listCicdRuns = async (environmentId?: string) =>
-  (await api.get('/cicd/runs', { params: environmentId ? { environmentId } : {} })).data as CicdRun[];
+  (
+    await api.get("/cicd/runs", {
+      params: environmentId ? { environmentId } : {},
+    })
+  ).data as CicdRun[];
 export const refreshCicdRun = async (runId: string) =>
-  (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/refresh`)).data as CicdRun;
+  (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/refresh`))
+    .data as CicdRun;
 export const cancelCicdRun = async (runId: string) =>
-  (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/cancel`)).data as CicdRun;
+  (await api.post(`/cicd/runs/${encodeURIComponent(runId)}/cancel`))
+    .data as CicdRun;
 export const getCicdRunLog = async (runId: string, start = 0) =>
-  (await api.get(`/cicd/runs/${encodeURIComponent(runId)}/log`, { params: { start } })).data as { text: string; nextStart: number; hasMore: boolean };
+  (
+    await api.get(`/cicd/runs/${encodeURIComponent(runId)}/log`, {
+      params: { start },
+    })
+  ).data as { text: string; nextStart: number; hasMore: boolean };
 
 export type DependencyHealthItem = {
   key: string;
@@ -2102,10 +3195,19 @@ export type DependencyHealthItem = {
   httpStatus: number | null;
   durationMs: number | null;
   tlsExpiresAt: string | null;
-  errorType: 'NONE' | 'NETWORK' | 'HTTP_STATUS' | 'PROBE_ERROR';
+  errorType: "NONE" | "NETWORK" | "HTTP_STATUS" | "PROBE_ERROR";
   checkedAt: string;
-  overallStatus: 'HEALTHY' | 'REACHABLE' | 'UNAVAILABLE' | 'AUTH_FAILED' | 'PERMISSION_DENIED' | 'BUSINESS_FAILED' | 'NOT_CONFIGURED' | 'CHECKING' | 'STALE';
-  verificationDepth: 'L1' | 'L2' | 'L3';
+  overallStatus:
+    | "HEALTHY"
+    | "REACHABLE"
+    | "UNAVAILABLE"
+    | "AUTH_FAILED"
+    | "PERMISSION_DENIED"
+    | "BUSINESS_FAILED"
+    | "NOT_CONFIGURED"
+    | "CHECKING"
+    | "STALE";
+  verificationDepth: "L1" | "L2" | "L3";
   layers: {
     L1: DependencyHealthLayer;
     L2?: DependencyHealthLayer;
@@ -2114,7 +3216,7 @@ export type DependencyHealthItem = {
 };
 
 export type DependencyHealthLayer = {
-  status: 'PASS' | 'FAIL' | 'NOT_CONFIGURED' | 'SKIPPED';
+  status: "PASS" | "FAIL" | "NOT_CONFIGURED" | "SKIPPED";
   reasonCode: string;
   summary: string;
   durationMs: number | null;
@@ -2127,44 +3229,153 @@ export type DependencyHealthResponse = {
   cached: boolean;
   stale: boolean;
   cacheAgeMs: number;
-  summary: { total: number; healthy: number; unhealthy: number; checking: number };
+  summary: {
+    total: number;
+    healthy: number;
+    unhealthy: number;
+    checking: number;
+  };
   items: DependencyHealthItem[];
 };
 
 export const getDependencyHealth = async (forceRefresh = false) =>
-  (await api.get('/dependency-health', { params: forceRefresh ? { refresh: 'true' } : undefined })).data as DependencyHealthResponse;
+  (
+    await api.get("/dependency-health", {
+      params: forceRefresh ? { refresh: "true" } : undefined,
+    })
+  ).data as DependencyHealthResponse;
 
 export type DependencyHealthTarget = {
-  key: string; name: string; environmentId: string; category: string; url: string;
-  module: 'http_2xx' | 'http_reachable'; providerProfile?: string | null; enabled: boolean; sortOrder: number; updatedAt?: string;
+  key: string;
+  name: string;
+  environmentId: string;
+  category: string;
+  url: string;
+  module: "http_2xx" | "http_reachable";
+  providerProfile?: string | null;
+  enabled: boolean;
+  sortOrder: number;
+  updatedAt?: string;
 };
 export type DependencyHealthProviderProfile = {
-  id: string; label: string; category: string; environmentId: string; suggestedUrl: string; configured: boolean; description: string;
+  id: string;
+  label: string;
+  category: string;
+  environmentId: string;
+  suggestedUrl: string;
+  configured: boolean;
+  description: string;
 };
 export type DependencyHealthProviderProfileRecord = {
-  id: string; providerType: string; name: string; environmentId: string; category: string; config: Record<string, string>; enabled: boolean; sortOrder?: number;
+  id: string;
+  providerType: string;
+  name: string;
+  environmentId: string;
+  category: string;
+  config: Record<string, string>;
+  enabled: boolean;
+  sortOrder?: number;
 };
-export type SiteConfReference = { confKey: string; valueType: string; category?: string; description?: string; isSensitive: boolean; configured: boolean };
+export type SiteConfReference = {
+  confKey: string;
+  valueType: string;
+  category?: string;
+  description?: string;
+  isSensitive: boolean;
+  configured: boolean;
+};
 export type DependencyHealthHistory = {
-  targetKey: string; hours: number;
-  availability: Array<{ layer: 'L1' | 'L2' | 'L3'; total: number; passed: number; percentage: number | null }>;
-  points: Array<{ layer: 'L1' | 'L2' | 'L3'; status: string; reasonCode: string; durationMs: number | null; checkedAt: string }>;
-  trend: Array<{
-    hour: string; status: 'PASS' | 'FAIL' | 'SKIPPED' | 'NO_DATA'; total: number; passed: number; failed: number;
-    layers: Array<{ layer: 'L1' | 'L2' | 'L3'; status: string; total: number; passed: number; failed: number }>;
+  targetKey: string;
+  hours: number;
+  availability: Array<{
+    layer: "L1" | "L2" | "L3";
+    total: number;
+    passed: number;
+    percentage: number | null;
   }>;
-  events: Array<{ layer: 'L2' | 'L3'; eventType: 'FIRING' | 'RECOVERED'; reasonCode: string; summary: string; createdAt: string }>;
+  points: Array<{
+    layer: "L1" | "L2" | "L3";
+    status: string;
+    reasonCode: string;
+    durationMs: number | null;
+    checkedAt: string;
+  }>;
+  trend: Array<{
+    hour: string;
+    status: "PASS" | "FAIL" | "SKIPPED" | "NO_DATA";
+    total: number;
+    passed: number;
+    failed: number;
+    layers: Array<{
+      layer: "L1" | "L2" | "L3";
+      status: string;
+      total: number;
+      passed: number;
+      failed: number;
+    }>;
+  }>;
+  events: Array<{
+    layer: "L2" | "L3";
+    eventType: "FIRING" | "RECOVERED";
+    reasonCode: string;
+    summary: string;
+    createdAt: string;
+  }>;
 };
-export const listDependencyHealthTargets = async () => (await api.get('/dependency-health/targets')).data as DependencyHealthTarget[];
-export const listDependencyHealthProviderProfiles = async () => (await api.get('/dependency-health/provider-profiles')).data as DependencyHealthProviderProfile[];
-export const listDependencyHealthProviderProfileRecords = async () => (await api.get('/dependency-health/provider-profile-records')).data as DependencyHealthProviderProfileRecord[];
-export const listDependencyHealthProviderTypes = async () => (await api.get('/dependency-health/provider-types')).data as string[];
-export const listDependencyHealthSiteConfReferences = async () => (await api.get('/dependency-health/siteconf-references')).data as SiteConfReference[];
-export const createDependencyHealthProviderProfile = async (data: DependencyHealthProviderProfileRecord) => (await api.post('/dependency-health/provider-profiles', data)).data;
-export const updateDependencyHealthProviderProfile = async (id: string, data: DependencyHealthProviderProfileRecord) => (await api.put(`/dependency-health/provider-profiles/${encodeURIComponent(id)}`, data)).data;
-export const deleteDependencyHealthProviderProfile = async (id: string) => (await api.delete(`/dependency-health/provider-profiles/${encodeURIComponent(id)}`)).data;
-export const createDependencyHealthTarget = async (data: Omit<DependencyHealthTarget, 'updatedAt'>) => (await api.post('/dependency-health/targets', data)).data;
-export const updateDependencyHealthTarget = async (key: string, data: Omit<DependencyHealthTarget, 'key' | 'updatedAt'>) => (await api.put(`/dependency-health/targets/${encodeURIComponent(key)}`, data)).data;
-export const verifyDependencyHealthTarget = async (key: string) => (await api.post(`/dependency-health/targets/${encodeURIComponent(key)}/verify`)).data;
-export const deleteDependencyHealthTarget = async (key: string) => (await api.delete(`/dependency-health/targets/${encodeURIComponent(key)}`)).data;
-export const getDependencyHealthHistory = async (key: string, hours = 24) => (await api.get(`/dependency-health/history/${encodeURIComponent(key)}`, { params: { hours } })).data as DependencyHealthHistory;
+export const listDependencyHealthTargets = async () =>
+  (await api.get("/dependency-health/targets"))
+    .data as DependencyHealthTarget[];
+export const listDependencyHealthProviderProfiles = async () =>
+  (await api.get("/dependency-health/provider-profiles"))
+    .data as DependencyHealthProviderProfile[];
+export const listDependencyHealthProviderProfileRecords = async () =>
+  (await api.get("/dependency-health/provider-profile-records"))
+    .data as DependencyHealthProviderProfileRecord[];
+export const listDependencyHealthProviderTypes = async () =>
+  (await api.get("/dependency-health/provider-types")).data as string[];
+export const listDependencyHealthSiteConfReferences = async () =>
+  (await api.get("/dependency-health/siteconf-references"))
+    .data as SiteConfReference[];
+export const createDependencyHealthProviderProfile = async (
+  data: DependencyHealthProviderProfileRecord,
+) => (await api.post("/dependency-health/provider-profiles", data)).data;
+export const updateDependencyHealthProviderProfile = async (
+  id: string,
+  data: DependencyHealthProviderProfileRecord,
+) =>
+  (
+    await api.put(
+      `/dependency-health/provider-profiles/${encodeURIComponent(id)}`,
+      data,
+    )
+  ).data;
+export const deleteDependencyHealthProviderProfile = async (id: string) =>
+  (
+    await api.delete(
+      `/dependency-health/provider-profiles/${encodeURIComponent(id)}`,
+    )
+  ).data;
+export const createDependencyHealthTarget = async (
+  data: Omit<DependencyHealthTarget, "updatedAt">,
+) => (await api.post("/dependency-health/targets", data)).data;
+export const updateDependencyHealthTarget = async (
+  key: string,
+  data: Omit<DependencyHealthTarget, "key" | "updatedAt">,
+) =>
+  (await api.put(`/dependency-health/targets/${encodeURIComponent(key)}`, data))
+    .data;
+export const verifyDependencyHealthTarget = async (key: string) =>
+  (
+    await api.post(
+      `/dependency-health/targets/${encodeURIComponent(key)}/verify`,
+    )
+  ).data;
+export const deleteDependencyHealthTarget = async (key: string) =>
+  (await api.delete(`/dependency-health/targets/${encodeURIComponent(key)}`))
+    .data;
+export const getDependencyHealthHistory = async (key: string, hours = 24) =>
+  (
+    await api.get(`/dependency-health/history/${encodeURIComponent(key)}`, {
+      params: { hours },
+    })
+  ).data as DependencyHealthHistory;
