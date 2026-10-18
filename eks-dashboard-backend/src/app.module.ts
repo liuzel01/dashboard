@@ -30,6 +30,7 @@ import { CicdModule } from './cicd/cicd.module';
 import { MenuOrderModule } from './menu-order/menu-order.module';
 import { DependencyHealthModule } from './dependency-health/dependency-health.module';
 import { BytebaseModule } from './bytebase/bytebase.module';
+import { JumpserverAccessModule } from './jumpserver-access/jumpserver-access.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { BytebaseModule } from './bytebase/bytebase.module';
     MenuOrderModule,
     DependencyHealthModule,
     BytebaseModule,
+    JumpserverAccessModule,
   ],
   controllers: [AppController],
   providers: [AppService],

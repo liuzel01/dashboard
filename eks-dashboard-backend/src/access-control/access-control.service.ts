@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import * as mysql from 'mysql2/promise';
 import { PlatformDatabaseService } from './platform-database.service';
@@ -26,6 +31,11 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:monitoring-requests', name: '监控资源申请' },
   { key: 'menu:cicd-runs', name: 'CI/CD 执行中心' },
   { key: 'menu:bytebase', name: '数据库访问与变更中心' },
+  { key: 'menu:jumpserver', name: '服务器访问（JumpServer）' },
+  { key: 'jumpserver:portal:launch', name: 'JumpServer 受控跳转' },
+  { key: 'jumpserver:config:manage', name: 'JumpServer 配置管理' },
+  { key: 'jumpserver:sync:execute', name: 'JumpServer 授权同步' },
+  { key: 'jumpserver:audit:read', name: 'JumpServer 审计读取' },
   { key: 'bytebase:catalog:read', name: 'Bytebase 目录读取' },
   { key: 'bytebase:change:submit', name: 'Bytebase 变更提交' },
   { key: 'bytebase:rollout:execute', name: 'Bytebase 发布执行' },
@@ -68,9 +78,7 @@ export class AccessControlService {
   private async getUserById(id: number) {
     const rows = await this.db.query<any[]>(
       'SELECT id, username, display_name, status, last_login_at FROM users WHERE id = ? LIMIT 1',
-      [
-      id,
-      ],
+      [id],
     );
     return rows?.[0] || null;
   }
@@ -95,12 +103,16 @@ export class AccessControlService {
   }
 
   private async ensureDefaultPermissions() {
-    const existing = await this.db.query<{ key: string }[]>('SELECT `key` FROM permissions');
+    const existing = await this.db.query<{ key: string }[]>(
+      'SELECT `key` FROM permissions',
+    );
     const existingKeys = new Set(existing.map((row) => row.key));
     const missing = DEFAULT_PERMISSIONS.filter((p) => !existingKeys.has(p.key));
 
     if (missing.length > 0) {
-      const valuesSql = missing.map(() => '(?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())').join(',');
+      const valuesSql = missing
+        .map(() => '(?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())')
+        .join(',');
       const params: any[] = [];
       missing.forEach((p) => {
         params.push(p.key, p.name);
@@ -111,7 +123,6 @@ export class AccessControlService {
         params,
       );
     }
-
   }
 
   async listPermissions() {
@@ -127,7 +138,10 @@ export class AccessControlService {
     );
   }
 
-  async ensureUserByUsername(usernameRaw: string, opts?: { displayName?: string }) {
+  async ensureUserByUsername(
+    usernameRaw: string,
+    opts?: { displayName?: string },
+  ) {
     const username = usernameRaw.trim();
     const displayName = opts?.displayName?.trim() || null;
     if (!username) {
@@ -153,10 +167,20 @@ export class AccessControlService {
       'INSERT INTO users (username, display_name, password_hash, status, created_at, updated_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())',
       [username, displayName || username, passwordHash, 'active'],
     );
-    return { id: result.insertId, username, display_name: displayName || username, status: 'active' };
+    return {
+      id: result.insertId,
+      username,
+      display_name: displayName || username,
+      status: 'active',
+    };
   }
 
-  async getMe(params?: { userId?: number; username?: string; allowDefaultUser?: boolean; allowBootstrap?: boolean }) {
+  async getMe(params?: {
+    userId?: number;
+    username?: string;
+    allowDefaultUser?: boolean;
+    allowBootstrap?: boolean;
+  }) {
     await this.ensureDefaultPermissions();
     let user: any = null;
     const explicitUserId = params?.userId && !Number.isNaN(params.userId);
@@ -229,9 +253,9 @@ export class AccessControlService {
          r.id ASC`,
     );
 
-    const perms = await this.db.query<{ role_id: number; permission_id: number }[]>(
-      'SELECT role_id, permission_id FROM role_permissions',
-    );
+    const perms = await this.db.query<
+      { role_id: number; permission_id: number }[]
+    >('SELECT role_id, permission_id FROM role_permissions');
     const permMap = new Map<number, number[]>();
     perms.forEach((row) => {
       const list = permMap.get(row.role_id) ?? [];
@@ -270,7 +294,11 @@ export class AccessControlService {
       mfa_pending: Number(row.mfa_pending || 0) === 1,
       created_at: row.created_at,
       updated_at: row.updated_at,
-      role_ids: row.role_ids ? String(row.role_ids).split(',').map((v) => Number(v)) : [],
+      role_ids: row.role_ids
+        ? String(row.role_ids)
+            .split(',')
+            .map((v) => Number(v))
+        : [],
       role_names: row.role_names ? String(row.role_names).split(',') : [],
     }));
   }
@@ -283,9 +311,10 @@ export class AccessControlService {
     }
 
     return this.db.withTransaction(async (conn) => {
-      const [exists] = await conn.execute<any[]>('SELECT id FROM users WHERE username = ? LIMIT 1', [
-        username,
-      ]);
+      const [exists] = await conn.execute<any[]>(
+        'SELECT id FROM users WHERE username = ? LIMIT 1',
+        [username],
+      );
       if (Array.isArray(exists) && exists.length > 0) {
         throw new BadRequestException('用户名已存在');
       }
@@ -321,7 +350,10 @@ export class AccessControlService {
 
   async updateUser(id: number, dto: UpdateUserDto) {
     return this.db.withTransaction(async (conn) => {
-      const [rows] = await conn.execute<any[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
+      const [rows] = await conn.execute<any[]>(
+        'SELECT id FROM users WHERE id = ? LIMIT 1',
+        [id],
+      );
       if (!Array.isArray(rows) || rows.length === 0) {
         throw new NotFoundException('用户不存在');
       }
@@ -395,10 +427,10 @@ export class AccessControlService {
 
       const nextPassword = password?.trim() || generatePassword();
       const passwordHash = hashPassword(nextPassword);
-      await conn.execute('UPDATE users SET password_hash = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?', [
-        passwordHash,
-        id,
-      ]);
+      await conn.execute(
+        'UPDATE users SET password_hash = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
+        [passwordHash, id],
+      );
 
       return { password: password ? undefined : nextPassword };
     });
@@ -408,9 +440,10 @@ export class AccessControlService {
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('角色名不能为空');
 
-    const [exists] = await this.db.query<any[]>('SELECT id FROM roles WHERE name = ? LIMIT 1', [
-      name,
-    ]);
+    const [exists] = await this.db.query<any[]>(
+      'SELECT id FROM roles WHERE name = ? LIMIT 1',
+      [name],
+    );
     if (Array.isArray(exists) && exists.length > 0) {
       throw new BadRequestException('角色名已存在');
     }
@@ -473,12 +506,17 @@ export class AccessControlService {
 
   async updateRolePermissions(id: number, dto: UpdateRolePermissionsDto) {
     return this.db.withTransaction(async (conn) => {
-      const [rows] = await conn.execute<any[]>('SELECT id FROM roles WHERE id = ? LIMIT 1', [id]);
+      const [rows] = await conn.execute<any[]>(
+        'SELECT id FROM roles WHERE id = ? LIMIT 1',
+        [id],
+      );
       if (!Array.isArray(rows) || rows.length === 0) {
         throw new NotFoundException('角色不存在');
       }
 
-      await conn.execute('DELETE FROM role_permissions WHERE role_id = ?', [id]);
+      await conn.execute('DELETE FROM role_permissions WHERE role_id = ?', [
+        id,
+      ]);
       if (dto.permissionIds.length > 0) {
         const valuesSql = dto.permissionIds.map(() => '(?, ?)').join(',');
         const params: any[] = [];
