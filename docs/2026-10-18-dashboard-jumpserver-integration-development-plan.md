@@ -8,17 +8,17 @@
 
 JumpServer 可以作为独立 Provider 接入 Dashboard 运维系统。第一版采用：
 
-> **运维系统自定义角色 → JumpServer 授权包 → JumpServer 实际权限核验 → 单次受控跳转**
+> **Dashboard 功能 RBAC → Admin 为具体用户分配 JumpServer 授权包 → 远端实际权限核验 → 单次受控跳转**
 
-角色不是系统预置的“Dashboard 角色”。Admin 可以在运维系统中创建任意自定义角色，再把角色绑定到一个或多个 JumpServer 授权包，并把角色分配给用户。
+Dashboard 自定义角色只控制菜单和动作权限，不承载 JumpServer 资产范围。Admin 为已完成身份映射的具体用户直接分配一个或多个授权包；授权包描述资产/节点、账号和协议范围。
 
-第一版不建设普通用户申请、审批和按小时授权。用户持有有效角色且远端授权同步成功期间，可以进入 JumpServer；角色移除、用户禁用、授权包解绑或远端权限回收后，应立即失去访问资格。
+第一版不建设普通用户申请、审批和按小时授权。用户同时拥有菜单/跳转权限、有效身份映射、直接用户授权和远端有效权限时才能进入 JumpServer；功能权限移除、用户禁用、用户授权包解绑或远端权限回收后，应立即失去访问资格。
 
 短时 Ticket 只保护一次跳转，不等于限时资产授权：
 
 - Ticket 建议有效 60–120 秒、只能消费一次，并绑定当前用户和登录会话；
 - Ticket 消费后失效，不决定 JumpServer 会话时长；
-- 第一版资产授权生命周期跟随运维系统角色；
+- 第一版资产授权生命周期跟随 Admin 维护的用户—授权包绑定；
 - 后续申请链路才引入真正的 Grant 有效期、到期回收和审批。
 
 ## 2. 设计来源与取舍
@@ -30,7 +30,7 @@ JumpServer 可以作为独立 Provider 接入 Dashboard 运维系统。第一版
 | `9814a06` | 集成边界和分阶段交付 | 复用阶段门禁，不复制 Somas 系统边界 |
 | `8288c4d` | HTTP Signature、只读健康和资产目录 | 复用 Connector 契约与 GET allowlist |
 | `935986c` | 身份映射和一次性 Portal Ticket | 复用安全语义，改用 Dashboard 用户稳定 ID |
-| `53e7884` | Grant 创建、撤销和回收 | 第一版只用于角色授权同步；自助申请暂缓 |
+| `53e7884` | Grant 创建、撤销和回收 | 第一版用于 Admin 对具体用户授权；自助申请暂缓 |
 | `3213784` | 会话、命令审计元数据 | 后续阶段只回流摘要和稳定引用 |
 | `00173bf` | 跳转前必须存在有效 Grant | 作为第一版强制校验 |
 | `827c4dc` | 查询用户实际生效资产权限 | 作为第一版强制校验，不能只信本地记录 |
@@ -53,9 +53,9 @@ JumpServer 可以作为独立 Provider 接入 Dashboard 运维系统。第一版
 1. 配置 JumpServer Provider 和专用机器身份；
 2. 同步或实时读取用户组、资产节点、资产、账号和协议目录；
 3. 创建“授权包”，选择受控的用户组、资产节点/资产、账号和协议；
-4. 把授权包绑定到一个或多个运维系统自定义角色；
-5. 把角色分配给用户；
-6. 后端把角色期望状态同步到 JumpServer，并展示同步结果和漂移状态。
+4. 选择已建立身份映射的运维系统用户；
+5. 把授权包直接分配给该用户；
+6. 后端把用户期望状态同步到 JumpServer，并展示同步结果和漂移状态。
 
 ### 3.2 普通用户使用流程
 
@@ -66,7 +66,7 @@ sequenceDiagram
     participant J as JumpServer
 
     U->>D: 打开服务器访问菜单
-    D->>D: 校验账号、菜单权限和角色绑定
+    D->>D: 校验账号、菜单权限和用户授权包绑定
     D->>J: 查询身份映射及实际生效资产权限
     J-->>D: 返回有效账号、协议和资产范围
     D-->>U: 展示可访问范围
@@ -83,7 +83,7 @@ sequenceDiagram
 
 - 没有菜单/动作权限；
 - 尚未建立 JumpServer 身份映射；
-- 角色没有绑定授权包；
+- 用户没有被分配授权包；
 - 远端授权正在同步；
 - 本地期望授权与 JumpServer 实际权限不一致；
 - Provider 不可用或权限不足；
@@ -101,11 +101,11 @@ sequenceDiagram
 | --- | --- |
 | `menu:jumpserver` | 查看服务器访问菜单 |
 | `jumpserver:portal:launch` | 查询本人有效范围并发起受控跳转 |
-| `jumpserver:config:manage` | 管理 Provider、身份映射、授权包和角色绑定 |
+| `jumpserver:config:manage` | 管理 Provider、身份映射、授权包和用户授权 |
 | `jumpserver:sync:execute` | 执行授权同步、撤销和人工对账 |
 | `jumpserver:audit:read` | 查看跳转、同步和会话摘要 |
 
-前端菜单和按钮隐藏不构成授权。所有后端接口必须再次校验动作权限、用户状态、角色绑定、Provider 绑定和目标范围。
+前端菜单和按钮隐藏不构成授权。所有后端接口必须再次校验动作权限、用户状态、用户授权包绑定、Provider 绑定和目标范围。Dashboard 自定义角色只聚合这些功能权限，不隐式派生任何 JumpServer 资产权限。
 
 ### 4.2 授权包模型
 
@@ -119,14 +119,14 @@ JumpServerAccessBundle
   protocols[]
   riskLevel
 
-JumpServerRoleBinding
-  roleId
+JumpServerUserBundleBinding
+  dashboardUserId
   bundleId
   enabled
   createdBy, createdAt, updatedAt
 ```
 
-授权包只允许从远端目录选择稳定 ID，禁止自由填写资产、节点、用户组或 URL。角色名称由 Admin 自定义，业务逻辑不能按角色名称硬编码。
+授权包只允许从远端目录选择稳定 ID，禁止自由填写资产、节点、用户组或 URL。Admin 必须显式选择具体用户，不能因为用户拥有某个 Dashboard 自定义角色而自动获得资产权限。
 
 ### 4.3 身份映射
 
@@ -145,7 +145,7 @@ JumpServerIdentityMapping
 
 ### 4.4 权限事实源
 
-- 运维系统角色及其授权包绑定是**期望状态**；
+- 运维系统用户及其授权包绑定是**期望状态**；
 - JumpServer 用户、用户组、Asset Permission 和 effective asset access 是**执行状态**；
 - 用户能否跳转必须同时满足本地期望状态和远端实际有效状态；
 - 定时对账发现漂移时，默认阻断跳转并告警，不能把本地 `SYNCED` 当作永久事实。
@@ -194,14 +194,14 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 - `jumpserver_identity_mappings`
 - `jumpserver_access_bundles`
 - `jumpserver_bundle_targets`
-- `jumpserver_role_bindings`
+- `jumpserver_user_bundle_bindings`
 - `jumpserver_sync_runs`
 - `jumpserver_sync_events`
 - `jumpserver_portal_tickets`
 - `jumpserver_portal_events`
 - `jumpserver_session_refs`（后续）
 
-审计保存：操作者、目标用户、角色 ID、授权包 ID、远端稳定 ID、期望状态 hash、动作、结果、时间和脱敏错误摘要。不得保存 Access Key、密码、Cookie、录像 URL 中的临时签名、完整命令和文件内容。
+审计保存：操作者、目标用户、授权包 ID、远端稳定 ID、期望状态 hash、动作、结果、时间和脱敏错误摘要。不得保存 Access Key、密码、Cookie、录像 URL 中的临时签名、完整命令和文件内容。
 
 ## 8. 分阶段实施计划
 
@@ -221,17 +221,17 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 ### Phase 1：只读目录和配置管理
 
 - 新增 Provider、权限键、菜单和健康诊断；
-- 管理身份映射、授权包和角色绑定；
+- 管理身份映射、授权包和用户授权包绑定；
 - 读取用户组、节点、资产、账号、协议和现有授权；
-- 提供预览：某角色/用户预期获得哪些范围；
+- 提供预览：某用户预期获得哪些范围；
 - 不执行远端写操作。
 
 验收：跨 Provider/跨范围输入被拒绝；用户不能自由输入远端 ID；Secret 不泄露；目录分页和错误分类测试通过。
 
-### Phase 2：角色驱动授权同步
+### Phase 2：用户驱动授权同步
 
 - 使用专用 Grant Manager 创建或维护受管用户组及 Asset Permission；
-- 用户新增/删除角色、账号禁用、授权包变更触发幂等同步；
+- Admin 新增/删除用户授权包绑定、账号禁用、授权包变更触发幂等同步；
 - Worker 定时对账并修复或标记漂移；
 - 所有删除先验证资源由 Dashboard 创建或纳入受管范围；
 - 写操作支持 dry-run、影响预览、确认和审计。
@@ -246,7 +246,7 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 - 返回固定 HTTPS Portal，不接收前端自定义 redirect URL；
 - 记录 prepared、consumed、denied 和 expired 事件。
 
-验收：无映射、无角色、远端未生效、过期、重复消费、跨用户和跨会话全部拒绝。
+验收：无映射、无功能权限、无用户授权包、远端未生效、过期、重复消费、跨用户和跨会话全部拒绝。
 
 ### Phase 4：生产化与运行保障
 
@@ -285,7 +285,7 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 
 ### 9.5 自动回收和生命周期事件
 
-- 用户禁用、离职、角色移除和授权包停用触发回收；
+- 用户禁用、离职、直接授权移除和授权包停用触发回收；
 - 定期检测孤儿用户、孤儿授权和超范围权限；
 - 回收失败进入重试队列并告警，最终状态不能伪标成功；
 - 提供授权影响分析和批量迁移预览。
@@ -294,12 +294,12 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 
 | 层级 | 重点 |
 | --- | --- |
-| 单元测试 | 权限依赖、角色聚合、授权包展开、Ticket 过期/防重放、脱敏 |
+| 单元测试 | 功能权限、用户授权包展开、Ticket 过期/防重放、脱敏 |
 | Connector 契约测试 | HTTP Signature、分页、限流、超时、错误分类和 endpoint allowlist |
 | Service 测试 | 身份冲突、期望状态 hash、幂等同步、撤销、漂移和 UNKNOWN 对账 |
-| 前端测试 | 自定义角色选择、范围预览、阻断原因和危险确认 |
+| 前端测试 | 用户选择、范围预览、阻断原因和危险确认 |
 | 集成测试 | 隔离用户、用户组、非生产资产的赋权/撤权/effective access |
-| E2E | Admin 配置角色 → 用户跳转 → 角色撤销 → 跳转被拒绝 |
+| E2E | Admin 为用户授权 → 用户跳转 → Admin 回收授权 → 跳转被拒绝 |
 
 自动化测试默认 Mock Provider，不能创建真实生产授权。真实链路只在专用测试范围人工触发，并在结束后验证无遗留权限。
 
@@ -308,8 +308,8 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 必须全部满足：
 
 1. 专用 Reader 与 Grant Manager 已创建，admin 凭据未进入运行配置；
-2. 用户、角色、授权包和远端实际权限的关系可以对账；
-3. 角色撤销和用户禁用能够真实回收权限；
+2. 用户、授权包和远端实际权限的关系可以对账；
+3. 用户直接授权撤销和用户禁用能够真实回收权限；
 4. 跳转前核验 effective access，直接访问 URL 不能绕过 JumpServer 自身授权；
 5. Ticket 防重放、跨用户和跨会话测试通过；
 6. Provider 不可用时失败关闭；
@@ -371,15 +371,21 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 ### 14.1 已实现
 
 - Dashboard 新增独立“服务器访问（JumpServer）”菜单和五个权限键；
-- 新增 Provider、身份映射、授权包、角色绑定、同步状态、Portal Ticket 和事件表；
-- 授权包绑定运维系统自定义角色，不按角色名称硬编码；
+- 新增 Provider、身份映射、授权包、用户授权包绑定、同步状态、Portal Ticket 和事件表；
+- Dashboard 自定义角色只控制菜单和动作权限；资产授权由 Admin 直接绑定到具体用户；
 - Reader/Grant Manager 使用独立 HTTP Signature 凭据；
 - 后端对 GET/写 endpoint 使用显式 allowlist；Reader 不能执行写操作；
 - 授权同步只创建 `dashboard:bundle:*` 命名的 Asset Permission；撤销前再次读取并验证受管前缀；
-- 用户失去角色或授权包后，同步流程回收对应受管 Permission；
+- 用户授权包解绑或授权包停用后，同步流程回收对应受管 Permission；
 - 跳转前读取远端 Permission 状态，远端失效或漂移时阻断；
 - Ticket 有效期 60–300 秒、默认 120 秒，数据库只保存 hash，并绑定用户和浏览器会话标识；
-- 前端提供本人状态、Provider 诊断、身份映射、授权包/自定义角色绑定、人工同步和受控跳转入口。
+- 前端提供本人状态、Provider 诊断、身份映射、资产授权包、用户直接授权/回收、人工同步和受控跳转入口。
+
+### 14.1.1 授权模型修订
+
+最初实现曾把授权包绑定到 Dashboard 自定义角色。2026-10-18 人工验证后确认，这会把功能 RBAC 和远端资产权限耦合：为单个用户增减资产可能影响同角色的其他用户，也会导致角色数量随资产组合增长。因此同步事实源已调整为 `jumpserver_user_bundle_bindings`。
+
+原 `jumpserver_role_bindings` 只为已有数据库回滚和审计保留，当前同步路径不再读取该表。增量迁移只把已经存在远端 Permission 且状态为 `SYNCED` 的精确用户—授权包关系转换为直接绑定，不会把同角色的其他成员批量展开，避免迁移时产生隐式扩权。后续新增授权必须由 Admin 显式选择具体用户。
 
 ### 14.2 机器身份
 
@@ -412,6 +418,6 @@ Access Key 保存在本地权限为 `0600` 的受控文件并已同步到本地�
 
 - 将 migration 和敏感 SiteConf 部署到 Dashboard EC2；
 - 从 EC2 应用进程验证 Reader/Grant Manager 网络与 TLS；
-- Admin 在页面建立一个真实用户映射、授权包和自定义角色绑定；
-- 普通用户完成“角色授权 → 同步 → 页面可进入 → 角色撤销 → 页面被阻断”的完整人工验收；
+- Admin 在页面建立一个真实用户映射、授权包和用户直接绑定；
+- 普通用户完成“Admin 直接授权 → 同步 → 页面可进入 → Admin 回收授权 → 页面被阻断”的完整人工验收；
 - 根据验收结果决定是否启用自动周期对账 Worker。当前版本提供幂等人工同步和跳转前漂移核验，尚未启用后台自动写入。
