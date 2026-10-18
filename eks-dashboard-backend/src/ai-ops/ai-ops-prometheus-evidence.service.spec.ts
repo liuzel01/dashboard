@@ -74,8 +74,58 @@ describe('AiOpsPrometheusEvidenceService', () => {
     });
 
     expect(result.classification).toBe('OBSERVE');
-    expect(result.insufficientEvidence).toBe(false);
+    expect(result.insufficientEvidence).toBe(true);
     expect(result.findings.join(' ')).toContain('证据不完整');
+  });
+
+  it('uses exported kube-state labels and reaches high confidence only with replica evidence', async () => {
+    get.mockImplementation(async (_url, config) => {
+      const query = String(config?.params?.query || '');
+      if (query.includes('sum by (pod)'))
+        return response([
+          { metric: { pod: 'alertmanager-main-0' }, value: [1, '0.33'] },
+          { metric: { pod: 'alertmanager-main-1' }, value: [1, '0.27'] },
+          { metric: { pod: 'alertmanager-main-2' }, value: [1, '0.14'] },
+        ]) as any;
+      if (query.includes('throttled_periods'))
+        return response([{ value: [1, '0.33'] }]) as any;
+      if (query.includes('usage_seconds'))
+        return response([{ value: [1, '0.00002'] }]) as any;
+      if (query.includes('resource_limits'))
+        return response([{ value: [1, '0.01'] }]) as any;
+      if (query.includes('restarts_total'))
+        return response([{ value: [1, '0'] }]) as any;
+      return response([]) as any;
+    });
+
+    const result = await service.collect({
+      environmentId: 'mgbx',
+      alertName: 'CPUThrottlingHigh',
+      startedAt: '2026-10-17T18:20:52.000Z',
+      labels: {
+        namespace: 'monitoring',
+        pod: 'alertmanager-main-0',
+        container: 'config-reloader',
+      },
+    });
+
+    expect(result.playbookVersion).toBe('cpu-throttling-v2');
+    expect(result.classification).toBe('NOISE_CANDIDATE');
+    expect(result.confidence).toBe('HIGH');
+    expect(result.insufficientEvidence).toBe(false);
+    expect(result.findings.join(' ')).toContain('3 个副本');
+    const queries = get.mock.calls.map((call) =>
+      String((call[1] as { params?: { query?: string } })?.params?.query || ''),
+    );
+    expect(
+      queries.find((query) => query.includes('resource_limits')),
+    ).toContain('exported_namespace="monitoring"');
+    expect(queries.find((query) => query.includes('restarts_total'))).toContain(
+      'exported_pod="alertmanager-main-0"',
+    );
+    expect(queries.find((query) => query.includes('sum by (pod)'))).toContain(
+      'pod=~"alertmanager-main-.*"',
+    );
   });
 
   it('confirms the OOM signal without claiming a specific memory leak cause', async () => {

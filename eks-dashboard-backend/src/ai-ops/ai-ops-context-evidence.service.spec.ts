@@ -1,6 +1,6 @@
 import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 
 describe('AiOpsContextEvidenceService', () => {
   const logs = {
@@ -129,5 +129,51 @@ describe('AiOpsContextEvidenceService', () => {
     expect(result.missingEvidence).toHaveLength(2);
     expect(result.missingEvidence.join(' ')).toContain('Kubernetes');
     expect(result.missingEvidence.join(' ')).toContain('Grafana/Loki');
+  });
+
+  it('uses pod and container clues instead of a Prometheus scrape service for logs', async () => {
+    const kubernetes = {
+      getAiOpsEvidenceSnapshot: jest.fn(() =>
+        Promise.resolve({
+          observedAt: '2026-10-17T18:21:54.000Z',
+          namespace: 'monitoring',
+          workload: null,
+          pods: [],
+          events: [],
+          previousLogs: [],
+        }),
+      ),
+    };
+    const podLogs = {
+      searchAlertWindow: jest.fn(() =>
+        Promise.resolve({ evidence: [], querySummary: {}, exploreUrl: '' }),
+      ),
+    };
+    const service = new AiOpsContextEvidenceService(
+      kubernetes as any,
+      { query: jest.fn(() => Promise.resolve([])) } as any,
+      podLogs as any,
+    );
+
+    await service.collect({
+      environmentId: 'mgbx',
+      startedAt: '2026-10-17T18:20:52.000Z',
+      namespace: 'monitoring',
+      service: 'kubelet',
+      labels: {
+        pod: 'alertmanager-main-0',
+        container: 'config-reloader',
+        service: 'kubelet',
+      },
+      replay: false,
+    });
+
+    expect(podLogs.searchAlertWindow).toHaveBeenCalledWith(
+      'mgbx',
+      expect.objectContaining({
+        serviceName: undefined,
+        queryTexts: ['alertmanager-main-0', 'config-reloader'],
+      }),
+    );
   });
 });

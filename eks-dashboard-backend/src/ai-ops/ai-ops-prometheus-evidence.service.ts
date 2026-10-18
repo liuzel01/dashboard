@@ -233,6 +233,10 @@ export class AiOpsPrometheusEvidenceService {
       const pod = this.literal(context.labels.pod);
       const container = this.literal(context.labels.container);
       const selector = `{namespace="${namespace}",pod="${pod}",container="${container}"}`;
+      // kube-state-metrics is scraped from the monitoring namespace in mgbx.
+      // Preserve the workload identity through exported_* labels, matching the
+      // OOM playbook below, instead of querying the scraper's own labels.
+      const kubeStateSelector = `{exported_namespace="${namespace}",exported_pod="${pod}",exported_container="${container}"}`;
       const queries = [
         {
           key: 'throttling-ratio',
@@ -247,15 +251,20 @@ export class AiOpsPrometheusEvidenceService {
         {
           key: 'cpu-limit',
           title: 'CPU limit 核数',
-          promql: `max(kube_pod_container_resource_limits${selector.slice(0, -1)},resource="cpu"})`,
+          promql: `max(kube_pod_container_resource_limits${kubeStateSelector.slice(0, -1)},resource="cpu"})`,
         },
         {
           key: 'restarts',
           title: '容器重启次数',
-          promql: `max(kube_pod_container_status_restarts_total${selector})`,
+          promql: `max(kube_pod_container_status_restarts_total${kubeStateSelector})`,
+        },
+        {
+          key: 'replica-throttling',
+          title: '同工作负载副本 CPU throttling 对比',
+          promql: `sum by (pod) (increase(container_cpu_cfs_throttled_periods_total{namespace="${namespace}",container="${container}",pod=~"${this.regexPodFamily(pod)}"}[5m])) / sum by (pod) (increase(container_cpu_cfs_periods_total{namespace="${namespace}",container="${container}",pod=~"${this.regexPodFamily(pod)}"}[5m]))`,
         },
       ];
-      const empty = this.empty('CPU_THROTTLING_HIGH', 'cpu-throttling-v1');
+      const empty = this.empty('CPU_THROTTLING_HIGH', 'cpu-throttling-v2');
       return {
         queries,
         empty,
@@ -264,6 +273,12 @@ export class AiOpsPrometheusEvidenceService {
           const usage = this.single(evidence, 'cpu-usage');
           const limit = this.single(evidence, 'cpu-limit');
           const restarts = this.single(evidence, 'restarts');
+          const replicas = this.samples(evidence, 'replica-throttling')
+            .map((sample) => ({
+              pod: String(sample.metric?.pod || ''),
+              ratio: Number(sample.value?.[1]),
+            }))
+            .filter((sample) => sample.pod && Number.isFinite(sample.ratio));
           const lowImpact =
             throttling !== null &&
             throttling >= 0.25 &&
@@ -272,12 +287,24 @@ export class AiOpsPrometheusEvidenceService {
             limit > 0 &&
             usage / limit < 0.5 &&
             (restarts === null || restarts === 0);
+          const completeResourceEvidence =
+            throttling !== null &&
+            usage !== null &&
+            limit !== null &&
+            restarts !== null;
+          const comparableReplicas = replicas.length >= 2;
+          const confidence =
+            lowImpact && completeResourceEvidence && comparableReplicas
+              ? 'HIGH'
+              : completeResourceEvidence
+                ? 'MEDIUM'
+                : 'LOW';
           return {
             playbookKey: empty.playbookKey,
             playbookVersion: empty.playbookVersion,
             classification: lowImpact ? 'NOISE_CANDIDATE' : 'OBSERVE',
-            confidence: this.populatedCount(evidence) >= 3 ? 'MEDIUM' : 'LOW',
-            insufficientEvidence: this.populatedCount(evidence) < 2,
+            confidence,
+            insufficientEvidence: !completeResourceEvidence,
             findings: [
               throttling === null
                 ? '告警时间点未取得 throttling 样本。'
@@ -286,18 +313,29 @@ export class AiOpsPrometheusEvidenceService {
                 ? 'CPU usage/limit 证据不完整。'
                 : `CPU usage 约 ${usage.toFixed(3)} 核，limit 约 ${limit.toFixed(3)} 核。`,
               lowImpact
-                ? '当前资源与重启证据未显示明显业务影响，标记为噪声候选，仍需观察。'
+                ? '当前资源与重启证据符合低影响特征，标记为噪声候选；该判断不等同于已证明业务无影响。'
                 : '当前证据不足以将告警判定为噪声，保持观察。',
+              replicas.length
+                ? `同工作负载取得 ${replicas.length} 个副本的 throttling 对比：${replicas
+                    .map(
+                      (sample) =>
+                        `${sample.pod}=${(sample.ratio * 100).toFixed(1)}%`,
+                    )
+                    .join('，')}。`
+                : '未取得同工作负载副本的 throttling 对比。',
             ],
             recommendations: [
               '核对同 Pod 副本、节点状态和业务错误率后再决定是否调整 limit。',
               '不要仅凭 throttling 比例自动扩容或重启。',
             ],
-            missingEvidence: this.missing(failed, [
-              'Pod/Node 当前状态',
-              '同副本对比',
-              '业务影响',
-            ]),
+            missingEvidence: this.missing(
+              failed,
+              [
+                'Pod/Node 当前状态',
+                comparableReplicas ? '' : '同副本对比',
+                '业务影响',
+              ].filter(Boolean),
+            ),
             evidence,
           };
         },
@@ -592,6 +630,13 @@ export class AiOpsPrometheusEvidenceService {
         ? String(value)
         : '';
     return scalar.replace(/[\\"\n\r]/g, '').slice(0, 200);
+  }
+  private regexPodFamily(pod: string) {
+    const escaped = pod.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const family = escaped
+      .replace(/-\d+$/, '-.*')
+      .replace(/-[a-f0-9]{8,10}-[a-z0-9]{5}$/, '-.*');
+    return family || '.+';
   }
   private safeMetric(value: unknown) {
     const input =

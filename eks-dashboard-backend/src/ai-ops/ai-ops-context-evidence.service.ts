@@ -139,15 +139,24 @@ export class AiOpsContextEvidenceService {
       );
     }
 
-    const logService = this.text(context.service || context.labels.job);
-    if (logService) {
+    // Scrape labels such as service=kubelet identify the metrics endpoint, not
+    // necessarily the workload whose logs should be searched. When a concrete
+    // pod is present, use bounded literal clues instead of querying the scrape
+    // service as if it were an application service.
+    const logService = pod
+      ? ''
+      : this.text(context.service || context.labels.job);
+    const logClues = pod ? [pod, container].filter(Boolean) : [];
+    const logTarget = logService || logClues.join('/');
+    if (logService || logClues.length) {
       try {
         const alertAt = new Date(context.startedAt).getTime();
         const logResult = await this.logs.searchAlertWindow(
           context.environmentId,
           {
             namespace: context.namespace || 'default',
-            serviceName: logService,
+            serviceName: logService || undefined,
+            queryTexts: logClues,
             from: new Date(alertAt - 10 * 60 * 1000).toISOString(),
             to: new Date(alertAt + 10 * 60 * 1000).toISOString(),
             limit: 100,
@@ -157,12 +166,12 @@ export class AiOpsContextEvidenceService {
         evidence.push({
           evidenceId: this.id(
             'loki-query',
-            `${context.environmentId}:${context.startedAt}:${context.namespace}:${logService}`,
+            `${context.environmentId}:${context.startedAt}:${context.namespace}:${logTarget}`,
           ),
           evidenceType: 'LOG',
           sourceSystem: 'grafana-loki',
           observedAt: queryObservedAt,
-          title: `Loki 告警窗口查询 ${context.namespace || 'default'}/${logService}`,
+          title: `Loki 告警窗口查询 ${context.namespace || 'default'}/${logTarget}`,
           content: {
             querySummary: logResult.querySummary,
             hitCount: logResult.evidence.length,
@@ -176,7 +185,7 @@ export class AiOpsContextEvidenceService {
             evidenceType: 'LOG',
             sourceSystem: 'grafana-loki',
             observedAt: item.timestamp,
-            title: `Loki log ${logService}`,
+            title: `Loki log ${logTarget}`,
             content: {
               labels: item.labels,
               line: item.line,
@@ -196,7 +205,7 @@ export class AiOpsContextEvidenceService {
         );
       }
     } else {
-      missingEvidence.push('日志目标映射（告警缺少 service 或 job 标签）');
+      missingEvidence.push('日志目标映射（告警缺少 pod、service 或 job 标签）');
     }
 
     if (context.service) {

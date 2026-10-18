@@ -472,7 +472,8 @@ export class AiOpsLogService {
     environmentId: string,
     input: {
       namespace: string;
-      serviceName: string;
+      serviceName?: string;
+      queryTexts?: string[];
       from: string;
       to: string;
       limit?: number;
@@ -492,6 +493,7 @@ export class AiOpsLogService {
         sourceId: source.sourceId,
         namespace: input.namespace,
         serviceName: input.serviceName,
+        queryTexts: input.queryTexts,
         from: input.from,
         to: input.to,
         limit: input.limit || Math.min(100, source.maxLines),
