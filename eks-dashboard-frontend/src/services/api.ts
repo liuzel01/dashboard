@@ -158,13 +158,15 @@ export type JumpserverCatalogItem = {
 };
 export type JumpserverConfiguration = {
   mappings: Array<Record<string, unknown>>;
-  bundles: Array<Record<string, unknown>>;
   userBindings: Array<{
     dashboard_user_id: number;
     dashboard_username: string;
     bundle_id: number;
     bundle_name: string;
     enabled: number;
+    accounts: string[];
+    protocols: string[];
+    targets: string[];
   }>;
 };
 const jumpserverSession = () => {
@@ -192,22 +194,13 @@ export const upsertJumpserverMapping = async (input: {
   remoteUsername: string;
   status?: "ACTIVE" | "DISABLED";
 }) => (await api.post("/jumpserver-access/mappings", input)).data;
-export const createJumpserverBundle = async (input: {
-  name: string;
+export const createJumpserverUserGrant = async (input: {
+  dashboardUserId: number;
   description?: string;
   targets: Array<{ type: "ASSET" | "NODE"; id: string; name: string }>;
   accounts: string[];
   protocols: string[];
-}) => (await api.post("/jumpserver-access/bundles", input)).data;
-export const bindJumpserverUser = async (
-  bundleId: number,
-  dashboardUserId: number,
-) =>
-  (
-    await api.post(`/jumpserver-access/bundles/${bundleId}/users`, {
-      dashboardUserId,
-    })
-  ).data;
+}) => (await api.post("/jumpserver-access/user-grants", input)).data;
 export const unbindJumpserverUser = async (
   bundleId: number,
   dashboardUserId: number,
