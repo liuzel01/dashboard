@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -34,8 +35,8 @@ class BundleDto {
   @IsArray() accounts!: string[];
   @IsArray() protocols!: string[];
 }
-class BindDto {
-  @IsInt() @Min(1) roleId!: number;
+class UserBindDto {
+  @IsInt() @Min(1) dashboardUserId!: number;
 }
 class TicketDto {
   @IsString() ticket!: string;
@@ -69,12 +70,19 @@ export class JumpserverAccessController {
   ) {
     return this.service.createBundle(a, body);
   }
-  @Post('bundles/:id/roles') bind(
+  @Post('bundles/:id/users') bindUser(
     @Headers('authorization') a: string | undefined,
     @Param('id') id: string,
-    @Body() body: BindDto,
+    @Body() body: UserBindDto,
   ) {
-    return this.service.bindRole(a, Number(id), body.roleId);
+    return this.service.bindUser(a, Number(id), body.dashboardUserId);
+  }
+  @Delete('bundles/:id/users/:userId') unbindUser(
+    @Headers('authorization') a: string | undefined,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.service.unbindUser(a, Number(id), Number(userId));
   }
   @Post('users/:id/sync') sync(
     @Headers('authorization') a: string | undefined,

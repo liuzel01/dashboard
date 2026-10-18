@@ -216,15 +216,20 @@ export class JumpserverAccessService {
 
   async configuration(authorization?: string) {
     await this.actor(authorization, 'jumpserver:config:manage');
-    const [mappings, bundles, roles] = await Promise.all([
+    const [mappings, bundles, userBindings] = await Promise.all([
       this.db.query<any[]>(
         `SELECT m.*,u.username AS dashboard_username FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id ORDER BY m.id DESC`,
       ),
       this.db.query<any[]>(
-        `SELECT b.*,GROUP_CONCAT(DISTINCT CONCAT(t.target_type,':',t.remote_id,':',t.remote_name) SEPARATOR '\n') targets,GROUP_CONCAT(DISTINCT CONCAT(rb.role_id,':',r.name) SEPARATOR '\n') roles FROM jumpserver_access_bundles b LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id LEFT JOIN jumpserver_role_bindings rb ON rb.bundle_id=b.id AND rb.enabled=1 LEFT JOIN roles r ON r.id=rb.role_id GROUP BY b.id ORDER BY b.id DESC`,
+        `SELECT b.*,GROUP_CONCAT(DISTINCT CONCAT(t.target_type,':',t.remote_id,':',t.remote_name) SEPARATOR '\n') targets FROM jumpserver_access_bundles b LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id GROUP BY b.id ORDER BY b.id DESC`,
       ),
       this.db.query<any[]>(
-        'SELECT id,name,description FROM roles ORDER BY name',
+        `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username dashboard_username,b.name bundle_name
+           FROM jumpserver_user_bundle_bindings ub
+           JOIN users u ON u.id=ub.dashboard_user_id
+           JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
+          WHERE ub.provider_key='primary'
+          ORDER BY ub.updated_at DESC`,
       ),
     ]);
     return {
@@ -234,9 +239,8 @@ export class JumpserverAccessService {
         accounts: this.json(b.accounts_json),
         protocols: this.json(b.protocols_json),
         targets: this.lines(b.targets),
-        roles: this.lines(b.roles),
       })),
-      roles,
+      userBindings,
     };
   }
 
@@ -305,29 +309,60 @@ export class JumpserverAccessService {
     return { id: Number(result.insertId), name };
   }
 
-  async bindRole(
+  async bindUser(
     authorization: string | undefined,
     bundleId: number,
-    roleId: number,
+    dashboardUserId: number,
   ) {
     const actor = await this.actor(authorization, 'jumpserver:config:manage');
+    const [bundle, mapping] = await Promise.all([
+      this.db.query<any[]>(
+        `SELECT id FROM jumpserver_access_bundles WHERE id=? AND provider_key='primary' AND enabled=1 LIMIT 1`,
+        [bundleId],
+      ),
+      this.db.query<any[]>(
+        `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
+        [dashboardUserId],
+      ),
+    ]);
+    if (!bundle[0]) throw new BadRequestException('授权包不存在或已停用');
+    if (!mapping[0])
+      throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
     await this.db.query(
-      'INSERT INTO jumpserver_role_bindings(role_id,bundle_id,enabled,created_by) VALUES(?,?,1,?) ON DUPLICATE KEY UPDATE enabled=1,created_by=VALUES(created_by)',
-      [roleId, bundleId, actor.userId],
+      `INSERT INTO jumpserver_user_bundle_bindings(provider_key,dashboard_user_id,bundle_id,enabled,created_by)
+       VALUES('primary',?,?,1,?)
+       ON DUPLICATE KEY UPDATE enabled=1,created_by=VALUES(created_by),updated_at=UTC_TIMESTAMP(3)`,
+      [dashboardUserId, bundleId, actor.userId],
     );
     return { ok: true };
+  }
+
+  async unbindUser(
+    authorization: string | undefined,
+    bundleId: number,
+    dashboardUserId: number,
+  ) {
+    await this.actor(authorization, 'jumpserver:config:manage');
+    const result: any = await this.db.query(
+      `UPDATE jumpserver_user_bundle_bindings SET enabled=0,updated_at=UTC_TIMESTAMP(3)
+        WHERE provider_key='primary' AND dashboard_user_id=? AND bundle_id=? AND enabled=1`,
+      [dashboardUserId, bundleId],
+    );
+    if (!Number(result.affectedRows || 0))
+      throw new BadRequestException('用户未绑定该授权包');
+    return { ok: true, requiresSync: true };
   }
 
   async syncUser(authorization: string | undefined, dashboardUserId: number) {
     const actor = await this.actor(authorization, 'jumpserver:sync:execute');
     const mappings = await this.db.query<any[]>(
-      `SELECT * FROM jumpserver_identity_mappings WHERE provider_key='primary' AND dashboard_user_id=? AND status='ACTIVE' LIMIT 1`,
+      `SELECT m.* FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
       [dashboardUserId],
     );
     if (!mappings[0])
       throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
     const bundles = await this.db.query<any[]>(
-      `SELECT DISTINCT b.* FROM user_roles ur JOIN jumpserver_role_bindings rb ON rb.role_id=ur.role_id AND rb.enabled=1 JOIN jumpserver_access_bundles b ON b.id=rb.bundle_id AND b.enabled=1 WHERE ur.user_id=?`,
+      `SELECT DISTINCT b.* FROM jumpserver_user_bundle_bindings ub JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id AND b.enabled=1 WHERE ub.provider_key='primary' AND ub.dashboard_user_id=? AND ub.enabled=1`,
       [dashboardUserId],
     );
     const existing = await this.db.query<any[]>(
@@ -347,7 +382,7 @@ export class JumpserverAccessService {
     }
     if (bundles.length === 0 && results.length === 0)
       throw new BadRequestException(
-        '用户当前角色未绑定任何已启用的 JumpServer 授权包，请先创建授权包并绑定角色',
+        '用户未绑定任何已启用的 JumpServer 授权包，请先由管理员为该用户分配授权包',
       );
     for (const bundle of bundles) {
       const targets = await this.db.query<any[]>(
@@ -467,7 +502,14 @@ export class JumpserverAccessService {
   async myStatus(authorization?: string) {
     const actor = await this.actor(authorization, 'jumpserver:portal:launch');
     const rows = await this.db.query<any[]>(
-      `SELECT m.remote_username,g.bundle_id,g.remote_permission_id,g.status,b.name bundle_name FROM jumpserver_identity_mappings m LEFT JOIN jumpserver_grant_states g ON g.dashboard_user_id=m.dashboard_user_id AND g.provider_key=m.provider_key LEFT JOIN jumpserver_access_bundles b ON b.id=g.bundle_id WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE'`,
+      `SELECT m.remote_username,g.bundle_id,g.remote_permission_id,g.status,b.name bundle_name
+         FROM jumpserver_identity_mappings m
+         LEFT JOIN jumpserver_user_bundle_bindings ub
+           ON ub.provider_key=m.provider_key AND ub.dashboard_user_id=m.dashboard_user_id AND ub.enabled=1
+         LEFT JOIN jumpserver_grant_states g
+           ON g.dashboard_user_id=m.dashboard_user_id AND g.provider_key=m.provider_key AND g.bundle_id=ub.bundle_id
+         LEFT JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id AND b.enabled=1
+        WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE'`,
       [actor.userId],
     );
     const synced = rows.filter(
@@ -493,11 +535,13 @@ export class JumpserverAccessService {
       mapped: rows.length > 0,
       eligible: synced.length > 0 && synced.every((r) => r.status === 'SYNCED'),
       remoteUsername: rows[0]?.remote_username || null,
-      grants: rows.map((r) => ({
-        bundleId: r.bundle_id,
-        bundleName: r.bundle_name,
-        status: r.status,
-      })),
+      grants: rows
+        .filter((r) => r.bundle_id)
+        .map((r) => ({
+          bundleId: r.bundle_id,
+          bundleName: r.bundle_name,
+          status: r.status,
+        })),
     };
   }
 

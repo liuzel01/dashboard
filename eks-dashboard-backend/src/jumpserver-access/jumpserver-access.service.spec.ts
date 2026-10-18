@@ -82,7 +82,38 @@ describe('JumpserverAccessService safety policy', () => {
       .mockResolvedValueOnce([]);
 
     await expect(service.syncUser('token', 2)).rejects.toThrow(
-      '用户当前角色未绑定任何已启用的 JumpServer 授权包',
+      '用户未绑定任何已启用的 JumpServer 授权包',
     );
+    expect(db.query.mock.calls[1][0]).toContain(
+      'jumpserver_user_bundle_bindings',
+    );
+    expect(db.query.mock.calls[1][0]).not.toContain('user_roles');
+  });
+
+  it('derives portal eligibility from direct user bindings', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    db.query.mockResolvedValueOnce([
+      {
+        remote_username: 'mapped-user',
+        bundle_id: 7,
+        bundle_name: 'ops-assets',
+        remote_permission_id: 'permission-7',
+        status: 'SYNCED',
+      },
+    ]);
+    jest.spyOn(service as any, 'remote').mockResolvedValue({
+      id: 'permission-7',
+      name: 'dashboard:bundle:7:user:2',
+      is_valid: true,
+    });
+
+    const status = await service.myStatus('token');
+    expect(db.query.mock.calls[0][0]).toContain(
+      'jumpserver_user_bundle_bindings',
+    );
+    expect(status.eligible).toBe(true);
+    expect(status.grants).toEqual([
+      { bundleId: 7, bundleName: 'ops-assets', status: 'SYNCED' },
+    ]);
   });
 });
