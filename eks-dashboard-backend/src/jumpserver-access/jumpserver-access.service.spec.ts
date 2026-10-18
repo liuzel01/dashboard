@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { JumpserverAccessService } from './jumpserver-access.service';
 
@@ -115,5 +115,34 @@ describe('JumpserverAccessService safety policy', () => {
     expect(status.grants).toEqual([
       { bundleId: 7, bundleName: 'ops-assets', status: 'SYNCED' },
     ]);
+  });
+
+  it('creates the internal scope snapshot and user binding atomically', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    db.query.mockResolvedValueOnce([{ id: 10 }]);
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 21 }])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{}]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+    const syncUser = jest
+      .spyOn(service, 'syncUser')
+      .mockResolvedValue({ dashboardUserId: 2, results: [] });
+
+    const result = await service.createUserGrant('token', {
+      dashboardUserId: 2,
+      targets: [{ type: 'ASSET', id: 'asset-1', name: 'test-asset' }],
+      accounts: ['@ALL'],
+      protocols: ['ssh'],
+    });
+
+    expect(result.bundleId).toBe(21);
+    expect(conn.execute.mock.calls[2][0]).toContain(
+      'jumpserver_user_bundle_bindings',
+    );
+    expect(syncUser).toHaveBeenCalledWith('token', 2);
   });
 });

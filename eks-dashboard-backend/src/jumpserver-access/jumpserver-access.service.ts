@@ -216,31 +216,31 @@ export class JumpserverAccessService {
 
   async configuration(authorization?: string) {
     await this.actor(authorization, 'jumpserver:config:manage');
-    const [mappings, bundles, userBindings] = await Promise.all([
+    const [mappings, userBindings] = await Promise.all([
       this.db.query<any[]>(
         `SELECT m.*,u.username AS dashboard_username FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id ORDER BY m.id DESC`,
       ),
       this.db.query<any[]>(
-        `SELECT b.*,GROUP_CONCAT(DISTINCT CONCAT(t.target_type,':',t.remote_id,':',t.remote_name) SEPARATOR '\n') targets FROM jumpserver_access_bundles b LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id GROUP BY b.id ORDER BY b.id DESC`,
-      ),
-      this.db.query<any[]>(
-        `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username dashboard_username,b.name bundle_name
+        `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username dashboard_username,b.name bundle_name,
+                b.accounts_json,b.protocols_json,
+                GROUP_CONCAT(DISTINCT CONCAT(t.target_type,':',t.remote_id,':',t.remote_name) SEPARATOR '\n') targets
            FROM jumpserver_user_bundle_bindings ub
            JOIN users u ON u.id=ub.dashboard_user_id
            JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
+           LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id
           WHERE ub.provider_key='primary'
+          GROUP BY ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username,b.name,b.accounts_json,b.protocols_json
           ORDER BY ub.updated_at DESC`,
       ),
     ]);
     return {
       mappings,
-      bundles: bundles.map((b) => ({
-        ...b,
-        accounts: this.json(b.accounts_json),
-        protocols: this.json(b.protocols_json),
-        targets: this.lines(b.targets),
+      userBindings: userBindings.map((binding) => ({
+        ...binding,
+        accounts: this.json(binding.accounts_json),
+        protocols: this.json(binding.protocols_json),
+        targets: this.lines(binding.targets),
       })),
-      userBindings,
     };
   }
 
@@ -273,68 +273,61 @@ export class JumpserverAccessService {
     };
   }
 
-  async createBundle(authorization: string | undefined, input: any) {
+  async createUserGrant(authorization: string | undefined, input: any) {
     const actor = await this.actor(authorization, 'jumpserver:config:manage');
-    const name = String(input.name || '').trim();
-    if (!name) throw new BadRequestException('授权包名称不能为空');
+    const dashboardUserId = Number(input.dashboardUserId);
     const targets = Array.isArray(input.targets) ? input.targets : [];
-    if (!targets.length)
-      throw new BadRequestException('至少选择一个资产或节点');
     const accounts = this.strings(input.accounts);
     const protocols = this.strings(input.protocols);
+    if (!dashboardUserId || !targets.length)
+      throw new BadRequestException('请选择用户和资产范围');
     if (!accounts.length || !protocols.length)
       throw new BadRequestException('账号选择器和协议不能为空');
-    const result: any = await this.db.query(
-      `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,enabled,created_by) VALUES('primary',?,?,?,?,1,?)`,
-      [
-        name,
-        String(input.description || '').slice(0, 500),
-        JSON.stringify(accounts),
-        JSON.stringify(protocols),
-        actor.userId,
-      ],
+    const mappings = await this.db.query<any[]>(
+      `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
+        WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
+      [dashboardUserId],
     );
-    for (const target of targets) {
-      const type = target.type === 'NODE' ? 'NODE' : 'ASSET';
-      await this.db.query(
-        'INSERT INTO jumpserver_bundle_targets(bundle_id,target_type,remote_id,remote_name) VALUES(?,?,?,?)',
+    if (!mappings[0])
+      throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
+    const grant = await this.db.withTransaction(async (conn) => {
+      const label = String(input.name || targets[0]?.name || 'asset')
+        .trim()
+        .slice(0, 80);
+      const name = `user-${dashboardUserId}-${label}-${randomUUID().slice(0, 8)}`;
+      const [created]: any = await conn.execute(
+        `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,enabled,created_by)
+         VALUES('primary',?,?,?,?,1,?)`,
         [
-          result.insertId,
-          type,
-          String(target.id),
-          String(target.name || '').slice(0, 255),
+          name,
+          String(input.description || '').slice(0, 500),
+          JSON.stringify(accounts),
+          JSON.stringify(protocols),
+          actor.userId,
         ],
       );
-    }
-    return { id: Number(result.insertId), name };
-  }
-
-  async bindUser(
-    authorization: string | undefined,
-    bundleId: number,
-    dashboardUserId: number,
-  ) {
-    const actor = await this.actor(authorization, 'jumpserver:config:manage');
-    const [bundle, mapping] = await Promise.all([
-      this.db.query<any[]>(
-        `SELECT id FROM jumpserver_access_bundles WHERE id=? AND provider_key='primary' AND enabled=1 LIMIT 1`,
-        [bundleId],
-      ),
-      this.db.query<any[]>(
-        `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
-        [dashboardUserId],
-      ),
-    ]);
-    if (!bundle[0]) throw new BadRequestException('授权包不存在或已停用');
-    if (!mapping[0])
-      throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
-    await this.db.query(
-      `INSERT INTO jumpserver_user_bundle_bindings(provider_key,dashboard_user_id,bundle_id,enabled,created_by)
-       VALUES('primary',?,?,1,?)
-       ON DUPLICATE KEY UPDATE enabled=1,created_by=VALUES(created_by),updated_at=UTC_TIMESTAMP(3)`,
-      [dashboardUserId, bundleId, actor.userId],
-    );
-    return { ok: true };
+      const bundleId = Number(created.insertId);
+      for (const target of targets) {
+        const type = target.type === 'NODE' ? 'NODE' : 'ASSET';
+        await conn.execute(
+          'INSERT INTO jumpserver_bundle_targets(bundle_id,target_type,remote_id,remote_name) VALUES(?,?,?,?)',
+          [
+            bundleId,
+            type,
+            String(target.id),
+            String(target.name || '').slice(0, 255),
+          ],
+        );
+      }
+      await conn.execute(
+        `INSERT INTO jumpserver_user_bundle_bindings(provider_key,dashboard_user_id,bundle_id,enabled,created_by)
+         VALUES('primary',?,?,1,?)`,
+        [dashboardUserId, bundleId, actor.userId],
+      );
+      return { bundleId, name };
+    });
+    const sync = await this.syncUser(authorization, dashboardUserId);
+    return { ...grant, dashboardUserId, sync };
   }
 
   async unbindUser(

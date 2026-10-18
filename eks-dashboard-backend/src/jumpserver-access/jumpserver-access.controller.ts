@@ -35,7 +35,7 @@ class BundleDto {
   @IsArray() accounts!: string[];
   @IsArray() protocols!: string[];
 }
-class UserBindDto {
+class UserGrantDto extends BundleDto {
   @IsInt() @Min(1) dashboardUserId!: number;
 }
 class TicketDto {
@@ -64,18 +64,11 @@ export class JumpserverAccessController {
   ) {
     return this.service.upsertMapping(a, body);
   }
-  @Post('bundles') bundle(
+  @Post('user-grants') userGrant(
     @Headers('authorization') a: string | undefined,
-    @Body() body: BundleDto,
+    @Body() body: UserGrantDto,
   ) {
-    return this.service.createBundle(a, body);
-  }
-  @Post('bundles/:id/users') bindUser(
-    @Headers('authorization') a: string | undefined,
-    @Param('id') id: string,
-    @Body() body: UserBindDto,
-  ) {
-    return this.service.bindUser(a, Number(id), body.dashboardUserId);
+    return this.service.createUserGrant(a, body);
   }
   @Delete('bundles/:id/users/:userId') unbindUser(
     @Headers('authorization') a: string | undefined,
