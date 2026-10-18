@@ -191,6 +191,7 @@ export class JumpserverAccessService {
       groups: '/api/v1/users/groups/',
       nodes: '/api/v1/assets/nodes/',
       assets: '/api/v1/assets/assets/',
+      permissions: '/api/v1/perms/asset-permissions/',
     };
     if (!map[kind])
       throw new BadRequestException('不支持的 JumpServer 目录类型');
@@ -199,12 +200,21 @@ export class JumpserverAccessService {
     // JumpServer Community Edition's built-in System Auditor can read users
     // and assets, but returns 403 for node/group catalogs. Keep the broader
     // Grant Manager constrained to the same GET allowlist for those catalogs.
-    const identity = ['groups', 'nodes'].includes(kind) ? 'grant' : 'reader';
+    const identity = ['groups', 'nodes', 'permissions'].includes(kind)
+      ? 'grant'
+      : 'reader';
     const data = await this.remote(identity, 'GET', `${map[kind]}?${query}`);
+    const results = (data.results || []).filter(
+      (value: any) =>
+        kind !== 'permissions' ||
+        (value.is_valid !== false &&
+          value.is_active !== false &&
+          !String(value.name || '').startsWith('dashboard:')),
+    );
     return {
       kind,
-      count: Number(data.count || 0),
-      items: (data.results || []).map((v: any) => ({
+      count: results.length,
+      items: results.map((v: any) => ({
         id: String(v.id),
         name: String(v.name || v.username || ''),
         username: v.username ? String(v.username) : undefined,
@@ -222,14 +232,15 @@ export class JumpserverAccessService {
       ),
       this.db.query<any[]>(
         `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username dashboard_username,b.name bundle_name,
-                b.accounts_json,b.protocols_json,
+                b.accounts_json,b.protocols_json,b.actions_json,
+                b.source_permission_id,b.source_permission_name,b.source_snapshot_hash,
                 GROUP_CONCAT(DISTINCT CONCAT(t.target_type,':',t.remote_id,':',t.remote_name) SEPARATOR '\n') targets
            FROM jumpserver_user_bundle_bindings ub
            JOIN users u ON u.id=ub.dashboard_user_id
            JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
            LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id
           WHERE ub.provider_key='primary'
-          GROUP BY ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username,b.name,b.accounts_json,b.protocols_json
+          GROUP BY ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username,b.name,b.accounts_json,b.protocols_json,b.actions_json,b.source_permission_id,b.source_permission_name,b.source_snapshot_hash
           ORDER BY ub.updated_at DESC`,
       ),
     ]);
@@ -239,8 +250,66 @@ export class JumpserverAccessService {
         ...binding,
         accounts: this.json(binding.accounts_json),
         protocols: this.json(binding.protocols_json),
+        actions: this.json(binding.actions_json),
         targets: this.lines(binding.targets),
       })),
+    };
+  }
+
+  async permissionTemplate(authorization: string | undefined, id: string) {
+    await this.actor(authorization, 'jumpserver:config:manage');
+    return this.loadPermissionTemplate(id);
+  }
+
+  private async loadPermissionTemplate(id: string) {
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(String(id || '')))
+      throw new BadRequestException('Asset Permission ID 不合法');
+    const detail = await this.remote(
+      'grant',
+      'GET',
+      `/api/v1/perms/asset-permissions/${encodeURIComponent(id)}/`,
+    );
+    const name = String(detail.name || '').trim();
+    if (!name || detail.is_valid === false || detail.is_active === false)
+      throw new BadRequestException('Asset Permission 不存在或已失效');
+    if (name.startsWith('dashboard:'))
+      throw new BadRequestException('不能将 Dashboard 受管授权作为模板');
+    const targets = [
+      ...(Array.isArray(detail.assets) ? detail.assets : []).map((value: any) =>
+        this.targetRef('ASSET', value),
+      ),
+      ...(Array.isArray(detail.nodes) ? detail.nodes : []).map((value: any) =>
+        this.targetRef('NODE', value),
+      ),
+    ];
+    const accounts = this.strings(detail.accounts);
+    const protocols = this.strings(detail.protocols);
+    const actions = this.actionStrings(detail.actions);
+    if (
+      !targets.length ||
+      !accounts.length ||
+      !protocols.length ||
+      !actions.length
+    )
+      throw new BadRequestException(
+        'Asset Permission 缺少可复用的资产、账号、协议或动作范围',
+      );
+    const risks: string[] = [];
+    if (accounts.includes('@ALL')) risks.push('允许目标范围内的全部账号');
+    if (protocols.includes('all')) risks.push('允许全部协议');
+    const elevated = actions.filter((value) => value !== 'connect');
+    if (elevated.length) risks.push(`包含高风险动作：${elevated.join(', ')}`);
+    if (targets.filter((target) => target.type === 'NODE').length)
+      risks.push('包含节点范围；节点新增资产可能自动进入授权范围');
+    return {
+      id: String(detail.id || id),
+      name,
+      targets,
+      accounts,
+      protocols,
+      actions,
+      dateExpired: detail.date_expired || null,
+      risks,
     };
   }
 
@@ -296,13 +365,14 @@ export class JumpserverAccessService {
         .slice(0, 80);
       const name = `user-${dashboardUserId}-${label}-${randomUUID().slice(0, 8)}`;
       const [created]: any = await conn.execute(
-        `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,enabled,created_by)
-         VALUES('primary',?,?,?,?,1,?)`,
+        `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,actions_json,enabled,created_by)
+         VALUES('primary',?,?,?,?,?,1,?)`,
         [
           name,
           String(input.description || '').slice(0, 500),
           JSON.stringify(accounts),
           JSON.stringify(protocols),
+          JSON.stringify(['connect']),
           actor.userId,
         ],
       );
@@ -328,6 +398,75 @@ export class JumpserverAccessService {
     });
     const sync = await this.syncUser(authorization, dashboardUserId);
     return { ...grant, dashboardUserId, sync };
+  }
+
+  async createUserGrantFromTemplate(
+    authorization: string | undefined,
+    input: any,
+  ) {
+    const actor = await this.actor(authorization, 'jumpserver:config:manage');
+    const dashboardUserId = Number(input.dashboardUserId);
+    if (!dashboardUserId) throw new BadRequestException('请选择运维系统用户');
+    const template = await this.loadPermissionTemplate(
+      String(input.permissionId || ''),
+    );
+    const mappings = await this.db.query<any[]>(
+      `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
+        WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
+      [dashboardUserId],
+    );
+    if (!mappings[0])
+      throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
+    const snapshot = {
+      targets: template.targets,
+      accounts: template.accounts,
+      protocols: template.protocols,
+      actions: template.actions,
+    };
+    const snapshotHash = this.hash(JSON.stringify(snapshot));
+    const grant = await this.db.withTransaction(async (conn) => {
+      const label = template.name
+        .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+        .slice(0, 60);
+      const name = `template-${dashboardUserId}-${label || 'permission'}-${randomUUID().slice(0, 8)}`;
+      const [created]: any = await conn.execute(
+        `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,actions_json,source_permission_id,source_permission_name,source_snapshot_hash,enabled,created_by)
+         VALUES('primary',?,?,?,?,?,?,?,?,1,?)`,
+        [
+          name,
+          `Copied from JumpServer Asset Permission: ${template.name}`.slice(
+            0,
+            500,
+          ),
+          JSON.stringify(template.accounts),
+          JSON.stringify(template.protocols),
+          JSON.stringify(template.actions),
+          template.id,
+          template.name.slice(0, 128),
+          snapshotHash,
+          actor.userId,
+        ],
+      );
+      const bundleId = Number(created.insertId);
+      for (const target of template.targets)
+        await conn.execute(
+          'INSERT INTO jumpserver_bundle_targets(bundle_id,target_type,remote_id,remote_name) VALUES(?,?,?,?)',
+          [bundleId, target.type, target.id, target.name.slice(0, 255)],
+        );
+      await conn.execute(
+        `INSERT INTO jumpserver_user_bundle_bindings(provider_key,dashboard_user_id,bundle_id,enabled,created_by)
+         VALUES('primary',?,?,1,?)`,
+        [dashboardUserId, bundleId, actor.userId],
+      );
+      return { bundleId, name };
+    });
+    const sync = await this.syncUser(authorization, dashboardUserId);
+    return {
+      ...grant,
+      dashboardUserId,
+      sourcePermission: { id: template.id, name: template.name, snapshotHash },
+      sync,
+    };
   }
 
   async unbindUser(
@@ -388,6 +527,9 @@ export class JumpserverAccessService {
         targets: targets.map((t) => [t.target_type, t.remote_id]),
         accounts: this.json(bundle.accounts_json),
         protocols: this.json(bundle.protocols_json),
+        actions: this.json(bundle.actions_json).length
+          ? this.json(bundle.actions_json)
+          : ['connect'],
       };
       const hash = createHash('sha256')
         .update(JSON.stringify(desired))
@@ -422,7 +564,7 @@ export class JumpserverAccessService {
             .map((t) => t.remote_id),
           accounts: desired.accounts,
           protocols: desired.protocols,
-          actions: ['connect'],
+          actions: desired.actions,
           is_active: true,
           date_start: new Date().toISOString(),
           date_expired: '2099-12-31T23:59:59Z',
@@ -631,6 +773,37 @@ export class JumpserverAccessService {
           ),
         ]
       : [];
+  }
+  private actionStrings(v: any): string[] {
+    return Array.isArray(v)
+      ? [
+          ...new Set(
+            v
+              .map((value: any) =>
+                String(
+                  typeof value === 'object' && value
+                    ? value.value || value.name || ''
+                    : value,
+                ).trim(),
+              )
+              .filter(Boolean),
+          ),
+        ]
+      : [];
+  }
+  private targetRef(type: 'ASSET' | 'NODE', value: any) {
+    const id = String(
+      typeof value === 'object' && value
+        ? value.id || value.value || ''
+        : value,
+    );
+    if (!id) throw new BadRequestException('Asset Permission 包含无效资产引用');
+    const name = String(
+      typeof value === 'object' && value
+        ? value.name || value.label || value.id || id
+        : id,
+    );
+    return { type, id, name };
   }
   private hash(v: string) {
     return createHash('sha256').update(String(v)).digest('hex');

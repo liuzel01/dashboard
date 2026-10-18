@@ -38,6 +38,10 @@ class BundleDto {
 class UserGrantDto extends BundleDto {
   @IsInt() @Min(1) dashboardUserId!: number;
 }
+class TemplateGrantDto {
+  @IsInt() @Min(1) dashboardUserId!: number;
+  @IsString() @MaxLength(64) permissionId!: string;
+}
 class TicketDto {
   @IsString() ticket!: string;
 }
@@ -58,6 +62,12 @@ export class JumpserverAccessController {
   @Get('configuration') configuration(@Headers('authorization') a?: string) {
     return this.service.configuration(a);
   }
+  @Get('permission-templates/:id') permissionTemplate(
+    @Headers('authorization') a: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.service.permissionTemplate(a, id);
+  }
   @Post('mappings') mapping(
     @Headers('authorization') a: string | undefined,
     @Body() body: MappingDto,
@@ -69,6 +79,12 @@ export class JumpserverAccessController {
     @Body() body: UserGrantDto,
   ) {
     return this.service.createUserGrant(a, body);
+  }
+  @Post('user-grants/from-template') templateGrant(
+    @Headers('authorization') a: string | undefined,
+    @Body() body: TemplateGrantDto,
+  ) {
+    return this.service.createUserGrantFromTemplate(a, body);
   }
   @Delete('bundles/:id/users/:userId') unbindUser(
     @Headers('authorization') a: string | undefined,

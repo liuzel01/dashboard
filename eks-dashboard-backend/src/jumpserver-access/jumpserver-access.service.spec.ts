@@ -70,6 +70,48 @@ describe('JumpserverAccessService safety policy', () => {
       'GET',
       expect.stringContaining('/api/v1/assets/nodes/'),
     );
+
+    remote.mockResolvedValue({
+      count: 3,
+      results: [
+        { id: 'p1', name: 'ops', is_valid: true },
+        { id: 'p2', name: 'dashboard:bundle:1:user:2', is_valid: true },
+        { id: 'p3', name: 'expired', is_valid: false },
+      ],
+    });
+    const permissions = await service.catalog('token', 'permissions');
+    expect(remote).toHaveBeenLastCalledWith(
+      'grant',
+      'GET',
+      expect.stringContaining('/api/v1/perms/asset-permissions/'),
+    );
+    expect(permissions.items.map((item) => item.name)).toEqual(['ops']);
+  });
+
+  it('reads only reusable scope fields from an Asset Permission template', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    jest.spyOn(service as any, 'remote').mockResolvedValue({
+      id: 'permission-1',
+      name: 'ops-template',
+      is_valid: true,
+      users: [{ id: 'user-1', name: 'must-not-copy' }],
+      user_groups: [{ id: 'group-1', name: 'must-not-copy' }],
+      assets: [{ id: 'asset-1', name: 'host-1' }],
+      nodes: [{ id: 'node-1', name: 'production' }],
+      accounts: ['@ALL'],
+      protocols: ['ssh'],
+      actions: [{ value: 'connect' }, { value: 'download' }],
+    });
+
+    const template = await service.permissionTemplate('token', 'permission-1');
+    expect(template.targets).toEqual([
+      { type: 'ASSET', id: 'asset-1', name: 'host-1' },
+      { type: 'NODE', id: 'node-1', name: 'production' },
+    ]);
+    expect(template.actions).toEqual(['connect', 'download']);
+    expect(template).not.toHaveProperty('users');
+    expect(template).not.toHaveProperty('userGroups');
+    expect(template.risks.join(' ')).toContain('高风险动作');
   });
 
   it('rejects an empty sync instead of reporting a misleading success', async () => {
@@ -144,5 +186,53 @@ describe('JumpserverAccessService safety policy', () => {
       'jumpserver_user_bundle_bindings',
     );
     expect(syncUser).toHaveBeenCalledWith('token', 2);
+  });
+
+  it('snapshots a template and binds it to one Dashboard user atomically', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    jest.spyOn(service as any, 'remote').mockResolvedValue({
+      id: 'permission-1',
+      name: 'ops-template',
+      is_valid: true,
+      users: [{ id: 'remote-user' }],
+      user_groups: [{ id: 'remote-group' }],
+      assets: [{ id: 'asset-1', name: 'host-1' }],
+      nodes: [],
+      accounts: ['@ALL'],
+      protocols: ['ssh'],
+      actions: [{ value: 'connect' }, { value: 'download' }],
+    });
+    db.query.mockResolvedValueOnce([{ id: 10 }]);
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 22 }])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{}]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+    jest
+      .spyOn(service, 'syncUser')
+      .mockResolvedValue({ dashboardUserId: 2, results: [] });
+
+    const result = await service.createUserGrantFromTemplate('token', {
+      dashboardUserId: 2,
+      permissionId: 'permission-1',
+    });
+
+    expect(result.bundleId).toBe(22);
+    expect(conn.execute.mock.calls[0][0]).toContain('source_snapshot_hash');
+    expect(conn.execute.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['permission-1', 'ops-template']),
+    );
+    expect(conn.execute.mock.calls[1][1]).toEqual([
+      22,
+      'ASSET',
+      'asset-1',
+      'host-1',
+    ]);
+    expect(conn.execute.mock.calls[2][0]).toContain(
+      'jumpserver_user_bundle_bindings',
+    );
   });
 });

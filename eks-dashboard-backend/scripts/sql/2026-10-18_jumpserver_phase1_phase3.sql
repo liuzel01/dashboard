@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS `jumpserver_identity_mappings` (
 CREATE TABLE IF NOT EXISTS `jumpserver_access_bundles` (
   `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, `provider_key` VARCHAR(64) NOT NULL,
   `name` VARCHAR(128) NOT NULL, `description` VARCHAR(500) NOT NULL DEFAULT '',
-  `accounts_json` JSON NOT NULL, `protocols_json` JSON NOT NULL, `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+  `accounts_json` JSON NOT NULL, `protocols_json` JSON NOT NULL, `actions_json` JSON NULL,
+  `source_permission_id` VARCHAR(64) NULL, `source_permission_name` VARCHAR(128) NULL, `source_snapshot_hash` CHAR(64) NULL,
+  `enabled` TINYINT(1) NOT NULL DEFAULT 1,
   `created_by` BIGINT UNSIGNED NOT NULL, `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY `uk_jumpserver_bundle_name` (`provider_key`,`name`)
