@@ -92,6 +92,7 @@ export default function JumpserverAccessPage() {
         <Space direction="vertical" style={{ width: "100%" }}>
           <Select
             showSearch
+            optionFilterProp="label"
             placeholder="运维系统用户"
             style={{ width: "100%" }}
             options={users.map((u) => ({
@@ -190,13 +191,27 @@ export default function JumpserverAccessPage() {
       content:
         "将根据用户当前角色创建或回收 Dashboard 受管的 JumpServer Asset Permission。",
       onOk: async () => {
-        await syncJumpserverUser(id);
-        message.success("同步完成");
+        const result = await syncJumpserverUser(id);
+        const synced = result.results.filter(
+          (item: { status: string }) => item.status === "SYNCED",
+        ).length;
+        const revoked = result.results.filter(
+          (item: { status: string }) => item.status === "REVOKED",
+        ).length;
+        message.success(`同步完成：生效 ${synced}，回收 ${revoked}`);
         await load();
       },
     });
   const adminPanel = (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+      {cfg.bundles.length === 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="尚未创建授权包"
+          description="身份映射不会自动授予资产权限。请先创建授权包并绑定运维系统角色，再为对应用户执行授权同步。"
+        />
+      )}
       <Card title="Provider 诊断">
         <Descriptions column={2} size="small">
           <Descriptions.Item label="Reader">
