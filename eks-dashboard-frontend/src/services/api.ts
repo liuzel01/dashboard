@@ -166,8 +166,22 @@ export type JumpserverConfiguration = {
     enabled: number;
     accounts: string[];
     protocols: string[];
+    actions: string[];
     targets: string[];
+    source_permission_id?: string;
+    source_permission_name?: string;
+    source_snapshot_hash?: string;
   }>;
+};
+export type JumpserverPermissionTemplate = {
+  id: string;
+  name: string;
+  targets: Array<{ type: "ASSET" | "NODE"; id: string; name: string }>;
+  accounts: string[];
+  protocols: string[];
+  actions: string[];
+  dateExpired?: string | null;
+  risks: string[];
 };
 const jumpserverSession = () => {
   const key = "dashboard_jumpserver_session";
@@ -181,7 +195,7 @@ const jumpserverSession = () => {
 export const diagnoseJumpserver = async () =>
   (await api.get("/jumpserver-access/diagnostics")).data;
 export const getJumpserverCatalog = async (
-  kind: "users" | "groups" | "nodes" | "assets",
+  kind: "users" | "groups" | "nodes" | "assets" | "permissions",
   keyword = "",
 ) =>
   (await api.get("/jumpserver-access/catalog", { params: { kind, keyword } }))
@@ -201,6 +215,17 @@ export const createJumpserverUserGrant = async (input: {
   accounts: string[];
   protocols: string[];
 }) => (await api.post("/jumpserver-access/user-grants", input)).data;
+export const getJumpserverPermissionTemplate = async (permissionId: string) =>
+  (
+    await api.get(
+      `/jumpserver-access/permission-templates/${encodeURIComponent(permissionId)}`,
+    )
+  ).data as JumpserverPermissionTemplate;
+export const createJumpserverUserGrantFromTemplate = async (input: {
+  dashboardUserId: number;
+  permissionId: string;
+}) =>
+  (await api.post("/jumpserver-access/user-grants/from-template", input)).data;
 export const unbindJumpserverUser = async (
   bundleId: number,
   dashboardUserId: number,

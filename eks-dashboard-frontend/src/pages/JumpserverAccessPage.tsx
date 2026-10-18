@@ -18,16 +18,19 @@ import { AuthContext } from "../contexts/AuthContextValue";
 import {
   consumeJumpserverPortal,
   createJumpserverUserGrant,
+  createJumpserverUserGrantFromTemplate,
   diagnoseJumpserver,
   getAccessUsers,
   getJumpserverCatalog,
   getJumpserverConfiguration,
+  getJumpserverPermissionTemplate,
   getMyJumpserverStatus,
   prepareJumpserverPortal,
   syncJumpserverUser,
   unbindJumpserverUser,
   upsertJumpserverMapping,
   type JumpserverCatalogItem,
+  type JumpserverPermissionTemplate,
 } from "../services/api";
 const { Title, Text } = Typography;
 
@@ -44,25 +47,36 @@ export default function JumpserverAccessPage() {
     [users, setUsers] = useState<any[]>([]),
     [remoteUsers, setRemoteUsers] = useState<JumpserverCatalogItem[]>([]),
     [assets, setAssets] = useState<JumpserverCatalogItem[]>([]),
-    [nodes, setNodes] = useState<JumpserverCatalogItem[]>([]);
+    [nodes, setNodes] = useState<JumpserverCatalogItem[]>([]),
+    [permissionTemplates, setPermissionTemplates] = useState<
+      JumpserverCatalogItem[]
+    >([]),
+    [templateModalOpen, setTemplateModalOpen] = useState(false),
+    [templateUserId, setTemplateUserId] = useState<number>(),
+    [templatePermissionId, setTemplatePermissionId] = useState<string>(),
+    [templatePreview, setTemplatePreview] =
+      useState<JumpserverPermissionTemplate>(),
+    [templateLoading, setTemplateLoading] = useState(false);
   const load = async () => {
     setLoading(true);
     try {
       setStatus(await getMyJumpserverStatus());
       if (admin) {
         setDiag(await diagnoseJumpserver());
-        const [c, u, ru, a, n] = await Promise.all([
+        const [c, u, ru, a, n, p] = await Promise.all([
           getJumpserverConfiguration(),
           getAccessUsers(),
           getJumpserverCatalog("users"),
           getJumpserverCatalog("assets"),
           getJumpserverCatalog("nodes"),
+          getJumpserverCatalog("permissions"),
         ]);
         setCfg(c);
         setUsers(u || []);
         setRemoteUsers(ru.items);
         setAssets(a.items);
         setNodes(n.items);
+        setPermissionTemplates(p.items);
       }
     } catch (e: any) {
       message.error(e?.response?.data?.message || e.message);
@@ -191,6 +205,54 @@ export default function JumpserverAccessPage() {
       },
     });
   };
+  const mappedUserOptions = () => {
+    const mappedUserIds = new Set(
+      cfg.mappings
+        .filter((mapping: any) => mapping.status === "ACTIVE")
+        .map((mapping: any) => Number(mapping.dashboard_user_id)),
+    );
+    return users
+      .filter((user) => mappedUserIds.has(Number(user.id)))
+      .map((user) => ({
+        value: Number(user.id),
+        label: `${user.display_name || user.username} (${user.username})`,
+      }));
+  };
+  const openTemplateGrant = () => {
+    setTemplateUserId(undefined);
+    setTemplatePermissionId(undefined);
+    setTemplatePreview(undefined);
+    setTemplateModalOpen(true);
+  };
+  const selectPermissionTemplate = async (permissionId: string) => {
+    setTemplatePermissionId(permissionId);
+    setTemplatePreview(undefined);
+    setTemplateLoading(true);
+    try {
+      setTemplatePreview(await getJumpserverPermissionTemplate(permissionId));
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || "读取授权模板失败");
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+  const confirmTemplateGrant = async () => {
+    if (!templateUserId || !templatePermissionId || !templatePreview) return;
+    setTemplateLoading(true);
+    try {
+      await createJumpserverUserGrantFromTemplate({
+        dashboardUserId: templateUserId,
+        permissionId: templatePermissionId,
+      });
+      message.success("已复制授权范围并同步到 JumpServer");
+      setTemplateModalOpen(false);
+      await load();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || "复用授权模板失败");
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
   const revokeBundle = (binding: any) =>
     Modal.confirm({
       title: "确认回收用户资产授权？",
@@ -278,9 +340,12 @@ export default function JumpserverAccessPage() {
       <Card
         title="用户资产授权"
         extra={
-          <Button type="primary" onClick={openUserGrant}>
-            新增授权
-          </Button>
+          <Space>
+            <Button onClick={openUserGrant}>新增自定义授权</Button>
+            <Button type="primary" onClick={openTemplateGrant}>
+              复用现有 Asset Permission
+            </Button>
+          </Space>
         }
       >
         <Table
@@ -305,6 +370,15 @@ export default function JumpserverAccessPage() {
               title: "账号 / 协议",
               render: (_, row: any) =>
                 `${(row.accounts || []).join(", ")} / ${(row.protocols || []).join(", ")}`,
+            },
+            {
+              title: "来源",
+              render: (_, row: any) =>
+                row.source_permission_name ? (
+                  <Tag color="blue">模板 · {row.source_permission_name}</Tag>
+                ) : (
+                  <Tag>自定义</Tag>
+                ),
             },
             {
               title: "操作",
@@ -377,6 +451,90 @@ export default function JumpserverAccessPage() {
           items={[{ key: "admin", label: "授权管理", children: adminPanel }]}
         />
       )}
+      <Modal
+        width={720}
+        title="复用现有 JumpServer Asset Permission"
+        open={templateModalOpen}
+        confirmLoading={templateLoading}
+        okText="确认复制并授权"
+        okButtonProps={{
+          danger: Boolean(templatePreview?.risks.length),
+          disabled:
+            !templateUserId || !templatePermissionId || !templatePreview,
+        }}
+        onCancel={() => setTemplateModalOpen(false)}
+        onOk={() => void confirmTemplateGrant()}
+      >
+        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+          <Alert
+            type="info"
+            showIcon
+            message="系统只复制所选 Asset Permission 的资产、节点、账号、协议和动作范围；不会复制源用户或用户组，也不会修改源 Permission。"
+          />
+          <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择已建立身份映射的运维系统用户"
+            style={{ width: "100%" }}
+            options={mappedUserOptions()}
+            value={templateUserId}
+            onChange={setTemplateUserId}
+          />
+          <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择现有 Asset Permission 作为授权模板"
+            style={{ width: "100%" }}
+            options={permissionTemplates.map((permission) => ({
+              value: permission.id,
+              label: permission.name,
+            }))}
+            value={templatePermissionId}
+            loading={templateLoading}
+            onChange={(value) => void selectPermissionTemplate(value)}
+          />
+          {templatePreview && (
+            <>
+              <Descriptions bordered size="small" column={2}>
+                <Descriptions.Item label="模板名称" span={2}>
+                  {templatePreview.name}
+                </Descriptions.Item>
+                <Descriptions.Item label="资产 / 节点">
+                  {
+                    templatePreview.targets.filter((x) => x.type === "ASSET")
+                      .length
+                  }
+                  {" / "}
+                  {
+                    templatePreview.targets.filter((x) => x.type === "NODE")
+                      .length
+                  }
+                </Descriptions.Item>
+                <Descriptions.Item label="失效时间">
+                  {templatePreview.dateExpired || "未返回"}
+                </Descriptions.Item>
+                <Descriptions.Item label="账号" span={2}>
+                  {templatePreview.accounts.join(", ")}
+                </Descriptions.Item>
+                <Descriptions.Item label="协议" span={2}>
+                  {templatePreview.protocols.join(", ")}
+                </Descriptions.Item>
+                <Descriptions.Item label="动作" span={2}>
+                  {templatePreview.actions.join(", ")}
+                </Descriptions.Item>
+              </Descriptions>
+              {templatePreview.risks.length > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="请确认以下授权风险"
+                  description={templatePreview.risks.join("；")}
+                />
+              )}
+            </>
+          )}
+        </Space>
+      </Modal>
     </div>
   );
 }
