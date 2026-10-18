@@ -1,7 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.service';
 
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 
 const payload = (alertname = 'KylinBackendServiceHttpLatencyHigh') => ({
   status: 'firing',
@@ -114,6 +114,9 @@ const makeService = (existingId?: number, returnJsonObject = false) => {
   const groupCallback = {
     enqueue: jest.fn(async () => ({ status: 'DISABLED' })),
   };
+  const alertAgent = {
+    analyze: jest.fn(async () => ({ status: 'DISABLED' })),
+  };
   const service = new AiOpsAlertInvestigationService(
     db as any,
     siteConf as any,
@@ -121,8 +124,17 @@ const makeService = (existingId?: number, returnJsonObject = false) => {
     prometheus as any,
     contextEvidence as any,
     groupCallback as any,
+    alertAgent as any,
   );
-  return { service, db, execute, prometheus, contextEvidence, groupCallback };
+  return {
+    service,
+    db,
+    execute,
+    prometheus,
+    contextEvidence,
+    groupCallback,
+    alertAgent,
+  };
 };
 
 describe('AiOpsAlertInvestigationService', () => {
@@ -175,6 +187,44 @@ describe('AiOpsAlertInvestigationService', () => {
     expect(report.missingEvidence).not.toEqual(
       expect.arrayContaining(['关联日志', 'release']),
     );
+  });
+
+  it('persists a bounded agent conclusion and its investigation step', async () => {
+    const { service, execute, alertAgent } = makeService();
+    alertAgent.analyze.mockResolvedValueOnce({
+      status: 'COMPLETED',
+      provider: 'cliproxy',
+      model: 'test-model',
+      summary: '证据支持低影响候选判断。',
+      findings: [
+        { text: '日志窗口无错误。', evidenceIds: ['loki-query-test'] },
+      ],
+      evidenceIds: ['loki-query-test'],
+      confidence: 'MEDIUM',
+      insufficientEvidence: false,
+    });
+
+    await service.receiveAlertmanager('Bearer test-token', payload());
+    await service.processQueuedAlerts();
+
+    const reportJson = execute.mock.calls
+      .flatMap((call) => (Array.isArray(call[1]) ? call[1] : []))
+      .find(
+        (value) =>
+          typeof value === 'string' && value.includes('"agentAnalysis"'),
+      );
+    expect(JSON.parse(String(reportJson))).toMatchObject({
+      agentAnalysis: {
+        model: 'test-model',
+        confidence: 'MEDIUM',
+        evidenceIds: ['loki-query-test'],
+      },
+    });
+    expect(
+      execute.mock.calls.some(([sql]) =>
+        String(sql).includes("'agent.analyze'"),
+      ),
+    ).toBe(true);
   });
 
   it('accepts a JSON column already decoded by the MySQL 8 driver', async () => {

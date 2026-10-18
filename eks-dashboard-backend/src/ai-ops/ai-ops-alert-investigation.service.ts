@@ -21,6 +21,7 @@ import { AiOpsPrometheusEvidenceService } from './ai-ops-prometheus-evidence.ser
 import { AIOPS_REPLAY_CASES } from './ai-ops-replay.fixtures';
 import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
+import { AiOpsAlertAgentService } from './ai-ops-alert-agent.service';
 
 type ActorContext = {
   userId: number | null;
@@ -43,6 +44,7 @@ export class AiOpsAlertInvestigationService {
     private readonly prometheus: AiOpsPrometheusEvidenceService,
     private readonly contextEvidence: AiOpsContextEvidenceService,
     private readonly groupCallback: AiOpsGroupCallbackService,
+    private readonly alertAgent: AiOpsAlertAgentService,
   ) {}
 
   async receiveAlertmanager(
@@ -514,7 +516,7 @@ export class AiOpsAlertInvestigationService {
       ? 'RESOLVED'
       : specialized?.classification ||
         (severity === 'info' ? 'OBSERVE' : 'NEEDS_INVESTIGATION');
-    const summary = resolved
+    let summary = resolved
       ? `${alertName} 已恢复；保留历史证据供回看。`
       : `${alertName} 已进入通用告警调查。${description ? ` ${description}` : ''}`.slice(
           0,
@@ -536,7 +538,7 @@ export class AiOpsAlertInvestigationService {
         return false;
       return true;
     });
-    const report = {
+    const report: Record<string, unknown> = {
       kind: 'generic-alert-report',
       replay: sourceType === 'HISTORICAL_REPLAY',
       facts: {
@@ -584,6 +586,43 @@ export class AiOpsAlertInvestigationService {
           : '当前告警已完成轻量接入；如需自动深度取证，请补充专项 Playbook。',
       ],
     };
+    const baselineConfidence = specialized?.confidence || 'LOW';
+    const baselineInsufficientEvidence =
+      specialized?.insufficientEvidence !== false;
+    const agent = shouldCollect
+      ? await this.alertAgent.analyze({
+          environmentId,
+          alertName,
+          baselineConfidence,
+          baselineInsufficientEvidence,
+          report,
+          evidence: [...(specialized?.evidence || []), ...contextual.evidence],
+        })
+      : ({ status: 'DISABLED' } as const);
+    if (agent.status === 'COMPLETED') {
+      report.agentAnalysis = {
+        provider: agent.provider,
+        model: agent.model,
+        summary: agent.summary,
+        findings: agent.findings,
+        evidenceIds: agent.evidenceIds,
+        confidence: agent.confidence,
+        insufficientEvidence: agent.insufficientEvidence,
+      };
+      summary = agent.summary;
+    } else if (agent.status === 'FAILED') {
+      report.agentAnalysis = {
+        status: 'FAILED',
+        errorSummary: agent.errorSummary,
+        fallback: 'DETERMINISTIC_REPORT',
+      };
+    }
+    const finalConfidence =
+      agent.status === 'COMPLETED' ? agent.confidence : baselineConfidence;
+    const finalInsufficientEvidence =
+      agent.status === 'COMPLETED'
+        ? agent.insufficientEvidence
+        : baselineInsufficientEvidence;
 
     const outcome = await this.db.withTransaction(async (conn) => {
       const existingSql = resolved
@@ -622,8 +661,8 @@ export class AiOpsAlertInvestigationService {
             playbookVersion,
             summary,
             classification,
-            specialized?.confidence || 'LOW',
-            specialized?.insufficientEvidence === false ? 0 : 1,
+            finalConfidence,
+            finalInsufficientEvidence ? 1 : 0,
             JSON.stringify(report),
             resolved ? this.mysqlDate(alert.endsAt) : null,
           ],
@@ -644,8 +683,8 @@ export class AiOpsAlertInvestigationService {
               sourceStatus,
               summary,
               classification,
-              specialized?.confidence || 'LOW',
-              specialized?.insufficientEvidence === false ? 0 : 1,
+              finalConfidence,
+              finalInsufficientEvidence ? 1 : 0,
               JSON.stringify(report),
               id,
             ],
@@ -744,6 +783,24 @@ export class AiOpsAlertInvestigationService {
           ],
         );
       }
+      if (agent.status !== 'DISABLED') {
+        await conn.execute(
+          `INSERT INTO aiops_investigation_steps
+           (investigation_id, step_key, tool_name, status, result_count, summary, error_summary, started_at, completed_at, created_at)
+           VALUES (?, 'agent.analyze', 'cliproxy-evidence-agent', ?, ?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+           ON DUPLICATE KEY UPDATE status=VALUES(status), result_count=VALUES(result_count), summary=VALUES(summary),
+             error_summary=VALUES(error_summary), completed_at=UTC_TIMESTAMP()`,
+          [
+            id,
+            agent.status,
+            agent.status === 'COMPLETED' ? agent.evidenceIds.length : 0,
+            agent.status === 'COMPLETED'
+              ? `AI Agent 已基于 ${agent.evidenceIds.length} 条引用证据生成受控结论`
+              : 'AI Agent 分析失败，已回退确定性报告',
+            agent.status === 'FAILED' ? agent.errorSummary : null,
+          ],
+        );
+      }
       const evidenceId = `alert-${this.hash(`${fingerprint}:${sourceStatus}:${alert.endsAt || alert.startsAt || ''}`).slice(0, 16)}`;
       await conn.execute(
         `INSERT INTO aiops_investigation_evidence
@@ -777,7 +834,7 @@ export class AiOpsAlertInvestigationService {
         alertName,
         environmentId,
         classification,
-        confidence: specialized?.confidence || 'LOW',
+        confidence: finalConfidence,
         summary,
       });
     }
