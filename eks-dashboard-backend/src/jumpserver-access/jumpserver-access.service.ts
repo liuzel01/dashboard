@@ -335,11 +335,20 @@ export class JumpserverAccessService {
       ['primary', dashboardUserId],
     );
     const wanted = new Set(bundles.map((b) => Number(b.id)));
+    const results: any[] = [];
     for (const state of existing.filter(
       (s) => !wanted.has(Number(s.bundle_id)) && s.remote_permission_id,
-    ))
+    )) {
       await this.revokeManaged(actor, dashboardUserId, state);
-    const results: any[] = [];
+      results.push({
+        bundleId: Number(state.bundle_id),
+        status: 'REVOKED',
+      });
+    }
+    if (bundles.length === 0 && results.length === 0)
+      throw new BadRequestException(
+        '用户当前角色未绑定任何已启用的 JumpServer 授权包，请先创建授权包并绑定角色',
+      );
     for (const bundle of bundles) {
       const targets = await this.db.query<any[]>(
         'SELECT * FROM jumpserver_bundle_targets WHERE bundle_id=? ORDER BY id',
@@ -420,7 +429,9 @@ export class JumpserverAccessService {
       dashboardUserId,
       'GRANT_SYNC',
       String(dashboardUserId),
-      results.every((r) => r.status === 'SYNCED') ? 'SUCCESS' : 'PARTIAL',
+      results.every((r) => ['SYNCED', 'REVOKED'].includes(r.status))
+        ? 'SUCCESS'
+        : 'PARTIAL',
       `同步 ${results.length} 个授权包`,
     );
     return { dashboardUserId, results };

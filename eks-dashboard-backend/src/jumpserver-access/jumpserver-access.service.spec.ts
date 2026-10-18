@@ -71,4 +71,18 @@ describe('JumpserverAccessService safety policy', () => {
       expect.stringContaining('/api/v1/assets/nodes/'),
     );
   });
+
+  it('rejects an empty sync instead of reporting a misleading success', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    db.query
+      .mockResolvedValueOnce([
+        { dashboard_user_id: 2, remote_user_id: 'remote-user' },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await expect(service.syncUser('token', 2)).rejects.toThrow(
+      '用户当前角色未绑定任何已启用的 JumpServer 授权包',
+    );
+  });
 });
