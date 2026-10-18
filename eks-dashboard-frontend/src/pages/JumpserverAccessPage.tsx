@@ -17,7 +17,7 @@ import {
 } from "antd";
 import { AuthContext } from "../contexts/AuthContextValue";
 import {
-  bindJumpserverRole,
+  bindJumpserverUser,
   consumeJumpserverPortal,
   createJumpserverBundle,
   diagnoseJumpserver,
@@ -27,6 +27,7 @@ import {
   getMyJumpserverStatus,
   prepareJumpserverPortal,
   syncJumpserverUser,
+  unbindJumpserverUser,
   upsertJumpserverMapping,
   type JumpserverCatalogItem,
 } from "../services/api";
@@ -38,7 +39,11 @@ export default function JumpserverAccessPage() {
   const [loading, setLoading] = useState(false),
     [status, setStatus] = useState<any>(null),
     [diag, setDiag] = useState<any>(null),
-    [cfg, setCfg] = useState<any>({ mappings: [], bundles: [], roles: [] }),
+    [cfg, setCfg] = useState<any>({
+      mappings: [],
+      bundles: [],
+      userBindings: [],
+    }),
     [users, setUsers] = useState<any[]>([]),
     [remoteUsers, setRemoteUsers] = useState<JumpserverCatalogItem[]>([]),
     [assets, setAssets] = useState<JumpserverCatalogItem[]>([]),
@@ -125,8 +130,7 @@ export default function JumpserverAccessPage() {
   };
   const openBundle = () => {
     let name = "",
-      target = "",
-      roleId = 0;
+      target = "";
     Modal.confirm({
       width: 620,
       title: "创建授权包",
@@ -152,15 +156,6 @@ export default function JumpserverAccessPage() {
             ]}
             onChange={(v) => (target = v)}
           />
-          <Select
-            placeholder="绑定自定义角色"
-            style={{ width: "100%" }}
-            options={cfg.roles.map((r: any) => ({
-              value: r.id,
-              label: r.name,
-            }))}
-            onChange={(v) => (roleId = v)}
-          />
           <Alert
             type="warning"
             showIcon
@@ -169,9 +164,9 @@ export default function JumpserverAccessPage() {
         </Space>
       ),
       onOk: async () => {
-        if (!name || !target || !roleId) throw new Error("请完整填写");
+        if (!name || !target) throw new Error("请完整填写");
         const [type, id, ...rest] = target.split("|");
-        const b = await createJumpserverBundle({
+        await createJumpserverBundle({
           name,
           targets: [
             { type: type as "ASSET" | "NODE", id, name: rest.join("|") },
@@ -179,17 +174,64 @@ export default function JumpserverAccessPage() {
           accounts: ["@ALL"],
           protocols: ["ssh"],
         });
-        await bindJumpserverRole(b.id, roleId);
-        message.success("授权包和角色绑定已创建");
+        message.success("授权包已创建，请在列表中授权给具体用户");
         await load();
       },
     });
   };
+  const grantBundle = (bundle: any) => {
+    let dashboardUserId = 0;
+    const mappedUserIds = new Set(
+      cfg.mappings
+        .filter((mapping: any) => mapping.status === "ACTIVE")
+        .map((mapping: any) => Number(mapping.dashboard_user_id)),
+    );
+    Modal.confirm({
+      title: `将“${bundle.name}”授权给用户`,
+      content: (
+        <Select
+          showSearch
+          optionFilterProp="label"
+          placeholder="选择已建立身份映射的运维系统用户"
+          style={{ width: "100%" }}
+          options={users
+            .filter((user) => mappedUserIds.has(Number(user.id)))
+            .map((user) => ({
+              value: user.id,
+              label: `${user.display_name || user.username} (${user.username})`,
+            }))}
+          onChange={(value) => (dashboardUserId = value)}
+        />
+      ),
+      onOk: async () => {
+        if (!dashboardUserId) throw new Error("请选择用户");
+        await bindJumpserverUser(Number(bundle.id), dashboardUserId);
+        await syncJumpserverUser(dashboardUserId);
+        message.success("用户授权已绑定并同步到 JumpServer");
+        await load();
+      },
+    });
+  };
+  const revokeBundle = (binding: any) =>
+    Modal.confirm({
+      title: "确认回收用户资产授权？",
+      content: `将回收 ${binding.dashboard_username} 的“${binding.bundle_name}”授权。`,
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await unbindJumpserverUser(
+          Number(binding.bundle_id),
+          Number(binding.dashboard_user_id),
+        );
+        await syncJumpserverUser(Number(binding.dashboard_user_id));
+        message.success("用户授权已回收并同步到 JumpServer");
+        await load();
+      },
+    });
   const sync = (id: number) =>
     Modal.confirm({
       title: "确认同步远端授权？",
       content:
-        "将根据用户当前角色创建或回收 Dashboard 受管的 JumpServer Asset Permission。",
+        "将根据管理员为该用户直接分配的授权包，创建或回收 Dashboard 受管的 JumpServer Asset Permission。",
       onOk: async () => {
         const result = await syncJumpserverUser(id);
         const synced = result.results.filter(
@@ -209,7 +251,7 @@ export default function JumpserverAccessPage() {
           type="warning"
           showIcon
           message="尚未创建授权包"
-          description="身份映射不会自动授予资产权限。请先创建授权包并绑定运维系统角色，再为对应用户执行授权同步。"
+          description="身份映射不会自动授予资产权限。请先创建授权包，再将授权包直接分配给具体用户。"
         />
       )}
       <Card title="Provider 诊断">
@@ -263,7 +305,7 @@ export default function JumpserverAccessPage() {
         />
       </Card>
       <Card
-        title="授权包与自定义角色"
+        title="资产授权包"
         extra={
           <Button type="primary" onClick={openBundle}>
             创建授权包
@@ -285,17 +327,38 @@ export default function JumpserverAccessPage() {
                 )),
             },
             {
-              title: "角色",
-              dataIndex: "roles",
-              render: (v: string[]) =>
-                (v || []).map((x) => (
-                  <Tag key={x}>{x.split(":").slice(1).join(":")}</Tag>
-                )),
-            },
-            {
               title: "协议",
               dataIndex: "protocols",
               render: (v: string[]) => (v || []).join(", "),
+            },
+            {
+              title: "操作",
+              render: (_, row: any) => (
+                <Button type="link" onClick={() => grantBundle(row)}>
+                  授权用户
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </Card>
+      <Card title="用户资产授权">
+        <Table
+          rowKey={(row: any) => `${row.dashboard_user_id}:${row.bundle_id}`}
+          pagination={false}
+          dataSource={cfg.userBindings.filter(
+            (binding: any) => Number(binding.enabled) === 1,
+          )}
+          columns={[
+            { title: "运维系统用户", dataIndex: "dashboard_username" },
+            { title: "授权包", dataIndex: "bundle_name" },
+            {
+              title: "操作",
+              render: (_, row: any) => (
+                <Button danger type="link" onClick={() => revokeBundle(row)}>
+                  回收授权
+                </Button>
+              ),
             },
           ]}
         />
@@ -315,7 +378,9 @@ export default function JumpserverAccessPage() {
           <Title level={4} style={{ margin: 0 }}>
             服务器访问（JumpServer）
           </Title>
-          <Text type="secondary">角色授权与远端实际权限双重校验</Text>
+          <Text type="secondary">
+            Dashboard 功能权限与 JumpServer 用户资产授权分离管理
+          </Text>
         </div>
         <Button loading={loading} onClick={load}>
           刷新

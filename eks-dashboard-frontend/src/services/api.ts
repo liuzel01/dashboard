@@ -159,7 +159,13 @@ export type JumpserverCatalogItem = {
 export type JumpserverConfiguration = {
   mappings: Array<Record<string, unknown>>;
   bundles: Array<Record<string, unknown>>;
-  roles: Array<{ id: number; name: string; description?: string }>;
+  userBindings: Array<{
+    dashboard_user_id: number;
+    dashboard_username: string;
+    bundle_id: number;
+    bundle_name: string;
+    enabled: number;
+  }>;
 };
 const jumpserverSession = () => {
   const key = "dashboard_jumpserver_session";
@@ -193,9 +199,24 @@ export const createJumpserverBundle = async (input: {
   accounts: string[];
   protocols: string[];
 }) => (await api.post("/jumpserver-access/bundles", input)).data;
-export const bindJumpserverRole = async (bundleId: number, roleId: number) =>
-  (await api.post(`/jumpserver-access/bundles/${bundleId}/roles`, { roleId }))
-    .data;
+export const bindJumpserverUser = async (
+  bundleId: number,
+  dashboardUserId: number,
+) =>
+  (
+    await api.post(`/jumpserver-access/bundles/${bundleId}/users`, {
+      dashboardUserId,
+    })
+  ).data;
+export const unbindJumpserverUser = async (
+  bundleId: number,
+  dashboardUserId: number,
+) =>
+  (
+    await api.delete(
+      `/jumpserver-access/bundles/${bundleId}/users/${dashboardUserId}`,
+    )
+  ).data;
 export const syncJumpserverUser = async (userId: number) =>
   (await api.post(`/jumpserver-access/users/${userId}/sync`)).data;
 export const getMyJumpserverStatus = async () =>
