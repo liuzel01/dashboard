@@ -608,6 +608,7 @@ export class AiOpsAlertInvestigationService {
         evidenceIds: agent.evidenceIds,
         confidence: agent.confidence,
         insufficientEvidence: agent.insufficientEvidence,
+        generatedAt: new Date().toISOString(),
       };
       summary = agent.summary;
     } else if (agent.status === 'FAILED') {
@@ -617,27 +618,54 @@ export class AiOpsAlertInvestigationService {
         fallback: 'DETERMINISTIC_REPORT',
       };
     }
-    const finalConfidence =
+    report.latestAgentAttempt = {
+      status: agent.status,
+      attemptedAt: new Date().toISOString(),
+      ...(agent.status === 'FAILED'
+        ? { errorSummary: agent.errorSummary }
+        : {}),
+    };
+    let finalConfidence =
       agent.status === 'COMPLETED' ? agent.confidence : baselineConfidence;
-    const finalInsufficientEvidence =
+    let finalInsufficientEvidence =
       agent.status === 'COMPLETED'
         ? agent.insufficientEvidence
         : baselineInsufficientEvidence;
 
     const outcome = await this.db.withTransaction(async (conn) => {
       const existingSql = resolved
-        ? `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type=?
+        ? `SELECT id, summary, confidence, insufficient_evidence, report_json FROM aiops_investigations WHERE environment_id=? AND source_type=?
            AND source_fingerprint=? AND source_started_at=? ORDER BY id DESC LIMIT 1 FOR UPDATE`
-        : `SELECT id FROM aiops_investigations WHERE environment_id=? AND source_type=?
+        : `SELECT id, summary, confidence, insufficient_evidence, report_json FROM aiops_investigations WHERE environment_id=? AND source_type=?
            AND source_fingerprint=? AND source_started_at=? AND playbook_version=? LIMIT 1 FOR UPDATE`;
       const existingParams = resolved
         ? [environmentId, sourceType, fingerprint, startedAt]
         : [environmentId, sourceType, fingerprint, startedAt, playbookVersion];
       const [existing] = await conn.execute<
-        Array<mysql.RowDataPacket & { id: number }>
+        Array<
+          mysql.RowDataPacket & {
+            id: number;
+            summary: string | null;
+            confidence: string | null;
+            insufficient_evidence: number;
+            report_json: unknown;
+          }
+        >
       >(existingSql, existingParams);
       let id = Number(existing[0]?.id || 0);
       const created = !id;
+      if (!created && !resolved && agent.status !== 'COMPLETED') {
+        const previousReport = this.jsonObject(existing[0].report_json);
+        const previousAgent = this.jsonObject(previousReport.agentAnalysis);
+        if (this.hasSuccessfulAgentAnalysis(previousAgent)) {
+          report.agentAnalysis = previousAgent;
+          report.previousAgentAnalysisPreserved = true;
+          summary = this.text(existing[0].summary, 2000) || summary;
+          finalConfidence = this.confidence(existing[0].confidence);
+          finalInsufficientEvidence =
+            Number(existing[0].insufficient_evidence) !== 0;
+        }
+      }
       if (created) {
         const [insert] = await conn.execute<mysql.ResultSetHeader>(
           `INSERT INTO aiops_investigations
@@ -977,6 +1005,29 @@ export class AiOpsAlertInvestigationService {
   }
   private jsonParameter(value: unknown): string {
     return typeof value === 'string' ? value : JSON.stringify(value ?? null);
+  }
+  private jsonObject(value: unknown): Record<string, unknown> {
+    try {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  private hasSuccessfulAgentAnalysis(value: Record<string, unknown>) {
+    return Boolean(
+      this.text(value.summary, 2000) &&
+        this.text(value.provider, 128) &&
+        this.text(value.model, 128),
+    );
+  }
+  private confidence(value: unknown): 'LOW' | 'MEDIUM' | 'HIGH' {
+    const normalized = this.text(value, 16).toUpperCase();
+    return normalized === 'HIGH' || normalized === 'MEDIUM'
+      ? normalized
+      : 'LOW';
   }
   private mysqlDate(value: unknown): string | null {
     const date = new Date(this.text(value, 128));

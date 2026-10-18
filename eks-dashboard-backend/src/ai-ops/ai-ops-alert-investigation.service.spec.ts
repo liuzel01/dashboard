@@ -17,7 +17,11 @@ const payload = (alertname = 'KylinBackendServiceHttpLatencyHigh') => ({
   ],
 });
 
-const makeService = (existingId?: number, returnJsonObject = false) => {
+const makeService = (
+  existingId?: number,
+  returnJsonObject = false,
+  existingInvestigation?: Record<string, unknown>,
+) => {
   let queuedPayload = '';
   let queueClaimed = false;
   let queueInserted = false;
@@ -49,8 +53,27 @@ const makeService = (existingId?: number, returnJsonObject = false) => {
         [],
       ];
     }
-    if (sql.includes('SELECT id FROM aiops_investigations'))
-      return [[...(existingId ? [{ id: existingId }] : [])], []];
+    if (
+      sql.includes('SELECT id, summary, confidence') &&
+      sql.includes('FROM aiops_investigations')
+    )
+      return [
+        [
+          ...(existingId
+            ? [
+                {
+                  id: existingId,
+                  summary: null,
+                  confidence: 'LOW',
+                  insufficient_evidence: 1,
+                  report_json: {},
+                  ...existingInvestigation,
+                },
+              ]
+            : []),
+        ],
+        [],
+      ];
     if (sql.includes('INSERT INTO aiops_investigations'))
       return [{ insertId: 7, affectedRows: 1 }, []];
     return [{ affectedRows: 1 }, []];
@@ -227,6 +250,79 @@ describe('AiOpsAlertInvestigationService', () => {
     ).toBe(true);
   });
 
+  it('preserves the last successful agent report when a retry runs with the agent disabled', async () => {
+    const previousAgent = {
+      provider: 'cliproxy',
+      model: 'test-model',
+      summary: '上一轮成功的 AI 结论。',
+      findings: [{ text: '旧结论', evidenceIds: ['old-evidence'] }],
+      evidenceIds: ['old-evidence'],
+      confidence: 'MEDIUM',
+      insufficientEvidence: false,
+    };
+    const { service, execute } = makeService(7, false, {
+      summary: previousAgent.summary,
+      confidence: 'MEDIUM',
+      insufficient_evidence: 0,
+      report_json: { agentAnalysis: previousAgent },
+    });
+
+    await service.receiveAlertmanager('Bearer test-token', payload());
+    await service.processQueuedAlerts();
+
+    const update = execute.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE aiops_investigations SET source_status=?'),
+    );
+    expect(update).toBeDefined();
+    const params = update?.[1] as unknown[];
+    const report = JSON.parse(String(params[5])) as Record<string, any>;
+    expect(params[1]).toBe(previousAgent.summary);
+    expect(params[3]).toBe('MEDIUM');
+    expect(params[4]).toBe(0);
+    expect(report.agentAnalysis).toMatchObject(previousAgent);
+    expect(report.latestAgentAttempt).toMatchObject({ status: 'DISABLED' });
+    expect(report.previousAgentAnalysisPreserved).toBe(true);
+  });
+
+  it('preserves the last successful agent report when a retry agent call fails', async () => {
+    const previousAgent = {
+      provider: 'cliproxy',
+      model: 'test-model',
+      summary: '保留的成功结论。',
+      findings: [],
+      evidenceIds: ['old-evidence'],
+      confidence: 'LOW',
+      insufficientEvidence: true,
+    };
+    const { service, execute, alertAgent } = makeService(7, false, {
+      summary: previousAgent.summary,
+      confidence: 'LOW',
+      insufficient_evidence: 1,
+      report_json: { agentAnalysis: previousAgent },
+    });
+    alertAgent.analyze.mockResolvedValueOnce({
+      status: 'FAILED',
+      errorSummary: 'provider timeout',
+    });
+
+    await service.receiveAlertmanager('Bearer test-token', payload());
+    await service.processQueuedAlerts();
+
+    const update = execute.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE aiops_investigations SET source_status=?'),
+    );
+    const report = JSON.parse(String((update?.[1] as unknown[])[5])) as Record<
+      string,
+      any
+    >;
+    expect(report.agentAnalysis).toMatchObject(previousAgent);
+    expect(report.latestAgentAttempt).toMatchObject({
+      status: 'FAILED',
+      errorSummary: 'provider timeout',
+    });
+    expect(report.previousAgentAnalysisPreserved).toBe(true);
+  });
+
   it('accepts a JSON column already decoded by the MySQL 8 driver', async () => {
     const { service, execute } = makeService(undefined, true);
     await service.receiveAlertmanager('Bearer test-token', payload());
@@ -291,7 +387,7 @@ describe('AiOpsAlertInvestigationService', () => {
 
     expect(result).toMatchObject({ queued: 1 });
     const select = execute.mock.calls.find(([sql]) =>
-      String(sql).includes('SELECT id FROM aiops_investigations'),
+      String(sql).includes('FROM aiops_investigations WHERE environment_id=?'),
     );
     expect(String(select?.[0])).not.toContain('playbook_version=?');
     expect(select?.[1]).toHaveLength(4);
@@ -400,7 +496,7 @@ describe('AiOpsAlertInvestigationService', () => {
     );
     expect(result).toMatchObject({ investigationId: 7, created: true });
     const select = execute.mock.calls.find(([sql]) =>
-      String(sql).includes('SELECT id FROM aiops_investigations'),
+      String(sql).includes('FROM aiops_investigations WHERE environment_id=?'),
     );
     expect(select?.[1]).toContain('HISTORICAL_REPLAY');
     expect(
