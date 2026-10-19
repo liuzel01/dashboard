@@ -640,12 +640,33 @@ export default function JumpserverAccessPage() {
           </Descriptions.Item>
           <Descriptions.Item label="受控授权">
             {status?.grants?.map((g: any) => (
-              <Tag key={g.bundleId}>
-                {g.bundleName}: {g.status}
+              <Tag
+                key={g.bundleId}
+                color={
+                  g.status === "SYNCED"
+                    ? "green"
+                    : g.status === "PARTIAL"
+                      ? "orange"
+                      : "red"
+                }
+              >
+                {g.bundleName}:{" "}
+                {g.status === "PARTIAL"
+                  ? `部分生效 ${g.effectiveAssetCount}/${g.totalAssetCount}`
+                  : g.status}
               </Tag>
             )) || "-"}
           </Descriptions.Item>
         </Descriptions>
+        {status?.grants?.some((grant: any) => grant.status === "PARTIAL") && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="部分资产当前不可用"
+            description="授权范围内存在没有有效账号或协议的资产；仍可进入 JumpServer 使用其余已生效资产，请在 JumpServer 中完善异常资产配置。"
+          />
+        )}
         <Button
           type="primary"
           disabled={!status?.eligible}
