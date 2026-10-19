@@ -17,6 +17,8 @@ type Actor = { userId: number; username: string; permissions: string[] };
 
 @Injectable()
 export class JumpserverAccessService {
+  private static readonly MAX_EFFECTIVE_ASSETS_PER_GRANT = 200;
+
   constructor(
     private readonly db: PlatformDatabaseService,
     private readonly auth: AuthService,
@@ -704,7 +706,8 @@ export class JumpserverAccessService {
   async myStatus(authorization?: string) {
     const actor = await this.actor(authorization, 'jumpserver:portal:launch');
     const rows = await this.db.query<any[]>(
-      `SELECT m.remote_username,g.bundle_id,g.remote_permission_id,g.status,b.name bundle_name
+      `SELECT m.remote_user_id,m.remote_username,g.bundle_id,g.remote_permission_id,g.status,
+              b.name bundle_name,b.accounts_json,b.protocols_json
          FROM jumpserver_identity_mappings m
          LEFT JOIN jumpserver_user_bundle_bindings ub
            ON ub.provider_key=m.provider_key AND ub.dashboard_user_id=m.dashboard_user_id AND ub.enabled=1
@@ -719,16 +722,7 @@ export class JumpserverAccessService {
     );
     for (const row of synced) {
       try {
-        const remote = await this.remote(
-          'grant',
-          'GET',
-          `/api/v1/perms/asset-permissions/${encodeURIComponent(row.remote_permission_id)}/`,
-        );
-        if (
-          !remote.is_valid ||
-          !String(remote.name || '').startsWith('dashboard:bundle:')
-        )
-          row.status = 'DRIFTED';
+        await this.verifyEffectiveGrant(row);
       } catch {
         row.status = 'DRIFTED';
       }
@@ -745,6 +739,109 @@ export class JumpserverAccessService {
           status: r.status,
         })),
     };
+  }
+
+  private async verifyEffectiveGrant(row: any) {
+    const permissionId = encodeURIComponent(String(row.remote_permission_id));
+    const remoteUserId = String(row.remote_user_id || '');
+    if (!remoteUserId) throw new Error('missing remote user');
+    const permission = await this.remote(
+      'grant',
+      'GET',
+      `/api/v1/perms/asset-permissions/${permissionId}/`,
+    );
+    if (
+      permission.is_valid === false ||
+      permission.is_active === false ||
+      !String(permission.name || '').startsWith('dashboard:bundle:') ||
+      !this.refValues(permission.users).includes(remoteUserId)
+    )
+      throw new Error('managed permission is inactive or user is missing');
+
+    const limit = JumpserverAccessService.MAX_EFFECTIVE_ASSETS_PER_GRANT + 1;
+    const expanded = await this.remote(
+      'grant',
+      'GET',
+      `/api/v1/perms/asset-permissions/${permissionId}/assets/all/?offset=0&limit=${limit}&display=1`,
+    );
+    const values = Array.isArray(expanded?.results)
+      ? expanded.results
+      : Array.isArray(expanded)
+        ? expanded
+        : [];
+    const total = Number(expanded?.count ?? values.length);
+    if (
+      total < 1 ||
+      total > JumpserverAccessService.MAX_EFFECTIVE_ASSETS_PER_GRANT ||
+      values.length < total
+    )
+      throw new Error('effective asset scope is empty or exceeds safe limit');
+
+    const expectedAccounts = this.json(row.accounts_json);
+    const expectedProtocols = this.json(row.protocols_json);
+    const assets = values.slice(0, total);
+    for (let offset = 0; offset < assets.length; offset += 8) {
+      await Promise.all(
+        assets.slice(offset, offset + 8).map(async (value: any) => {
+          const assetId = String(
+            value.asset?.id || value.asset || value.id || value.value || '',
+          );
+          if (!assetId) throw new Error('effective asset id is missing');
+          const effective = await this.remote(
+            'grant',
+            'GET',
+            `/api/v1/perms/users/${encodeURIComponent(remoteUserId)}/assets/${encodeURIComponent(assetId)}/`,
+          );
+          if (
+            !this.effectiveSelectorsMatch(
+              expectedAccounts,
+              this.refValues(effective?.permed_accounts),
+              '@ALL',
+            ) ||
+            !this.effectiveSelectorsMatch(
+              expectedProtocols,
+              this.refValues(effective?.permed_protocols),
+              'all',
+            )
+          )
+            throw new Error('effective account or protocol is missing');
+        }),
+      );
+    }
+  }
+
+  private effectiveSelectorsMatch(
+    expected: string[],
+    actual: string[],
+    allSelector: string,
+  ) {
+    if (!expected.length || !actual.length) return false;
+    const normalizedActual = new Set(
+      actual.map((value) => value.toLowerCase()),
+    );
+    if (
+      expected.some(
+        (value) => value.toLowerCase() === allSelector.toLowerCase(),
+      )
+    )
+      return true;
+    return expected.every((value) => normalizedActual.has(value.toLowerCase()));
+  }
+
+  private refValues(values: unknown): string[] {
+    if (!Array.isArray(values)) return [];
+    return [
+      ...new Set(
+        values
+          .flatMap((value: any) =>
+            value && typeof value === 'object'
+              ? [value.id, value.value, value.name, value.username]
+              : [value],
+          )
+          .map((value) => String(value || '').trim())
+          .filter(Boolean),
+      ),
+    ];
   }
 
   async prepareTicket(authorization: string | undefined, sessionId: string) {

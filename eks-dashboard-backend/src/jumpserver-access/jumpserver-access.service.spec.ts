@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { createHash } from 'crypto';
 import { JumpserverAccessService } from './jumpserver-access.service';
 
 describe('JumpserverAccessService safety policy', () => {
@@ -179,22 +184,113 @@ describe('JumpserverAccessService safety policy', () => {
     expect(db.query.mock.calls[1][0]).not.toContain('user_roles');
   });
 
+  it('keeps an unchanged synchronized grant idempotent', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    const desired = {
+      user: 'remote-user',
+      bundle: 7,
+      targets: [['ASSET', 'asset-1']],
+      accounts: ['@ALL'],
+      protocols: ['ssh'],
+      actions: ['connect'],
+    };
+    const desiredHash = createHash('sha256')
+      .update(JSON.stringify(desired))
+      .digest('hex');
+    db.query
+      .mockResolvedValueOnce([{ remote_user_id: 'remote-user' }])
+      .mockResolvedValueOnce([
+        {
+          id: 7,
+          accounts_json: '["@ALL"]',
+          protocols_json: '["ssh"]',
+          actions_json: '["connect"]',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          bundle_id: 7,
+          remote_permission_id: 'permission-7',
+          desired_hash: desiredHash,
+          status: 'SYNCED',
+        },
+      ])
+      .mockResolvedValueOnce([{ target_type: 'ASSET', remote_id: 'asset-1' }])
+      .mockResolvedValueOnce({});
+    const remote = jest.spyOn(service as any, 'remote');
+
+    await expect(service.syncUser('token', 2)).resolves.toEqual({
+      dashboardUserId: 2,
+      results: [{ bundleId: 7, status: 'SYNCED', unchanged: true }],
+    });
+    expect(remote).not.toHaveBeenCalled();
+  });
+
+  it('records a failed remote synchronization without reporting success', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    db.query
+      .mockResolvedValueOnce([{ remote_user_id: 'remote-user' }])
+      .mockResolvedValueOnce([
+        {
+          id: 7,
+          accounts_json: '["@ALL"]',
+          protocols_json: '["ssh"]',
+          actions_json: '["connect"]',
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ target_type: 'ASSET', remote_id: 'asset-1' }])
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+    jest
+      .spyOn(service as any, 'remote')
+      .mockRejectedValue(new Error('provider unavailable'));
+
+    const result = await service.syncUser('token', 2);
+    expect(result.results).toEqual([
+      {
+        bundleId: 7,
+        status: 'FAILED',
+        error: 'provider unavailable',
+      },
+    ]);
+    expect(db.query.mock.calls[4][0]).toContain("status='FAILED'");
+    expect(db.query.mock.calls[5][1]).toEqual(
+      expect.arrayContaining(['GRANT_SYNC', 'PARTIAL']),
+    );
+  });
+
   it('derives portal eligibility from direct user bindings', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
     db.query.mockResolvedValueOnce([
       {
+        remote_user_id: 'remote-user-2',
         remote_username: 'mapped-user',
         bundle_id: 7,
         bundle_name: 'ops-assets',
         remote_permission_id: 'permission-7',
         status: 'SYNCED',
+        accounts_json: '["@ALL"]',
+        protocols_json: '["ssh"]',
       },
     ]);
-    jest.spyOn(service as any, 'remote').mockResolvedValue({
-      id: 'permission-7',
-      name: 'dashboard:bundle:7:user:2',
-      is_valid: true,
-    });
+    const remote = jest
+      .spyOn(service as any, 'remote')
+      .mockResolvedValueOnce({
+        id: 'permission-7',
+        name: 'dashboard:bundle:7:user:2',
+        is_valid: true,
+        is_active: true,
+        users: [{ id: 'remote-user-2' }],
+      })
+      .mockResolvedValueOnce({
+        count: 1,
+        results: [{ asset: 'asset-1' }],
+      })
+      .mockResolvedValueOnce({
+        permed_accounts: [{ id: 'account-1' }],
+        permed_protocols: [{ name: 'ssh' }],
+      });
 
     const status = await service.myStatus('token');
     expect(db.query.mock.calls[0][0]).toContain(
@@ -204,6 +300,75 @@ describe('JumpserverAccessService safety policy', () => {
     expect(status.grants).toEqual([
       { bundleId: 7, bundleName: 'ops-assets', status: 'SYNCED' },
     ]);
+    expect(remote).toHaveBeenLastCalledWith(
+      'grant',
+      'GET',
+      '/api/v1/perms/users/remote-user-2/assets/asset-1/',
+    );
+  });
+
+  it('fails closed when an effective account or protocol is missing', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    db.query.mockResolvedValueOnce([
+      {
+        remote_user_id: 'remote-user-2',
+        remote_username: 'mapped-user',
+        bundle_id: 7,
+        bundle_name: 'ops-assets',
+        remote_permission_id: 'permission-7',
+        status: 'SYNCED',
+        accounts_json: '["account-expected"]',
+        protocols_json: '["ssh"]',
+      },
+    ]);
+    jest
+      .spyOn(service as any, 'remote')
+      .mockResolvedValueOnce({
+        name: 'dashboard:bundle:7:user:2',
+        is_valid: true,
+        is_active: true,
+        users: ['remote-user-2'],
+      })
+      .mockResolvedValueOnce({
+        count: 1,
+        results: [{ asset: { id: 'asset-1' } }],
+      })
+      .mockResolvedValueOnce({
+        permed_accounts: [{ id: 'another-account' }],
+        permed_protocols: ['ssh'],
+      });
+
+    await expect(service.myStatus('token')).resolves.toMatchObject({
+      eligible: false,
+      grants: [{ bundleId: 7, status: 'DRIFTED' }],
+    });
+  });
+
+  it('fails closed when effective asset expansion exceeds the safety limit', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    db.query.mockResolvedValueOnce([
+      {
+        remote_user_id: 'remote-user-2',
+        bundle_id: 7,
+        remote_permission_id: 'permission-7',
+        status: 'SYNCED',
+        accounts_json: '["@ALL"]',
+        protocols_json: '["ssh"]',
+      },
+    ]);
+    const remote = jest
+      .spyOn(service as any, 'remote')
+      .mockResolvedValueOnce({
+        name: 'dashboard:bundle:7:user:2',
+        is_valid: true,
+        users: ['remote-user-2'],
+      })
+      .mockResolvedValueOnce({ count: 201, results: [] });
+
+    const status = await service.myStatus('token');
+    expect(status.eligible).toBe(false);
+    expect(status.grants[0].status).toBe('DRIFTED');
+    expect(remote).toHaveBeenCalledTimes(2);
   });
 
   it('creates the internal scope snapshot and user binding atomically', async () => {
@@ -293,5 +458,80 @@ describe('JumpserverAccessService safety policy', () => {
     expect(conn.execute.mock.calls[2][0]).toContain(
       'jumpserver_user_bundle_bindings',
     );
+  });
+
+  it('rejects preparing a portal ticket without a browser session', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    jest.spyOn(service, 'myStatus').mockResolvedValue({
+      mapped: true,
+      eligible: true,
+      remoteUsername: 'mapped-user',
+      grants: [],
+    });
+
+    await expect(service.prepareTicket('token', '')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('clamps the configured portal ticket lifetime to the safe maximum', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    jest.spyOn(service, 'myStatus').mockResolvedValue({
+      mapped: true,
+      eligible: true,
+      remoteUsername: 'mapped-user',
+      grants: [],
+    });
+    siteConf.getNumber = jest.fn().mockResolvedValue(999);
+    db.query.mockResolvedValue({});
+
+    const result = await service.prepareTicket('token', 'session-2');
+    expect(typeof result.ticket).toBe('string');
+    expect(result.expiresInSeconds).toBe(300);
+    expect(db.query.mock.calls[0][1][4]).toBe(300);
+  });
+
+  it('rejects an expired, replayed, cross-user or cross-session ticket', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    const conn = { execute: jest.fn().mockResolvedValueOnce([[]]) };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+
+    await expect(
+      service.consumeTicket('token', 'session-2', 'invalid-ticket'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(conn.execute.mock.calls[0][0]).toContain('expires_at>UTC_TIMESTAMP');
+    expect(conn.execute.mock.calls[0][0]).toContain('consumed_at IS NULL');
+    expect(conn.execute.mock.calls[0][1]).toEqual([
+      expect.any(String),
+      2,
+      expect.any(String),
+    ]);
+  });
+
+  it('consumes a valid ticket exactly once before returning the fixed portal', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    jest.spyOn(service, 'myStatus').mockResolvedValue({
+      mapped: true,
+      eligible: true,
+      remoteUsername: 'mapped-user',
+      grants: [],
+    });
+    jest.spyOn(service as any, 'config').mockResolvedValue({
+      portalUrl: 'https://jumpserver.example.test',
+    });
+    jest.spyOn(service as any, 'event').mockResolvedValue(undefined);
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([[{ ticket_id: 'ticket-id' }]])
+        .mockResolvedValueOnce([{ affectedRows: 1 }]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+
+    await expect(
+      service.consumeTicket('token', 'session-2', 'valid-ticket'),
+    ).resolves.toEqual({ portalUrl: 'https://jumpserver.example.test' });
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.execute.mock.calls[1][0]).toContain('consumed_at IS NULL');
   });
 });
