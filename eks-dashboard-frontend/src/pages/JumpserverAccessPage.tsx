@@ -299,12 +299,20 @@ export default function JumpserverAccessPage() {
             style={{ width: "100%" }}
             options={[
               ...assets.map((x) => ({
-                value: `ASSET|${x.id}|${x.name}`,
-                label: `资产 · ${x.name}`,
+                value: `ASSET|${x.id}|${x.name}${
+                  x.nodesDisplay?.length
+                    ? ` · ${x.nodesDisplay.join(", ")}`
+                    : ""
+                }`,
+                label: `资产 · ${x.name}${
+                  x.nodesDisplay?.length
+                    ? ` · ${x.nodesDisplay.join(", ")}`
+                    : ""
+                }`,
               })),
               ...nodes.map((x) => ({
-                value: `NODE|${x.id}|${x.name}`,
-                label: `节点 · ${x.name}`,
+                value: `NODE|${x.id}|${x.fullValue || x.name}`,
+                label: `节点 · ${x.fullValue || x.name}`,
               })),
             ]}
             onChange={(v) => (target = v)}
@@ -496,10 +504,16 @@ export default function JumpserverAccessPage() {
             {
               title: "资产范围",
               dataIndex: "targets",
-              render: (targets: string[]) =>
+              render: (
+                targets: Array<{
+                  type: "ASSET" | "NODE";
+                  id: string;
+                  name: string;
+                }>,
+              ) =>
                 (targets || []).map((target) => (
-                  <Tag key={target}>
-                    {target.split(":").slice(0, 2).join(":")}
+                  <Tag key={`${target.type}:${target.id}`} title={target.id}>
+                    {target.type === "NODE" ? "节点" : "资产"} · {target.name}
                   </Tag>
                 )),
             },

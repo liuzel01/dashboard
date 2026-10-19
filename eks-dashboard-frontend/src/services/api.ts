@@ -154,6 +154,8 @@ export type JumpserverCatalogItem = {
   name: string;
   username?: string;
   address?: string;
+  fullValue?: string;
+  nodesDisplay?: string[];
   isActive: boolean;
 };
 export type JumpserverConfiguration = {
@@ -167,7 +169,11 @@ export type JumpserverConfiguration = {
     accounts: string[];
     protocols: string[];
     actions: string[];
-    targets: string[];
+    targets: Array<{
+      type: "ASSET" | "NODE";
+      id: string;
+      name: string;
+    }>;
     source_permission_id?: string;
     source_permission_name?: string;
     source_snapshot_hash?: string;
