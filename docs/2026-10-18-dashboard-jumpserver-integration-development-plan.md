@@ -392,6 +392,8 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 
 为降低逐项选择大量资产的操作成本，Admin 还可以为一个用户同时选择一个或多个 JumpServer 中现有、有效且非 `dashboard:*` 的 Asset Permission 作为授权模板。Dashboard 读取全部模板后，仅复制其资产、节点、账号、协议和动作范围，明确忽略源 Permission 的用户和用户组；后端在同一数据库事务中为每个模板创建独立的 `dashboard:bundle:*` 受管 Permission，全部落库成功后仅同步一次 JumpServer。源 Permission 不会被修改，源权限后续变更也不会自动传播到已创建授权，避免隐式扩权。
 
+每条用户资产授权可以独立设置到期时间，不能复用 JumpServer 用户账号级 `date_expired`，以免影响该用户的其他授权和登录能力。Dashboard 将 `expires_at` 保存在用户与授权范围的绑定记录，并同步到对应受管 Asset Permission 的 `date_expired`；JumpServer 原生到期负责及时阻断访问，Dashboard 定时回收任务负责删除远端受管 Permission、更新本地状态、审计和失败重试。长期授权使用空到期时间，限时授权最长 366 天。
+
 模板授权保存源 Permission ID、名称和范围引用快照 hash，页面在执行前分别展示直接资产数、授权节点数、节点实时展开后的当前有效资产数及高风险动作提示。包含 `@ALL`、全部协议、上传、下载、复制、粘贴、删除、分享或节点动态范围时，仍需管理员显式确认。系统角色、组织角色和用户组不属于可复用模板；回收操作只删除 Dashboard 自己创建并通过命名前缀校验的 Permission。
 
 范围引用快照会固化资产 ID、节点 ID、账号、协议和动作，但不会把节点展开为静态资产列表。源 Permission 后续修改不会传播；节点本身新增或移除资产仍会实时影响实际授权范围。`assets/all` 仅用于确认前的有效资产数量和样本预览，不作为创建 Permission 的写入数据。

@@ -14,6 +14,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsISO8601,
   IsOptional,
   IsString,
   MaxLength,
@@ -39,9 +40,11 @@ class BundleDto {
 }
 class UserGrantDto extends BundleDto {
   @IsInt() @Min(1) dashboardUserId!: number;
+  @IsOptional() @IsISO8601() expiresAt?: string;
 }
 class TemplateGrantDto {
   @IsInt() @Min(1) dashboardUserId!: number;
+  @IsOptional() @IsISO8601() expiresAt?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(10)

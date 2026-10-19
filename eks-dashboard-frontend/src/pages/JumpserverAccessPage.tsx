@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Collapse,
+  DatePicker,
   Descriptions,
   message,
   Modal,
@@ -15,6 +16,7 @@ import {
   Tag,
   Typography,
 } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 import { AuthContext } from "../contexts/AuthContextValue";
 import {
   consumeJumpserverPortal,
@@ -64,6 +66,9 @@ export default function JumpserverAccessPage() {
     [templateModalOpen, setTemplateModalOpen] = useState(false),
     [templateUserId, setTemplateUserId] = useState<number>(),
     [templatePermissionIds, setTemplatePermissionIds] = useState<string[]>([]),
+    [templateExpiresAt, setTemplateExpiresAt] = useState<Dayjs | null>(
+      dayjs().add(30, "day"),
+    ),
     [templatePreviews, setTemplatePreviews] = useState<
       Record<string, JumpserverPermissionTemplate>
     >({}),
@@ -328,7 +333,8 @@ export default function JumpserverAccessPage() {
       setCustomGrantCatalogLoading(false);
     }
     let dashboardUserId = 0,
-      target = "";
+      target = "",
+      expiresAt: Dayjs | null = dayjs().add(30, "day");
     const mappedUserIds = new Set(
       configuration.mappings
         .filter((mapping: any) => mapping.status === "ACTIVE")
@@ -376,6 +382,24 @@ export default function JumpserverAccessPage() {
             ]}
             onChange={(v) => (target = v)}
           />
+          <DatePicker
+            showTime
+            allowClear
+            defaultValue={expiresAt}
+            presets={[
+              { label: "1 天", value: dayjs().add(1, "day") },
+              { label: "7 天", value: dayjs().add(7, "day") },
+              { label: "30 天", value: dayjs().add(30, "day") },
+              { label: "90 天", value: dayjs().add(90, "day") },
+            ]}
+            disabledDate={(current) =>
+              current.isBefore(dayjs().startOf("day")) ||
+              current.isAfter(dayjs().add(366, "day"), "day")
+            }
+            placeholder="授权到期时间；清空表示长期有效"
+            style={{ width: "100%" }}
+            onChange={(value) => (expiresAt = value)}
+          />
           <Alert
             type="warning"
             showIcon
@@ -389,6 +413,7 @@ export default function JumpserverAccessPage() {
         const [type, id, ...rest] = target.split("|");
         await createJumpserverUserGrant({
           dashboardUserId,
+          expiresAt: expiresAt?.toISOString(),
           targets: [
             { type: type as "ASSET" | "NODE", id, name: rest.join("|") },
           ],
@@ -429,6 +454,7 @@ export default function JumpserverAccessPage() {
     }
     setTemplateUserId(undefined);
     setTemplatePermissionIds([]);
+    setTemplateExpiresAt(dayjs().add(30, "day"));
     setTemplatePreviews({});
     setTemplateSampleExpandedIds([]);
     setTemplateModalOpen(true);
@@ -492,6 +518,7 @@ export default function JumpserverAccessPage() {
       await createJumpserverUserGrantFromTemplate({
         dashboardUserId: templateUserId,
         permissionIds: templatePermissionIds,
+        expiresAt: templateExpiresAt?.toISOString(),
       });
       message.success(
         `已复制 ${templatePermissionIds.length} 个授权范围并同步到 JumpServer`,
@@ -652,6 +679,31 @@ export default function JumpserverAccessPage() {
                 ) : (
                   <Tag>自定义</Tag>
                 ),
+            },
+            {
+              title: "有效期",
+              render: (_, row: any) => {
+                if (row.revocation_status === "FAILED")
+                  return (
+                    <Tag color="red" title={row.last_revoke_error || undefined}>
+                      自动回收失败
+                    </Tag>
+                  );
+                if (row.revocation_status === "PENDING")
+                  return <Tag color="orange">回收中</Tag>;
+                if (!row.expires_at) return <Tag>长期有效</Tag>;
+                const expired = dayjs(row.expires_at).isBefore(dayjs());
+                return (
+                  <Space direction="vertical" size={0}>
+                    <Tag color={expired ? "red" : "blue"}>
+                      {expired ? "已到期" : "限时授权"}
+                    </Tag>
+                    <Text type="secondary">
+                      {dayjs(row.expires_at).format("YYYY-MM-DD HH:mm:ss")}
+                    </Text>
+                  </Space>
+                );
+              },
             },
             {
               title: "操作",
@@ -838,6 +890,24 @@ export default function JumpserverAccessPage() {
             value={templatePermissionIds}
             loading={templatePreviewLoading}
             onChange={(value) => void selectPermissionTemplates(value)}
+          />
+          <DatePicker
+            showTime
+            allowClear
+            value={templateExpiresAt}
+            presets={[
+              { label: "1 天", value: dayjs().add(1, "day") },
+              { label: "7 天", value: dayjs().add(7, "day") },
+              { label: "30 天", value: dayjs().add(30, "day") },
+              { label: "90 天", value: dayjs().add(90, "day") },
+            ]}
+            disabledDate={(current) =>
+              current.isBefore(dayjs().startOf("day")) ||
+              current.isAfter(dayjs().add(366, "day"), "day")
+            }
+            placeholder="授权到期时间；清空表示长期有效"
+            style={{ width: "100%" }}
+            onChange={setTemplateExpiresAt}
           />
           {templatePermissionIds.length > 0 &&
             templatePermissionIds.every((id) => templatePreviews[id]) && (

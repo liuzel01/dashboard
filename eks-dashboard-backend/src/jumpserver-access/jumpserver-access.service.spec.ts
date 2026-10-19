@@ -486,6 +486,56 @@ describe('JumpserverAccessService safety policy', () => {
     expect(syncUser).toHaveBeenCalledWith('token', 2);
   });
 
+  it('stores expiration on the user grant binding', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    db.query.mockResolvedValueOnce([{ id: 10 }]);
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 21 }])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{}]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+    jest
+      .spyOn(service, 'syncUser')
+      .mockResolvedValue({ dashboardUserId: 2, results: [] });
+
+    await service.createUserGrant('token', {
+      dashboardUserId: 2,
+      targets: [{ type: 'ASSET', id: 'asset-1', name: 'test-asset' }],
+      accounts: ['@ALL'],
+      protocols: ['ssh'],
+      expiresAt: '2026-10-31T02:38:10.000Z',
+    });
+
+    expect(conn.execute.mock.calls[2][0]).toContain('expires_at');
+    expect(conn.execute.mock.calls[2][1]).toEqual([
+      2,
+      21,
+      '2026-10-31 02:38:10',
+      1,
+    ]);
+  });
+
+  it('marks an expired grant revoked when no remote permission remains', async () => {
+    db.query.mockResolvedValue({});
+
+    await (service as any).expireUserGrant({
+      dashboard_user_id: 2,
+      bundle_id: 21,
+      created_by: 1,
+      revocation_attempts: 0,
+      remote_permission_id: null,
+    });
+
+    expect(db.query.mock.calls[0][0]).toContain("revocation_status='PENDING'");
+    expect(db.query.mock.calls[1][0]).toContain("revocation_status='REVOKED'");
+    expect(db.query.mock.calls[2][1]).toEqual(
+      expect.arrayContaining(['GRANT_AUTO_EXPIRE', 'SUCCESS']),
+    );
+  });
+
   it('snapshots a template and binds it to one Dashboard user atomically', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
     jest

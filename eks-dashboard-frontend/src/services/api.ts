@@ -166,6 +166,10 @@ export type JumpserverConfiguration = {
     bundle_id: number;
     bundle_name: string;
     enabled: number;
+    expires_at?: string | null;
+    revocation_status?: "ACTIVE" | "PENDING" | "REVOKED" | "FAILED";
+    revoked_at?: string | null;
+    last_revoke_error?: string | null;
     accounts: string[];
     protocols: string[];
     actions: string[];
@@ -232,6 +236,7 @@ export const upsertJumpserverMapping = async (input: {
 }) => (await api.post("/jumpserver-access/mappings", input)).data;
 export const createJumpserverUserGrant = async (input: {
   dashboardUserId: number;
+  expiresAt?: string;
   description?: string;
   targets: Array<{ type: "ASSET" | "NODE"; id: string; name: string }>;
   accounts: string[];
@@ -246,6 +251,7 @@ export const getJumpserverPermissionTemplate = async (permissionId: string) =>
 export const createJumpserverUserGrantFromTemplate = async (input: {
   dashboardUserId: number;
   permissionIds: string[];
+  expiresAt?: string;
 }) =>
   (await api.post("/jumpserver-access/user-grants/from-template", input)).data;
 export const unbindJumpserverUser = async (
