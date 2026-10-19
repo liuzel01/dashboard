@@ -727,14 +727,20 @@ export class JumpserverAccessService {
     );
     for (const row of synced) {
       try {
-        await this.verifyEffectiveGrant(row);
+        const effective = await this.verifyEffectiveGrant(row);
+        row.effective_asset_count = effective.effective;
+        row.total_asset_count = effective.total;
+        row.unavailable_asset_count = effective.unavailable;
+        if (effective.unavailable > 0) row.status = 'PARTIAL';
       } catch {
         row.status = 'DRIFTED';
       }
     }
     return {
       mapped: rows.length > 0,
-      eligible: synced.length > 0 && synced.every((r) => r.status === 'SYNCED'),
+      eligible:
+        synced.length > 0 &&
+        synced.every((r) => ['SYNCED', 'PARTIAL'].includes(r.status)),
       remoteUsername: rows[0]?.remote_username || null,
       grants: rows
         .filter((r) => r.bundle_id)
@@ -742,6 +748,9 @@ export class JumpserverAccessService {
           bundleId: r.bundle_id,
           bundleName: r.bundle_name,
           status: r.status,
+          effectiveAssetCount: Number(r.effective_asset_count || 0),
+          totalAssetCount: Number(r.total_asset_count || 0),
+          unavailableAssetCount: Number(r.unavailable_asset_count || 0),
         })),
     };
   }
@@ -785,34 +794,38 @@ export class JumpserverAccessService {
     const expectedAccounts = this.json(row.accounts_json);
     const expectedProtocols = this.json(row.protocols_json);
     const assets = values.slice(0, total);
+    let effective = 0;
     for (let offset = 0; offset < assets.length; offset += 8) {
-      await Promise.all(
+      const batch = await Promise.all(
         assets.slice(offset, offset + 8).map(async (value: any) => {
           const assetId = String(
             value.asset?.id || value.asset || value.id || value.value || '',
           );
           if (!assetId) throw new Error('effective asset id is missing');
-          const effective = await this.remote(
+          const access = await this.remote(
             'grant',
             'GET',
             `/api/v1/perms/users/${encodeURIComponent(remoteUserId)}/assets/${encodeURIComponent(assetId)}/`,
           );
-          if (
-            !this.effectiveSelectorsMatch(
+          return (
+            this.effectiveSelectorsMatch(
               expectedAccounts,
-              this.refValues(effective?.permed_accounts),
+              this.refValues(access?.permed_accounts),
               '@ALL',
-            ) ||
-            !this.effectiveSelectorsMatch(
+            ) &&
+            this.effectiveSelectorsMatch(
               expectedProtocols,
-              this.refValues(effective?.permed_protocols),
+              this.refValues(access?.permed_protocols),
               'all',
             )
-          )
-            throw new Error('effective account or protocol is missing');
+          );
         }),
       );
+      effective += batch.filter(Boolean).length;
     }
+    if (effective === 0)
+      throw new Error('no asset has effective account and protocol access');
+    return { total, effective, unavailable: total - effective };
   }
 
   private effectiveSelectorsMatch(

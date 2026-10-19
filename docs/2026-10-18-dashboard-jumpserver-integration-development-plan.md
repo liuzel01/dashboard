@@ -241,6 +241,7 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 ### Phase 3：受控 Portal 跳转
 
 - 跳转前实时或短缓存核验 effective asset access；
+- 单资产授权无有效账号/协议时失败关闭；多资产授权至少一个资产有效时允许进入，并以 `PARTIAL` 明示有效覆盖率；
 - 创建 60–120 秒、单次、绑定用户及当前登录会话的 Ticket；
 - Ticket 数据库只保存 hash，消费使用行锁/CAS 防重放；
 - 返回固定 HTTPS Portal，不接收前端自定义 redirect URL；
@@ -440,7 +441,7 @@ Access Key 保存在本地权限为 `0600` 的受控文件并已同步到本地�
 | Phase 0 运行态与 API 契约 | 功能完成 | 精确版本记录和 EC2 应用进程网络复验随部署验收完成 |
 | Phase 1 目录、映射和授权配置 | 已完成 | 页面已收敛为用户资产授权，并支持复用现有 Asset Permission |
 | Phase 2 人工同步与回收 | 已完成 | 支持幂等同步、失败状态、受管前缀保护和人工回收；自动 Worker 延后 |
-| Phase 3 受控 Portal 跳转 | 已完成 | Ticket 单次消费、用户/会话绑定、跳转前远端核验及 prepared/consumed/denied/expired 生命周期事件均已实现 |
+| Phase 3 受控 Portal 跳转 | 已完成 | Ticket 单次消费、用户/会话绑定、跳转前远端核验、部分有效覆盖率及 prepared/consumed/denied/expired 生命周期事件均已实现 |
 | 自动化测试 | 第一版已补齐 | 已覆盖 allowlist、受管撤销保护、模板快照、直接绑定、同步幂等/异常、严格 effective-access、Ticket TTL/会话绑定/防重放/过期审计等关键安全路径 |
 | Phase 4 生产化与运行保障 | 待部署验收 | EC2 配置、网络、灰度和 Runbook 尚未完成 |
 

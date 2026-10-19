@@ -328,7 +328,14 @@ describe('JumpserverAccessService safety policy', () => {
     );
     expect(status.eligible).toBe(true);
     expect(status.grants).toEqual([
-      { bundleId: 7, bundleName: 'ops-assets', status: 'SYNCED' },
+      {
+        bundleId: 7,
+        bundleName: 'ops-assets',
+        status: 'SYNCED',
+        effectiveAssetCount: 1,
+        totalAssetCount: 1,
+        unavailableAssetCount: 0,
+      },
     ]);
     expect(remote).toHaveBeenLastCalledWith(
       'grant',
@@ -371,6 +378,55 @@ describe('JumpserverAccessService safety policy', () => {
     await expect(service.myStatus('token')).resolves.toMatchObject({
       eligible: false,
       grants: [{ bundleId: 7, status: 'DRIFTED' }],
+    });
+  });
+
+  it('allows a partially effective multi-asset grant with a warning status', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    db.query.mockResolvedValueOnce([
+      {
+        remote_user_id: 'remote-user-2',
+        remote_username: 'mapped-user',
+        bundle_id: 7,
+        bundle_name: 'ops-assets',
+        remote_permission_id: 'permission-7',
+        status: 'SYNCED',
+        accounts_json: '["@ALL"]',
+        protocols_json: '["all"]',
+      },
+    ]);
+    jest
+      .spyOn(service as any, 'remote')
+      .mockResolvedValueOnce({
+        name: 'dashboard:bundle:7:user:2',
+        is_valid: true,
+        is_active: true,
+        users: ['remote-user-2'],
+      })
+      .mockResolvedValueOnce({
+        count: 2,
+        results: [{ asset: 'asset-1' }, { asset: 'asset-2' }],
+      })
+      .mockResolvedValueOnce({
+        permed_accounts: [{ id: 'account-1' }],
+        permed_protocols: ['ssh'],
+      })
+      .mockResolvedValueOnce({
+        permed_accounts: [],
+        permed_protocols: ['ssh'],
+      });
+
+    await expect(service.myStatus('token')).resolves.toMatchObject({
+      eligible: true,
+      grants: [
+        {
+          bundleId: 7,
+          status: 'PARTIAL',
+          effectiveAssetCount: 1,
+          totalAssetCount: 2,
+          unavailableAssetCount: 1,
+        },
+      ],
     });
   });
 
