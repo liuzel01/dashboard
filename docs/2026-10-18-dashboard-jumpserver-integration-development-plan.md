@@ -389,7 +389,9 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 
 为降低逐项选择大量资产的操作成本，Admin 还可以选择 JumpServer 中现有、有效且非 `dashboard:*` 的 Asset Permission 作为授权模板。Dashboard 读取模板后，仅复制其资产、节点、账号、协议和动作范围，明确忽略源 Permission 的用户和用户组；随后创建独立的 `dashboard:bundle:*` 受管 Permission 并只绑定所选 Dashboard 用户。源 Permission 不会被修改，源权限后续变更也不会自动传播到已创建授权，避免隐式扩权。
 
-模板授权保存源 Permission ID、名称和范围快照 hash，页面在执行前展示范围及高风险动作提示。包含 `@ALL`、全部协议、上传、下载、复制、粘贴、删除、分享或节点动态范围时，仍需管理员显式确认。系统角色、组织角色和用户组不属于可复用模板；回收操作只删除 Dashboard 自己创建并通过命名前缀校验的 Permission。
+模板授权保存源 Permission ID、名称和范围引用快照 hash，页面在执行前分别展示直接资产数、授权节点数、节点实时展开后的当前有效资产数及高风险动作提示。包含 `@ALL`、全部协议、上传、下载、复制、粘贴、删除、分享或节点动态范围时，仍需管理员显式确认。系统角色、组织角色和用户组不属于可复用模板；回收操作只删除 Dashboard 自己创建并通过命名前缀校验的 Permission。
+
+范围引用快照会固化资产 ID、节点 ID、账号、协议和动作，但不会把节点展开为静态资产列表。源 Permission 后续修改不会传播；节点本身新增或移除资产仍会实时影响实际授权范围。`assets/all` 仅用于确认前的有效资产数量和样本预览，不作为创建 Permission 的写入数据。
 
 原 `jumpserver_role_bindings` 只为已有数据库回滚和审计保留，当前同步路径不再读取该表。增量迁移只把已经存在远端 Permission 且状态为 `SYNCED` 的精确用户—授权包关系转换为直接绑定，不会把同角色的其他成员批量展开，避免迁移时产生隐式扩权。后续新增授权必须由 Admin 显式选择具体用户。
 
