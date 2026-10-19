@@ -90,18 +90,24 @@ describe('JumpserverAccessService safety policy', () => {
 
   it('reads only reusable scope fields from an Asset Permission template', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
-    jest.spyOn(service as any, 'remote').mockResolvedValue({
-      id: 'permission-1',
-      name: 'ops-template',
-      is_valid: true,
-      users: [{ id: 'user-1', name: 'must-not-copy' }],
-      user_groups: [{ id: 'group-1', name: 'must-not-copy' }],
-      assets: [{ id: 'asset-1', name: 'host-1' }],
-      nodes: [{ id: 'node-1', name: 'production' }],
-      accounts: ['@ALL'],
-      protocols: ['ssh'],
-      actions: [{ value: 'connect' }, { value: 'download' }],
-    });
+    jest
+      .spyOn(service as any, 'remote')
+      .mockResolvedValueOnce({
+        id: 'permission-1',
+        name: 'ops-template',
+        is_valid: true,
+        users: [{ id: 'user-1', name: 'must-not-copy' }],
+        user_groups: [{ id: 'group-1', name: 'must-not-copy' }],
+        assets: [{ id: 'asset-1', name: 'host-1' }],
+        nodes: [{ id: 'node-1', name: 'production' }],
+        accounts: ['@ALL'],
+        protocols: ['ssh'],
+        actions: [{ value: 'connect' }, { value: 'download' }],
+      })
+      .mockResolvedValueOnce({
+        count: 9,
+        results: [{ asset: 'asset-1', asset_display: 'host-1' }],
+      });
 
     const template = await service.permissionTemplate('token', 'permission-1');
     expect(template.targets).toEqual([
@@ -109,6 +115,10 @@ describe('JumpserverAccessService safety policy', () => {
       { type: 'NODE', id: 'node-1', name: 'production' },
     ]);
     expect(template.actions).toEqual(['connect', 'download']);
+    expect(template.effectiveAssets).toEqual({
+      count: 9,
+      sample: [{ id: 'asset-1', name: 'host-1', address: undefined }],
+    });
     expect(template).not.toHaveProperty('users');
     expect(template).not.toHaveProperty('userGroups');
     expect(template.risks.join(' ')).toContain('高风险动作');
@@ -190,18 +200,21 @@ describe('JumpserverAccessService safety policy', () => {
 
   it('snapshots a template and binds it to one Dashboard user atomically', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
-    jest.spyOn(service as any, 'remote').mockResolvedValue({
-      id: 'permission-1',
-      name: 'ops-template',
-      is_valid: true,
-      users: [{ id: 'remote-user' }],
-      user_groups: [{ id: 'remote-group' }],
-      assets: [{ id: 'asset-1', name: 'host-1' }],
-      nodes: [],
-      accounts: ['@ALL'],
-      protocols: ['ssh'],
-      actions: [{ value: 'connect' }, { value: 'download' }],
-    });
+    jest
+      .spyOn(service as any, 'remote')
+      .mockResolvedValueOnce({
+        id: 'permission-1',
+        name: 'ops-template',
+        is_valid: true,
+        users: [{ id: 'remote-user' }],
+        user_groups: [{ id: 'remote-group' }],
+        assets: [{ id: 'asset-1', name: 'host-1' }],
+        nodes: [],
+        accounts: ['@ALL'],
+        protocols: ['ssh'],
+        actions: [{ value: 'connect' }, { value: 'download' }],
+      })
+      .mockResolvedValueOnce({ count: 1, results: [] });
     db.query.mockResolvedValueOnce([{ id: 10 }]);
     const conn = {
       execute: jest

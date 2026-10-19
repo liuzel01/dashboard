@@ -1,5 +1,5 @@
--- Store immutable snapshots when a JumpServer Asset Permission is reused as
--- an authorization template. The source permission itself is never modified.
+-- Store scope-reference snapshots when a JumpServer Asset Permission is reused
+-- as an authorization template. Node membership remains dynamic.
 -- ADD COLUMN IF NOT EXISTS is not portable across supported MySQL versions.
 SET @has_column = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='jumpserver_access_bundles' AND COLUMN_NAME='actions_json');
 SET @ddl = IF(@has_column=0,'ALTER TABLE `jumpserver_access_bundles` ADD COLUMN `actions_json` JSON NULL AFTER `protocols_json`','SELECT 1'); PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;

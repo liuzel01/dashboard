@@ -301,6 +301,31 @@ export class JumpserverAccessService {
     if (elevated.length) risks.push(`包含高风险动作：${elevated.join(', ')}`);
     if (targets.filter((target) => target.type === 'NODE').length)
       risks.push('包含节点范围；节点新增资产可能自动进入授权范围');
+    const effectiveAssetData = await this.remote(
+      'grant',
+      'GET',
+      `/api/v1/perms/asset-permissions/${encodeURIComponent(id)}/assets/all/?offset=0&limit=20&display=1&draw=1`,
+    );
+    const effectiveAssetResults = Array.isArray(effectiveAssetData?.results)
+      ? effectiveAssetData.results
+      : Array.isArray(effectiveAssetData)
+        ? effectiveAssetData
+        : [];
+    const effectiveAssets = {
+      count: Number(effectiveAssetData?.count ?? effectiveAssetResults.length),
+      sample: effectiveAssetResults.map((value: any) => ({
+        id: String(value.asset || value.id || value.value || ''),
+        name: String(
+          value.asset_display ||
+            value.name ||
+            value.label ||
+            value.asset ||
+            value.id ||
+            '',
+        ),
+        address: value.address ? String(value.address) : undefined,
+      })),
+    };
     return {
       id: String(detail.id || id),
       name,
@@ -308,6 +333,7 @@ export class JumpserverAccessService {
       accounts,
       protocols,
       actions,
+      effectiveAssets,
       dateExpired: detail.date_expired || null,
       risks,
     };
