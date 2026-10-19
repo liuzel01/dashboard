@@ -56,7 +56,8 @@ export default function JumpserverAccessPage() {
     [templatePermissionId, setTemplatePermissionId] = useState<string>(),
     [templatePreview, setTemplatePreview] =
       useState<JumpserverPermissionTemplate>(),
-    [templateLoading, setTemplateLoading] = useState(false);
+    [templateLoading, setTemplateLoading] = useState(false),
+    [templateSampleExpanded, setTemplateSampleExpanded] = useState(false);
   const load = async () => {
     setLoading(true);
     try {
@@ -222,11 +223,13 @@ export default function JumpserverAccessPage() {
     setTemplateUserId(undefined);
     setTemplatePermissionId(undefined);
     setTemplatePreview(undefined);
+    setTemplateSampleExpanded(false);
     setTemplateModalOpen(true);
   };
   const selectPermissionTemplate = async (permissionId: string) => {
     setTemplatePermissionId(permissionId);
     setTemplatePreview(undefined);
+    setTemplateSampleExpanded(false);
     setTemplateLoading(true);
     try {
       setTemplatePreview(await getJumpserverPermissionTemplate(permissionId));
@@ -462,7 +465,10 @@ export default function JumpserverAccessPage() {
           disabled:
             !templateUserId || !templatePermissionId || !templatePreview,
         }}
-        onCancel={() => setTemplateModalOpen(false)}
+        onCancel={() => {
+          setTemplateModalOpen(false);
+          setTemplateSampleExpanded(false);
+        }}
         onOk={() => void confirmTemplateGrant()}
       >
         <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -528,12 +534,55 @@ export default function JumpserverAccessPage() {
                 </Descriptions.Item>
                 {templatePreview.effectiveAssets.sample.length > 0 && (
                   <Descriptions.Item label="有效资产样本" span={3}>
-                    {templatePreview.effectiveAssets.sample.map((asset) => (
-                      <Tag key={asset.id}>
-                        {asset.name}
-                        {asset.address ? ` · ${asset.address}` : ""}
-                      </Tag>
-                    ))}
+                    <Space
+                      direction="vertical"
+                      size={4}
+                      style={{ width: "100%" }}
+                    >
+                      <div
+                        style={{
+                          maxHeight: templateSampleExpanded ? 160 : undefined,
+                          overflowY: templateSampleExpanded
+                            ? "auto"
+                            : undefined,
+                        }}
+                      >
+                        {templatePreview.effectiveAssets.sample
+                          .slice(0, templateSampleExpanded ? 20 : 5)
+                          .map((asset) => (
+                            <Tag key={asset.id} style={{ marginBottom: 4 }}>
+                              {asset.name}
+                              {asset.address ? ` · ${asset.address}` : ""}
+                            </Tag>
+                          ))}
+                      </div>
+                      {templatePreview.effectiveAssets.sample.length > 5 && (
+                        <Button
+                          type="link"
+                          size="small"
+                          style={{ alignSelf: "flex-start", padding: 0 }}
+                          onClick={() =>
+                            setTemplateSampleExpanded((expanded) => !expanded)
+                          }
+                        >
+                          {templateSampleExpanded
+                            ? "收起"
+                            : templatePreview.effectiveAssets.count >
+                                templatePreview.effectiveAssets.sample.length
+                              ? `展开更多样本（共 ${templatePreview.effectiveAssets.count} 个）`
+                              : `展开更多（剩余 ${templatePreview.effectiveAssets.sample.length - 5} 个）`}
+                        </Button>
+                      )}
+                      {templateSampleExpanded &&
+                        templatePreview.effectiveAssets.count >
+                          templatePreview.effectiveAssets.sample.length && (
+                          <Text type="secondary">
+                            当前仅展示前{" "}
+                            {templatePreview.effectiveAssets.sample.length}{" "}
+                            个，共 {templatePreview.effectiveAssets.count} 个
+                          </Text>
+                        )}
+                    </Space>
                   </Descriptions.Item>
                 )}
               </Descriptions>
