@@ -226,12 +226,31 @@ export default function JumpserverAccessPage() {
     ]).catch(() => undefined);
   }, []);
   const launch = async () => {
+    let portalWindow: Window | null = null;
+    try {
+      portalWindow = window.open("about:blank", "_blank");
+      if (portalWindow) {
+        portalWindow.document.title = "正在进入 JumpServer";
+        portalWindow.document.body.textContent = "正在验证访问权限，请稍候…";
+        portalWindow.opener = null;
+      }
+    } catch {
+      portalWindow = null;
+    }
+    if (!portalWindow) {
+      message.info("浏览器阻止了新标签页，将在当前页面进入 JumpServer");
+    }
     try {
       setLaunchLoading(true);
       const p = await prepareJumpserverPortal();
       const r = await consumeJumpserverPortal(p.ticket);
-      window.open(r.portalUrl, "_blank", "noopener,noreferrer");
+      if (portalWindow && !portalWindow.closed) {
+        portalWindow.location.replace(r.portalUrl);
+      } else {
+        window.location.assign(r.portalUrl);
+      }
     } catch (e: any) {
+      if (portalWindow && !portalWindow.closed) portalWindow.close();
       message.error(e?.response?.data?.message || "无法进入 JumpServer");
     } finally {
       setLaunchLoading(false);
