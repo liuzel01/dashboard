@@ -219,6 +219,12 @@ export class JumpserverAccessService {
         name: String(v.name || v.username || ''),
         username: v.username ? String(v.username) : undefined,
         address: kind === 'assets' ? String(v.address || '') : undefined,
+        fullValue:
+          kind === 'nodes' ? String(v.full_value || v.name || '') : undefined,
+        nodesDisplay:
+          kind === 'assets' && Array.isArray(v.nodes_display)
+            ? v.nodes_display.map(String)
+            : undefined,
         isActive: v.is_active !== false,
       })),
     };
@@ -251,7 +257,7 @@ export class JumpserverAccessService {
         accounts: this.json(binding.accounts_json),
         protocols: this.json(binding.protocols_json),
         actions: this.json(binding.actions_json),
-        targets: this.lines(binding.targets),
+        targets: this.targetLines(binding.targets),
       })),
     };
   }
@@ -274,7 +280,7 @@ export class JumpserverAccessService {
       throw new BadRequestException('Asset Permission 不存在或已失效');
     if (name.startsWith('dashboard:'))
       throw new BadRequestException('不能将 Dashboard 受管授权作为模板');
-    const targets = [
+    let targets = [
       ...(Array.isArray(detail.assets) ? detail.assets : []).map((value: any) =>
         this.targetRef('ASSET', value),
       ),
@@ -282,6 +288,41 @@ export class JumpserverAccessService {
         this.targetRef('NODE', value),
       ),
     ];
+    const [assetCatalog, nodeCatalog] = await Promise.all([
+      targets.some((target) => target.type === 'ASSET')
+        ? this.remote(
+            'grant',
+            'GET',
+            '/api/v1/assets/assets/?offset=0&limit=1000',
+          )
+        : Promise.resolve({ results: [] }),
+      targets.some((target) => target.type === 'NODE')
+        ? this.remote(
+            'grant',
+            'GET',
+            '/api/v1/assets/nodes/?offset=0&limit=1000',
+          )
+        : Promise.resolve({ results: [] }),
+    ]);
+    const assetNames = new Map(
+      (assetCatalog.results || []).map((value: any) => [
+        String(value.id),
+        this.assetDisplayName(value),
+      ]),
+    );
+    const nodeNames = new Map(
+      (nodeCatalog.results || []).map((value: any) => [
+        String(value.id),
+        String(value.full_value || value.name || value.value || value.id),
+      ]),
+    );
+    targets = targets.map((target) => ({
+      ...target,
+      name:
+        (target.type === 'ASSET'
+          ? assetNames.get(target.id)
+          : nodeNames.get(target.id)) || target.name,
+    }));
     const accounts = this.strings(detail.accounts);
     const protocols = this.strings(detail.protocols);
     const actions = this.actionStrings(detail.actions);
@@ -788,6 +829,16 @@ export class JumpserverAccessService {
       .split('\n')
       .filter(Boolean);
   }
+  private targetLines(v: any) {
+    return this.lines(v).map((line) => {
+      const [type, id, ...name] = line.split(':');
+      return {
+        type: type === 'NODE' ? 'NODE' : 'ASSET',
+        id,
+        name: name.join(':') || id,
+      };
+    });
+  }
   private strings(v: any): string[] {
     return Array.isArray(v)
       ? [
@@ -830,6 +881,13 @@ export class JumpserverAccessService {
         : id,
     );
     return { type, id, name };
+  }
+  private assetDisplayName(value: any) {
+    const name = String(value.name || value.label || value.id || '');
+    const paths = Array.isArray(value.nodes_display)
+      ? value.nodes_display.map(String).filter(Boolean)
+      : [];
+    return paths.length ? `${name} · ${paths.join(', ')}` : name;
   }
   private hash(v: string) {
     return createHash('sha256').update(String(v)).digest('hex');

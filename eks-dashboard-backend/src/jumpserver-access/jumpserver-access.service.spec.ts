@@ -51,6 +51,21 @@ describe('JumpserverAccessService safety policy', () => {
     ]);
   });
 
+  it('returns stored target names instead of exposing target UUIDs as labels', () => {
+    expect(
+      (service as any).targetLines(
+        'NODE:node-1:/DEFAULT/hashex/开发\nASSET:asset-1:tenant-admin · /DEFAULT/hashex/开发',
+      ),
+    ).toEqual([
+      { type: 'NODE', id: 'node-1', name: '/DEFAULT/hashex/开发' },
+      {
+        type: 'ASSET',
+        id: 'asset-1',
+        name: 'tenant-admin · /DEFAULT/hashex/开发',
+      },
+    ]);
+  });
+
   it('uses the constrained grant identity only for catalogs denied to the auditor', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
     const remote = jest
@@ -105,14 +120,36 @@ describe('JumpserverAccessService safety policy', () => {
         actions: [{ value: 'connect' }, { value: 'download' }],
       })
       .mockResolvedValueOnce({
+        results: [
+          {
+            id: 'asset-1',
+            name: 'host-1',
+            nodes_display: ['/DEFAULT/hashex/开发'],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        results: [
+          {
+            id: 'node-1',
+            name: 'production',
+            full_value: '/DEFAULT/hashex/开发',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
         count: 9,
         results: [{ asset: 'asset-1', asset_display: 'host-1' }],
       });
 
     const template = await service.permissionTemplate('token', 'permission-1');
     expect(template.targets).toEqual([
-      { type: 'ASSET', id: 'asset-1', name: 'host-1' },
-      { type: 'NODE', id: 'node-1', name: 'production' },
+      {
+        type: 'ASSET',
+        id: 'asset-1',
+        name: 'host-1 · /DEFAULT/hashex/开发',
+      },
+      { type: 'NODE', id: 'node-1', name: '/DEFAULT/hashex/开发' },
     ]);
     expect(template.actions).toEqual(['connect', 'download']);
     expect(template.effectiveAssets).toEqual({
@@ -214,6 +251,15 @@ describe('JumpserverAccessService safety policy', () => {
         protocols: ['ssh'],
         actions: [{ value: 'connect' }, { value: 'download' }],
       })
+      .mockResolvedValueOnce({
+        results: [
+          {
+            id: 'asset-1',
+            name: 'host-1',
+            nodes_display: ['/DEFAULT/test'],
+          },
+        ],
+      })
       .mockResolvedValueOnce({ count: 1, results: [] });
     db.query.mockResolvedValueOnce([{ id: 10 }]);
     const conn = {
@@ -242,7 +288,7 @@ describe('JumpserverAccessService safety policy', () => {
       22,
       'ASSET',
       'asset-1',
-      'host-1',
+      'host-1 · /DEFAULT/test',
     ]);
     expect(conn.execute.mock.calls[2][0]).toContain(
       'jumpserver_user_bundle_bindings',
