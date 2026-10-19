@@ -237,10 +237,14 @@ export class JumpserverAccessService {
     await this.actor(authorization, 'jumpserver:config:manage');
     const [mappings, userBindings] = await Promise.all([
       this.db.query<any[]>(
-        `SELECT m.*,u.username AS dashboard_username FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id ORDER BY m.id DESC`,
+        `SELECT m.*,u.username AS dashboard_username,u.display_name AS dashboard_display_name
+           FROM jumpserver_identity_mappings m
+           JOIN users u ON u.id=m.dashboard_user_id
+          ORDER BY m.id DESC`,
       ),
       this.db.query<any[]>(
-        `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username dashboard_username,b.name bundle_name,
+        `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,
+                u.username dashboard_username,u.display_name dashboard_display_name,b.name bundle_name,
                 b.accounts_json,b.protocols_json,b.actions_json,
                 b.source_permission_id,b.source_permission_name,b.source_snapshot_hash,
                 GROUP_CONCAT(DISTINCT CONCAT(t.target_type,':',t.remote_id,':',t.remote_name) SEPARATOR '\n') targets
@@ -249,7 +253,7 @@ export class JumpserverAccessService {
            JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
            LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id
           WHERE ub.provider_key='primary'
-          GROUP BY ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username,b.name,b.accounts_json,b.protocols_json,b.actions_json,b.source_permission_id,b.source_permission_name,b.source_snapshot_hash
+          GROUP BY ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.enabled,u.username,u.display_name,b.name,b.accounts_json,b.protocols_json,b.actions_json,b.source_permission_id,b.source_permission_name,b.source_snapshot_hash
           ORDER BY ub.updated_at DESC`,
       ),
     ]);

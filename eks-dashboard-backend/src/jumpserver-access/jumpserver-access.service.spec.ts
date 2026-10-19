@@ -71,6 +71,36 @@ describe('JumpserverAccessService safety policy', () => {
     ]);
   });
 
+  it('returns Dashboard display names for mappings and user grants', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    db.query
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          dashboard_username: 'user@example.com',
+          dashboard_display_name: 'Kevin',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          dashboard_user_id: 2,
+          bundle_id: 7,
+          dashboard_username: 'user@example.com',
+          dashboard_display_name: 'Kevin',
+          accounts_json: '[]',
+          protocols_json: '[]',
+          actions_json: '[]',
+          targets: '',
+        },
+      ]);
+
+    const configuration = await service.configuration('token');
+    expect(configuration.mappings[0].dashboard_display_name).toBe('Kevin');
+    expect(configuration.userBindings[0].dashboard_display_name).toBe('Kevin');
+    expect(db.query.mock.calls[0][0]).toContain('u.display_name');
+    expect(db.query.mock.calls[1][0]).toContain('u.display_name');
+  });
+
   it('uses the constrained grant identity only for catalogs denied to the auditor', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
     const remote = jest
