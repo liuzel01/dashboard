@@ -87,6 +87,7 @@ describe('JumpserverAccessService safety policy', () => {
           bundle_id: 7,
           dashboard_username: 'user@example.com',
           dashboard_display_name: 'Kevin',
+          expires_at: '2026-10-19 05:49:00.000',
           accounts_json: '[]',
           protocols_json: '[]',
           actions_json: '[]',
@@ -97,6 +98,9 @@ describe('JumpserverAccessService safety policy', () => {
     const configuration = await service.configuration('token');
     expect(configuration.mappings[0].dashboard_display_name).toBe('Kevin');
     expect(configuration.userBindings[0].dashboard_display_name).toBe('Kevin');
+    expect(configuration.userBindings[0].expires_at).toBe(
+      '2026-10-19T05:49:00.000Z',
+    );
     expect(db.query.mock.calls[0][0]).toContain('u.display_name');
     expect(db.query.mock.calls[1][0]).toContain('u.display_name');
   });

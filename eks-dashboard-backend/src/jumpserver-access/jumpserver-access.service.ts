@@ -264,6 +264,8 @@ export class JumpserverAccessService {
       mappings,
       userBindings: userBindings.map((binding) => ({
         ...binding,
+        expires_at: this.utcDateIso(binding.expires_at),
+        revoked_at: this.utcDateIso(binding.revoked_at),
         accounts: this.json(binding.accounts_json),
         protocols: this.json(binding.protocols_json),
         actions: this.json(binding.actions_json),
@@ -693,9 +695,7 @@ export class JumpserverAccessService {
           is_active: true,
           date_start: new Date().toISOString(),
           date_expired: bundle.expires_at
-            ? new Date(
-                `${String(bundle.expires_at).replace(' ', 'T')}Z`,
-              ).toISOString()
+            ? this.utcDateIso(bundle.expires_at)
             : '2099-12-31T23:59:59Z',
           comment: 'Managed by Dashboard; do not edit manually',
         };
@@ -1207,6 +1207,19 @@ export class JumpserverAccessService {
 
   private mysqlDate(value: string | null): string | null {
     return value ? value.slice(0, 19).replace('T', ' ') : null;
+  }
+
+  private utcDateIso(value: unknown): string | null {
+    if (!value) return null;
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().replace(' ', 'T');
+    const date = new Date(
+      /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)
+        ? normalized
+        : `${normalized}Z`,
+    );
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
   }
   private lines(v: any) {
     return String(v || '')
