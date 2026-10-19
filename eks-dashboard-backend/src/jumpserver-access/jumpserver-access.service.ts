@@ -1053,7 +1053,7 @@ export class JumpserverAccessService {
     });
   }
 
-  @Interval(60_000)
+  @Interval(30_000)
   async reconcileExpiredUserGrants() {
     try {
       await this.db.withConnection(async (conn) => {
@@ -1199,7 +1199,9 @@ export class JumpserverAccessService {
     const date = new Date(value);
     const now = Date.now();
     if (!Number.isFinite(date.getTime()) || date.getTime() <= now + 60_000)
-      throw new BadRequestException('授权到期时间必须晚于当前时间');
+      throw new BadRequestException(
+        '授权到期时间至少需要晚于当前时间 1 分钟，请重新选择',
+      );
     if (date.getTime() - now > JumpserverAccessService.MAX_GRANT_LIFETIME_MS)
       throw new BadRequestException('用户资产授权最长不得超过 366 天');
     return date.toISOString();

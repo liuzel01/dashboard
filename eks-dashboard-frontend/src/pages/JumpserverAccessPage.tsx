@@ -410,6 +410,10 @@ export default function JumpserverAccessPage() {
       onOk: async () => {
         if (!dashboardUserId || !target)
           throw new Error("请选择用户和资产范围");
+        if (expiresAt && expiresAt.diff(dayjs(), "second") < 120) {
+          message.error("请选择至少 2 分钟后的授权到期时间");
+          throw new Error("授权到期时间过近");
+        }
         const [type, id, ...rest] = target.split("|");
         await createJumpserverUserGrant({
           dashboardUserId,
@@ -513,6 +517,10 @@ export default function JumpserverAccessPage() {
       templatePermissionIds.some((id) => !templatePreviews[id])
     )
       return;
+    if (templateExpiresAt && templateExpiresAt.diff(dayjs(), "second") < 120) {
+      message.error("请选择至少 2 分钟后的授权到期时间");
+      return;
+    }
     setTemplateSubmitting(true);
     try {
       await createJumpserverUserGrantFromTemplate({
@@ -695,8 +703,8 @@ export default function JumpserverAccessPage() {
                 const expired = dayjs(row.expires_at).isBefore(dayjs());
                 return (
                   <Space direction="vertical" size={0}>
-                    <Tag color={expired ? "red" : "blue"}>
-                      {expired ? "已到期" : "限时授权"}
+                    <Tag color={expired ? "orange" : "blue"}>
+                      {expired ? "已到期，回收处理中" : "限时授权"}
                     </Tag>
                     <Text type="secondary">
                       {dayjs(row.expires_at).format("YYYY-MM-DD HH:mm:ss")}

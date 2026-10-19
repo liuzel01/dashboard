@@ -492,6 +492,9 @@ describe('JumpserverAccessService safety policy', () => {
 
   it('stores expiration on the user grant binding', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     db.query.mockResolvedValueOnce([{ id: 10 }]);
     const conn = {
       execute: jest
@@ -510,16 +513,30 @@ describe('JumpserverAccessService safety policy', () => {
       targets: [{ type: 'ASSET', id: 'asset-1', name: 'test-asset' }],
       accounts: ['@ALL'],
       protocols: ['ssh'],
-      expiresAt: '2026-10-31T02:38:10.000Z',
+      expiresAt,
     });
 
     expect(conn.execute.mock.calls[2][0]).toContain('expires_at');
     expect(conn.execute.mock.calls[2][1]).toEqual([
       2,
       21,
-      '2026-10-31 02:38:10',
+      expiresAt.slice(0, 19).replace('T', ' '),
       1,
     ]);
+  });
+
+  it('rejects a grant expiration less than one minute away with a precise message', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+
+    await expect(
+      service.createUserGrant('token', {
+        dashboardUserId: 2,
+        targets: [{ type: 'ASSET', id: 'asset-1', name: 'test-asset' }],
+        accounts: ['@ALL'],
+        protocols: ['ssh'],
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      }),
+    ).rejects.toThrow('授权到期时间至少需要晚于当前时间 1 分钟');
   });
 
   it('marks an expired grant revoked when no remote permission remains', async () => {
