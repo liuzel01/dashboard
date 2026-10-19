@@ -204,9 +204,21 @@ export const getJumpserverCatalog = async (
 ) =>
   (await api.get("/jumpserver-access/catalog", { params: { kind, keyword } }))
     .data as { kind: string; count: number; items: JumpserverCatalogItem[] };
-export const getJumpserverConfiguration = async () =>
-  (await api.get("/jumpserver-access/configuration"))
-    .data as JumpserverConfiguration;
+let pendingJumpserverConfiguration: Promise<JumpserverConfiguration> | null =
+  null;
+export const getJumpserverConfiguration = async () => {
+  if (pendingJumpserverConfiguration) return pendingJumpserverConfiguration;
+  const request = api
+    .get("/jumpserver-access/configuration")
+    .then((response) => response.data as JumpserverConfiguration);
+  pendingJumpserverConfiguration = request;
+  try {
+    return await request;
+  } finally {
+    if (pendingJumpserverConfiguration === request)
+      pendingJumpserverConfiguration = null;
+  }
+};
 export const upsertJumpserverMapping = async (input: {
   dashboardUserId: number;
   remoteUsername: string;
@@ -241,13 +253,25 @@ export const unbindJumpserverUser = async (
   ).data;
 export const syncJumpserverUser = async (userId: number) =>
   (await api.post(`/jumpserver-access/users/${userId}/sync`)).data;
-export const getMyJumpserverStatus = async () =>
-  (await api.get("/jumpserver-access/me")).data as {
-    mapped: boolean;
-    eligible: boolean;
-    remoteUsername?: string;
-    grants: Array<{ bundleId: number; bundleName: string; status: string }>;
-  };
+type MyJumpserverStatus = {
+  mapped: boolean;
+  eligible: boolean;
+  remoteUsername?: string;
+  grants: Array<{ bundleId: number; bundleName: string; status: string }>;
+};
+let pendingMyJumpserverStatus: Promise<MyJumpserverStatus> | null = null;
+export const getMyJumpserverStatus = async () => {
+  if (pendingMyJumpserverStatus) return pendingMyJumpserverStatus;
+  const request = api
+    .get("/jumpserver-access/me")
+    .then((response) => response.data as MyJumpserverStatus);
+  pendingMyJumpserverStatus = request;
+  try {
+    return await request;
+  } finally {
+    if (pendingMyJumpserverStatus === request) pendingMyJumpserverStatus = null;
+  }
+};
 export const prepareJumpserverPortal = async () =>
   (
     await api.post(

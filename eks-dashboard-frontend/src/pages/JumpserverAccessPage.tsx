@@ -1,16 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
   Card,
+  Collapse,
   Descriptions,
   message,
   Modal,
   Select,
   Space,
+  Spin,
   Table,
-  Tabs,
   Tag,
   Typography,
 } from "antd";
@@ -57,36 +58,140 @@ export default function JumpserverAccessPage() {
     [templatePreview, setTemplatePreview] =
       useState<JumpserverPermissionTemplate>(),
     [templateLoading, setTemplateLoading] = useState(false),
-    [templateSampleExpanded, setTemplateSampleExpanded] = useState(false);
-  const load = async () => {
+    [templateSampleExpanded, setTemplateSampleExpanded] = useState(false),
+    [configurationLoading, setConfigurationLoading] = useState(false),
+    [diagnosticLoading, setDiagnosticLoading] = useState(false),
+    [diagnosticOpen, setDiagnosticOpen] = useState(false),
+    [actionCatalogLoading, setActionCatalogLoading] = useState(false);
+  const configurationLoadedRef = useRef(false);
+  const configurationRequestRef = useRef<Promise<void> | null>(null);
+  const userCatalogLoadedRef = useRef(false);
+  const userCatalogRequestRef = useRef<Promise<void> | null>(null);
+  const targetCatalogLoadedRef = useRef(false);
+  const targetCatalogRequestRef = useRef<Promise<void> | null>(null);
+  const permissionCatalogLoadedRef = useRef(false);
+  const permissionCatalogRequestRef = useRef<Promise<void> | null>(null);
+  const diagnosticRequestRef = useRef<Promise<void> | null>(null);
+  const loadStatus = async () => {
     setLoading(true);
     try {
       setStatus(await getMyJumpserverStatus());
-      if (admin) {
-        setDiag(await diagnoseJumpserver());
-        const [c, u, ru, a, n, p] = await Promise.all([
-          getJumpserverConfiguration(),
-          getAccessUsers(),
-          getJumpserverCatalog("users"),
-          getJumpserverCatalog("assets"),
-          getJumpserverCatalog("nodes"),
-          getJumpserverCatalog("permissions"),
-        ]);
-        setCfg(c);
-        setUsers(u || []);
-        setRemoteUsers(ru.items);
-        setAssets(a.items);
-        setNodes(n.items);
-        setPermissionTemplates(p.items);
-      }
     } catch (e: any) {
       message.error(e?.response?.data?.message || e.message);
     } finally {
       setLoading(false);
     }
   };
+  const loadConfiguration = async (force = false) => {
+    if (!admin || (!force && configurationLoadedRef.current)) return;
+    if (configurationRequestRef.current) return configurationRequestRef.current;
+    const request = (async () => {
+      setConfigurationLoading(true);
+      try {
+        setCfg(await getJumpserverConfiguration());
+        configurationLoadedRef.current = true;
+      } catch (e: any) {
+        message.error(e?.response?.data?.message || e.message);
+      } finally {
+        setConfigurationLoading(false);
+      }
+    })();
+    configurationRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (configurationRequestRef.current === request)
+        configurationRequestRef.current = null;
+    }
+  };
+  const loadUserCatalog = async () => {
+    if (userCatalogLoadedRef.current) return;
+    if (userCatalogRequestRef.current) return userCatalogRequestRef.current;
+    const request = Promise.all([
+      getAccessUsers(),
+      getJumpserverCatalog("users"),
+    ]).then(([dashboardUsers, jumpserverUsers]) => {
+      setUsers(dashboardUsers || []);
+      setRemoteUsers(jumpserverUsers.items);
+      userCatalogLoadedRef.current = true;
+    });
+    userCatalogRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (userCatalogRequestRef.current === request)
+        userCatalogRequestRef.current = null;
+    }
+  };
+  const loadTargetCatalog = async () => {
+    if (targetCatalogLoadedRef.current) return;
+    if (targetCatalogRequestRef.current) return targetCatalogRequestRef.current;
+    const request = Promise.all([
+      getJumpserverCatalog("assets"),
+      getJumpserverCatalog("nodes"),
+    ]).then(([assetCatalog, nodeCatalog]) => {
+      setAssets(assetCatalog.items);
+      setNodes(nodeCatalog.items);
+      targetCatalogLoadedRef.current = true;
+    });
+    targetCatalogRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (targetCatalogRequestRef.current === request)
+        targetCatalogRequestRef.current = null;
+    }
+  };
+  const loadPermissionCatalog = async () => {
+    if (permissionCatalogLoadedRef.current) return;
+    if (permissionCatalogRequestRef.current)
+      return permissionCatalogRequestRef.current;
+    const request = getJumpserverCatalog("permissions").then((catalog) => {
+      setPermissionTemplates(catalog.items);
+      permissionCatalogLoadedRef.current = true;
+    });
+    permissionCatalogRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (permissionCatalogRequestRef.current === request)
+        permissionCatalogRequestRef.current = null;
+    }
+  };
+  const loadDiagnostic = async () => {
+    if (diagnosticRequestRef.current) return diagnosticRequestRef.current;
+    const request = (async () => {
+      setDiagnosticLoading(true);
+      try {
+        setDiag(await diagnoseJumpserver());
+      } catch (e: any) {
+        message.error(e?.response?.data?.message || e.message);
+      } finally {
+        setDiagnosticLoading(false);
+      }
+    })();
+    diagnosticRequestRef.current = request;
+    try {
+      await request;
+    } finally {
+      if (diagnosticRequestRef.current === request)
+        diagnosticRequestRef.current = null;
+    }
+  };
+  const refreshAfterAdminChange = async () => {
+    await Promise.all([loadStatus(), loadConfiguration(true)]);
+  };
+  const refreshPage = async () => {
+    await Promise.all([
+      loadStatus(),
+      admin ? loadConfiguration(true) : undefined,
+    ]);
+  };
   useEffect(() => {
-    void load();
+    void Promise.all([
+      loadStatus(),
+      admin ? loadConfiguration() : Promise.resolve(),
+    ]);
   }, []);
   const launch = async () => {
     try {
@@ -100,7 +205,16 @@ export default function JumpserverAccessPage() {
       setLoading(false);
     }
   };
-  const openMapping = () => {
+  const openMapping = async () => {
+    setActionCatalogLoading(true);
+    try {
+      await loadUserCatalog();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || "加载用户目录失败");
+      return;
+    } finally {
+      setActionCatalogLoading(false);
+    }
     let dashboardUserId = 0,
       remoteUsername = "";
     Modal.confirm({
@@ -136,11 +250,20 @@ export default function JumpserverAccessPage() {
           throw new Error("请选择用户并填写 JumpServer username");
         await upsertJumpserverMapping({ dashboardUserId, remoteUsername });
         message.success("身份映射已保存");
-        await load();
+        await refreshAfterAdminChange();
       },
     });
   };
-  const openUserGrant = () => {
+  const openUserGrant = async () => {
+    setActionCatalogLoading(true);
+    try {
+      await Promise.all([loadUserCatalog(), loadTargetCatalog()]);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || "加载用户或资产目录失败");
+      return;
+    } finally {
+      setActionCatalogLoading(false);
+    }
     let dashboardUserId = 0,
       target = "";
     const mappedUserIds = new Set(
@@ -202,7 +325,7 @@ export default function JumpserverAccessPage() {
           protocols: ["ssh"],
         });
         message.success("用户资产授权已创建并同步到 JumpServer");
-        await load();
+        await refreshAfterAdminChange();
       },
     });
   };
@@ -219,7 +342,16 @@ export default function JumpserverAccessPage() {
         label: `${user.display_name || user.username} (${user.username})`,
       }));
   };
-  const openTemplateGrant = () => {
+  const openTemplateGrant = async () => {
+    setActionCatalogLoading(true);
+    try {
+      await Promise.all([loadUserCatalog(), loadPermissionCatalog()]);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || "加载用户或授权模板失败");
+      return;
+    } finally {
+      setActionCatalogLoading(false);
+    }
     setTemplateUserId(undefined);
     setTemplatePermissionId(undefined);
     setTemplatePreview(undefined);
@@ -249,7 +381,7 @@ export default function JumpserverAccessPage() {
       });
       message.success("已复制授权范围并同步到 JumpServer");
       setTemplateModalOpen(false);
-      await load();
+      await refreshAfterAdminChange();
     } catch (e: any) {
       message.error(e?.response?.data?.message || "复用授权模板失败");
     } finally {
@@ -268,7 +400,7 @@ export default function JumpserverAccessPage() {
         );
         await syncJumpserverUser(Number(binding.dashboard_user_id));
         message.success("用户授权已回收并同步到 JumpServer");
-        await load();
+        await refreshAfterAdminChange();
       },
     });
   const sync = (id: number) =>
@@ -285,32 +417,21 @@ export default function JumpserverAccessPage() {
           (item: { status: string }) => item.status === "REVOKED",
         ).length;
         message.success(`同步完成：生效 ${synced}，回收 ${revoked}`);
-        await load();
+        await refreshAfterAdminChange();
       },
     });
   const adminPanel = (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-      <Card title="Provider 诊断">
-        <Descriptions column={2} size="small">
-          <Descriptions.Item label="Reader">
-            {diag?.reader?.ok ? (
-              <Tag color="green">正常 · {diag.reader.username}</Tag>
-            ) : (
-              <Tag color="red">异常</Tag>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="Grant Manager">
-            {diag?.grant?.ok ? (
-              <Tag color="green">正常 · {diag.grant.username}</Tag>
-            ) : (
-              <Tag color="red">异常</Tag>
-            )}
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
       <Card
         title="身份映射"
-        extra={<Button onClick={openMapping}>新增映射</Button>}
+        extra={
+          <Button
+            loading={actionCatalogLoading}
+            onClick={() => void openMapping()}
+          >
+            新增映射
+          </Button>
+        }
       >
         <Table
           rowKey="id"
@@ -344,8 +465,17 @@ export default function JumpserverAccessPage() {
         title="用户资产授权"
         extra={
           <Space>
-            <Button onClick={openUserGrant}>新增自定义授权</Button>
-            <Button type="primary" onClick={openTemplateGrant}>
+            <Button
+              loading={actionCatalogLoading}
+              onClick={() => void openUserGrant()}
+            >
+              新增自定义授权
+            </Button>
+            <Button
+              type="primary"
+              loading={actionCatalogLoading}
+              onClick={() => void openTemplateGrant()}
+            >
               复用现有 Asset Permission
             </Button>
           </Space>
@@ -413,7 +543,7 @@ export default function JumpserverAccessPage() {
             Dashboard 功能权限与 JumpServer 用户资产授权分离管理
           </Text>
         </div>
-        <Button loading={loading} onClick={load}>
+        <Button loading={loading} onClick={() => void refreshPage()}>
           刷新
         </Button>
       </Space>
@@ -450,9 +580,50 @@ export default function JumpserverAccessPage() {
         </Button>
       </Card>
       {admin && (
-        <Tabs
-          items={[{ key: "admin", label: "授权管理", children: adminPanel }]}
-        />
+        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+          <Collapse
+            activeKey={diagnosticOpen ? ["diagnostic"] : []}
+            onChange={(keys) => {
+              const nextOpen = (Array.isArray(keys) ? keys : [keys]).includes(
+                "diagnostic",
+              );
+              setDiagnosticOpen(nextOpen);
+              if (nextOpen && !diag && !diagnosticLoading)
+                void loadDiagnostic();
+            }}
+            items={[
+              {
+                key: "diagnostic",
+                label: "Provider 诊断",
+                children: (
+                  <Spin spinning={diagnosticLoading}>
+                    <Descriptions column={2} size="small">
+                      <Descriptions.Item label="Reader">
+                        {diag?.reader?.ok ? (
+                          <Tag color="green">正常 · {diag.reader.username}</Tag>
+                        ) : diag ? (
+                          <Tag color="red">异常</Tag>
+                        ) : (
+                          <Text type="secondary">尚未检查</Text>
+                        )}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Grant Manager">
+                        {diag?.grant?.ok ? (
+                          <Tag color="green">正常 · {diag.grant.username}</Tag>
+                        ) : diag ? (
+                          <Tag color="red">异常</Tag>
+                        ) : (
+                          <Text type="secondary">尚未检查</Text>
+                        )}
+                      </Descriptions.Item>
+                    </Descriptions>
+                  </Spin>
+                ),
+              },
+            ]}
+          />
+          <Spin spinning={configurationLoading}>{adminPanel}</Spin>
+        </Space>
       )}
       <Modal
         width={720}
