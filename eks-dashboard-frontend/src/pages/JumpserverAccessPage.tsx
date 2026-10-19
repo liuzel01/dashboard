@@ -495,34 +495,55 @@ export default function JumpserverAccessPage() {
           />
           {templatePreview && (
             <>
-              <Descriptions bordered size="small" column={2}>
+              <Descriptions bordered size="small" column={3}>
                 <Descriptions.Item label="模板名称" span={2}>
                   {templatePreview.name}
                 </Descriptions.Item>
-                <Descriptions.Item label="资产 / 节点">
+                <Descriptions.Item label="失效时间">
+                  {templatePreview.dateExpired || "未返回"}
+                </Descriptions.Item>
+                <Descriptions.Item label="直接资产">
                   {
                     templatePreview.targets.filter((x) => x.type === "ASSET")
                       .length
                   }
-                  {" / "}
+                </Descriptions.Item>
+                <Descriptions.Item label="授权节点">
                   {
                     templatePreview.targets.filter((x) => x.type === "NODE")
                       .length
                   }
                 </Descriptions.Item>
-                <Descriptions.Item label="失效时间">
-                  {templatePreview.dateExpired || "未返回"}
+                <Descriptions.Item label="当前有效资产">
+                  {templatePreview.effectiveAssets.count}
                 </Descriptions.Item>
-                <Descriptions.Item label="账号" span={2}>
+                <Descriptions.Item label="账号" span={3}>
                   {templatePreview.accounts.join(", ")}
                 </Descriptions.Item>
-                <Descriptions.Item label="协议" span={2}>
+                <Descriptions.Item label="协议" span={3}>
                   {templatePreview.protocols.join(", ")}
                 </Descriptions.Item>
-                <Descriptions.Item label="动作" span={2}>
+                <Descriptions.Item label="动作" span={3}>
                   {templatePreview.actions.join(", ")}
                 </Descriptions.Item>
+                {templatePreview.effectiveAssets.sample.length > 0 && (
+                  <Descriptions.Item label="有效资产样本" span={3}>
+                    {templatePreview.effectiveAssets.sample.map((asset) => (
+                      <Tag key={asset.id}>
+                        {asset.name}
+                        {asset.address ? ` · ${asset.address}` : ""}
+                      </Tag>
+                    ))}
+                  </Descriptions.Item>
+                )}
               </Descriptions>
+              {templatePreview.targets.some((x) => x.type === "NODE") && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="当前有效资产数是按节点实时展开的预览；节点成员后续变化会影响实际授权范围。"
+                />
+              )}
               {templatePreview.risks.length > 0 && (
                 <Alert
                   type="warning"

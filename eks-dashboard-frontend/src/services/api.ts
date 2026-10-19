@@ -180,6 +180,10 @@ export type JumpserverPermissionTemplate = {
   accounts: string[];
   protocols: string[];
   actions: string[];
+  effectiveAssets: {
+    count: number;
+    sample: Array<{ id: string; name: string; address?: string }>;
+  };
   dateExpired?: string | null;
   risks: string[];
 };
