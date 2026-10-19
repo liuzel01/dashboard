@@ -38,7 +38,8 @@ const { Title, Text } = Typography;
 export default function JumpserverAccessPage() {
   const { permissions } = useContext(AuthContext);
   const admin = permissions.includes("jumpserver:config:manage");
-  const [loading, setLoading] = useState(false),
+  const [statusLoading, setStatusLoading] = useState(false),
+    [launchLoading, setLaunchLoading] = useState(false),
     [status, setStatus] = useState<any>(null),
     [diag, setDiag] = useState<any>(null),
     [cfg, setCfg] = useState<any>({
@@ -57,12 +58,15 @@ export default function JumpserverAccessPage() {
     [templatePermissionId, setTemplatePermissionId] = useState<string>(),
     [templatePreview, setTemplatePreview] =
       useState<JumpserverPermissionTemplate>(),
-    [templateLoading, setTemplateLoading] = useState(false),
+    [templatePreviewLoading, setTemplatePreviewLoading] = useState(false),
+    [templateSubmitting, setTemplateSubmitting] = useState(false),
     [templateSampleExpanded, setTemplateSampleExpanded] = useState(false),
     [configurationLoading, setConfigurationLoading] = useState(false),
     [diagnosticLoading, setDiagnosticLoading] = useState(false),
     [diagnosticOpen, setDiagnosticOpen] = useState(false),
-    [actionCatalogLoading, setActionCatalogLoading] = useState(false);
+    [mappingCatalogLoading, setMappingCatalogLoading] = useState(false),
+    [customGrantCatalogLoading, setCustomGrantCatalogLoading] = useState(false),
+    [templateCatalogLoading, setTemplateCatalogLoading] = useState(false);
   const configurationLoadedRef = useRef(false);
   const configurationRequestRef = useRef<Promise<void> | null>(null);
   const userCatalogLoadedRef = useRef(false);
@@ -73,13 +77,13 @@ export default function JumpserverAccessPage() {
   const permissionCatalogRequestRef = useRef<Promise<void> | null>(null);
   const diagnosticRequestRef = useRef<Promise<void> | null>(null);
   const loadStatus = async () => {
-    setLoading(true);
+    setStatusLoading(true);
     try {
       setStatus(await getMyJumpserverStatus());
     } catch (e: any) {
       message.error(e?.response?.data?.message || e.message);
     } finally {
-      setLoading(false);
+      setStatusLoading(false);
     }
   };
   const loadConfiguration = async (force = false) => {
@@ -195,25 +199,25 @@ export default function JumpserverAccessPage() {
   }, []);
   const launch = async () => {
     try {
-      setLoading(true);
+      setLaunchLoading(true);
       const p = await prepareJumpserverPortal();
       const r = await consumeJumpserverPortal(p.ticket);
       window.open(r.portalUrl, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       message.error(e?.response?.data?.message || "无法进入 JumpServer");
     } finally {
-      setLoading(false);
+      setLaunchLoading(false);
     }
   };
   const openMapping = async () => {
-    setActionCatalogLoading(true);
+    setMappingCatalogLoading(true);
     try {
       await loadUserCatalog();
     } catch (e: any) {
       message.error(e?.response?.data?.message || "加载用户目录失败");
       return;
     } finally {
-      setActionCatalogLoading(false);
+      setMappingCatalogLoading(false);
     }
     let dashboardUserId = 0,
       remoteUsername = "";
@@ -255,14 +259,14 @@ export default function JumpserverAccessPage() {
     });
   };
   const openUserGrant = async () => {
-    setActionCatalogLoading(true);
+    setCustomGrantCatalogLoading(true);
     try {
       await Promise.all([loadUserCatalog(), loadTargetCatalog()]);
     } catch (e: any) {
       message.error(e?.response?.data?.message || "加载用户或资产目录失败");
       return;
     } finally {
-      setActionCatalogLoading(false);
+      setCustomGrantCatalogLoading(false);
     }
     let dashboardUserId = 0,
       target = "";
@@ -343,14 +347,14 @@ export default function JumpserverAccessPage() {
       }));
   };
   const openTemplateGrant = async () => {
-    setActionCatalogLoading(true);
+    setTemplateCatalogLoading(true);
     try {
       await Promise.all([loadUserCatalog(), loadPermissionCatalog()]);
     } catch (e: any) {
       message.error(e?.response?.data?.message || "加载用户或授权模板失败");
       return;
     } finally {
-      setActionCatalogLoading(false);
+      setTemplateCatalogLoading(false);
     }
     setTemplateUserId(undefined);
     setTemplatePermissionId(undefined);
@@ -362,18 +366,18 @@ export default function JumpserverAccessPage() {
     setTemplatePermissionId(permissionId);
     setTemplatePreview(undefined);
     setTemplateSampleExpanded(false);
-    setTemplateLoading(true);
+    setTemplatePreviewLoading(true);
     try {
       setTemplatePreview(await getJumpserverPermissionTemplate(permissionId));
     } catch (e: any) {
       message.error(e?.response?.data?.message || "读取授权模板失败");
     } finally {
-      setTemplateLoading(false);
+      setTemplatePreviewLoading(false);
     }
   };
   const confirmTemplateGrant = async () => {
     if (!templateUserId || !templatePermissionId || !templatePreview) return;
-    setTemplateLoading(true);
+    setTemplateSubmitting(true);
     try {
       await createJumpserverUserGrantFromTemplate({
         dashboardUserId: templateUserId,
@@ -385,7 +389,7 @@ export default function JumpserverAccessPage() {
     } catch (e: any) {
       message.error(e?.response?.data?.message || "复用授权模板失败");
     } finally {
-      setTemplateLoading(false);
+      setTemplateSubmitting(false);
     }
   };
   const revokeBundle = (binding: any) =>
@@ -426,7 +430,7 @@ export default function JumpserverAccessPage() {
         title="身份映射"
         extra={
           <Button
-            loading={actionCatalogLoading}
+            loading={mappingCatalogLoading}
             onClick={() => void openMapping()}
           >
             新增映射
@@ -466,14 +470,14 @@ export default function JumpserverAccessPage() {
         extra={
           <Space>
             <Button
-              loading={actionCatalogLoading}
+              loading={customGrantCatalogLoading}
               onClick={() => void openUserGrant()}
             >
               新增自定义授权
             </Button>
             <Button
               type="primary"
-              loading={actionCatalogLoading}
+              loading={templateCatalogLoading}
               onClick={() => void openTemplateGrant()}
             >
               复用现有 Asset Permission
@@ -543,7 +547,7 @@ export default function JumpserverAccessPage() {
             Dashboard 功能权限与 JumpServer 用户资产授权分离管理
           </Text>
         </div>
-        <Button loading={loading} onClick={() => void refreshPage()}>
+        <Button loading={statusLoading} onClick={() => void refreshPage()}>
           刷新
         </Button>
       </Space>
@@ -573,7 +577,7 @@ export default function JumpserverAccessPage() {
         <Button
           type="primary"
           disabled={!status?.eligible}
-          loading={loading}
+          loading={launchLoading}
           onClick={launch}
         >
           进入 JumpServer
@@ -629,7 +633,7 @@ export default function JumpserverAccessPage() {
         width={720}
         title="复用现有 JumpServer Asset Permission"
         open={templateModalOpen}
-        confirmLoading={templateLoading}
+        confirmLoading={templateSubmitting}
         okText="确认复制并授权"
         okButtonProps={{
           danger: Boolean(templatePreview?.risks.length),
@@ -667,7 +671,7 @@ export default function JumpserverAccessPage() {
               label: permission.name,
             }))}
             value={templatePermissionId}
-            loading={templateLoading}
+            loading={templatePreviewLoading}
             onChange={(value) => void selectPermissionTemplate(value)}
           />
           {templatePreview && (
