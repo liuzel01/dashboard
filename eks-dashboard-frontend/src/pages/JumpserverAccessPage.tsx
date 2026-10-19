@@ -34,6 +34,14 @@ import {
   type JumpserverPermissionTemplate,
 } from "../services/api";
 const { Title, Text } = Typography;
+type UserCatalogData = {
+  dashboardUsers: any[];
+  jumpserverUsers: JumpserverCatalogItem[];
+};
+type TargetCatalogData = {
+  assetItems: JumpserverCatalogItem[];
+  nodeItems: JumpserverCatalogItem[];
+};
 
 export default function JumpserverAccessPage() {
   const { permissions } = useContext(AuthContext);
@@ -68,11 +76,14 @@ export default function JumpserverAccessPage() {
     [customGrantCatalogLoading, setCustomGrantCatalogLoading] = useState(false),
     [templateCatalogLoading, setTemplateCatalogLoading] = useState(false);
   const configurationLoadedRef = useRef(false);
-  const configurationRequestRef = useRef<Promise<void> | null>(null);
+  const configurationDataRef = useRef<any>({ mappings: [], userBindings: [] });
+  const configurationRequestRef = useRef<Promise<any> | null>(null);
   const userCatalogLoadedRef = useRef(false);
-  const userCatalogRequestRef = useRef<Promise<void> | null>(null);
+  const userCatalogRequestRef = useRef<Promise<UserCatalogData> | null>(null);
   const targetCatalogLoadedRef = useRef(false);
-  const targetCatalogRequestRef = useRef<Promise<void> | null>(null);
+  const targetCatalogRequestRef = useRef<Promise<TargetCatalogData> | null>(
+    null,
+  );
   const permissionCatalogLoadedRef = useRef(false);
   const permissionCatalogRequestRef = useRef<Promise<void> | null>(null);
   const diagnosticRequestRef = useRef<Promise<void> | null>(null);
@@ -87,48 +98,61 @@ export default function JumpserverAccessPage() {
     }
   };
   const loadConfiguration = async (force = false) => {
-    if (!admin || (!force && configurationLoadedRef.current)) return;
+    if (!admin) return configurationDataRef.current;
+    if (!force && configurationLoadedRef.current)
+      return configurationDataRef.current;
     if (configurationRequestRef.current) return configurationRequestRef.current;
     const request = (async () => {
       setConfigurationLoading(true);
       try {
-        setCfg(await getJumpserverConfiguration());
+        const configuration = await getJumpserverConfiguration();
+        configurationDataRef.current = configuration;
+        setCfg(configuration);
         configurationLoadedRef.current = true;
+        return configuration;
       } catch (e: any) {
         message.error(e?.response?.data?.message || e.message);
+        throw e;
       } finally {
         setConfigurationLoading(false);
       }
     })();
     configurationRequestRef.current = request;
     try {
-      await request;
+      return await request;
     } finally {
       if (configurationRequestRef.current === request)
         configurationRequestRef.current = null;
     }
   };
-  const loadUserCatalog = async () => {
-    if (userCatalogLoadedRef.current) return;
+  const loadUserCatalog = async (): Promise<UserCatalogData> => {
+    if (userCatalogLoadedRef.current)
+      return { dashboardUsers: users, jumpserverUsers: remoteUsers };
     if (userCatalogRequestRef.current) return userCatalogRequestRef.current;
     const request = Promise.all([
       getAccessUsers(),
       getJumpserverCatalog("users"),
     ]).then(([dashboardUsers, jumpserverUsers]) => {
-      setUsers(dashboardUsers || []);
+      const normalizedUsers = dashboardUsers || [];
+      setUsers(normalizedUsers);
       setRemoteUsers(jumpserverUsers.items);
       userCatalogLoadedRef.current = true;
+      return {
+        dashboardUsers: normalizedUsers,
+        jumpserverUsers: jumpserverUsers.items,
+      };
     });
     userCatalogRequestRef.current = request;
     try {
-      await request;
+      return await request;
     } finally {
       if (userCatalogRequestRef.current === request)
         userCatalogRequestRef.current = null;
     }
   };
-  const loadTargetCatalog = async () => {
-    if (targetCatalogLoadedRef.current) return;
+  const loadTargetCatalog = async (): Promise<TargetCatalogData> => {
+    if (targetCatalogLoadedRef.current)
+      return { assetItems: assets, nodeItems: nodes };
     if (targetCatalogRequestRef.current) return targetCatalogRequestRef.current;
     const request = Promise.all([
       getJumpserverCatalog("assets"),
@@ -137,10 +161,14 @@ export default function JumpserverAccessPage() {
       setAssets(assetCatalog.items);
       setNodes(nodeCatalog.items);
       targetCatalogLoadedRef.current = true;
+      return {
+        assetItems: assetCatalog.items,
+        nodeItems: nodeCatalog.items,
+      };
     });
     targetCatalogRequestRef.current = request;
     try {
-      await request;
+      return await request;
     } finally {
       if (targetCatalogRequestRef.current === request)
         targetCatalogRequestRef.current = null;
@@ -183,10 +211,10 @@ export default function JumpserverAccessPage() {
     }
   };
   const refreshAfterAdminChange = async () => {
-    await Promise.all([loadStatus(), loadConfiguration(true)]);
+    await Promise.allSettled([loadStatus(), loadConfiguration(true)]);
   };
   const refreshPage = async () => {
-    await Promise.all([
+    await Promise.allSettled([
       loadStatus(),
       admin ? loadConfiguration(true) : undefined,
     ]);
@@ -195,7 +223,7 @@ export default function JumpserverAccessPage() {
     void Promise.all([
       loadStatus(),
       admin ? loadConfiguration() : Promise.resolve(),
-    ]);
+    ]).catch(() => undefined);
   }, []);
   const launch = async () => {
     try {
@@ -211,8 +239,9 @@ export default function JumpserverAccessPage() {
   };
   const openMapping = async () => {
     setMappingCatalogLoading(true);
+    let catalog: Awaited<ReturnType<typeof loadUserCatalog>>;
     try {
-      await loadUserCatalog();
+      catalog = await loadUserCatalog();
     } catch (e: any) {
       message.error(e?.response?.data?.message || "加载用户目录失败");
       return;
@@ -230,7 +259,7 @@ export default function JumpserverAccessPage() {
             optionFilterProp="label"
             placeholder="运维系统用户"
             style={{ width: "100%" }}
-            options={users.map((u) => ({
+            options={catalog.dashboardUsers.map((u) => ({
               value: u.id,
               label: `${u.display_name || u.username} (${u.username})`,
             }))}
@@ -241,7 +270,7 @@ export default function JumpserverAccessPage() {
             optionFilterProp="label"
             placeholder="搜索并选择 JumpServer 用户"
             style={{ width: "100%" }}
-            options={remoteUsers.map((u) => ({
+            options={catalog.jumpserverUsers.map((u) => ({
               value: u.username || u.name,
               label: `${u.name}${u.username ? ` (${u.username})` : ""}`,
             }))}
@@ -260,8 +289,15 @@ export default function JumpserverAccessPage() {
   };
   const openUserGrant = async () => {
     setCustomGrantCatalogLoading(true);
+    let userCatalog: Awaited<ReturnType<typeof loadUserCatalog>>;
+    let targetCatalog: Awaited<ReturnType<typeof loadTargetCatalog>>;
+    let configuration: any;
     try {
-      await Promise.all([loadUserCatalog(), loadTargetCatalog()]);
+      [userCatalog, targetCatalog, configuration] = await Promise.all([
+        loadUserCatalog(),
+        loadTargetCatalog(),
+        loadConfiguration(),
+      ]);
     } catch (e: any) {
       message.error(e?.response?.data?.message || "加载用户或资产目录失败");
       return;
@@ -271,7 +307,7 @@ export default function JumpserverAccessPage() {
     let dashboardUserId = 0,
       target = "";
     const mappedUserIds = new Set(
-      cfg.mappings
+      configuration.mappings
         .filter((mapping: any) => mapping.status === "ACTIVE")
         .map((mapping: any) => Number(mapping.dashboard_user_id)),
     );
@@ -285,7 +321,7 @@ export default function JumpserverAccessPage() {
             optionFilterProp="label"
             placeholder="选择已建立身份映射的运维系统用户"
             style={{ width: "100%" }}
-            options={users
+            options={userCatalog.dashboardUsers
               .filter((user) => mappedUserIds.has(Number(user.id)))
               .map((user) => ({
                 value: user.id,
@@ -298,7 +334,7 @@ export default function JumpserverAccessPage() {
             placeholder="选择资产或节点"
             style={{ width: "100%" }}
             options={[
-              ...assets.map((x) => ({
+              ...targetCatalog.assetItems.map((x) => ({
                 value: `ASSET|${x.id}|${x.name}${
                   x.nodesDisplay?.length
                     ? ` · ${x.nodesDisplay.join(", ")}`
@@ -310,7 +346,7 @@ export default function JumpserverAccessPage() {
                     : ""
                 }`,
               })),
-              ...nodes.map((x) => ({
+              ...targetCatalog.nodeItems.map((x) => ({
                 value: `NODE|${x.id}|${x.fullValue || x.name}`,
                 label: `节点 · ${x.fullValue || x.name}`,
               })),
@@ -357,7 +393,11 @@ export default function JumpserverAccessPage() {
   const openTemplateGrant = async () => {
     setTemplateCatalogLoading(true);
     try {
-      await Promise.all([loadUserCatalog(), loadPermissionCatalog()]);
+      await Promise.all([
+        loadUserCatalog(),
+        loadPermissionCatalog(),
+        loadConfiguration(),
+      ]);
     } catch (e: any) {
       message.error(e?.response?.data?.message || "加载用户或授权模板失败");
       return;
