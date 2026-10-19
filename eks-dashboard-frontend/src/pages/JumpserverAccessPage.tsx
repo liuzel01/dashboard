@@ -440,10 +440,22 @@ export default function JumpserverAccessPage() {
       setTemplateSubmitting(false);
     }
   };
+  const dashboardUserLabel = (record: any) =>
+    record.dashboard_display_name || record.dashboard_username || "-";
+  const dashboardUserCell = (record: any) => (
+    <Space direction="vertical" size={0}>
+      <Text>{dashboardUserLabel(record)}</Text>
+      {record.dashboard_display_name &&
+        record.dashboard_username &&
+        record.dashboard_display_name !== record.dashboard_username && (
+          <Text type="secondary">{record.dashboard_username}</Text>
+        )}
+    </Space>
+  );
   const revokeBundle = (binding: any) =>
     Modal.confirm({
       title: "确认回收用户资产授权？",
-      content: `将回收 ${binding.dashboard_username} 的“${binding.bundle_name}”授权。`,
+      content: `将回收 ${dashboardUserLabel(binding)} 的“${binding.bundle_name}”授权。`,
       okButtonProps: { danger: true },
       onOk: async () => {
         await unbindJumpserverUser(
@@ -490,7 +502,10 @@ export default function JumpserverAccessPage() {
           pagination={false}
           dataSource={cfg.mappings}
           columns={[
-            { title: "运维系统用户", dataIndex: "dashboard_username" },
+            {
+              title: "运维系统用户",
+              render: (_, row: any) => dashboardUserCell(row),
+            },
             { title: "JumpServer 用户", dataIndex: "remote_username" },
             {
               title: "状态",
@@ -540,7 +555,10 @@ export default function JumpserverAccessPage() {
             (binding: any) => Number(binding.enabled) === 1,
           )}
           columns={[
-            { title: "运维系统用户", dataIndex: "dashboard_username" },
+            {
+              title: "运维系统用户",
+              render: (_, row: any) => dashboardUserCell(row),
+            },
             {
               title: "资产范围",
               dataIndex: "targets",
