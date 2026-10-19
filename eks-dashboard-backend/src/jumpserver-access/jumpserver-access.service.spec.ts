@@ -472,6 +472,26 @@ describe('JumpserverAccessService safety policy', () => {
     await expect(service.prepareTicket('token', '')).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
+    expect(db.query.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['PORTAL_DENIED', 'DENIED']),
+    );
+  });
+
+  it('records a denied event when remote access is not eligible', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    jest.spyOn(service, 'myStatus').mockResolvedValue({
+      mapped: true,
+      eligible: false,
+      remoteUsername: 'mapped-user',
+      grants: [{ bundleId: 7, status: 'DRIFTED' }],
+    });
+
+    await expect(
+      service.prepareTicket('token', 'session-2'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.query.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['PORTAL_DENIED', 'DENIED']),
+    );
   });
 
   it('clamps the configured portal ticket lifetime to the safe maximum', async () => {
@@ -491,7 +511,7 @@ describe('JumpserverAccessService safety policy', () => {
     expect(db.query.mock.calls[0][1][4]).toBe(300);
   });
 
-  it('rejects an expired, replayed, cross-user or cross-session ticket', async () => {
+  it('rejects an unknown ticket without leaking validation details', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
     const conn = { execute: jest.fn().mockResolvedValueOnce([[]]) };
     db.withTransaction.mockImplementation((callback: any) => callback(conn));
@@ -499,13 +519,97 @@ describe('JumpserverAccessService safety policy', () => {
     await expect(
       service.consumeTicket('token', 'session-2', 'invalid-ticket'),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(conn.execute.mock.calls[0][0]).toContain('expires_at>UTC_TIMESTAMP');
-    expect(conn.execute.mock.calls[0][0]).toContain('consumed_at IS NULL');
-    expect(conn.execute.mock.calls[0][1]).toEqual([
-      expect.any(String),
-      2,
-      expect.any(String),
-    ]);
+    expect(conn.execute.mock.calls[0][0]).toContain('is_expired');
+    expect(conn.execute.mock.calls[0][1]).toEqual([expect.any(String)]);
+    expect(db.query.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['PORTAL_DENIED', 'DENIED']),
+    );
+  });
+
+  it('records expired and denied events for an unconsumed expired ticket', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([
+          [
+            {
+              ticket_id: 'expired-ticket-id',
+              dashboard_user_id: 2,
+              consumed_at: null,
+              expired_event_at: null,
+              is_expired: 1,
+            },
+          ],
+        ])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{}]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+
+    await expect(
+      service.consumeTicket('token', 'session-2', 'expired-ticket'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(conn.execute.mock.calls[2][1]).toEqual(
+      expect.arrayContaining(['PORTAL_EXPIRED', 'EXPIRED']),
+    );
+    expect(db.query.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['PORTAL_DENIED', 'DENIED']),
+    );
+  });
+
+  it('records each naturally expired ticket only after claiming it', async () => {
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([
+          [
+            {
+              ticket_id: 'expired-ticket-id',
+              dashboard_user_id: 2,
+              expired_event_at: null,
+            },
+          ],
+        ])
+        .mockResolvedValueOnce([{ affectedRows: 1 }])
+        .mockResolvedValueOnce([{}]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+
+    await service.recordExpiredPortalTickets();
+    expect(conn.execute.mock.calls[0][0]).toContain('expired_event_at IS NULL');
+    expect(conn.execute.mock.calls[1][0]).toContain(
+      'expired_event_at=UTC_TIMESTAMP',
+    );
+    expect(conn.execute.mock.calls[2][1]).toEqual(
+      expect.arrayContaining(['PORTAL_EXPIRED', 'EXPIRED']),
+    );
+  });
+
+  it('records a denied event for a replayed or mismatched-session ticket', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    const conn = {
+      execute: jest.fn().mockResolvedValueOnce([
+        [
+          {
+            ticket_id: 'consumed-ticket-id',
+            dashboard_user_id: 2,
+            session_hash: 'another-session',
+            consumed_at: new Date(),
+            is_expired: 0,
+          },
+        ],
+      ]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+
+    await expect(
+      service.consumeTicket('token', 'session-2', 'consumed-ticket'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+    expect(db.query.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['PORTAL_DENIED', 'DENIED']),
+    );
   });
 
   it('consumes a valid ticket exactly once before returning the fixed portal', async () => {
@@ -523,7 +627,19 @@ describe('JumpserverAccessService safety policy', () => {
     const conn = {
       execute: jest
         .fn()
-        .mockResolvedValueOnce([[{ ticket_id: 'ticket-id' }]])
+        .mockResolvedValueOnce([
+          [
+            {
+              ticket_id: 'ticket-id',
+              dashboard_user_id: 2,
+              session_hash: createHash('sha256')
+                .update('session-2')
+                .digest('hex'),
+              consumed_at: null,
+              is_expired: 0,
+            },
+          ],
+        ])
         .mockResolvedValueOnce([{ affectedRows: 1 }]),
     };
     db.withTransaction.mockImplementation((callback: any) => callback(conn));

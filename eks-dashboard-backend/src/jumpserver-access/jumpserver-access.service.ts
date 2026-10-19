@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import axios from 'axios';
 import { createHash, createHmac, randomBytes, randomUUID } from 'crypto';
+import { Interval } from '@nestjs/schedule';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuthService } from '../auth/auth.service';
@@ -846,10 +847,29 @@ export class JumpserverAccessService {
 
   async prepareTicket(authorization: string | undefined, sessionId: string) {
     const actor = await this.actor(authorization, 'jumpserver:portal:launch');
+    if (!sessionId) {
+      await this.event(
+        actor.userId,
+        actor.userId,
+        'PORTAL_DENIED',
+        'prepare',
+        'DENIED',
+        '登录会话无效，拒绝创建跳转 Ticket',
+      );
+      throw new UnauthorizedException('登录会话无效');
+    }
     const status = await this.myStatus(authorization);
-    if (!status.eligible)
+    if (!status.eligible) {
+      await this.event(
+        actor.userId,
+        actor.userId,
+        'PORTAL_DENIED',
+        'prepare',
+        'DENIED',
+        '远端实际授权未生效或存在漂移，拒绝创建跳转 Ticket',
+      );
       throw new ForbiddenException('JumpServer 实际授权尚未生效或存在漂移');
-    if (!sessionId) throw new UnauthorizedException('登录会话无效');
+    }
     const ticket = randomBytes(32).toString('base64url');
     const ttl = Math.min(
       300,
@@ -883,34 +903,104 @@ export class JumpserverAccessService {
     ticket: string,
   ) {
     const actor = await this.actor(authorization, 'jumpserver:portal:launch');
-    const ticketId = await this.db.withTransaction(async (conn) => {
+    const outcome = await this.db.withTransaction(async (conn) => {
       const [rows]: any = await conn.execute(
-        `SELECT * FROM jumpserver_portal_tickets WHERE ticket_hash=? AND dashboard_user_id=? AND session_hash=? AND consumed_at IS NULL AND expires_at>UTC_TIMESTAMP(3) FOR UPDATE`,
-        [this.hash(ticket), actor.userId, this.hash(sessionId)],
+        `SELECT *,expires_at<=UTC_TIMESTAMP(3) AS is_expired
+           FROM jumpserver_portal_tickets WHERE ticket_hash=? FOR UPDATE`,
+        [this.hash(ticket)],
       );
-      if (!rows[0])
-        throw new ForbiddenException(
-          'Ticket 无效、已过期、已使用或不属于当前会话',
-        );
+      const row = rows[0];
+      if (!row) return { denied: true, ticketId: 'unknown' };
+      if (row.consumed_at)
+        return { denied: true, ticketId: String(row.ticket_id) };
+      if (Number(row.is_expired) === 1) {
+        await this.recordExpiredTicket(conn, row);
+        return { denied: true, ticketId: String(row.ticket_id) };
+      }
+      if (
+        Number(row.dashboard_user_id) !== actor.userId ||
+        String(row.session_hash) !== this.hash(sessionId)
+      )
+        return { denied: true, ticketId: String(row.ticket_id) };
       await conn.execute(
         'UPDATE jumpserver_portal_tickets SET consumed_at=UTC_TIMESTAMP(3) WHERE ticket_id=? AND consumed_at IS NULL',
-        [rows[0].ticket_id],
+        [row.ticket_id],
       );
-      return String(rows[0].ticket_id);
+      return { denied: false, ticketId: String(row.ticket_id) };
     });
+    if (outcome.denied) {
+      await this.event(
+        actor.userId,
+        actor.userId,
+        'PORTAL_DENIED',
+        outcome.ticketId,
+        'DENIED',
+        'Ticket 无效、已过期、已使用或不属于当前会话',
+      );
+      throw new ForbiddenException(
+        'Ticket 无效、已过期、已使用或不属于当前会话',
+      );
+    }
     const status = await this.myStatus(authorization);
-    if (!status.eligible)
+    if (!status.eligible) {
+      await this.event(
+        actor.userId,
+        actor.userId,
+        'PORTAL_DENIED',
+        outcome.ticketId,
+        'DENIED',
+        'Ticket 消费后远端实际授权已失效',
+      );
       throw new ForbiddenException('JumpServer 实际授权已失效');
+    }
     const c = await this.config('reader');
     await this.event(
       actor.userId,
       actor.userId,
       'PORTAL_CONSUMED',
-      ticketId,
+      outcome.ticketId,
       'SUCCESS',
       '单次跳转 Ticket 已消费',
     );
     return { portalUrl: c.portalUrl };
+  }
+
+  @Interval(60_000)
+  async recordExpiredPortalTickets() {
+    await this.db.withTransaction(async (conn) => {
+      const [rows]: any = await conn.execute(
+        `SELECT ticket_id,dashboard_user_id,expired_event_at
+           FROM jumpserver_portal_tickets
+          WHERE consumed_at IS NULL AND expires_at<=UTC_TIMESTAMP(3) AND expired_event_at IS NULL
+          ORDER BY expires_at
+          LIMIT 100
+          FOR UPDATE`,
+      );
+      for (const row of rows) await this.recordExpiredTicket(conn, row);
+    });
+  }
+
+  private async recordExpiredTicket(conn: any, row: any) {
+    if (row.expired_event_at) return;
+    const [result]: any = await conn.execute(
+      `UPDATE jumpserver_portal_tickets
+          SET expired_event_at=UTC_TIMESTAMP(3)
+        WHERE ticket_id=? AND expired_event_at IS NULL`,
+      [row.ticket_id],
+    );
+    if (!Number(result.affectedRows || 0)) return;
+    await conn.execute(
+      `INSERT INTO jumpserver_events(actor_user_id,target_user_id,event_type,target_ref,outcome,summary)
+       VALUES(?,?,?,?,?,?)`,
+      [
+        Number(row.dashboard_user_id),
+        Number(row.dashboard_user_id),
+        'PORTAL_EXPIRED',
+        String(row.ticket_id),
+        'EXPIRED',
+        '单次跳转 Ticket 已自然过期',
+      ],
+    );
   }
 
   private json(v: any): string[] {

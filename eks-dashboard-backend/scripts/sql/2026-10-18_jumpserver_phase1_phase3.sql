@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS `jumpserver_portal_tickets` (
   `ticket_id` CHAR(36) PRIMARY KEY, `ticket_hash` CHAR(64) NOT NULL UNIQUE,
   `dashboard_user_id` BIGINT UNSIGNED NOT NULL, `session_hash` CHAR(64) NOT NULL,
   `expires_at` DATETIME(3) NOT NULL, `consumed_at` DATETIME(3) NULL,
+  `expired_event_at` DATETIME(3) NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY `idx_jumpserver_ticket_expiry` (`dashboard_user_id`,`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
