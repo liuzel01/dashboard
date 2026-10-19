@@ -245,7 +245,7 @@ export const getJumpserverPermissionTemplate = async (permissionId: string) =>
   ).data as JumpserverPermissionTemplate;
 export const createJumpserverUserGrantFromTemplate = async (input: {
   dashboardUserId: number;
-  permissionId: string;
+  permissionIds: string[];
 }) =>
   (await api.post("/jumpserver-access/user-grants/from-template", input)).data;
 export const unbindJumpserverUser = async (

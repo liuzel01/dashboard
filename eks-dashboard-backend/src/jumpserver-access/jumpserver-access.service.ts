@@ -481,8 +481,27 @@ export class JumpserverAccessService {
     const actor = await this.actor(authorization, 'jumpserver:config:manage');
     const dashboardUserId = Number(input.dashboardUserId);
     if (!dashboardUserId) throw new BadRequestException('请选择运维系统用户');
-    const template = await this.loadPermissionTemplate(
-      String(input.permissionId || ''),
+    const permissionIds: string[] = [
+      ...new Set<string>(
+        (Array.isArray(input.permissionIds)
+          ? input.permissionIds
+          : [input.permissionId]
+        )
+          .filter(
+            (value: unknown): value is string => typeof value === 'string',
+          )
+          .map((value: string) => value.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (permissionIds.length === 0)
+      throw new BadRequestException('请至少选择一个 Asset Permission');
+    if (permissionIds.length > 10)
+      throw new BadRequestException('单次最多选择 10 个 Asset Permission');
+    const templates = await Promise.all(
+      permissionIds.map((permissionId) =>
+        this.loadPermissionTemplate(permissionId),
+      ),
     );
     const mappings = await this.db.query<any[]>(
       `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
@@ -491,54 +510,73 @@ export class JumpserverAccessService {
     );
     if (!mappings[0])
       throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
-    const snapshot = {
-      targets: template.targets,
-      accounts: template.accounts,
-      protocols: template.protocols,
-      actions: template.actions,
-    };
-    const snapshotHash = this.hash(JSON.stringify(snapshot));
-    const grant = await this.db.withTransaction(async (conn) => {
-      const label = template.name
-        .replace(/[^\p{L}\p{N}._-]+/gu, '-')
-        .slice(0, 60);
-      const name = `template-${dashboardUserId}-${label || 'permission'}-${randomUUID().slice(0, 8)}`;
-      const [created]: any = await conn.execute(
-        `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,actions_json,source_permission_id,source_permission_name,source_snapshot_hash,enabled,created_by)
-         VALUES('primary',?,?,?,?,?,?,?,?,1,?)`,
-        [
-          name,
-          `Copied from JumpServer Asset Permission: ${template.name}`.slice(
-            0,
-            500,
-          ),
-          JSON.stringify(template.accounts),
-          JSON.stringify(template.protocols),
-          JSON.stringify(template.actions),
-          template.id,
-          template.name.slice(0, 128),
-          snapshotHash,
-          actor.userId,
-        ],
-      );
-      const bundleId = Number(created.insertId);
-      for (const target of template.targets)
-        await conn.execute(
-          'INSERT INTO jumpserver_bundle_targets(bundle_id,target_type,remote_id,remote_name) VALUES(?,?,?,?)',
-          [bundleId, target.type, target.id, target.name.slice(0, 255)],
+    const grants = await this.db.withTransaction(async (conn) => {
+      const createdGrants: Array<{
+        bundleId: number;
+        name: string;
+        sourcePermission: {
+          id: string;
+          name: string;
+          snapshotHash: string;
+        };
+      }> = [];
+      for (const template of templates) {
+        const snapshot = {
+          targets: template.targets,
+          accounts: template.accounts,
+          protocols: template.protocols,
+          actions: template.actions,
+        };
+        const snapshotHash = this.hash(JSON.stringify(snapshot));
+        const label = template.name
+          .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+          .slice(0, 60);
+        const name = `template-${dashboardUserId}-${label || 'permission'}-${randomUUID().slice(0, 8)}`;
+        const [created]: any = await conn.execute(
+          `INSERT INTO jumpserver_access_bundles(provider_key,name,description,accounts_json,protocols_json,actions_json,source_permission_id,source_permission_name,source_snapshot_hash,enabled,created_by)
+           VALUES('primary',?,?,?,?,?,?,?,?,1,?)`,
+          [
+            name,
+            `Copied from JumpServer Asset Permission: ${template.name}`.slice(
+              0,
+              500,
+            ),
+            JSON.stringify(template.accounts),
+            JSON.stringify(template.protocols),
+            JSON.stringify(template.actions),
+            template.id,
+            template.name.slice(0, 128),
+            snapshotHash,
+            actor.userId,
+          ],
         );
-      await conn.execute(
-        `INSERT INTO jumpserver_user_bundle_bindings(provider_key,dashboard_user_id,bundle_id,enabled,created_by)
-         VALUES('primary',?,?,1,?)`,
-        [dashboardUserId, bundleId, actor.userId],
-      );
-      return { bundleId, name };
+        const bundleId = Number(created.insertId);
+        for (const target of template.targets)
+          await conn.execute(
+            'INSERT INTO jumpserver_bundle_targets(bundle_id,target_type,remote_id,remote_name) VALUES(?,?,?,?)',
+            [bundleId, target.type, target.id, target.name.slice(0, 255)],
+          );
+        await conn.execute(
+          `INSERT INTO jumpserver_user_bundle_bindings(provider_key,dashboard_user_id,bundle_id,enabled,created_by)
+           VALUES('primary',?,?,1,?)`,
+          [dashboardUserId, bundleId, actor.userId],
+        );
+        createdGrants.push({
+          bundleId,
+          name,
+          sourcePermission: {
+            id: template.id,
+            name: template.name,
+            snapshotHash,
+          },
+        });
+      }
+      return createdGrants;
     });
     const sync = await this.syncUser(authorization, dashboardUserId);
     return {
-      ...grant,
       dashboardUserId,
-      sourcePermission: { id: template.id, name: template.name, snapshotHash },
+      grants,
       sync,
     };
   }

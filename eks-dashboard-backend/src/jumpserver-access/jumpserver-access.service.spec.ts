@@ -530,7 +530,7 @@ describe('JumpserverAccessService safety policy', () => {
       permissionId: 'permission-1',
     });
 
-    expect(result.bundleId).toBe(22);
+    expect(result.grants[0].bundleId).toBe(22);
     expect(conn.execute.mock.calls[0][0]).toContain('source_snapshot_hash');
     expect(conn.execute.mock.calls[0][1]).toEqual(
       expect.arrayContaining(['permission-1', 'ops-template']),
@@ -544,6 +544,53 @@ describe('JumpserverAccessService safety policy', () => {
     expect(conn.execute.mock.calls[2][0]).toContain(
       'jumpserver_user_bundle_bindings',
     );
+  });
+
+  it('creates multiple template grants in one transaction and syncs once', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    jest
+      .spyOn(service as any, 'loadPermissionTemplate')
+      .mockResolvedValueOnce({
+        id: 'permission-1',
+        name: 'template-1',
+        targets: [{ type: 'ASSET', id: 'asset-1', name: 'host-1' }],
+        accounts: ['@ALL'],
+        protocols: ['ssh'],
+        actions: ['connect'],
+      })
+      .mockResolvedValueOnce({
+        id: 'permission-2',
+        name: 'template-2',
+        targets: [{ type: 'NODE', id: 'node-1', name: '/DEFAULT/test' }],
+        accounts: ['@ALL'],
+        protocols: ['ssh'],
+        actions: ['connect'],
+      });
+    db.query.mockResolvedValueOnce([{ id: 10 }]);
+    const conn = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 22 }])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{ insertId: 23 }])
+        .mockResolvedValueOnce([{}])
+        .mockResolvedValueOnce([{}]),
+    };
+    db.withTransaction.mockImplementation((callback: any) => callback(conn));
+    const sync = jest
+      .spyOn(service, 'syncUser')
+      .mockResolvedValue({ dashboardUserId: 2, results: [] });
+
+    const result = await service.createUserGrantFromTemplate('token', {
+      dashboardUserId: 2,
+      permissionIds: ['permission-1', 'permission-2'],
+    });
+
+    expect(result.grants.map((grant) => grant.bundleId)).toEqual([22, 23]);
+    expect(db.withTransaction).toHaveBeenCalledTimes(1);
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(sync).toHaveBeenCalledWith('token', 2);
   });
 
   it('rejects preparing a portal ticket without a browser session', async () => {

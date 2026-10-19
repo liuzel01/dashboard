@@ -9,6 +9,8 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsIn,
   IsInt,
@@ -40,7 +42,12 @@ class UserGrantDto extends BundleDto {
 }
 class TemplateGrantDto {
   @IsInt() @Min(1) dashboardUserId!: number;
-  @IsString() @MaxLength(64) permissionId!: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  permissionIds!: string[];
 }
 class TicketDto {
   @IsString() ticket!: string;

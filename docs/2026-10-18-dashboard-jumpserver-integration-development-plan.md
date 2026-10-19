@@ -390,7 +390,7 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 
 后续人工验证进一步确认，“先创建授权包、再选择用户”的两步 UI 对当前场景没有业务价值。页面已收敛为一次“新增用户资产授权”操作；后端在同一事务中创建内部范围快照和用户绑定，再执行远端同步。内部 `jumpserver_access_bundles` 继续存在，但不再是用户需要管理的资源。
 
-为降低逐项选择大量资产的操作成本，Admin 还可以选择 JumpServer 中现有、有效且非 `dashboard:*` 的 Asset Permission 作为授权模板。Dashboard 读取模板后，仅复制其资产、节点、账号、协议和动作范围，明确忽略源 Permission 的用户和用户组；随后创建独立的 `dashboard:bundle:*` 受管 Permission 并只绑定所选 Dashboard 用户。源 Permission 不会被修改，源权限后续变更也不会自动传播到已创建授权，避免隐式扩权。
+为降低逐项选择大量资产的操作成本，Admin 还可以为一个用户同时选择一个或多个 JumpServer 中现有、有效且非 `dashboard:*` 的 Asset Permission 作为授权模板。Dashboard 读取全部模板后，仅复制其资产、节点、账号、协议和动作范围，明确忽略源 Permission 的用户和用户组；后端在同一数据库事务中为每个模板创建独立的 `dashboard:bundle:*` 受管 Permission，全部落库成功后仅同步一次 JumpServer。源 Permission 不会被修改，源权限后续变更也不会自动传播到已创建授权，避免隐式扩权。
 
 模板授权保存源 Permission ID、名称和范围引用快照 hash，页面在执行前分别展示直接资产数、授权节点数、节点实时展开后的当前有效资产数及高风险动作提示。包含 `@ALL`、全部协议、上传、下载、复制、粘贴、删除、分享或节点动态范围时，仍需管理员显式确认。系统角色、组织角色和用户组不属于可复用模板；回收操作只删除 Dashboard 自己创建并通过命名前缀校验的 Permission。
 

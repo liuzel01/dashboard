@@ -63,12 +63,15 @@ export default function JumpserverAccessPage() {
     >([]),
     [templateModalOpen, setTemplateModalOpen] = useState(false),
     [templateUserId, setTemplateUserId] = useState<number>(),
-    [templatePermissionId, setTemplatePermissionId] = useState<string>(),
-    [templatePreview, setTemplatePreview] =
-      useState<JumpserverPermissionTemplate>(),
+    [templatePermissionIds, setTemplatePermissionIds] = useState<string[]>([]),
+    [templatePreviews, setTemplatePreviews] = useState<
+      Record<string, JumpserverPermissionTemplate>
+    >({}),
     [templatePreviewLoading, setTemplatePreviewLoading] = useState(false),
     [templateSubmitting, setTemplateSubmitting] = useState(false),
-    [templateSampleExpanded, setTemplateSampleExpanded] = useState(false),
+    [templateSampleExpandedIds, setTemplateSampleExpandedIds] = useState<
+      string[]
+    >([]),
     [configurationLoading, setConfigurationLoading] = useState(false),
     [diagnosticLoading, setDiagnosticLoading] = useState(false),
     [diagnosticOpen, setDiagnosticOpen] = useState(false),
@@ -87,6 +90,7 @@ export default function JumpserverAccessPage() {
   const permissionCatalogLoadedRef = useRef(false);
   const permissionCatalogRequestRef = useRef<Promise<void> | null>(null);
   const diagnosticRequestRef = useRef<Promise<void> | null>(null);
+  const templatePreviewRequestRef = useRef(0);
   const loadStatus = async () => {
     setStatusLoading(true);
     try {
@@ -424,33 +428,74 @@ export default function JumpserverAccessPage() {
       setTemplateCatalogLoading(false);
     }
     setTemplateUserId(undefined);
-    setTemplatePermissionId(undefined);
-    setTemplatePreview(undefined);
-    setTemplateSampleExpanded(false);
+    setTemplatePermissionIds([]);
+    setTemplatePreviews({});
+    setTemplateSampleExpandedIds([]);
     setTemplateModalOpen(true);
   };
-  const selectPermissionTemplate = async (permissionId: string) => {
-    setTemplatePermissionId(permissionId);
-    setTemplatePreview(undefined);
-    setTemplateSampleExpanded(false);
+  const selectPermissionTemplates = async (permissionIds: string[]) => {
+    const requestId = ++templatePreviewRequestRef.current;
+    setTemplatePermissionIds(permissionIds);
+    setTemplateSampleExpandedIds((ids) =>
+      ids.filter((id) => permissionIds.includes(id)),
+    );
+    if (permissionIds.length === 0) {
+      setTemplatePreviews({});
+      setTemplatePreviewLoading(false);
+      return;
+    }
+    const retainedPreviews = Object.fromEntries(
+      permissionIds
+        .filter((id) => templatePreviews[id])
+        .map((id) => [id, templatePreviews[id]]),
+    );
+    const missingPermissionIds = permissionIds.filter(
+      (id) => !templatePreviews[id],
+    );
+    if (missingPermissionIds.length === 0) {
+      setTemplatePreviews(retainedPreviews);
+      setTemplatePreviewLoading(false);
+      return;
+    }
     setTemplatePreviewLoading(true);
     try {
-      setTemplatePreview(await getJumpserverPermissionTemplate(permissionId));
+      const previews = await Promise.all(
+        missingPermissionIds.map((permissionId) =>
+          getJumpserverPermissionTemplate(permissionId),
+        ),
+      );
+      if (requestId !== templatePreviewRequestRef.current) return;
+      setTemplatePreviews(
+        Object.fromEntries([
+          ...Object.entries(retainedPreviews),
+          ...previews.map((preview) => [preview.id, preview] as const),
+        ]),
+      );
     } catch (e: any) {
+      if (requestId !== templatePreviewRequestRef.current) return;
+      setTemplatePreviews({});
       message.error(e?.response?.data?.message || "读取授权模板失败");
     } finally {
-      setTemplatePreviewLoading(false);
+      if (requestId === templatePreviewRequestRef.current)
+        setTemplatePreviewLoading(false);
     }
   };
   const confirmTemplateGrant = async () => {
-    if (!templateUserId || !templatePermissionId || !templatePreview) return;
+    if (
+      !templateUserId ||
+      templatePermissionIds.length === 0 ||
+      templatePermissionIds.some((id) => !templatePreviews[id])
+    )
+      return;
     setTemplateSubmitting(true);
     try {
       await createJumpserverUserGrantFromTemplate({
         dashboardUserId: templateUserId,
-        permissionId: templatePermissionId,
+        permissionIds: templatePermissionIds,
       });
-      message.success("已复制授权范围并同步到 JumpServer");
+      message.success(
+        `已复制 ${templatePermissionIds.length} 个授权范围并同步到 JumpServer`,
+      );
       setTemplateModalOpen(false);
       await refreshAfterAdminChange();
     } catch (e: any) {
@@ -748,13 +793,18 @@ export default function JumpserverAccessPage() {
         confirmLoading={templateSubmitting}
         okText="确认复制并授权"
         okButtonProps={{
-          danger: Boolean(templatePreview?.risks.length),
+          danger: templatePermissionIds.some((id) =>
+            Boolean(templatePreviews[id]?.risks.length),
+          ),
           disabled:
-            !templateUserId || !templatePermissionId || !templatePreview,
+            !templateUserId ||
+            templatePermissionIds.length === 0 ||
+            templatePreviewLoading ||
+            templatePermissionIds.some((id) => !templatePreviews[id]),
         }}
         onCancel={() => {
           setTemplateModalOpen(false);
-          setTemplateSampleExpanded(false);
+          setTemplateSampleExpandedIds([]);
         }}
         onOk={() => void confirmTemplateGrant()}
       >
@@ -774,122 +824,160 @@ export default function JumpserverAccessPage() {
             onChange={setTemplateUserId}
           />
           <Select
+            mode="multiple"
+            maxCount={10}
             showSearch
             optionFilterProp="label"
-            placeholder="选择现有 Asset Permission 作为授权模板"
+            maxTagCount="responsive"
+            placeholder="选择一个或多个现有 Asset Permission 作为授权模板"
             style={{ width: "100%" }}
             options={permissionTemplates.map((permission) => ({
               value: permission.id,
               label: permission.name,
             }))}
-            value={templatePermissionId}
+            value={templatePermissionIds}
             loading={templatePreviewLoading}
-            onChange={(value) => void selectPermissionTemplate(value)}
+            onChange={(value) => void selectPermissionTemplates(value)}
           />
-          {templatePreview && (
-            <>
-              <Descriptions bordered size="small" column={3}>
-                <Descriptions.Item label="模板名称" span={2}>
-                  {templatePreview.name}
-                </Descriptions.Item>
-                <Descriptions.Item label="失效时间">
-                  {templatePreview.dateExpired || "未返回"}
-                </Descriptions.Item>
-                <Descriptions.Item label="直接资产">
-                  {
-                    templatePreview.targets.filter((x) => x.type === "ASSET")
-                      .length
-                  }
-                </Descriptions.Item>
-                <Descriptions.Item label="授权节点">
-                  {
-                    templatePreview.targets.filter((x) => x.type === "NODE")
-                      .length
-                  }
-                </Descriptions.Item>
-                <Descriptions.Item label="当前有效资产">
-                  {templatePreview.effectiveAssets.count}
-                </Descriptions.Item>
-                <Descriptions.Item label="账号" span={3}>
-                  {templatePreview.accounts.join(", ")}
-                </Descriptions.Item>
-                <Descriptions.Item label="协议" span={3}>
-                  {templatePreview.protocols.join(", ")}
-                </Descriptions.Item>
-                <Descriptions.Item label="动作" span={3}>
-                  {templatePreview.actions.join(", ")}
-                </Descriptions.Item>
-                {templatePreview.effectiveAssets.sample.length > 0 && (
-                  <Descriptions.Item label="有效资产样本" span={3}>
-                    <Space
-                      direction="vertical"
-                      size={4}
-                      style={{ width: "100%" }}
-                    >
-                      <div
-                        style={{
-                          maxHeight: templateSampleExpanded ? 160 : undefined,
-                          overflowY: templateSampleExpanded
-                            ? "auto"
-                            : undefined,
-                        }}
-                      >
-                        {templatePreview.effectiveAssets.sample
-                          .slice(0, templateSampleExpanded ? 20 : 5)
-                          .map((asset) => (
-                            <Tag key={asset.id} style={{ marginBottom: 4 }}>
-                              {asset.name}
-                              {asset.address ? ` · ${asset.address}` : ""}
-                            </Tag>
-                          ))}
-                      </div>
-                      {templatePreview.effectiveAssets.sample.length > 5 && (
-                        <Button
-                          type="link"
-                          size="small"
-                          style={{ alignSelf: "flex-start", padding: 0 }}
-                          onClick={() =>
-                            setTemplateSampleExpanded((expanded) => !expanded)
-                          }
+          {templatePermissionIds.length > 0 &&
+            templatePermissionIds.every((id) => templatePreviews[id]) && (
+              <Alert
+                type="info"
+                showIcon
+                message={`已选择 ${templatePermissionIds.length} 个授权模板`}
+                description={`各模板当前有效资产合计 ${templatePermissionIds.reduce(
+                  (total, id) =>
+                    total + templatePreviews[id].effectiveAssets.count,
+                  0,
+                )} 个（不同模板可能包含相同资产）。确认后将批量落库，再统一同步一次 JumpServer。`}
+              />
+            )}
+          {templatePermissionIds.map((permissionId) => {
+            const templatePreview = templatePreviews[permissionId];
+            if (!templatePreview) return null;
+            const sampleExpanded =
+              templateSampleExpandedIds.includes(permissionId);
+            return (
+              <Card
+                key={permissionId}
+                size="small"
+                title={templatePreview.name}
+              >
+                <Space
+                  direction="vertical"
+                  size="middle"
+                  style={{ width: "100%" }}
+                >
+                  <Descriptions bordered size="small" column={3}>
+                    <Descriptions.Item label="模板名称" span={2}>
+                      {templatePreview.name}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="失效时间">
+                      {templatePreview.dateExpired || "未返回"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="直接资产">
+                      {
+                        templatePreview.targets.filter(
+                          (x) => x.type === "ASSET",
+                        ).length
+                      }
+                    </Descriptions.Item>
+                    <Descriptions.Item label="授权节点">
+                      {
+                        templatePreview.targets.filter((x) => x.type === "NODE")
+                          .length
+                      }
+                    </Descriptions.Item>
+                    <Descriptions.Item label="当前有效资产">
+                      {templatePreview.effectiveAssets.count}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="账号" span={3}>
+                      {templatePreview.accounts.join(", ")}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="协议" span={3}>
+                      {templatePreview.protocols.join(", ")}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="动作" span={3}>
+                      {templatePreview.actions.join(", ")}
+                    </Descriptions.Item>
+                    {templatePreview.effectiveAssets.sample.length > 0 && (
+                      <Descriptions.Item label="有效资产样本" span={3}>
+                        <Space
+                          direction="vertical"
+                          size={4}
+                          style={{ width: "100%" }}
                         >
-                          {templateSampleExpanded
-                            ? "收起"
-                            : templatePreview.effectiveAssets.count >
-                                templatePreview.effectiveAssets.sample.length
-                              ? `展开更多样本（共 ${templatePreview.effectiveAssets.count} 个）`
-                              : `展开更多（剩余 ${templatePreview.effectiveAssets.sample.length - 5} 个）`}
-                        </Button>
-                      )}
-                      {templateSampleExpanded &&
-                        templatePreview.effectiveAssets.count >
-                          templatePreview.effectiveAssets.sample.length && (
-                          <Text type="secondary">
-                            当前仅展示前{" "}
-                            {templatePreview.effectiveAssets.sample.length}{" "}
-                            个，共 {templatePreview.effectiveAssets.count} 个
-                          </Text>
-                        )}
-                    </Space>
-                  </Descriptions.Item>
-                )}
-              </Descriptions>
-              {templatePreview.targets.some((x) => x.type === "NODE") && (
-                <Alert
-                  type="info"
-                  showIcon
-                  message="当前有效资产数是按节点实时展开的预览；节点成员后续变化会影响实际授权范围。"
-                />
-              )}
-              {templatePreview.risks.length > 0 && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message="请确认以下授权风险"
-                  description={templatePreview.risks.join("；")}
-                />
-              )}
-            </>
-          )}
+                          <div
+                            style={{
+                              maxHeight: sampleExpanded ? 160 : undefined,
+                              overflowY: sampleExpanded ? "auto" : undefined,
+                            }}
+                          >
+                            {templatePreview.effectiveAssets.sample
+                              .slice(0, sampleExpanded ? 20 : 5)
+                              .map((asset) => (
+                                <Tag key={asset.id} style={{ marginBottom: 4 }}>
+                                  {asset.name}
+                                  {asset.address ? ` · ${asset.address}` : ""}
+                                </Tag>
+                              ))}
+                          </div>
+                          {templatePreview.effectiveAssets.sample.length >
+                            5 && (
+                            <Button
+                              type="link"
+                              size="small"
+                              style={{ alignSelf: "flex-start", padding: 0 }}
+                              onClick={() =>
+                                setTemplateSampleExpandedIds((ids) =>
+                                  ids.includes(permissionId)
+                                    ? ids.filter((id) => id !== permissionId)
+                                    : [...ids, permissionId],
+                                )
+                              }
+                            >
+                              {sampleExpanded
+                                ? "收起"
+                                : templatePreview.effectiveAssets.count >
+                                    templatePreview.effectiveAssets.sample
+                                      .length
+                                  ? `展开更多样本（共 ${templatePreview.effectiveAssets.count} 个）`
+                                  : `展开更多（剩余 ${templatePreview.effectiveAssets.sample.length - 5} 个）`}
+                            </Button>
+                          )}
+                          {sampleExpanded &&
+                            templatePreview.effectiveAssets.count >
+                              templatePreview.effectiveAssets.sample.length && (
+                              <Text type="secondary">
+                                当前仅展示前{" "}
+                                {templatePreview.effectiveAssets.sample.length}{" "}
+                                个，共 {templatePreview.effectiveAssets.count}{" "}
+                                个
+                              </Text>
+                            )}
+                        </Space>
+                      </Descriptions.Item>
+                    )}
+                  </Descriptions>
+                  {templatePreview.targets.some((x) => x.type === "NODE") && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="当前有效资产数是按节点实时展开的预览；节点成员后续变化会影响实际授权范围。"
+                    />
+                  )}
+                  {templatePreview.risks.length > 0 && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="请确认以下授权风险"
+                      description={templatePreview.risks.join("；")}
+                    />
+                  )}
+                </Space>
+              </Card>
+            );
+          })}
         </Space>
       </Modal>
     </div>
