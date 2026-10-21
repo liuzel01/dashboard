@@ -649,6 +649,12 @@ export default function JumpserverAccessPage() {
   });
   const expiryFilter = (record: any, filter: string) => {
     if (filter === "FAILED") return record.revocation_status === "FAILED";
+    if (filter === "ACTIVE")
+      return (
+        record.revocation_status !== "FAILED" &&
+        record.revocation_status !== "PENDING" &&
+        (!record.expires_at || dayjs(record.expires_at).isAfter(dayjs()))
+      );
     if (filter === "REVOKING")
       return (
         record.revocation_status === "PENDING" ||
@@ -661,6 +667,14 @@ export default function JumpserverAccessPage() {
     if (filter === "WITHIN_7_DAYS") return remainingDays <= 7;
     if (filter === "WITHIN_30_DAYS") return remainingDays <= 30;
     return true;
+  };
+  const expiryRemainingText = (expiresAt: string) => {
+    const expiry = dayjs(expiresAt);
+    const remainingHours = expiry.diff(dayjs(), "hour", true);
+    if (remainingHours <= 0) return "已到期";
+    if (remainingHours < 24)
+      return `剩余 ${Math.max(1, Math.ceil(remainingHours))} 小时`;
+    return `剩余 ${Math.ceil(remainingHours / 24)} 天`;
   };
   const adminPanel = (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -749,6 +763,7 @@ export default function JumpserverAccessPage() {
             setGrantPage(pagination.current || 1);
             setGrantPageSize(pagination.pageSize || 20);
           }}
+          scroll={{ x: 980 }}
           dataSource={visibleUserBindings}
           columns={[
             {
@@ -767,6 +782,14 @@ export default function JumpserverAccessPage() {
             },
             {
               title: "来源",
+              filters: [
+                { text: "Asset Permission 模板", value: "TEMPLATE" },
+                { text: "自定义", value: "CUSTOM" },
+              ],
+              onFilter: (value, record: any) =>
+                value === "TEMPLATE"
+                  ? Boolean(record.source_permission_name)
+                  : !record.source_permission_name,
               render: (_, row: any) =>
                 row.source_permission_name ? (
                   <Tag color="blue">模板 · {row.source_permission_name}</Tag>
@@ -778,6 +801,7 @@ export default function JumpserverAccessPage() {
               title: "有效期",
               dataIndex: "expires_at",
               filters: [
+                { text: "正常有效", value: "ACTIVE" },
                 { text: "7 天内到期", value: "WITHIN_7_DAYS" },
                 { text: "30 天内到期", value: "WITHIN_30_DAYS" },
                 { text: "长期有效", value: "PERMANENT" },
@@ -811,21 +835,39 @@ export default function JumpserverAccessPage() {
                 if (row.revocation_status === "PENDING")
                   return <Tag color="orange">回收中</Tag>;
                 if (!row.expires_at) return <Tag>长期有效</Tag>;
-                const expired = dayjs(row.expires_at).isBefore(dayjs());
+                const remainingHours = dayjs(row.expires_at).diff(
+                  dayjs(),
+                  "hour",
+                  true,
+                );
+                const expired = remainingHours <= 0;
+                const color = expired
+                  ? "orange"
+                  : remainingHours <= 24
+                    ? "red"
+                    : remainingHours <= 24 * 7
+                      ? "orange"
+                      : "blue";
                 return (
-                  <Space direction="vertical" size={0}>
-                    <Tag color={expired ? "orange" : "blue"}>
-                      {expired ? "已到期，回收处理中" : "限时授权"}
-                    </Tag>
-                    <Text type="secondary">
-                      {dayjs(row.expires_at).format("YYYY-MM-DD HH:mm:ss")}
-                    </Text>
-                  </Space>
+                  <Tooltip
+                    title={`到期时间：${dayjs(row.expires_at).format("YYYY-MM-DD HH:mm:ss")}`}
+                  >
+                    <Space direction="vertical" size={0} tabIndex={0}>
+                      <Tag color={color}>
+                        {expired ? "已到期，回收处理中" : "限时授权"}
+                      </Tag>
+                      <Text type={remainingHours <= 24 ? "danger" : "secondary"}>
+                        {expiryRemainingText(row.expires_at)}
+                      </Text>
+                    </Space>
+                  </Tooltip>
                 );
               },
             },
             {
               title: "操作",
+              fixed: "right",
+              width: 100,
               render: (_, row: any) => (
                 <Button danger type="link" onClick={() => revokeBundle(row)}>
                   回收授权
