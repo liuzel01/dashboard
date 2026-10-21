@@ -82,6 +82,12 @@ export class AwsGovernanceCollector {
       },
     );
 
+    // A failed caller identity means every downstream AWS call would fail with
+    // the same credential error. Stop here to keep the run fast and actionable.
+    if (errors.length > 0) {
+      return { resources, errors, completedCollectors };
+    }
+
     for (const region of regions) {
       const clients =
         region === primaryRegion

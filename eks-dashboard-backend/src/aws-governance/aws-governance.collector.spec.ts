@@ -79,4 +79,41 @@ describe('AwsGovernanceCollector', () => {
     ]);
     expect(completed).toEqual(['healthy-source:ap-east-1']);
   });
+
+  it('stops after identity failure instead of repeating the credential error for every collector', async () => {
+    const send = jest.fn().mockRejectedValue(
+      Object.assign(new Error('credentials unavailable'), {
+        name: 'CredentialsProviderError',
+      }),
+    );
+    const factory = {
+      createPlatformAuditClients: jest.fn().mockReturnValue({ sts: { send } }),
+    };
+    const identityOnlyCollector = new AwsGovernanceCollector(factory as any);
+
+    const result = await identityOnlyCollector.collect(
+      {
+        id: 1,
+        environmentId: 'hashex',
+        accountId: '290368114919',
+        displayName: 'Hashex AWS',
+        partition: 'aws',
+        defaultRegions: ['ap-east-1'],
+        platformAuditRoleArn:
+          'arn:aws:iam::290368114919:role/DashboardHashexPlatformAuditRole',
+        enabled: true,
+      },
+      ['ap-east-1'],
+    );
+
+    expect(result.resources).toEqual([]);
+    expect(result.completedCollectors).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        collector: 'identity',
+        code: 'CredentialsProviderError',
+      }),
+    ]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });

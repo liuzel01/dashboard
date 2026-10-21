@@ -25,13 +25,21 @@ export class AwsCredentialProviderFactory {
     account: AwsCloudAccount,
     region: string,
   ): AwsGovernanceClients {
-    const profile = String(process.env.AWS_PROFILE || '').trim();
     const production =
       String(process.env.NODE_ENV || '').toLowerCase() === 'production';
-    const masterCredentials =
-      !production && profile
-        ? fromIni({ profile })
-        : fromInstanceMetadata({ maxRetries: 2, timeout: 1_000 });
+    const sourceProfile = String(
+      process.env.AWS_GOVERNANCE_SOURCE_PROFILE ||
+        process.env.AWS_PROFILE ||
+        '',
+    ).trim();
+    if (!production && !sourceProfile) {
+      throw new Error(
+        '本地 AWS Inventory 未配置凭据来源。请设置 AWS_GOVERNANCE_SOURCE_PROFILE（例如 megadev）后重启后端服务。',
+      );
+    }
+    const masterCredentials = production
+      ? fromInstanceMetadata({ maxRetries: 2, timeout: 1_000 })
+      : fromIni({ profile: sourceProfile });
     const roleSessionName =
       `dashboard-audit-${account.environmentId}-${Date.now()}`
         .replace(/[^A-Za-z0-9_=,.@-]/g, '-')
