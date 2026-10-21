@@ -8,6 +8,7 @@ import { AwsDetectionService } from './aws-detection.service';
 import { AwsGovernanceCollector } from './aws-governance.collector';
 import { AwsGovernanceController } from './aws-governance.controller';
 import { AwsGovernanceService } from './aws-governance.service';
+import { AwsRemediationService } from './aws-remediation.service';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AwsGovernanceService } from './aws-governance.service';
     AwsGovernanceCollector,
     AwsDetectionService,
     AwsGovernanceService,
+    AwsRemediationService,
   ],
   exports: [AwsCredentialProviderFactory],
 })

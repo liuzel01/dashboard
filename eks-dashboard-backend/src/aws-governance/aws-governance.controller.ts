@@ -14,6 +14,7 @@ import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
 import { AwsDetectionService } from './aws-detection.service';
 import { AwsGovernanceService } from './aws-governance.service';
+import { AwsRemediationService } from './aws-remediation.service';
 import type { AwsGovernanceActor } from './aws-governance.types';
 
 @Controller('aws-governance')
@@ -23,6 +24,7 @@ export class AwsGovernanceController {
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
     private readonly detection: AwsDetectionService,
+    private readonly remediation: AwsRemediationService,
   ) {}
 
   @Get('overview')
@@ -187,6 +189,80 @@ export class AwsGovernanceController {
       action,
       body,
     );
+  }
+
+  @Post('findings/:id/remediations/preview')
+  async previewRemediation(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Query('accountId') accountId: string,
+    @Body() body: any,
+  ) {
+    const actor = await this.actor(authorization, 'aws-governance:remediation:request');
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    return this.remediation.preview(Number(id), account.id, body);
+  }
+
+  @Post('remediations/from-finding/:id')
+  async createRemediation(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Query('accountId') accountId: string,
+    @Body() body: any,
+  ) {
+    const actor = await this.actor(authorization, 'aws-governance:remediation:request');
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    return this.remediation.create(actor, Number(id), account.id, body);
+  }
+
+  @Get('remediations')
+  async remediations(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('accountId') accountId: string,
+  ) {
+    const actor = await this.actor(authorization, 'aws-governance:finding:read');
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    return this.remediation.list(account.id);
+  }
+
+  @Post('remediations/:id/approve')
+  async approveRemediation(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Query('accountId') accountId: string,
+    @Body() body: any,
+  ) {
+    const actor = await this.actor(authorization, 'aws-governance:remediation:approve');
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    return this.remediation.approve(actor, Number(id), account.id, body);
+  }
+
+  @Post('remediations/:id/execute')
+  async executeRemediation(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Query('accountId') accountId: string,
+    @Body() body: any,
+  ) {
+    const actor = await this.actor(authorization, 'aws-governance:remediation:execute');
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    const task = await this.remediation.execute(actor, Number(id), account.id, body);
+    const inventory = await this.service.startRun(actor, account.id);
+    return { task, inventory };
+  }
+
+  @Post('remediations/:id/rollback')
+  async rollbackRemediation(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Query('accountId') accountId: string,
+    @Body() body: any,
+  ) {
+    const actor = await this.actor(authorization, 'aws-governance:remediation:rollback');
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    const task = await this.remediation.rollback(actor, Number(id), account.id, body);
+    const inventory = await this.service.startRun(actor, account.id);
+    return { task, inventory };
   }
 
   private async actor(

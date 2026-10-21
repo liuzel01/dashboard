@@ -33,6 +33,8 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
 ];
 
 export const AUDIT_PATTERN_RULES: AuditPatternRuleConfig[] = [
+  { method: 'POST', path: '/aws-governance/remediations/from-finding/:id', regex: /^\/aws-governance\/remediations\/from-finding\/([^/]+)$/, action: 'awsGovernance.remediation.create', actionName: '创建 AWS 受控整改任务', menuKey: 'menu:aws-governance', targetType: 'aws_remediation_task', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'POST', path: '/aws-governance/remediations/:id/:action', regex: /^\/aws-governance\/remediations\/([^/]+)\/(approve|execute|rollback)$/, action: 'awsGovernance.remediation.transition', actionName: '操作 AWS 受控整改任务', menuKey: 'menu:aws-governance', targetType: 'aws_remediation_task', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/aws-access/grants', regex: /^\/aws-access\/grants$/, action: 'awsAccess.grant.create', actionName: '创建 AWS 临时授权', menuKey: 'menu:aws-access', targetType: 'aws_access_grant' },
   { method: 'POST', path: '/aws-access/grants/:id/revoke', regex: /^\/aws-access\/grants\/([^/]+)\/revoke$/, action: 'awsAccess.grant.revoke', actionName: '提前回收 AWS 临时授权', menuKey: 'menu:aws-access', targetType: 'aws_access_grant', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/aws-access/grants/:id/session/prepare', regex: /^\/aws-access\/grants\/([^/]+)\/session\/prepare$/, action: 'awsAccess.session.prepare', actionName: '准备 AWS 临时会话', menuKey: 'menu:aws-access', targetType: 'aws_access_session', getResourceId: ({ params }) => String(params?.[0] || '') || null },
