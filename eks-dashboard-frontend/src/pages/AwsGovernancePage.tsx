@@ -1,0 +1,211 @@
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Descriptions, Input, message, Select, Space, Tabs, Tag, Typography } from "antd";
+import { CloudSyncOutlined, SafetyCertificateOutlined, SearchOutlined } from "@ant-design/icons";
+import { AuthContext } from "../contexts/AuthContextValue";
+import { DetailDrawer, MetricGrid, OpsTable, PageHeader } from "../components/ops";
+import {
+  diagnoseAwsGovernanceAccount,
+  getAwsGovernanceOverview,
+  getAwsInventoryRun,
+  listAwsGovernanceResources,
+  listAwsInventoryRuns,
+  listAwsResourceChanges,
+  startAwsInventoryRun,
+  type AwsGovernanceOverview,
+  type AwsGovernanceResource,
+  type AwsInventoryRun,
+  type AwsResourceChange,
+} from "../services/api";
+import { formatDateTime } from "../utils/time";
+
+const terminalRunStatuses = new Set(["SUCCEEDED", "PARTIAL", "FAILED"]);
+const runColor: Record<string, string> = {
+  PENDING: "default",
+  RUNNING: "processing",
+  SUCCEEDED: "success",
+  PARTIAL: "warning",
+  FAILED: "error",
+};
+
+const requestErrorMessage = (reason: unknown, fallback: string) => {
+  if (!reason || typeof reason !== "object") return fallback;
+  const candidate = reason as { message?: unknown; response?: { data?: { message?: unknown } } };
+  const apiMessage = candidate.response?.data?.message;
+  if (typeof apiMessage === "string" && apiMessage) return apiMessage;
+  return typeof candidate.message === "string" && candidate.message ? candidate.message : fallback;
+};
+
+const AwsGovernancePage: React.FC = () => {
+  const { permissions } = useContext(AuthContext);
+  const [overview, setOverview] = useState<AwsGovernanceOverview | null>(null);
+  const [accountId, setAccountId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState("resources");
+  const [resources, setResources] = useState<AwsGovernanceResource[]>([]);
+  const [resourceTotal, setResourceTotal] = useState(0);
+  const [runs, setRuns] = useState<AwsInventoryRun[]>([]);
+  const [runTotal, setRunTotal] = useState(0);
+  const [changes, setChanges] = useState<AwsResourceChange[]>([]);
+  const [changeTotal, setChangeTotal] = useState(0);
+  const [keywordDraft, setKeywordDraft] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [resourceType, setResourceType] = useState<string>();
+  const [region, setRegion] = useState<string>();
+  const [selected, setSelected] = useState<AwsGovernanceResource | AwsInventoryRun | AwsResourceChange | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pollTimer = useRef<number | null>(null);
+
+  const selectedAccount = overview?.accounts.find((account) => account.id === accountId) || null;
+  const canSync = permissions.includes("aws-governance:inventory:run");
+  const canDiagnose = permissions.includes("aws-governance:config:manage");
+
+  const loadOverview = useCallback(async () => {
+    const data = await getAwsGovernanceOverview();
+    setOverview(data);
+    setAccountId((current) => current && data.accounts.some((account) => account.id === current) ? current : data.accounts[0]?.id || null);
+    return data;
+  }, []);
+
+  const loadTab = useCallback(async () => {
+    if (!accountId) return;
+    if (activeTab === "resources") {
+      const data = await listAwsGovernanceResources({ accountId, resourceType, region, keyword, page: 1, pageSize: 100 });
+      setResources(data.items); setResourceTotal(data.total);
+    } else if (activeTab === "runs") {
+      const data = await listAwsInventoryRuns(accountId, 1, 100);
+      setRuns(data.items); setRunTotal(data.total);
+    } else {
+      const data = await listAwsResourceChanges({ accountId, page: 1, pageSize: 100 });
+      setChanges(data.items); setChangeTotal(data.total);
+    }
+  }, [accountId, activeTab, keyword, region, resourceType]);
+
+  useEffect(() => {
+    setLoading(true); setError(null);
+    void loadOverview().catch((reason: unknown) => setError(requestErrorMessage(reason, "加载 AWS 云资源治理失败"))).finally(() => setLoading(false));
+  }, [loadOverview]);
+
+  useEffect(() => {
+    if (!accountId) return;
+    setLoading(true); setError(null);
+    void loadTab().catch((reason: unknown) => setError(requestErrorMessage(reason, "加载列表失败"))).finally(() => setLoading(false));
+  }, [accountId, loadTab]);
+
+  useEffect(() => () => { if (pollTimer.current) window.clearTimeout(pollTimer.current); }, []);
+
+  const refreshAll = async () => {
+    await Promise.all([loadOverview(), loadTab()]);
+  };
+
+  const pollRun = async (runId: number) => {
+    const run = await getAwsInventoryRun(runId);
+    if (terminalRunStatuses.has(run.status)) {
+      setSyncing(false);
+      await refreshAll();
+      message.open({ type: run.status === "SUCCEEDED" ? "success" : run.status === "PARTIAL" ? "warning" : "error", content: run.status === "SUCCEEDED" ? "AWS Inventory 同步完成" : run.status === "PARTIAL" ? "同步部分完成，请查看任务错误" : "AWS Inventory 同步失败" });
+      return;
+    }
+    pollTimer.current = window.setTimeout(() => void pollRun(runId).catch(() => setSyncing(false)), 1500);
+  };
+
+  const startSync = async () => {
+    if (!accountId) return;
+    setSyncing(true);
+    try {
+      const run = await startAwsInventoryRun(accountId);
+      message.info(run.joined ? "已有同步任务运行，已继续追踪" : "已启动 AWS Inventory 同步");
+      await pollRun(run.runId);
+    } catch (reason: unknown) {
+      setSyncing(false);
+      message.error(requestErrorMessage(reason, "启动同步失败"));
+    }
+  };
+
+  const diagnose = async () => {
+    if (!accountId) return;
+    setDiagnosing(true);
+    try {
+      const result = await diagnoseAwsGovernanceAccount(accountId);
+      if (result.ok) message.success(`Audit Role 连接正常：${result.arn}`);
+      else message.error(`${result.errorCode || "诊断失败"}：${result.errorMessage || "身份不匹配"}`);
+    } finally { setDiagnosing(false); }
+  };
+
+  const typeOptions = useMemo(() => (overview?.byType || []).map((item) => ({ label: `${item.resourceType} (${item.count})`, value: item.resourceType })), [overview]);
+  const regionOptions = useMemo(() => Array.from(new Set(["global", ...(selectedAccount?.defaultRegions || [])])).map((value) => ({ label: value, value })), [selectedAccount]);
+
+  const resourceColumns = [
+    { title: "资源", key: "resource", render: (_: unknown, row: AwsGovernanceResource) => <Space direction="vertical" size={0}><Typography.Text strong>{row.displayName || row.resourceId}</Typography.Text><Typography.Text type="secondary" copyable>{row.resourceId}</Typography.Text></Space> },
+    { title: "类型", dataIndex: "resourceType", key: "resourceType", render: (value: string) => <Tag>{value}</Tag> },
+    { title: "区域", dataIndex: "region", key: "region" },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string | null) => value ? <Tag color="blue">{value}</Tag> : "-" },
+    { title: "最后发现", dataIndex: "lastSeenAt", key: "lastSeenAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsGovernanceResource) => <Button type="link" onClick={() => setSelected(row)}>详情</Button> },
+  ];
+  const runColumns = [
+    { title: "任务", dataIndex: "id", key: "id", render: (value: number) => `#${value}` },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => <Tag color={runColor[value]}>{value}</Tag> },
+    { title: "模式", dataIndex: "mode", key: "mode" },
+    { title: "资源", dataIndex: "resourceCount", key: "resourceCount" },
+    { title: "变更", dataIndex: "changeCount", key: "changeCount" },
+    { title: "错误", dataIndex: "errorCount", key: "errorCount", render: (value: number) => <Tag color={value ? "error" : "success"}>{value}</Tag> },
+    { title: "开始时间", dataIndex: "startedAt", key: "startedAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsInventoryRun) => <Button type="link" onClick={() => setSelected(row)}>详情</Button> },
+  ];
+  const changeColumns = [
+    { title: "变更", dataIndex: "changeType", key: "changeType", render: (value: string) => <Tag color={value === "CREATED" ? "success" : value === "DELETED" ? "error" : "processing"}>{value}</Tag> },
+    { title: "资源类型", dataIndex: "resourceType", key: "resourceType" },
+    { title: "资源 ID", dataIndex: "resourceId", key: "resourceId", ellipsis: true },
+    { title: "区域", dataIndex: "region", key: "region" },
+    { title: "发现时间", dataIndex: "detectedAt", key: "detectedAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsResourceChange) => <Button type="link" onClick={() => setSelected(row)}>详情</Button> },
+  ];
+
+  return <Space direction="vertical" size={20} style={{ width: "100%" }}>
+    <PageHeader
+      title="AWS 云资源治理"
+      description="使用独立 Platform Audit Role 同步只读资源快照；第一版仅接入 hashex。"
+      environmentName={selectedAccount?.environmentId || "未接入"}
+      scope={selectedAccount ? <Tag color="geekblue">AWS {selectedAccount.accountId}</Tag> : undefined}
+      actions={<Space>
+        {canDiagnose && <Button icon={<SafetyCertificateOutlined />} loading={diagnosing} disabled={!accountId} onClick={() => void diagnose()}>身份诊断</Button>}
+        {canSync && <Button type="primary" icon={<CloudSyncOutlined />} loading={syncing} disabled={!accountId} onClick={() => void startSync()}>同步 Inventory</Button>}
+      </Space>}
+    />
+    {error && <Alert type="error" showIcon message="加载失败" description={error} />}
+    {!loading && overview && !overview.accounts.length && <Alert type="warning" showIcon message="未授权 AWS 云账号" description="当前角色尚未绑定任何 AWS 云账号范围。" />}
+    <MetricGrid loading={loading} items={[
+      { key: "resources", label: "当前资源", value: overview?.metrics.resources || 0 },
+      { key: "changes", label: "24 小时变更", value: overview?.metrics.changes24h || 0 },
+      { key: "failed", label: "24 小时异常任务", value: overview?.metrics.failedRuns24h || 0, valueStyle: overview?.metrics.failedRuns24h ? { color: "#cf1322" } : undefined },
+      { key: "last", label: "最近成功同步", value: overview?.metrics.lastSuccessfulAt ? formatDateTime(overview.metrics.lastSuccessfulAt) : "尚未同步" },
+    ]} />
+    <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+      { key: "resources", label: `资源目录 (${resourceTotal})` },
+      { key: "runs", label: `同步任务 (${runTotal})` },
+      { key: "changes", label: `变更记录 (${changeTotal})` },
+    ]} />
+    {activeTab === "resources" && <>
+      <Space wrap>
+        <Input value={keywordDraft} onChange={(event) => setKeywordDraft(event.target.value)} onPressEnter={() => setKeyword(keywordDraft.trim())} placeholder="搜索资源名称、ID 或 ARN" style={{ width: 300 }} allowClear />
+        <Select value={resourceType} onChange={setResourceType} options={typeOptions} placeholder="资源类型" allowClear showSearch style={{ width: 240 }} />
+        <Select value={region} onChange={setRegion} options={regionOptions} placeholder="区域" allowClear showSearch style={{ width: 160 }} />
+        <Button icon={<SearchOutlined />} onClick={() => setKeyword(keywordDraft.trim())}>查询</Button>
+      </Space>
+      <OpsTable rowKey="id" loading={loading} dataSource={resources} columns={resourceColumns} pagination={false} emptyDescription="尚无资源快照，请执行同步" />
+    </>}
+    {activeTab === "runs" && <OpsTable rowKey="id" loading={loading} dataSource={runs} columns={runColumns} pagination={false} emptyDescription="尚无同步任务" />}
+    {activeTab === "changes" && <OpsTable rowKey="id" loading={loading} dataSource={changes} columns={changeColumns} pagination={false} emptyDescription="尚无资源变更" />}
+    <DetailDrawer open={Boolean(selected)} onClose={() => setSelected(null)} title="AWS 资源治理详情">
+      {selected && <Descriptions bordered column={1} size="small">
+        {Object.entries(selected).map(([key, value]) => <Descriptions.Item key={key} label={key}>
+          {typeof value === "object" && value !== null ? <Typography.Paragraph copyable style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}><code>{JSON.stringify(value, null, 2)}</code></Typography.Paragraph> : String(value ?? "-")}
+        </Descriptions.Item>)}
+      </Descriptions>}
+    </DetailDrawer>
+  </Space>;
+};
+
+export default AwsGovernancePage;

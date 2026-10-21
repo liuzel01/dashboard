@@ -96,6 +96,7 @@ const MenuOrderManagementPage = lazy(
 const DependencyHealthPage = lazy(() => import("./pages/DependencyHealthPage"));
 const BytebaseCenterPage = lazy(() => import("./pages/BytebaseCenterPage"));
 const JumpserverAccessPage = lazy(() => import("./pages/JumpserverAccessPage"));
+const AwsGovernancePage = lazy(() => import("./pages/AwsGovernancePage"));
 const Home = lazy(() => import("./pages/Home"));
 
 const PageLoadingFallback: React.FC = () => (
@@ -286,6 +287,13 @@ const AppLayout: React.FC = () => {
       permission: "menu:security-groups",
       order: 30,
     },
+    awsGovernance: {
+      key: "/aws-governance",
+      label: "AWS 云资源治理",
+      icon: <DeploymentUnitOutlined />,
+      permission: "menu:aws-governance",
+      order: 35,
+    },
     s3Upload: {
       key: "/s3-upload",
       label: "S3 上传",
@@ -433,7 +441,11 @@ const AppLayout: React.FC = () => {
     groupKey: string,
     items: T[],
   ) =>
-    sortByMenuOrder(groupKey, items).map(({ order: _order, ...item }) => item);
+    sortByMenuOrder(groupKey, items).map((entry) => {
+      const item: Partial<T> = { ...entry };
+      delete item.order;
+      return item as Omit<T, "order">;
+    });
 
   const createMenuGroup = (
     key: string,
@@ -583,6 +595,7 @@ const AppLayout: React.FC = () => {
       menuItems.deployments,
       menuItems.jumpServers,
       menuItems.securityGroups,
+      menuItems.awsGovernance,
       menuItems.s3Upload,
     ],
   );
@@ -812,6 +825,14 @@ const AppLayout: React.FC = () => {
                 element={
                   <ProtectedRoute required={["menu:security-groups"]}>
                     <SecurityGroupPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/aws-governance"
+                element={
+                  <ProtectedRoute required={["menu:aws-governance"]}>
+                    <AwsGovernancePage />
                   </ProtectedRoute>
                 }
               />

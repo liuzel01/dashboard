@@ -3458,3 +3458,98 @@ export const getDependencyHealthHistory = async (key: string, hours = 24) =>
       params: { hours },
     })
   ).data as DependencyHealthHistory;
+
+export type AwsCloudAccount = {
+  id: number;
+  environmentId: string;
+  accountId: string;
+  displayName: string;
+  partition: string;
+  defaultRegions: string[];
+  platformAuditRoleArn: string;
+  enabled: boolean;
+};
+export type AwsGovernanceOverview = {
+  accounts: AwsCloudAccount[];
+  metrics: {
+    resources: number;
+    changes24h: number;
+    failedRuns24h: number;
+    lastSuccessfulAt: string | null;
+  };
+  byType: Array<{ resourceType: string; count: number }>;
+};
+export type AwsInventoryRun = {
+  id: number;
+  accountId: number;
+  mode: "MANUAL" | "SCHEDULED";
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED";
+  regions: string[];
+  collectorVersion: string;
+  resourceCount: number;
+  changeCount: number;
+  errorCount: number;
+  errors: Array<{ collector: string; region: string; code: string; message: string }>;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string | null;
+};
+export type AwsGovernanceResource = {
+  id: number;
+  accountId: number;
+  region: string;
+  resourceType: string;
+  resourceId: string;
+  resourceArn: string | null;
+  displayName: string | null;
+  status: string | null;
+  normalized: Record<string, unknown>;
+  normalizedHash: string;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  deletedAt: string | null;
+};
+export type AwsResourceChange = {
+  id: number;
+  runId: number;
+  accountId: number;
+  region: string;
+  resourceType: string;
+  resourceId: string;
+  changeType: "CREATED" | "UPDATED" | "DELETED";
+  beforeHash: string | null;
+  afterHash: string | null;
+  summary: Record<string, unknown>;
+  detectedAt: string | null;
+};
+export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
+export const getAwsGovernanceOverview = async () =>
+  (await api.get("/aws-governance/overview")).data as AwsGovernanceOverview;
+export const listAwsGovernanceResources = async (params: {
+  accountId: number;
+  resourceType?: string;
+  region?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}) => (await api.get("/aws-governance/resources", { params })).data as Paged<AwsGovernanceResource>;
+export const listAwsInventoryRuns = async (accountId: number, page = 1, pageSize = 20) =>
+  (await api.get("/aws-governance/inventory-runs", { params: { accountId, page, pageSize } })).data as Paged<AwsInventoryRun>;
+export const getAwsInventoryRun = async (runId: number) =>
+  (await api.get(`/aws-governance/inventory-runs/${runId}`)).data as AwsInventoryRun;
+export const startAwsInventoryRun = async (accountId: number) =>
+  (await api.post(`/aws-governance/accounts/${accountId}/inventory-runs`)).data as { runId: number; status: string; joined: boolean };
+export const diagnoseAwsGovernanceAccount = async (accountId: number) =>
+  (await api.post(`/aws-governance/accounts/${accountId}/diagnose`)).data as {
+    ok: boolean;
+    accountId?: string | null;
+    arn?: string | null;
+    expectedAccountId: string;
+    roleArn: string;
+    region: string;
+    checkedAt: string;
+    errorCode?: string;
+    errorMessage?: string;
+  };
+export const listAwsResourceChanges = async (params: { accountId: number; runId?: number; page?: number; pageSize?: number }) =>
+  (await api.get("/aws-governance/changes", { params })).data as Paged<AwsResourceChange>;
