@@ -33,6 +33,10 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
 ];
 
 export const AUDIT_PATTERN_RULES: AuditPatternRuleConfig[] = [
+  { method: 'POST', path: '/aws-access/grants', regex: /^\/aws-access\/grants$/, action: 'awsAccess.grant.create', actionName: '创建 AWS 临时授权', menuKey: 'menu:aws-access', targetType: 'aws_access_grant' },
+  { method: 'POST', path: '/aws-access/grants/:id/revoke', regex: /^\/aws-access\/grants\/([^/]+)\/revoke$/, action: 'awsAccess.grant.revoke', actionName: '提前回收 AWS 临时授权', menuKey: 'menu:aws-access', targetType: 'aws_access_grant', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'POST', path: '/aws-access/grants/:id/session/prepare', regex: /^\/aws-access\/grants\/([^/]+)\/session\/prepare$/, action: 'awsAccess.session.prepare', actionName: '准备 AWS 临时会话', menuKey: 'menu:aws-access', targetType: 'aws_access_session', getResourceId: ({ params }) => String(params?.[0] || '') || null },
+  { method: 'POST', path: '/aws-access/sessions/consume', regex: /^\/aws-access\/sessions\/consume$/, action: 'awsAccess.session.consume', actionName: '启动 AWS 临时会话', menuKey: 'menu:aws-access', targetType: 'aws_access_session' },
   { method: 'POST', path: '/aws-governance/findings/:id/:action', regex: /^\/aws-governance\/findings\/([^/]+)\/(acknowledge|accept-risk|resolve|reopen|false-positive)$/, action: 'awsGovernance.finding.transition', actionName: '处置 AWS 风险发现', menuKey: 'menu:aws-governance', targetType: 'aws_finding', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'GET', path: '/bytebase/requests/:requestId/detail', regex: /^\/bytebase\/requests\/([^/]+)\/detail$/, action: 'bytebase.request.detail', actionName: '查看 Bytebase 变更详情', menuKey: 'menu:bytebase', targetType: 'bytebase_change', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/bytebase/requests/:requestId/cancel', regex: /^\/bytebase\/requests\/([^/]+)\/cancel$/, action: 'bytebase.request.cancel', actionName: '取消 Bytebase 数据库变更', menuKey: 'menu:bytebase', targetType: 'bytebase_change', getResourceId: ({ params }) => String(params?.[0] || '') || null },

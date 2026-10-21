@@ -32,6 +32,7 @@ import { DependencyHealthModule } from './dependency-health/dependency-health.mo
 import { BytebaseModule } from './bytebase/bytebase.module';
 import { JumpserverAccessModule } from './jumpserver-access/jumpserver-access.module';
 import { AwsGovernanceModule } from './aws-governance/aws-governance.module';
+import { AwsAccessModule } from './aws-access/aws-access.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { AwsGovernanceModule } from './aws-governance/aws-governance.module';
     BytebaseModule,
     JumpserverAccessModule,
     AwsGovernanceModule,
+    AwsAccessModule,
   ],
   controllers: [AppController],
   providers: [AppService],

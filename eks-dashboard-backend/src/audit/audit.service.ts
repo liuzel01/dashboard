@@ -65,8 +65,10 @@ export class AuditService {
           input.traceId ?? null,
         ],
       );
+      return true;
     } catch (err: any) {
       this.logger.warn(`Failed to write audit log: ${err?.message || err}`);
+      return false;
     }
   }
 

@@ -21,10 +21,7 @@ import type {
 
 @Injectable()
 export class AwsCredentialProviderFactory {
-  createPlatformAuditClients(
-    account: AwsCloudAccount,
-    region: string,
-  ): AwsGovernanceClients {
+  private sourceCredentials() {
     const production =
       String(process.env.NODE_ENV || '').toLowerCase() === 'production';
     const sourceProfile = String(
@@ -34,18 +31,41 @@ export class AwsCredentialProviderFactory {
     ).trim();
     if (!production && !sourceProfile) {
       throw new Error(
-        '本地 AWS Inventory 未配置凭据来源。请设置 AWS_GOVERNANCE_SOURCE_PROFILE（例如 megadev）后重启后端服务。',
+        '本地 AWS 功能未配置凭据来源。请设置 AWS_GOVERNANCE_SOURCE_PROFILE（例如 megadev）后重启后端服务。',
       );
     }
-    const masterCredentials = production
+    return production
       ? fromInstanceMetadata({ maxRetries: 2, timeout: 1_000 })
       : fromIni({ profile: sourceProfile });
+  }
+
+  createAssumeRoleCredentials(input: {
+    roleArn: string;
+    region: string;
+    roleSessionName: string;
+    durationSeconds?: number;
+  }) {
+    return fromTemporaryCredentials({
+      masterCredentials: this.sourceCredentials(),
+      clientConfig: { region: input.region },
+      params: {
+        RoleArn: input.roleArn,
+        RoleSessionName: input.roleSessionName,
+        DurationSeconds: input.durationSeconds || 900,
+      },
+    });
+  }
+
+  createPlatformAuditClients(
+    account: AwsCloudAccount,
+    region: string,
+  ): AwsGovernanceClients {
     const roleSessionName =
       `dashboard-audit-${account.environmentId}-${Date.now()}`
         .replace(/[^A-Za-z0-9_=,.@-]/g, '-')
         .slice(0, 64);
     const credentials = fromTemporaryCredentials({
-      masterCredentials,
+      masterCredentials: this.sourceCredentials(),
       clientConfig: { region },
       params: {
         RoleArn: account.platformAuditRoleArn,

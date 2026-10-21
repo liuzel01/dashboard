@@ -15,6 +15,9 @@ const SENSITIVE_KEYWORDS = [
   'otpcode',
   'mfacode',
   'totp',
+  'ticket',
+  'redirecturl',
+  'signin',
   'cookie',
 ];
 

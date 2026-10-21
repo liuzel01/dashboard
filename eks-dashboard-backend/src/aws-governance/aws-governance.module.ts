@@ -23,5 +23,6 @@ import { AwsGovernanceService } from './aws-governance.service';
     AwsDetectionService,
     AwsGovernanceService,
   ],
+  exports: [AwsCredentialProviderFactory],
 })
 export class AwsGovernanceModule {}
