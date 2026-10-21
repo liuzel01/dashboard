@@ -1854,6 +1854,57 @@ export const getAccessUsers = async () => {
   return response.data;
 };
 
+
+export type AwsAccessGrant = {
+  id: number;
+  grantee_user_id: number;
+  username: string;
+  display_name: string;
+  environment_id: string;
+  permission_template_key: string;
+  regions: string[];
+  reason: string;
+  status: "ACTIVE" | "EXPIRED" | "REVOKED";
+  valid_from: string;
+  valid_until: string;
+  revoke_reason?: string | null;
+  session_count: number;
+  last_session_at?: string | null;
+};
+
+export const getAwsAccessConfiguration = async () =>
+  (await api.get("/aws-access/configuration")).data as {
+    enabled: boolean;
+    account: { id: number; environmentId: string; accountId: string; displayName: string };
+    templates: Array<{ key: string; name: string; description: string }>;
+    regions: string[];
+    canManage: boolean;
+    deliveryMode: string;
+  };
+
+export const listAwsAccessGrants = async () =>
+  (await api.get("/aws-access/grants")).data as AwsAccessGrant[];
+
+export const createAwsAccessGrant = async (input: {
+  granteeUserId: number;
+  cloudAccountId: number;
+  permissionTemplateKey: string;
+  regions: string[];
+  validUntil: string;
+  reason: string;
+  mfaCode: string;
+}) => (await api.post("/aws-access/grants", input)).data;
+
+export const revokeAwsAccessGrant = async (
+  id: number,
+  input: { reason: string; mfaCode: string },
+) => (await api.post(`/aws-access/grants/${id}/revoke`, input)).data;
+
+export const launchAwsAccessSession = async (grantId: number) => {
+  const prepared = (await api.post(`/aws-access/grants/${grantId}/session/prepare`)).data as { ticket: string };
+  return (await api.post("/aws-access/sessions/consume", { ticket: prepared.ticket })).data as { redirectUrl: string };
+};
+
 export const createAccessUser = async (data: {
   username: string;
   displayName?: string;

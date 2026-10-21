@@ -97,6 +97,7 @@ const DependencyHealthPage = lazy(() => import("./pages/DependencyHealthPage"));
 const BytebaseCenterPage = lazy(() => import("./pages/BytebaseCenterPage"));
 const JumpserverAccessPage = lazy(() => import("./pages/JumpserverAccessPage"));
 const AwsGovernancePage = lazy(() => import("./pages/AwsGovernancePage"));
+const AwsAccessPage = lazy(() => import("./pages/AwsAccessPage"));
 const Home = lazy(() => import("./pages/Home"));
 
 const PageLoadingFallback: React.FC = () => (
@@ -293,6 +294,13 @@ const AppLayout: React.FC = () => {
       icon: <DeploymentUnitOutlined />,
       permission: "menu:aws-governance",
       order: 35,
+    },
+    awsAccess: {
+      key: "/aws-access",
+      label: "AWS 临时访问",
+      icon: <SafetyCertificateOutlined />,
+      permission: "menu:aws-access",
+      order: 65,
     },
     s3Upload: {
       key: "/s3-upload",
@@ -631,6 +639,7 @@ const AppLayout: React.FC = () => {
       menuItems.kmsValues,
       menuItems.cicdRuns,
       menuItems.jumpserverAccess,
+      menuItems.awsAccess,
     ],
   );
 
@@ -833,6 +842,14 @@ const AppLayout: React.FC = () => {
                 element={
                   <ProtectedRoute required={["menu:aws-governance"]}>
                     <AwsGovernancePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/aws-access"
+                element={
+                  <ProtectedRoute required={["menu:aws-access"]}>
+                    <AwsAccessPage />
                   </ProtectedRoute>
                 }
               />
