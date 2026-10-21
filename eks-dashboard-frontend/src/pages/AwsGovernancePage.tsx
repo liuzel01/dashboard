@@ -5,19 +5,26 @@ import { AuthContext } from "../contexts/AuthContextValue";
 import { DetailDrawer, MetricGrid, OpsTable, PageHeader } from "../components/ops";
 import {
   diagnoseAwsGovernanceAccount,
+  approveAwsRemediation,
+  createAwsRemediation,
+  executeAwsRemediation,
   exportAwsFindings,
   getAwsGovernanceOverview,
   getAwsInventoryRun,
   listAwsGovernanceResources,
   listAwsFindings,
   listAwsInventoryRuns,
+  listAwsRemediations,
   listAwsResourceChanges,
   startAwsInventoryRun,
+  previewAwsRemediation,
+  rollbackAwsRemediation,
   transitionAwsFinding,
   type AwsFinding,
   type AwsGovernanceOverview,
   type AwsGovernanceResource,
   type AwsInventoryRun,
+  type AwsRemediationTask,
   type AwsResourceChange,
 } from "../services/api";
 import { formatDateTime } from "../utils/time";
@@ -58,11 +65,18 @@ const AwsGovernancePage: React.FC = () => {
   const [findingNote, setFindingNote] = useState("");
   const [exemptUntil, setExemptUntil] = useState("");
   const [findingSaving, setFindingSaving] = useState(false);
+  const [remediations, setRemediations] = useState<AwsRemediationTask[]>([]);
+  const [remediationFinding, setRemediationFinding] = useState<AwsFinding | null>(null);
+  const [remediationForm, setRemediationForm] = useState({ environment: "", owner: "", reason: "", rollbackPlan: "移除本次新增标签，恢复执行前标签值", maintenanceStart: "", maintenanceEnd: "" });
+  const [remediationPreview, setRemediationPreview] = useState<any>(null);
+  const [remediationSaving, setRemediationSaving] = useState(false);
+  const [taskAction, setTaskAction] = useState<{ task: AwsRemediationTask; action: "approve" | "execute" | "rollback" } | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [keyword, setKeyword] = useState("");
   const [resourceType, setResourceType] = useState<string>();
   const [region, setRegion] = useState<string>();
-  const [selected, setSelected] = useState<AwsGovernanceResource | AwsInventoryRun | AwsResourceChange | AwsFinding | null>(null);
+  const [selected, setSelected] = useState<AwsGovernanceResource | AwsInventoryRun | AwsResourceChange | AwsFinding | AwsRemediationTask | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
@@ -73,6 +87,10 @@ const AwsGovernancePage: React.FC = () => {
   const canSync = permissions.includes("aws-governance:inventory:run");
   const canDiagnose = permissions.includes("aws-governance:config:manage");
   const canManageFinding = permissions.includes("aws-governance:finding:manage");
+  const canRequestRemediation = permissions.includes("aws-governance:remediation:request");
+  const canApproveRemediation = permissions.includes("aws-governance:remediation:approve");
+  const canExecuteRemediation = permissions.includes("aws-governance:remediation:execute");
+  const canRollbackRemediation = permissions.includes("aws-governance:remediation:rollback");
 
   const loadOverview = useCallback(async () => {
     const data = await getAwsGovernanceOverview();
@@ -92,9 +110,11 @@ const AwsGovernancePage: React.FC = () => {
     } else if (activeTab === "changes") {
       const data = await listAwsResourceChanges({ accountId, page: 1, pageSize: 100 });
       setChanges(data.items); setChangeTotal(data.total);
-    } else {
+    } else if (activeTab === "findings") {
       const data = await listAwsFindings({ accountId, status: findingStatus, severity: findingSeverity, keyword, page: 1, pageSize: 100 });
       setFindings(data.items); setFindingTotal(data.total);
+    } else {
+      setRemediations(await listAwsRemediations(accountId));
     }
   }, [accountId, activeTab, findingSeverity, findingStatus, keyword, region, resourceType]);
 
@@ -185,8 +205,58 @@ const AwsGovernancePage: React.FC = () => {
     { title: "资源", key: "resource", render: (_: unknown, row: AwsFinding) => <Space direction="vertical" size={0}><Typography.Text>{row.resourceType}</Typography.Text><Typography.Text type="secondary" copyable>{row.resourceId}</Typography.Text></Space> },
     { title: "状态", dataIndex: "status", key: "status", render: (value: string) => <Tag>{value}</Tag> },
     { title: "最后命中", dataIndex: "lastSeenAt", key: "lastSeenAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
-    { title: "操作", key: "action", render: (_: unknown, row: AwsFinding) => <Space wrap><Button type="link" onClick={() => setSelected(row)}>详情</Button>{canManageFinding && ["OPEN", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "acknowledge" })}>确认</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "accept-risk" })}>接受风险</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "false-positive" })}>误报</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REMEDIATING", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "resolve" })}>解决</Button>}{canManageFinding && ["RESOLVED", "ACCEPTED_RISK", "FALSE_POSITIVE"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "reopen" })}>重开</Button>}</Space> },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsFinding) => <Space wrap><Button type="link" onClick={() => setSelected(row)}>详情</Button>{canRequestRemediation && row.ruleKey === "required-tags-missing" && ["ec2:instance", "ec2:volume", "ec2:security-group"].includes(row.resourceType) && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => { setRemediationFinding(row); setRemediationPreview(null); }}>创建整改任务</Button>}{canManageFinding && ["OPEN", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "acknowledge" })}>确认</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "accept-risk" })}>接受风险</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "false-positive" })}>误报</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REMEDIATING", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "resolve" })}>解决</Button>}{canManageFinding && ["RESOLVED", "ACCEPTED_RISK", "FALSE_POSITIVE"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "reopen" })}>重开</Button>}</Space> },
   ];
+
+  const remediationColumns = [
+    { title: "任务", key: "task", render: (_: unknown, row: AwsRemediationTask) => <Space direction="vertical" size={0}><Typography.Text strong>#{row.id} · {row.resourceId}</Typography.Text><Typography.Text type="secondary">{row.resourceType} / {row.region}</Typography.Text></Space> },
+    { title: "目标标签", dataIndex: "desiredTags", key: "desiredTags", render: (value: Record<string, string>) => <Space wrap>{Object.entries(value).map(([key, item]) => <Tag key={key}>{key}={item}</Tag>)}</Space> },
+    { title: "维护窗口", key: "window", render: (_: unknown, row: AwsRemediationTask) => <>{formatDateTime(row.maintenanceStart)}<br />至 {formatDateTime(row.maintenanceEnd)}</> },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => <Tag color={value === "SUCCEEDED" ? "success" : value === "FAILED" ? "error" : value === "APPROVED" ? "processing" : "default"}>{value}</Tag> },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsRemediationTask) => <Space wrap><Button type="link" onClick={() => setSelected(row)}>详情</Button>{canApproveRemediation && row.status === "PENDING_APPROVAL" && <Button type="link" onClick={() => setTaskAction({ task: row, action: "approve" })}>审批</Button>}{canExecuteRemediation && row.status === "APPROVED" && <Button type="link" onClick={() => setTaskAction({ task: row, action: "execute" })}>执行</Button>}{canRollbackRemediation && row.status === "SUCCEEDED" && <Button danger type="link" onClick={() => setTaskAction({ task: row, action: "rollback" })}>回滚</Button>}</Space> },
+  ];
+
+  const remediationInput = () => ({
+    desiredTags: Object.fromEntries(Object.entries({ environment: remediationForm.environment, owner: remediationForm.owner }).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])),
+    reason: remediationForm.reason,
+    rollbackPlan: remediationForm.rollbackPlan,
+    maintenanceStart: new Date(remediationForm.maintenanceStart).toISOString(),
+    maintenanceEnd: new Date(remediationForm.maintenanceEnd).toISOString(),
+    clientRequestId: crypto.randomUUID(),
+  });
+
+  const previewRemediation = async () => {
+    if (!accountId || !remediationFinding) return;
+    setRemediationSaving(true);
+    try { setRemediationPreview(await previewAwsRemediation(remediationFinding.id, accountId, remediationInput())); }
+    catch (reason: unknown) { message.error(requestErrorMessage(reason, "整改预览失败")); }
+    finally { setRemediationSaving(false); }
+  };
+
+  const submitRemediation = async () => {
+    if (!accountId || !remediationFinding || !remediationPreview) return;
+    setRemediationSaving(true);
+    try {
+      await createAwsRemediation(remediationFinding.id, accountId, remediationInput());
+      message.success("整改任务已提交，等待另一名管理员审批");
+      setRemediationFinding(null); setRemediationPreview(null); setActiveTab("remediations");
+      await loadTab();
+    } catch (reason: unknown) { message.error(requestErrorMessage(reason, "提交整改任务失败")); }
+    finally { setRemediationSaving(false); }
+  };
+
+  const submitTaskAction = async () => {
+    if (!accountId || !taskAction || !/^\d{6}$/.test(mfaCode)) return;
+    setRemediationSaving(true);
+    try {
+      if (taskAction.action === "approve") await approveAwsRemediation(taskAction.task.id, accountId, mfaCode);
+      else if (taskAction.action === "execute") await executeAwsRemediation(taskAction.task.id, accountId, mfaCode);
+      else await rollbackAwsRemediation(taskAction.task.id, accountId, mfaCode);
+      message.success(taskAction.action === "approve" ? "整改任务已审批" : taskAction.action === "execute" ? "整改已执行，正在重新盘点" : "整改已回滚，正在重新盘点");
+      setTaskAction(null); setMfaCode(""); await refreshAll();
+    } catch (reason: unknown) { message.error(requestErrorMessage(reason, "操作失败")); }
+    finally { setRemediationSaving(false); }
+  };
 
   const submitFindingAction = async () => {
     if (!accountId || !findingAction || !findingNote.trim()) return;
@@ -239,6 +309,7 @@ const AwsGovernancePage: React.FC = () => {
       { key: "runs", label: `同步任务 (${runTotal})` },
       { key: "changes", label: `变更记录 (${changeTotal})` },
       { key: "findings", label: `风险发现 (${findingTotal})` },
+      { key: "remediations", label: `整改任务 (${remediations.length})` },
     ]} />
     {activeTab === "resources" && <>
       <Space wrap>
@@ -261,6 +332,7 @@ const AwsGovernancePage: React.FC = () => {
       </Space>
       <OpsTable rowKey="id" loading={loading} dataSource={findings} columns={findingColumns} pagination={false} emptyDescription="当前没有风险发现" />
     </>}
+    {activeTab === "remediations" && <OpsTable rowKey="id" loading={loading} dataSource={remediations} columns={remediationColumns} pagination={false} emptyDescription="尚无受控整改任务" />}
     <DetailDrawer open={Boolean(selected)} onClose={() => setSelected(null)} title="AWS 资源治理详情">
       {selected && <Descriptions bordered column={1} size="small">
         {Object.entries(selected).map(([key, value]) => <Descriptions.Item key={key} label={key}>
@@ -273,6 +345,20 @@ const AwsGovernancePage: React.FC = () => {
         <Input.TextArea rows={4} value={findingNote} onChange={(event) => setFindingNote(event.target.value)} placeholder="请输入处置原因或证据" />
         {findingAction?.action === "accept-risk" && <Input type="datetime-local" value={exemptUntil} onChange={(event) => setExemptUntil(event.target.value)} />}
       </Space>
+    </Modal>
+    <Modal open={Boolean(remediationFinding)} width={760} title="创建受控标签整改任务" okText={remediationPreview ? "提交审批" : "生成预览"} cancelText="取消" confirmLoading={remediationSaving} okButtonProps={{ disabled: !remediationForm.reason.trim() || !remediationForm.rollbackPlan.trim() || !remediationForm.maintenanceStart || !remediationForm.maintenanceEnd || (!remediationForm.environment.trim() && !remediationForm.owner.trim()) }} onOk={() => void (remediationPreview ? submitRemediation() : previewRemediation())} onCancel={() => { setRemediationFinding(null); setRemediationPreview(null); }}>
+      <Space direction="vertical" style={{ width: "100%" }}>
+        <Alert type="warning" showIcon message="仅允许整改 environment / owner 标签" description="任务须由另一名管理员 MFA 审批，并且只能在维护窗口内通过 AWS DryRun 后执行。" />
+        <Input value={remediationForm.environment} onChange={(event) => { setRemediationPreview(null); setRemediationForm((current) => ({ ...current, environment: event.target.value })); }} placeholder="environment（可留空）" />
+        <Input value={remediationForm.owner} onChange={(event) => { setRemediationPreview(null); setRemediationForm((current) => ({ ...current, owner: event.target.value })); }} placeholder="owner（可留空）" />
+        <Input.TextArea value={remediationForm.reason} onChange={(event) => { setRemediationPreview(null); setRemediationForm((current) => ({ ...current, reason: event.target.value })); }} placeholder="整改原因" />
+        <Input.TextArea value={remediationForm.rollbackPlan} onChange={(event) => { setRemediationPreview(null); setRemediationForm((current) => ({ ...current, rollbackPlan: event.target.value })); }} placeholder="回滚方案" />
+        <Space><Input type="datetime-local" value={remediationForm.maintenanceStart} onChange={(event) => { setRemediationPreview(null); setRemediationForm((current) => ({ ...current, maintenanceStart: event.target.value })); }} /><Typography.Text>至</Typography.Text><Input type="datetime-local" value={remediationForm.maintenanceEnd} onChange={(event) => { setRemediationPreview(null); setRemediationForm((current) => ({ ...current, maintenanceEnd: event.target.value })); }} /></Space>
+        {remediationPreview && <Descriptions bordered column={1} size="small"><Descriptions.Item label="资源">{remediationPreview.resourceId}</Descriptions.Item><Descriptions.Item label="变更预览"><pre style={{ margin: 0 }}>{JSON.stringify(remediationPreview.changes, null, 2)}</pre></Descriptions.Item></Descriptions>}
+      </Space>
+    </Modal>
+    <Modal open={Boolean(taskAction)} title={taskAction?.action === "approve" ? "审批整改任务" : taskAction?.action === "execute" ? "确认执行整改" : "确认回滚整改"} okText="确认" cancelText="取消" confirmLoading={remediationSaving} okButtonProps={{ disabled: !/^\d{6}$/.test(mfaCode), danger: taskAction?.action === "rollback" }} onOk={() => void submitTaskAction()} onCancel={() => { setTaskAction(null); setMfaCode(""); }}>
+      <Space direction="vertical" style={{ width: "100%" }}><Alert type="warning" showIcon message={taskAction?.action === "execute" ? "执行前会先调用 AWS DryRun；成功后自动重新盘点。" : taskAction?.action === "rollback" ? "将恢复执行前标签，并自动重新盘点。" : "提交人与审批人必须是不同管理员。"} /><Input.Password value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="请输入 6 位 MFA 验证码" /></Space>
     </Modal>
   </Space>;
 };

@@ -3600,6 +3600,34 @@ export type AwsFinding = {
   resolvedAt: string | null;
   exemptUntil: string | null;
 };
+export type AwsRemediationTask = {
+  id: number;
+  findingId: number;
+  accountId: number;
+  environmentId: string;
+  actionKey: string;
+  resourceType: string;
+  resourceId: string;
+  region: string;
+  desiredTags: Record<string, string>;
+  beforeTags: Record<string, string>;
+  reason: string;
+  rollbackPlan: string;
+  status: "PENDING_APPROVAL" | "APPROVED" | "EXECUTING" | "SUCCEEDED" | "FAILED" | "ROLLED_BACK" | "REJECTED";
+  requestedByUserId: number;
+  requesterName: string | null;
+  approvedByUserId: number | null;
+  approverName: string | null;
+  executedByUserId: number | null;
+  executorName: string | null;
+  maintenanceStart: string;
+  maintenanceEnd: string;
+  approvedAt: string | null;
+  executedAt: string | null;
+  rolledBackAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+};
 export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
 export const getAwsGovernanceOverview = async () =>
   (await api.get("/aws-governance/overview")).data as AwsGovernanceOverview;
@@ -3641,3 +3669,23 @@ export const transitionAwsFinding = async (
 ) => (await api.post(`/aws-governance/findings/${findingId}/${action}`, data, { params: { accountId } })).data as AwsFinding;
 export const exportAwsFindings = async (params: { accountId: number; status?: string; severity?: string; keyword?: string }) =>
   (await api.get("/aws-governance/finding-export", { params, responseType: "blob" })).data as Blob;
+export type AwsRemediationInput = {
+  desiredTags: Record<string, string>;
+  reason: string;
+  rollbackPlan: string;
+  maintenanceStart: string;
+  maintenanceEnd: string;
+  clientRequestId: string;
+};
+export const previewAwsRemediation = async (findingId: number, accountId: number, data: AwsRemediationInput) =>
+  (await api.post(`/aws-governance/findings/${findingId}/remediations/preview`, data, { params: { accountId } })).data;
+export const createAwsRemediation = async (findingId: number, accountId: number, data: AwsRemediationInput) =>
+  (await api.post(`/aws-governance/remediations/from-finding/${findingId}`, data, { params: { accountId } })).data as AwsRemediationTask;
+export const listAwsRemediations = async (accountId: number) =>
+  (await api.get("/aws-governance/remediations", { params: { accountId } })).data as AwsRemediationTask[];
+export const approveAwsRemediation = async (id: number, accountId: number, mfaCode: string) =>
+  (await api.post(`/aws-governance/remediations/${id}/approve`, { mfaCode, clientRequestId: crypto.randomUUID() }, { params: { accountId } })).data as AwsRemediationTask;
+export const executeAwsRemediation = async (id: number, accountId: number, mfaCode: string) =>
+  (await api.post(`/aws-governance/remediations/${id}/execute`, { mfaCode, clientRequestId: crypto.randomUUID() }, { params: { accountId } })).data as { task: AwsRemediationTask; inventory: { runId: number } };
+export const rollbackAwsRemediation = async (id: number, accountId: number, mfaCode: string) =>
+  (await api.post(`/aws-governance/remediations/${id}/rollback`, { mfaCode }, { params: { accountId } })).data as { task: AwsRemediationTask; inventory: { runId: number } };
