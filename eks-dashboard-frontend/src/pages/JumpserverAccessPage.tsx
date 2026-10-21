@@ -7,6 +7,7 @@ import {
   Collapse,
   DatePicker,
   Descriptions,
+  Input,
   message,
   Modal,
   Select,
@@ -83,7 +84,10 @@ export default function JumpserverAccessPage() {
     [diagnosticOpen, setDiagnosticOpen] = useState(false),
     [mappingCatalogLoading, setMappingCatalogLoading] = useState(false),
     [customGrantCatalogLoading, setCustomGrantCatalogLoading] = useState(false),
-    [templateCatalogLoading, setTemplateCatalogLoading] = useState(false);
+    [templateCatalogLoading, setTemplateCatalogLoading] = useState(false),
+    [grantSearch, setGrantSearch] = useState(""),
+    [grantPage, setGrantPage] = useState(1),
+    [grantPageSize, setGrantPageSize] = useState(20);
   const configurationLoadedRef = useRef(false);
   const configurationDataRef = useRef<any>({ mappings: [], userBindings: [] });
   const configurationRequestRef = useRef<Promise<any> | null>(null);
@@ -615,6 +619,49 @@ export default function JumpserverAccessPage() {
         await refreshAfterAdminChange();
       },
     });
+  const normalizedGrantSearch = grantSearch.trim().toLowerCase();
+  const remoteUsernameByUserId = new Map(
+    cfg.mappings.map((mapping: any) => [
+      Number(mapping.dashboard_user_id),
+      String(mapping.remote_username || ""),
+    ]),
+  );
+  const visibleUserBindings = cfg.userBindings.filter((binding: any) => {
+    if (Number(binding.enabled) !== 1) return false;
+    if (!normalizedGrantSearch) return true;
+    const searchable = [
+      binding.dashboard_display_name,
+      binding.dashboard_username,
+      remoteUsernameByUserId.get(Number(binding.dashboard_user_id)),
+      binding.bundle_name,
+      binding.source_permission_name,
+      ...(binding.targets || []).flatMap((target: any) => [
+        target.name,
+        target.id,
+      ]),
+      ...(binding.accounts || []),
+      ...(binding.protocols || []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return searchable.includes(normalizedGrantSearch);
+  });
+  const expiryFilter = (record: any, filter: string) => {
+    if (filter === "FAILED") return record.revocation_status === "FAILED";
+    if (filter === "REVOKING")
+      return (
+        record.revocation_status === "PENDING" ||
+        Boolean(record.expires_at && dayjs(record.expires_at).isBefore(dayjs()))
+      );
+    if (filter === "PERMANENT") return !record.expires_at;
+    if (!record.expires_at || !dayjs(record.expires_at).isAfter(dayjs()))
+      return false;
+    const remainingDays = dayjs(record.expires_at).diff(dayjs(), "day", true);
+    if (filter === "WITHIN_7_DAYS") return remainingDays <= 7;
+    if (filter === "WITHIN_30_DAYS") return remainingDays <= 30;
+    return true;
+  };
   const adminPanel = (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Card
@@ -662,7 +709,17 @@ export default function JumpserverAccessPage() {
       <Card
         title="用户资产授权"
         extra={
-          <Space>
+          <Space wrap>
+            <Input.Search
+              allowClear
+              value={grantSearch}
+              placeholder="搜索用户、资产或授权"
+              style={{ width: 260 }}
+              onChange={(event) => {
+                setGrantSearch(event.target.value);
+                setGrantPage(1);
+              }}
+            />
             <Button
               loading={customGrantCatalogLoading}
               onClick={() => void openUserGrant()}
@@ -681,10 +738,18 @@ export default function JumpserverAccessPage() {
       >
         <Table
           rowKey={(row: any) => `${row.dashboard_user_id}:${row.bundle_id}`}
-          pagination={false}
-          dataSource={cfg.userBindings.filter(
-            (binding: any) => Number(binding.enabled) === 1,
-          )}
+          pagination={{
+            current: grantPage,
+            pageSize: grantPageSize,
+            pageSizeOptions: ["20", "50", "100"],
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条授权`,
+          }}
+          onChange={(pagination) => {
+            setGrantPage(pagination.current || 1);
+            setGrantPageSize(pagination.pageSize || 20);
+          }}
+          dataSource={visibleUserBindings}
           columns={[
             {
               title: "运维系统用户",
@@ -711,6 +776,31 @@ export default function JumpserverAccessPage() {
             },
             {
               title: "有效期",
+              dataIndex: "expires_at",
+              filters: [
+                { text: "7 天内到期", value: "WITHIN_7_DAYS" },
+                { text: "30 天内到期", value: "WITHIN_30_DAYS" },
+                { text: "长期有效", value: "PERMANENT" },
+                { text: "已到期 / 回收中", value: "REVOKING" },
+                { text: "自动回收失败", value: "FAILED" },
+              ],
+              onFilter: (value, record: any) =>
+                expiryFilter(record, String(value)),
+              sorter: (
+                left: any,
+                right: any,
+                sortOrder?: "ascend" | "descend" | null,
+              ) => {
+                const leftPermanent = !left.expires_at;
+                const rightPermanent = !right.expires_at;
+                if (leftPermanent && rightPermanent) return 0;
+                if (leftPermanent) return sortOrder === "descend" ? -1 : 1;
+                if (rightPermanent) return sortOrder === "descend" ? 1 : -1;
+                return (
+                  dayjs(left.expires_at).valueOf() -
+                  dayjs(right.expires_at).valueOf()
+                );
+              },
               render: (_, row: any) => {
                 if (row.revocation_status === "FAILED")
                   return (
