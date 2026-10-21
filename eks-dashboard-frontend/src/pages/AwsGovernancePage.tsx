@@ -70,6 +70,7 @@ const AwsGovernancePage: React.FC = () => {
   const [remediationForm, setRemediationForm] = useState({ environment: "", owner: "", reason: "", rollbackPlan: "移除本次新增标签，恢复执行前标签值", maintenanceStart: "", maintenanceEnd: "" });
   const [remediationPreview, setRemediationPreview] = useState<any>(null);
   const [remediationSaving, setRemediationSaving] = useState(false);
+  const [locatingRemediationResourceId, setLocatingRemediationResourceId] = useState<string | null>(null);
   const [taskAction, setTaskAction] = useState<{ task: AwsRemediationTask; action: "approve" | "execute" | "rollback" } | null>(null);
   const [mfaCode, setMfaCode] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
@@ -172,13 +173,36 @@ const AwsGovernancePage: React.FC = () => {
   const typeOptions = useMemo(() => (overview?.byType || []).map((item) => ({ label: `${item.resourceType} (${item.count})`, value: item.resourceType })), [overview]);
   const regionOptions = useMemo(() => Array.from(new Set(["global", ...(selectedAccount?.defaultRegions || [])])).map((value) => ({ label: value, value })), [selectedAccount]);
 
+  const openRemediationForResource = async (resource: AwsGovernanceResource) => {
+    if (!accountId) return;
+    setLocatingRemediationResourceId(resource.resourceId);
+    try {
+      const result = await listAwsFindings({ accountId, keyword: resource.resourceId, page: 1, pageSize: 100 });
+      const finding = result.items.find((item) =>
+        item.resourceId === resource.resourceId
+        && item.resourceType === resource.resourceType
+        && item.ruleKey === "required-tags-missing"
+        && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(item.status));
+      if (!finding) {
+        message.warning("该资源当前没有可执行的必要标签整改 Finding，请先同步 Inventory 并运行规则检测");
+        return;
+      }
+      setRemediationFinding(finding);
+      setRemediationPreview(null);
+    } catch (reason: unknown) {
+      message.error(requestErrorMessage(reason, "查询可整改 Finding 失败"));
+    } finally {
+      setLocatingRemediationResourceId(null);
+    }
+  };
+
   const resourceColumns = [
     { title: "资源", key: "resource", render: (_: unknown, row: AwsGovernanceResource) => <Space direction="vertical" size={0}><Typography.Text strong>{row.displayName || row.resourceId}</Typography.Text><Typography.Text type="secondary" copyable>{row.resourceId}</Typography.Text></Space> },
     { title: "类型", dataIndex: "resourceType", key: "resourceType", render: (value: string) => <Tag>{value}</Tag> },
     { title: "区域", dataIndex: "region", key: "region" },
     { title: "状态", dataIndex: "status", key: "status", render: (value: string | null) => value ? <Tag color="blue">{value}</Tag> : "-" },
     { title: "最后发现", dataIndex: "lastSeenAt", key: "lastSeenAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
-    { title: "操作", key: "action", render: (_: unknown, row: AwsGovernanceResource) => <Button type="link" onClick={() => setSelected(row)}>详情</Button> },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsGovernanceResource) => <Space wrap><Button type="link" onClick={() => setSelected(row)}>详情</Button>{canRequestRemediation && ["ec2:instance", "ec2:volume", "ec2:security-group"].includes(row.resourceType) && <Button type="link" loading={locatingRemediationResourceId === row.resourceId} onClick={() => void openRemediationForResource(row)}>创建整改任务</Button>}</Space> },
   ];
   const runColumns = [
     { title: "任务", dataIndex: "id", key: "id", render: (value: number) => `#${value}` },
