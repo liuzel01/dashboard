@@ -3478,6 +3478,11 @@ export type AwsGovernanceOverview = {
     lastSuccessfulAt: string | null;
   };
   byType: Array<{ resourceType: string; count: number }>;
+  findings: {
+    open: number;
+    bySeverity: Array<{ severity: string; count: number }>;
+    trend: Array<{ day: string; opened: number }>;
+  };
 };
 export type AwsInventoryRun = {
   id: number;
@@ -3522,6 +3527,28 @@ export type AwsResourceChange = {
   summary: Record<string, unknown>;
   detectedAt: string | null;
 };
+export type AwsFinding = {
+  id: number;
+  fingerprint: string;
+  ruleKey: string;
+  ruleVersion: number;
+  accountId: number;
+  environmentId: string;
+  region: string;
+  resourceType: string;
+  resourceId: string;
+  resourceArn: string | null;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  status: "OPEN" | "ACKNOWLEDGED" | "REMEDIATING" | "RESOLVED" | "FALSE_POSITIVE" | "ACCEPTED_RISK" | "REOPENED";
+  title: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  remediationHint: string | null;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  resolvedAt: string | null;
+  exemptUntil: string | null;
+};
 export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
 export const getAwsGovernanceOverview = async () =>
   (await api.get("/aws-governance/overview")).data as AwsGovernanceOverview;
@@ -3553,3 +3580,13 @@ export const diagnoseAwsGovernanceAccount = async (accountId: number) =>
   };
 export const listAwsResourceChanges = async (params: { accountId: number; runId?: number; page?: number; pageSize?: number }) =>
   (await api.get("/aws-governance/changes", { params })).data as Paged<AwsResourceChange>;
+export const listAwsFindings = async (params: { accountId: number; status?: string; severity?: string; keyword?: string; page?: number; pageSize?: number }) =>
+  (await api.get("/aws-governance/findings", { params })).data as Paged<AwsFinding>;
+export const transitionAwsFinding = async (
+  findingId: number,
+  accountId: number,
+  action: "acknowledge" | "accept-risk" | "resolve" | "reopen" | "false-positive",
+  data: { note: string; exemptUntil?: string; clientRequestId: string },
+) => (await api.post(`/aws-governance/findings/${findingId}/${action}`, data, { params: { accountId } })).data as AwsFinding;
+export const exportAwsFindings = async (params: { accountId: number; status?: string; severity?: string; keyword?: string }) =>
+  (await api.get("/aws-governance/finding-export", { params, responseType: "blob" })).data as Blob;

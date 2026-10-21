@@ -1,16 +1,20 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Descriptions, Input, message, Select, Space, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Descriptions, Input, message, Modal, Select, Space, Tabs, Tag, Typography } from "antd";
 import { CloudSyncOutlined, SafetyCertificateOutlined, SearchOutlined } from "@ant-design/icons";
 import { AuthContext } from "../contexts/AuthContextValue";
 import { DetailDrawer, MetricGrid, OpsTable, PageHeader } from "../components/ops";
 import {
   diagnoseAwsGovernanceAccount,
+  exportAwsFindings,
   getAwsGovernanceOverview,
   getAwsInventoryRun,
   listAwsGovernanceResources,
+  listAwsFindings,
   listAwsInventoryRuns,
   listAwsResourceChanges,
   startAwsInventoryRun,
+  transitionAwsFinding,
+  type AwsFinding,
   type AwsGovernanceOverview,
   type AwsGovernanceResource,
   type AwsInventoryRun,
@@ -46,11 +50,19 @@ const AwsGovernancePage: React.FC = () => {
   const [runTotal, setRunTotal] = useState(0);
   const [changes, setChanges] = useState<AwsResourceChange[]>([]);
   const [changeTotal, setChangeTotal] = useState(0);
+  const [findings, setFindings] = useState<AwsFinding[]>([]);
+  const [findingTotal, setFindingTotal] = useState(0);
+  const [findingStatus, setFindingStatus] = useState<string>();
+  const [findingSeverity, setFindingSeverity] = useState<string>();
+  const [findingAction, setFindingAction] = useState<{ finding: AwsFinding; action: "acknowledge" | "accept-risk" | "resolve" | "reopen" | "false-positive" } | null>(null);
+  const [findingNote, setFindingNote] = useState("");
+  const [exemptUntil, setExemptUntil] = useState("");
+  const [findingSaving, setFindingSaving] = useState(false);
   const [keywordDraft, setKeywordDraft] = useState("");
   const [keyword, setKeyword] = useState("");
   const [resourceType, setResourceType] = useState<string>();
   const [region, setRegion] = useState<string>();
-  const [selected, setSelected] = useState<AwsGovernanceResource | AwsInventoryRun | AwsResourceChange | null>(null);
+  const [selected, setSelected] = useState<AwsGovernanceResource | AwsInventoryRun | AwsResourceChange | AwsFinding | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
@@ -60,6 +72,7 @@ const AwsGovernancePage: React.FC = () => {
   const selectedAccount = overview?.accounts.find((account) => account.id === accountId) || null;
   const canSync = permissions.includes("aws-governance:inventory:run");
   const canDiagnose = permissions.includes("aws-governance:config:manage");
+  const canManageFinding = permissions.includes("aws-governance:finding:manage");
 
   const loadOverview = useCallback(async () => {
     const data = await getAwsGovernanceOverview();
@@ -76,11 +89,14 @@ const AwsGovernancePage: React.FC = () => {
     } else if (activeTab === "runs") {
       const data = await listAwsInventoryRuns(accountId, 1, 100);
       setRuns(data.items); setRunTotal(data.total);
-    } else {
+    } else if (activeTab === "changes") {
       const data = await listAwsResourceChanges({ accountId, page: 1, pageSize: 100 });
       setChanges(data.items); setChangeTotal(data.total);
+    } else {
+      const data = await listAwsFindings({ accountId, status: findingStatus, severity: findingSeverity, keyword, page: 1, pageSize: 100 });
+      setFindings(data.items); setFindingTotal(data.total);
     }
-  }, [accountId, activeTab, keyword, region, resourceType]);
+  }, [accountId, activeTab, findingSeverity, findingStatus, keyword, region, resourceType]);
 
   useEffect(() => {
     setLoading(true); setError(null);
@@ -162,6 +178,41 @@ const AwsGovernancePage: React.FC = () => {
     { title: "发现时间", dataIndex: "detectedAt", key: "detectedAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
     { title: "操作", key: "action", render: (_: unknown, row: AwsResourceChange) => <Button type="link" onClick={() => setSelected(row)}>详情</Button> },
   ];
+  const severityColor: Record<string, string> = { CRITICAL: "magenta", HIGH: "red", MEDIUM: "orange", LOW: "blue" };
+  const findingColumns = [
+    { title: "严重度", dataIndex: "severity", key: "severity", render: (value: string) => <Tag color={severityColor[value]}>{value}</Tag> },
+    { title: "风险", key: "finding", render: (_: unknown, row: AwsFinding) => <Space direction="vertical" size={0}><Typography.Text strong>{row.title}</Typography.Text><Typography.Text type="secondary">{row.summary}</Typography.Text></Space> },
+    { title: "资源", key: "resource", render: (_: unknown, row: AwsFinding) => <Space direction="vertical" size={0}><Typography.Text>{row.resourceType}</Typography.Text><Typography.Text type="secondary" copyable>{row.resourceId}</Typography.Text></Space> },
+    { title: "状态", dataIndex: "status", key: "status", render: (value: string) => <Tag>{value}</Tag> },
+    { title: "最后命中", dataIndex: "lastSeenAt", key: "lastSeenAt", render: (value: string | null) => value ? formatDateTime(value) : "-" },
+    { title: "操作", key: "action", render: (_: unknown, row: AwsFinding) => <Space wrap><Button type="link" onClick={() => setSelected(row)}>详情</Button>{canManageFinding && ["OPEN", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "acknowledge" })}>确认</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "accept-risk" })}>接受风险</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "false-positive" })}>误报</Button>}{canManageFinding && ["OPEN", "ACKNOWLEDGED", "REMEDIATING", "REOPENED"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "resolve" })}>解决</Button>}{canManageFinding && ["RESOLVED", "ACCEPTED_RISK", "FALSE_POSITIVE"].includes(row.status) && <Button type="link" onClick={() => setFindingAction({ finding: row, action: "reopen" })}>重开</Button>}</Space> },
+  ];
+
+  const submitFindingAction = async () => {
+    if (!accountId || !findingAction || !findingNote.trim()) return;
+    if (findingAction.action === "accept-risk" && !exemptUntil) return;
+    setFindingSaving(true);
+    try {
+      await transitionAwsFinding(findingAction.finding.id, accountId, findingAction.action, {
+        note: findingNote.trim(),
+        exemptUntil: exemptUntil ? new Date(exemptUntil).toISOString() : undefined,
+        clientRequestId: crypto.randomUUID(),
+      });
+      message.success("风险状态已更新");
+      setFindingAction(null); setFindingNote(""); setExemptUntil("");
+      await refreshAll();
+    } catch (reason: unknown) { message.error(requestErrorMessage(reason, "风险状态更新失败")); }
+    finally { setFindingSaving(false); }
+  };
+
+  const downloadFindings = async () => {
+    if (!accountId) return;
+    const blob = await exportAwsFindings({ accountId, status: findingStatus, severity: findingSeverity, keyword });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `aws-findings-${selectedAccount?.environmentId || "export"}.csv`; anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   return <Space direction="vertical" size={20} style={{ width: "100%" }}>
     <PageHeader
@@ -180,12 +231,14 @@ const AwsGovernancePage: React.FC = () => {
       { key: "resources", label: "当前资源", value: overview?.metrics.resources || 0 },
       { key: "changes", label: "24 小时变更", value: overview?.metrics.changes24h || 0 },
       { key: "failed", label: "24 小时异常任务", value: overview?.metrics.failedRuns24h || 0, valueStyle: overview?.metrics.failedRuns24h ? { color: "#cf1322" } : undefined },
+      { key: "findings", label: "开放风险", value: overview?.findings?.open || 0, valueStyle: overview?.findings?.open ? { color: "#cf1322" } : undefined },
       { key: "last", label: "最近成功同步", value: overview?.metrics.lastSuccessfulAt ? formatDateTime(overview.metrics.lastSuccessfulAt) : "尚未同步" },
     ]} />
     <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
       { key: "resources", label: `资源目录 (${resourceTotal})` },
       { key: "runs", label: `同步任务 (${runTotal})` },
       { key: "changes", label: `变更记录 (${changeTotal})` },
+      { key: "findings", label: `风险发现 (${findingTotal})` },
     ]} />
     {activeTab === "resources" && <>
       <Space wrap>
@@ -193,11 +246,21 @@ const AwsGovernancePage: React.FC = () => {
         <Select value={resourceType} onChange={setResourceType} options={typeOptions} placeholder="资源类型" allowClear showSearch style={{ width: 240 }} />
         <Select value={region} onChange={setRegion} options={regionOptions} placeholder="区域" allowClear showSearch style={{ width: 160 }} />
         <Button icon={<SearchOutlined />} onClick={() => setKeyword(keywordDraft.trim())}>查询</Button>
+        <Button onClick={() => void downloadFindings()}>导出 CSV</Button>
       </Space>
       <OpsTable rowKey="id" loading={loading} dataSource={resources} columns={resourceColumns} pagination={false} emptyDescription="尚无资源快照，请执行同步" />
     </>}
     {activeTab === "runs" && <OpsTable rowKey="id" loading={loading} dataSource={runs} columns={runColumns} pagination={false} emptyDescription="尚无同步任务" />}
     {activeTab === "changes" && <OpsTable rowKey="id" loading={loading} dataSource={changes} columns={changeColumns} pagination={false} emptyDescription="尚无资源变更" />}
+    {activeTab === "findings" && <>
+      <Space wrap>
+        <Input value={keywordDraft} onChange={(event) => setKeywordDraft(event.target.value)} onPressEnter={() => setKeyword(keywordDraft.trim())} placeholder="搜索风险标题或资源 ID" style={{ width: 300 }} allowClear />
+        <Select value={findingSeverity} onChange={setFindingSeverity} options={["CRITICAL", "HIGH", "MEDIUM", "LOW"].map((value) => ({ label: value, value }))} placeholder="严重度" allowClear style={{ width: 150 }} />
+        <Select value={findingStatus} onChange={setFindingStatus} options={["OPEN", "ACKNOWLEDGED", "ACCEPTED_RISK", "RESOLVED", "REOPENED", "FALSE_POSITIVE"].map((value) => ({ label: value, value }))} placeholder="处置状态" allowClear style={{ width: 180 }} />
+        <Button icon={<SearchOutlined />} onClick={() => setKeyword(keywordDraft.trim())}>查询</Button>
+      </Space>
+      <OpsTable rowKey="id" loading={loading} dataSource={findings} columns={findingColumns} pagination={false} emptyDescription="当前没有风险发现" />
+    </>}
     <DetailDrawer open={Boolean(selected)} onClose={() => setSelected(null)} title="AWS 资源治理详情">
       {selected && <Descriptions bordered column={1} size="small">
         {Object.entries(selected).map(([key, value]) => <Descriptions.Item key={key} label={key}>
@@ -205,6 +268,12 @@ const AwsGovernancePage: React.FC = () => {
         </Descriptions.Item>)}
       </Descriptions>}
     </DetailDrawer>
+    <Modal open={Boolean(findingAction)} title={findingAction ? `风险处置：${findingAction.finding.title}` : "风险处置"} okText="确认" cancelText="取消" confirmLoading={findingSaving} okButtonProps={{ disabled: !findingNote.trim() || (findingAction?.action === "accept-risk" && !exemptUntil) }} onOk={() => void submitFindingAction()} onCancel={() => { setFindingAction(null); setFindingNote(""); setExemptUntil(""); }}>
+      <Space direction="vertical" style={{ width: "100%" }}>
+        <Input.TextArea rows={4} value={findingNote} onChange={(event) => setFindingNote(event.target.value)} placeholder="请输入处置原因或证据" />
+        {findingAction?.action === "accept-risk" && <Input type="datetime-local" value={exemptUntil} onChange={(event) => setExemptUntil(event.target.value)} />}
+      </Space>
+    </Modal>
   </Space>;
 };
 
