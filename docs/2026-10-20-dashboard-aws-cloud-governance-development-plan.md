@@ -539,6 +539,12 @@ Dashboard 原有数据模型没有可复用的通用云账号范围授权。Phas
 
 ### Phase 2：规则与 Finding MVP
 
+状态：**功能完成，本地真实链路已验证（2026-10-21）**。已建立版本化规则、Detection Run、Finding、Finding Action、账号范围校验和风险处置页面。真实 hashex 快照检测耗时约 1.13 秒，`229` 个 fingerprint 首次建立后再次运行没有重复记录；本地完成 `OPEN -> RESOLVED -> REOPENED`、风险接受到期自动重开和相同 `clientRequestId` 幂等处置验证。
+
+首版启用 9 条确定性规则：安全组公网高危端口、EBS 未加密、RDS 公网访问、RDS 未加密、ACM 临期、EKS 公网 Endpoint 未限制来源、CloudTrail 未投递、CloudTrail 未启用日志完整性校验、必要标签缺失。当前真实结果为 CRITICAL 3、HIGH 67、MEDIUM 1、LOW 158；这些是规则命中，不等同已经人工确认的事故。
+
+S3 公网访问、Target Group 健康、闲置 EIP 和 IAM 通配权限规则暂未启用，因为 Phase 1 尚未采集足以确定判断的对应字段。必须先扩展 Collector 和字段 allowlist，再增加规则，不能用缺失证据推断风险。
+
 - 建立版本化规则、Detection Run、Finding、Finding Action。
 - 上线 5–10 条确定性规则。
 - 实现 ACK、接受风险、解决、重开和豁免到期。
