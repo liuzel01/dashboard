@@ -14,6 +14,7 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -541,16 +542,47 @@ export default function JumpserverAccessPage() {
   };
   const dashboardUserLabel = (record: any) =>
     record.dashboard_display_name || record.dashboard_username || "-";
-  const dashboardUserCell = (record: any) => (
-    <Space direction="vertical" size={0}>
-      <Text>{dashboardUserLabel(record)}</Text>
-      {record.dashboard_display_name &&
-        record.dashboard_username &&
-        record.dashboard_display_name !== record.dashboard_username && (
-          <Text type="secondary">{record.dashboard_username}</Text>
-        )}
-    </Space>
-  );
+  const dashboardUserCell = (record: any) => {
+    const label = dashboardUserLabel(record);
+    const username = String(record.dashboard_username || "").trim();
+    const showUsername = username && username !== label;
+    return showUsername ? (
+      <Tooltip title={`邮箱 / 登录名：${username}`}>
+        <Text tabIndex={0}>{label}</Text>
+      </Tooltip>
+    ) : (
+      <Text>{label}</Text>
+    );
+  };
+  const grantTargetsCell = (
+    targets: Array<{
+      type: "ASSET" | "NODE";
+      id: string;
+      name: string;
+    }>,
+  ) => {
+    const items = targets || [];
+    if (!items.length) return <Text type="secondary">-</Text>;
+    const targetLabel = (target: (typeof items)[number]) =>
+      `${target.type === "NODE" ? "节点" : "资产"} · ${target.name}`;
+    const summary =
+      items.length === 1 ? targetLabel(items[0]) : `${items.length} 个授权范围`;
+    return (
+      <Tooltip
+        title={
+          <Space direction="vertical" size={2}>
+            {items.map((target) => (
+              <span key={`${target.type}:${target.id}`}>
+                {targetLabel(target)}
+              </span>
+            ))}
+          </Space>
+        }
+      >
+        <Text tabIndex={0}>{summary}</Text>
+      </Tooltip>
+    );
+  };
   const revokeBundle = (binding: any) =>
     Modal.confirm({
       title: "确认回收用户资产授权？",
@@ -661,18 +693,7 @@ export default function JumpserverAccessPage() {
             {
               title: "资产范围",
               dataIndex: "targets",
-              render: (
-                targets: Array<{
-                  type: "ASSET" | "NODE";
-                  id: string;
-                  name: string;
-                }>,
-              ) =>
-                (targets || []).map((target) => (
-                  <Tag key={`${target.type}:${target.id}`} title={target.id}>
-                    {target.type === "NODE" ? "节点" : "资产"} · {target.name}
-                  </Tag>
-                )),
+              render: grantTargetsCell,
             },
             {
               title: "账号 / 协议",
