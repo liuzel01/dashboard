@@ -554,6 +554,14 @@ S3 公网访问、Target Group 健康、闲置 EIP 和 IAM 通配权限规则暂
 
 ### Phase 3：管理员临时授权 MVP
 
+状态：**核心功能完成，本地 API 与真实 AWS 签发链路已验证（2026-10-21）；浏览器实际进入 Console 待人工验收。**
+
+已完成 hashex 首版：创建独立 `DashboardHashexCredentialBrokerRole` 与 `DashboardHashexHumanReadRole`，前者只允许 AssumeRole 到后者，后者只附加 AWS 托管 `ViewOnlyAccess`。Dashboard 新增独立“AWS 临时访问”菜单、Grant/Event/Session 数据模型、权限键、管理员 MFA 授权与提前回收、用户本人一次性 ticket、数据库 UTC 到期 Worker 和 AWS Console federation 交付。Grant 事件同步写入审计 Outbox 并由 Worker 重试投递；Session 保存 RoleSessionName、AssumedRoleArn、Dashboard User/Grant ID 等非敏感 CloudTrail 关联键。浏览器只接收短时 federation 登录 URL，不接收 AK/SK/SessionToken；数据库不包含凭据列，ticket、MFA 和 federation URL 会被审计脱敏，应用日志不保存完整登录 URL。
+
+本地真实验证结果：Broker 到 Human Read 的二段 AssumeRole 成功；IAM 模拟中 `ec2:DescribeInstances`、`s3:ListAllMyBuckets` 为 allowed，`ec2:RunInstances`、`s3:PutObject` 为 implicitDeny；管理员 MFA 给普通用户创建授权、普通用户以本人身份签发 federation token、管理员 MFA 提前回收均成功；重复 ticket 返回 400；旧 `grant_hash` 返回 403 并记录 `SESSION_DENIED/STALE_GRANT_HASH`；无授权普通用户创建 Grant 返回 403。会话策略同时限制授权区域，STS 会话到期时间不晚于 Grant 到期时间。
+
+已接受边界：首版只接入 hashex 与 `HUMAN_READ`，不开放写模板、普通用户申请、审批、来源 IP 或多账号。AWS Console 最终页面跳转需由真实用户在浏览器中人工确认；后端签发和 federation URL 格式已完成自动验证。
+
 - 新建 AWS Grant/Grant Event/Session，不创建用户申请和审批表。
 - 部署 Dashboard Credential Broker 专用身份和 allowlist。
 - 在 `hashex` 中至少支持 Human Read Role；受限写入只有在策略已审查、动作范围明确时才增加为受控 permission template。
