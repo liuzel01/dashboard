@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   ForbiddenException,
   Get,
@@ -6,9 +7,12 @@ import {
   Param,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AccessControlService } from '../access-control/access-control.service';
 import { AuthService } from '../auth/auth.service';
+import { AwsDetectionService } from './aws-detection.service';
 import { AwsGovernanceService } from './aws-governance.service';
 import type { AwsGovernanceActor } from './aws-governance.types';
 
@@ -18,6 +22,7 @@ export class AwsGovernanceController {
     private readonly service: AwsGovernanceService,
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
+    private readonly detection: AwsDetectionService,
   ) {}
 
   @Get('overview')
@@ -107,6 +112,80 @@ export class AwsGovernanceController {
       runId ? Number(runId) : undefined,
       Number(page || 1),
       Number(pageSize || 50),
+    );
+  }
+
+  @Get('findings')
+  async findings(
+    @Headers('authorization') authorization: string | undefined,
+    @Query() query: Record<string, string | undefined>,
+  ) {
+    const actor = await this.actor(
+      authorization,
+      'aws-governance:finding:read',
+    );
+    const account = await this.service.scopedAccount(
+      actor,
+      Number(query.accountId),
+    );
+    return this.detection.list(account.id, query);
+  }
+
+  @Get('findings/:id')
+  async finding(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Query('accountId') accountId: string,
+  ) {
+    const actor = await this.actor(
+      authorization,
+      'aws-governance:finding:read',
+    );
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    return this.detection.detail(Number(id), account.id);
+  }
+
+  @Get('finding-export')
+  async exportFindings(
+    @Headers('authorization') authorization: string | undefined,
+    @Query() query: Record<string, string | undefined>,
+    @Res() response: Response,
+  ) {
+    const actor = await this.actor(
+      authorization,
+      'aws-governance:finding:read',
+    );
+    const account = await this.service.scopedAccount(
+      actor,
+      Number(query.accountId),
+    );
+    const csv = await this.detection.exportCsv(account.id, query);
+    response
+      .type('text/csv; charset=utf-8')
+      .attachment(`aws-findings-${account.environmentId}.csv`)
+      .send(csv);
+  }
+
+  @Post('findings/:id/:action')
+  async transitionFinding(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+    @Param('action') action: string,
+    @Query('accountId') accountId: string,
+    @Body()
+    body: { note?: string; exemptUntil?: string; clientRequestId?: string },
+  ) {
+    const actor = await this.actor(
+      authorization,
+      'aws-governance:finding:manage',
+    );
+    const account = await this.service.scopedAccount(actor, Number(accountId));
+    return this.detection.transition(
+      Number(id),
+      account.id,
+      actor,
+      action,
+      body,
     );
   }
 

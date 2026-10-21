@@ -12,6 +12,7 @@ import { PlatformDatabaseService } from '../access-control/platform-database.ser
 import { AuditService } from '../audit/audit.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 import { AwsCredentialProviderFactory } from './aws-credential-provider.factory';
+import { AwsDetectionService } from './aws-detection.service';
 import { AwsGovernanceCollector } from './aws-governance.collector';
 import type {
   AwsCloudAccount,
@@ -33,6 +34,7 @@ export class AwsGovernanceService implements OnModuleInit {
     private readonly credentialFactory: AwsCredentialProviderFactory,
     private readonly audit: AuditService,
     private readonly siteConf: SiteConfService,
+    private readonly detection: AwsDetectionService,
   ) {}
 
   onModuleInit() {
@@ -68,7 +70,7 @@ export class AwsGovernanceService implements OnModuleInit {
         byType: [],
       };
     const placeholders = ids.map(() => '?').join(',');
-    const [resourceRows, changeRows, failedRows, lastRows, byType] =
+    const [resourceRows, changeRows, failedRows, lastRows, byType, findings] =
       await Promise.all([
         this.db.query<any[]>(
           `SELECT COUNT(*) count FROM aws_resource_current WHERE cloud_account_id IN (${placeholders}) AND deleted_at IS NULL`,
@@ -90,6 +92,7 @@ export class AwsGovernanceService implements OnModuleInit {
           `SELECT resource_type,COUNT(*) count FROM aws_resource_current WHERE cloud_account_id IN (${placeholders}) AND deleted_at IS NULL GROUP BY resource_type ORDER BY count DESC,resource_type`,
           ids,
         ),
+        this.detection.summary(ids),
       ]);
     return {
       accounts,
@@ -103,6 +106,7 @@ export class AwsGovernanceService implements OnModuleInit {
         resourceType: row.resource_type,
         count: Number(row.count),
       })),
+      findings,
     };
   }
 
@@ -328,6 +332,13 @@ export class AwsGovernanceService implements OnModuleInit {
         account.defaultRegions,
       );
       await this.persistCollection(runId, account, collection);
+      await this.detection
+        .runForInventory(runId, account, collection)
+        .catch((error) =>
+          this.logger.error(
+            `AWS detection for inventory run ${runId} failed: ${error?.message || error}`,
+          ),
+        );
     } catch (error: any) {
       await this.db.query(
         `UPDATE aws_inventory_runs SET status='FAILED',error_count=1,errors_json=?,finished_at=UTC_TIMESTAMP(3) WHERE id=?`,
@@ -638,6 +649,10 @@ export class AwsGovernanceService implements OnModuleInit {
     if (!rows[0])
       throw new ForbiddenException('No access to this AWS cloud account');
     return this.accountFromRow(rows[0]);
+  }
+
+  async scopedAccount(actor: AwsGovernanceActor, accountId: number) {
+    return this.requireAccountScope(actor, accountId);
   }
 
   private accountFromRow(row: any): AwsCloudAccount {

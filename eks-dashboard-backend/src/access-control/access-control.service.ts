@@ -36,6 +36,8 @@ const DEFAULT_PERMISSIONS = [
   { key: 'aws-governance:inventory:run', name: 'AWS Inventory 手动同步' },
   { key: 'aws-governance:change:read', name: 'AWS 资源变更读取' },
   { key: 'aws-governance:config:manage', name: 'AWS 云账号配置管理' },
+  { key: 'aws-governance:finding:read', name: 'AWS 风险发现读取' },
+  { key: 'aws-governance:finding:manage', name: 'AWS 风险发现处置' },
   { key: 'menu:jumpserver', name: '服务器访问（JumpServer）' },
   { key: 'jumpserver:portal:launch', name: 'JumpServer 受控跳转' },
   { key: 'jumpserver:config:manage', name: 'JumpServer 配置管理' },

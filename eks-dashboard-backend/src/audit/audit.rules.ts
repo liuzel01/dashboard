@@ -19,6 +19,7 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
   { method: 'DELETE', path: '/menu-order', action: 'menuOrder.reset', actionName: '恢复默认菜单排序', menuKey: 'menu:menu-management', targetType: 'menu_order', getResourceId: () => 'global' },
   { method: 'POST', path: '/lines/ingress/manifest/apply', action: 'lines.applyIngressManifest', actionName: '预检或创建 Ingress YAML', menuKey: 'menu:line-onboarding', targetType: 'ingress_manifest' },
   { method: 'GET', path: '/s3/buckets', action: 's3.listBuckets', actionName: '查询 S3 Bucket', menuKey: 'menu:s3-upload', targetType: 's3_bucket' },
+  { method: 'GET', path: '/aws-governance/finding-export', action: 'awsGovernance.finding.export', actionName: '导出 AWS 风险发现', menuKey: 'menu:aws-governance', targetType: 'aws_finding_export' },
   { method: 'GET', path: '/s3/prefixes', action: 's3.listPrefixes', actionName: '查询 S3 路径', menuKey: 'menu:s3-upload', targetType: 's3_prefix', getResourceId: ({ query }) => [query?.bucket, query?.prefix].filter(Boolean).join(':') || null },
   { method: 'GET', path: '/deployments', action: 'deployments.list', actionName: '查询 EKS 工作负载', menuKey: 'menu:deployments', targetType: 'workload', getResourceId: ({ query }) => [query?.type || 'deployment', query?.namespace || 'default'].join('/') },
   { method: 'GET', path: '/environments/configs', action: 'environments.listConfigs', actionName: '查询环境配置', menuKey: 'menu:environments', targetType: 'environment' },
@@ -32,6 +33,7 @@ export const AUDIT_EXACT_RULES: AuditRuleConfig[] = [
 ];
 
 export const AUDIT_PATTERN_RULES: AuditPatternRuleConfig[] = [
+  { method: 'POST', path: '/aws-governance/findings/:id/:action', regex: /^\/aws-governance\/findings\/([^/]+)\/(acknowledge|accept-risk|resolve|reopen|false-positive)$/, action: 'awsGovernance.finding.transition', actionName: '处置 AWS 风险发现', menuKey: 'menu:aws-governance', targetType: 'aws_finding', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'GET', path: '/bytebase/requests/:requestId/detail', regex: /^\/bytebase\/requests\/([^/]+)\/detail$/, action: 'bytebase.request.detail', actionName: '查看 Bytebase 变更详情', menuKey: 'menu:bytebase', targetType: 'bytebase_change', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/bytebase/requests/:requestId/cancel', regex: /^\/bytebase\/requests\/([^/]+)\/cancel$/, action: 'bytebase.request.cancel', actionName: '取消 Bytebase 数据库变更', menuKey: 'menu:bytebase', targetType: 'bytebase_change', getResourceId: ({ params }) => String(params?.[0] || '') || null },
   { method: 'POST', path: '/deployments/:name/restart', regex: /^\/deployments\/([^/]+)\/restart$/, action: 'deployments.restart', actionName: '重启 EKS 工作负载', menuKey: 'menu:deployments', targetType: 'workload', getResourceId: ({ params, query }) => [query?.type || 'deployment', query?.namespace || 'default', params?.[0]].filter(Boolean).join('/') || null },
