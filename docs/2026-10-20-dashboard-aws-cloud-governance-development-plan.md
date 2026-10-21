@@ -554,13 +554,13 @@ S3 公网访问、Target Group 健康、闲置 EIP 和 IAM 通配权限规则暂
 
 ### Phase 3：管理员临时授权 MVP
 
-状态：**核心功能完成，本地 API 与真实 AWS 签发链路已验证（2026-10-21）；浏览器实际进入 Console 待人工验收。**
+状态：**功能完成，本地 API、真实 AWS 签发链路和浏览器 Console 跳转均已验证（2026-10-21）。**
 
 已完成 hashex 首版：创建独立 `DashboardHashexCredentialBrokerRole` 与 `DashboardHashexHumanReadRole`，前者只允许 AssumeRole 到后者，后者只附加 AWS 托管 `ViewOnlyAccess`。Dashboard 新增独立“AWS 临时访问”菜单、Grant/Event/Session 数据模型、权限键、管理员 MFA 授权与提前回收、用户本人一次性 ticket、数据库 UTC 到期 Worker 和 AWS Console federation 交付。Grant 事件同步写入审计 Outbox 并由 Worker 重试投递；Session 保存 RoleSessionName、AssumedRoleArn、Dashboard User/Grant ID 等非敏感 CloudTrail 关联键。浏览器只接收短时 federation 登录 URL，不接收 AK/SK/SessionToken；数据库不包含凭据列，ticket、MFA 和 federation URL 会被审计脱敏，应用日志不保存完整登录 URL。
 
 本地真实验证结果：Broker 到 Human Read 的二段 AssumeRole 成功；IAM 模拟中 `ec2:DescribeInstances`、`s3:ListAllMyBuckets` 为 allowed，`ec2:RunInstances`、`s3:PutObject` 为 implicitDeny；管理员 MFA 给普通用户创建授权、普通用户以本人身份签发 federation token、管理员 MFA 提前回收均成功；重复 ticket 返回 400；旧 `grant_hash` 返回 403 并记录 `SESSION_DENIED/STALE_GRANT_HASH`；无授权普通用户创建 Grant 返回 403。会话策略同时限制授权区域，STS 会话到期时间不晚于 Grant 到期时间。
 
-已接受边界：首版只接入 hashex 与 `HUMAN_READ`，不开放写模板、普通用户申请、审批、来源 IP 或多账号。AWS Console 最终页面跳转需由真实用户在浏览器中人工确认；后端签发和 federation URL 格式已完成自动验证。
+已接受边界：首版只接入 hashex 与 `HUMAN_READ`，不开放通用写模板、普通用户申请、审批、来源 IP 或多账号。AWS Console 页面跳转已经真实用户人工验证通过。
 
 - 新建 AWS Grant/Grant Event/Session，不创建用户申请和审批表。
 - 部署 Dashboard Credential Broker 专用身份和 allowlist。
@@ -574,6 +574,16 @@ S3 公网访问、Target Group 健康、闲置 EIP 和 IAM 通配权限规则暂
 验收：真实完成管理员授权、用户领取、AWS 只读动作、到期自动阻断和回收；验证普通用户无法创建/修改授权、写操作拒绝、重复 ticket 拒绝、旧 `grant_hash` 拒绝。来源 IP 不在本阶段验收范围。
 
 ### Phase 4：受限写入与治理闭环
+
+状态：**首个受控整改动作已完成开发与自动化验证（2026-10-21）；Dashboard 真实写入及回滚待人工验收。**
+
+首版范围主动收敛为 hashex 的必要标签整改：只支持规则 `required-tags-missing` 命中的 EC2 Instance、EBS Volume 和 Security Group，只能写入 `environment`、`owner`。已创建独立 `DashboardHashexHumanWriteRole`，其信任主体只有 Credential Broker Role；IAM Policy 仅允许对 `ap-east-1` 当前账号上述三类 ARN 执行 `CreateTags/DeleteTags`，并用 `aws:TagKeys` 限制两个治理标签。IAM simulation 已确认允许受控标签写入、拒绝 `Name` 标签及 `ec2:RunInstances`；真实二段 AssumeRole 后 `CreateTags --dry-run` 返回预期 `DryRunOperation`，未实际修改 AWS 资源。
+
+Dashboard 已增加整改任务、不可变事件记录、预览、双人审批、MFA、维护窗口、幂等请求、执行前 AWS DryRun、执行前标签快照、失败回执、回滚和执行/回滚后自动 Inventory。提交人与审批人必须不同；Human Write Role 不会出现在 Phase 3 临时 Console 授权模板中。
+
+当前保留的人工验收项：在页面选择一条低风险测试资源，完成“预览 -> 提交 -> 另一管理员审批 -> 执行 -> Inventory 复核 -> 回滚 -> 再次复核”。在该 E2E 完成前，不把自动整改标记为生产可用。
+
+已降级为后续增强：普通用户自助申请、来源出口限制、通用写入模板、hashex 以外账号、通知/SLA 和自动修复。首版不开放任意 AWS API、任意标签键或通用 Human Write Console。
 
 - 只按明确动作开放 Human Write Role，不开放通用写权限。
 - 增加普通用户自助申请、双人审批/更高 assurance、来源出口限制、维护窗口和回滚说明。
