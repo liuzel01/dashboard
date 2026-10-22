@@ -17,6 +17,41 @@ describe('JumpserverAccessService safety policy', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new JumpserverAccessService(db, auth, access, siteConf);
+    jest.spyOn(service as any, 'remoteUserState').mockResolvedValue({
+      status: 'ACTIVE',
+      dateExpired: null,
+      reason: '',
+    });
+  });
+
+  it('classifies active, expired, disabled and malformed remote users', () => {
+    expect(
+      (service as any).userStateFromDetail({
+        id: 'user-1',
+        is_active: true,
+        date_expired: new Date(Date.now() + 60_000).toISOString(),
+      }).status,
+    ).toBe('ACTIVE');
+    expect(
+      (service as any).userStateFromDetail({
+        id: 'user-1',
+        is_active: true,
+        date_expired: new Date(Date.now() - 1).toISOString(),
+      }).status,
+    ).toBe('EXPIRED');
+    expect(
+      (service as any).userStateFromDetail({
+        id: 'user-1',
+        is_active: false,
+      }).status,
+    ).toBe('DISABLED');
+    expect(
+      (service as any).userStateFromDetail({
+        id: 'user-1',
+        is_active: true,
+        date_expired: 'not-a-date',
+      }).status,
+    ).toBe('UNKNOWN');
   });
 
   it('blocks unknown read endpoints before credentials are resolved', async () => {
@@ -348,6 +383,38 @@ describe('JumpserverAccessService safety policy', () => {
     );
   });
 
+  it('fails closed when the mapped JumpServer user is expired', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    (service as any).remoteUserState.mockResolvedValue({
+      status: 'EXPIRED',
+      dateExpired: '2026-10-21T00:00:00Z',
+      reason: 'JumpServer 用户已到期',
+    });
+    jest.spyOn(service as any, 'verifyEffectiveGrant').mockResolvedValue({
+      effective: 1,
+      total: 1,
+      unavailable: 0,
+    });
+    db.query.mockResolvedValueOnce([
+      {
+        remote_user_id: 'remote-user-2',
+        remote_username: 'mapped-user',
+        bundle_id: 7,
+        bundle_name: 'ops-assets',
+        remote_permission_id: 'permission-7',
+        status: 'SYNCED',
+      },
+    ]);
+
+    await expect(service.myStatus('token')).resolves.toMatchObject({
+      mapped: true,
+      eligible: false,
+      remoteUserStatus: 'EXPIRED',
+      remoteUserDateExpired: '2026-10-21T00:00:00Z',
+      grants: [{ status: 'SYNCED' }],
+    });
+  });
+
   it('fails closed when an effective account or protocol is missing', async () => {
     jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
     db.query.mockResolvedValueOnce([
@@ -488,6 +555,32 @@ describe('JumpserverAccessService safety policy', () => {
       'jumpserver_user_bundle_bindings',
     );
     expect(syncUser).toHaveBeenCalledWith('token', 2);
+  });
+
+  it('does not create a grant for an expired JumpServer user', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 1 });
+    (service as any).remoteUserState.mockResolvedValue({
+      status: 'EXPIRED',
+      dateExpired: '2026-10-21T00:00:00Z',
+      reason: 'JumpServer 用户已到期',
+    });
+    db.query.mockResolvedValueOnce([
+      {
+        id: 10,
+        remote_user_id: 'remote-user-2',
+        remote_username: 'mapped-user',
+      },
+    ]);
+
+    await expect(
+      service.createUserGrant('token', {
+        dashboardUserId: 2,
+        targets: [{ type: 'ASSET', id: 'asset-1', name: 'test-asset' }],
+        accounts: ['@ALL'],
+        protocols: ['ssh'],
+      }),
+    ).rejects.toThrow('已到期');
+    expect(db.withTransaction).not.toHaveBeenCalled();
   });
 
   it('stores expiration on the user grant binding', async () => {
@@ -696,6 +789,31 @@ describe('JumpserverAccessService safety policy', () => {
     expect(db.query.mock.calls[0][1]).toEqual(
       expect.arrayContaining(['PORTAL_DENIED', 'DENIED']),
     );
+  });
+
+  it('returns a specific denial when preparing a ticket for an expired user', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({ userId: 2 });
+    jest.spyOn(service, 'myStatus').mockResolvedValue({
+      mapped: true,
+      eligible: false,
+      remoteUsername: 'mapped-user',
+      remoteUserStatus: 'EXPIRED',
+      remoteUserDateExpired: '2026-10-21T00:00:00Z',
+      remoteUserReason: 'JumpServer 用户已到期',
+      grants: [],
+    });
+    db.query.mockResolvedValue({});
+
+    try {
+      await service.prepareTicket('token', 'session-2');
+      throw new Error('expected prepareTicket to reject');
+    } catch (error: any) {
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect(error.getResponse()).toMatchObject({
+        code: 'JUMPSERVER_USER_EXPIRED',
+        dateExpired: '2026-10-21T00:00:00Z',
+      });
+    }
   });
 
   it('clamps the configured portal ticket lifetime to the safe maximum', async () => {

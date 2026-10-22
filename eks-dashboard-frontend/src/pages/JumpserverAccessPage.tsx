@@ -111,6 +111,21 @@ export default function JumpserverAccessPage() {
       setStatusLoading(false);
     }
   };
+  const remoteUserStatusText = (value?: string | null) => {
+    if (value === "ACTIVE") return "正常";
+    if (value === "EXPIRED") return "已过期";
+    if (value === "DISABLED") return "已禁用";
+    if (value === "MISSING") return "不存在";
+    if (value === "UNKNOWN") return "状态未知";
+    return "未检查";
+  };
+  const remoteUserStatusColor = (value?: string | null) => {
+    if (value === "ACTIVE") return "green";
+    if (value === "UNKNOWN") return "orange";
+    return "red";
+  };
+  const remoteUserExpiryText = (value?: string | null) =>
+    value ? dayjs(value).format("YYYY-MM-DD HH:mm:ss") : "未设置";
   const loadConfiguration = async (force = false) => {
     if (!admin) return configurationDataRef.current;
     if (!force && configurationLoadedRef.current)
@@ -305,7 +320,14 @@ export default function JumpserverAccessPage() {
             style={{ width: "100%" }}
             options={catalog.jumpserverUsers.map((u) => ({
               value: u.username || u.name,
-              label: `${u.name}${u.username ? ` (${u.username})` : ""}`,
+              label: `${u.name}${u.username ? ` (${u.username})` : ""}${
+                u.remoteUserStatus === "EXPIRED"
+                  ? ` · 已过期 ${remoteUserExpiryText(u.dateExpired)}`
+                  : u.remoteUserStatus !== "ACTIVE"
+                    ? ` · ${remoteUserStatusText(u.remoteUserStatus)}`
+                    : ""
+              }`,
+              disabled: u.remoteUserStatus !== "ACTIVE",
             }))}
             onChange={(v) => (remoteUsername = v)}
           />
@@ -342,7 +364,11 @@ export default function JumpserverAccessPage() {
       expiresAt: Dayjs | null = dayjs().add(30, "day");
     const mappedUserIds = new Set(
       configuration.mappings
-        .filter((mapping: any) => mapping.status === "ACTIVE")
+        .filter(
+          (mapping: any) =>
+            mapping.status === "ACTIVE" &&
+            mapping.remote_user_status === "ACTIVE",
+        )
         .map((mapping: any) => Number(mapping.dashboard_user_id)),
     );
     Modal.confirm({
@@ -437,7 +463,11 @@ export default function JumpserverAccessPage() {
   const mappedUserOptions = () => {
     const mappedUserIds = new Set(
       cfg.mappings
-        .filter((mapping: any) => mapping.status === "ACTIVE")
+        .filter(
+          (mapping: any) =>
+            mapping.status === "ACTIVE" &&
+            mapping.remote_user_status === "ACTIVE",
+        )
         .map((mapping: any) => Number(mapping.dashboard_user_id)),
     );
     return users
@@ -700,6 +730,22 @@ export default function JumpserverAccessPage() {
             },
             { title: "JumpServer 用户", dataIndex: "remote_username" },
             {
+              title: "远端账户",
+              render: (_, row: any) => (
+                <Tooltip
+                  title={
+                    row.remote_user_status === "EXPIRED"
+                      ? `失效日期：${remoteUserExpiryText(row.remote_user_date_expired)}`
+                      : row.remote_user_reason || undefined
+                  }
+                >
+                  <Tag color={remoteUserStatusColor(row.remote_user_status)}>
+                    {remoteUserStatusText(row.remote_user_status)}
+                  </Tag>
+                </Tooltip>
+              ),
+            },
+            {
               title: "状态",
               dataIndex: "status",
               render: (v) => (
@@ -711,6 +757,7 @@ export default function JumpserverAccessPage() {
               render: (_, r: any) => (
                 <Button
                   type="link"
+                  disabled={r.remote_user_status !== "ACTIVE"}
                   onClick={() => sync(Number(r.dashboard_user_id))}
                 >
                   同步授权
@@ -856,7 +903,9 @@ export default function JumpserverAccessPage() {
                       <Tag color={color}>
                         {expired ? "已到期，回收处理中" : "限时授权"}
                       </Tag>
-                      <Text type={remainingHours <= 24 ? "danger" : "secondary"}>
+                      <Text
+                        type={remainingHours <= 24 ? "danger" : "secondary"}
+                      >
                         {expiryRemainingText(row.expires_at)}
                       </Text>
                     </Space>
@@ -915,6 +964,15 @@ export default function JumpserverAccessPage() {
           <Descriptions.Item label="JumpServer 用户">
             {status?.remoteUsername || "-"}
           </Descriptions.Item>
+          <Descriptions.Item label="远端账户状态">
+            {status?.mapped ? (
+              <Tag color={remoteUserStatusColor(status.remoteUserStatus)}>
+                {remoteUserStatusText(status.remoteUserStatus)}
+              </Tag>
+            ) : (
+              "-"
+            )}
+          </Descriptions.Item>
           <Descriptions.Item label="受控授权">
             {status?.grants?.map((g: any) => (
               <Tag
@@ -935,6 +993,31 @@ export default function JumpserverAccessPage() {
             )) || "-"}
           </Descriptions.Item>
         </Descriptions>
+        {status?.remoteUserStatus === "EXPIRED" && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="JumpServer 用户已到期，无法进入"
+            description={`用户 ${status.remoteUsername || "-"} 已于 ${remoteUserExpiryText(
+              status.remoteUserDateExpired,
+            )} 到期。请联系管理员在 JumpServer 用户管理中延长 date_expired，然后刷新本页面重试。`}
+          />
+        )}
+        {status?.mapped &&
+          status?.remoteUserStatus &&
+          !["ACTIVE", "EXPIRED"].includes(status.remoteUserStatus) && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="当前无法进入 JumpServer"
+              description={
+                status.remoteUserReason ||
+                "暂时无法确认 JumpServer 用户状态，请稍后刷新或联系管理员。"
+              }
+            />
+          )}
         {status?.grants?.some((grant: any) => grant.status === "PARTIAL") && (
           <Alert
             type="warning"

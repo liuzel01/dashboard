@@ -16,6 +16,17 @@ import { AuthService } from '../auth/auth.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
 
 type Actor = { userId: number; username: string; permissions: string[] };
+type RemoteUserStatus =
+  | 'ACTIVE'
+  | 'EXPIRED'
+  | 'DISABLED'
+  | 'MISSING'
+  | 'UNKNOWN';
+type RemoteUserState = {
+  status: RemoteUserStatus;
+  dateExpired: string | null;
+  reason: string;
+};
 
 @Injectable()
 export class JumpserverAccessService {
@@ -157,6 +168,82 @@ export class JumpserverAccessService {
     return response.data;
   }
 
+  private userStateFromDetail(detail: any): RemoteUserState {
+    if (!detail || !detail.id)
+      return {
+        status: 'MISSING',
+        dateExpired: null,
+        reason: 'JumpServer 用户不存在',
+      };
+    const rawDate = detail.date_expired;
+    const dateExpired = rawDate ? String(rawDate) : null;
+    if (detail.is_active === false || detail.is_valid === false)
+      return {
+        status: 'DISABLED',
+        dateExpired,
+        reason: 'JumpServer 用户已禁用',
+      };
+    if (dateExpired) {
+      const expiresAt = new Date(dateExpired).getTime();
+      if (!Number.isFinite(expiresAt))
+        return {
+          status: 'UNKNOWN',
+          dateExpired,
+          reason: 'JumpServer 用户失效日期格式无法识别',
+        };
+      if (expiresAt <= Date.now())
+        return {
+          status: 'EXPIRED',
+          dateExpired,
+          reason: `JumpServer 用户已于 ${dateExpired} 到期`,
+        };
+    }
+    return { status: 'ACTIVE', dateExpired, reason: '' };
+  }
+
+  private async remoteUserState(
+    remoteUserId: string,
+  ): Promise<RemoteUserState> {
+    if (!remoteUserId)
+      return {
+        status: 'MISSING',
+        dateExpired: null,
+        reason: 'JumpServer 用户不存在',
+      };
+    try {
+      const detail = await this.remote(
+        'reader',
+        'GET',
+        `/api/v1/users/users/${encodeURIComponent(remoteUserId)}/`,
+      );
+      return this.userStateFromDetail(detail);
+    } catch (error: any) {
+      this.logger.warn(
+        `Unable to verify JumpServer user ${remoteUserId}: ${String(error?.message || error)}`,
+      );
+      return {
+        status: 'UNKNOWN',
+        dateExpired: null,
+        reason: '暂时无法确认 JumpServer 用户状态',
+      };
+    }
+  }
+
+  private async assertRemoteUserActive(mapping: any) {
+    const state = await this.remoteUserState(
+      String(mapping.remote_user_id || ''),
+    );
+    if (state.status === 'ACTIVE') return state;
+    throw new BadRequestException({
+      code: `JUMPSERVER_USER_${state.status}`,
+      message:
+        state.status === 'EXPIRED'
+          ? `JumpServer 用户 ${String(mapping.remote_username || '')} 已到期，请先在 JumpServer 中延长 date_expired`
+          : state.reason,
+      dateExpired: state.dateExpired,
+    });
+  }
+
   async diagnostics(authorization?: string) {
     await this.actor(authorization, 'jumpserver:config:manage');
     const result: any = {
@@ -232,6 +319,12 @@ export class JumpserverAccessService {
             ? v.nodes_display.map(String)
             : undefined,
         isActive: v.is_active !== false,
+        remoteUserStatus:
+          kind === 'users' ? this.userStateFromDetail(v).status : undefined,
+        dateExpired:
+          kind === 'users' && v.date_expired
+            ? String(v.date_expired)
+            : undefined,
       })),
     };
   }
@@ -260,8 +353,21 @@ export class JumpserverAccessService {
           ORDER BY ub.updated_at DESC`,
       ),
     ]);
+    const enrichedMappings = await Promise.all(
+      mappings.map(async (mapping) => {
+        const remoteUser = await this.remoteUserState(
+          String(mapping.remote_user_id || ''),
+        );
+        return {
+          ...mapping,
+          remote_user_status: remoteUser.status,
+          remote_user_date_expired: remoteUser.dateExpired,
+          remote_user_reason: remoteUser.reason,
+        };
+      }),
+    );
     return {
-      mappings,
+      mappings: enrichedMappings,
       userBindings: userBindings.map((binding) => ({
         ...binding,
         expires_at: this.utcDateIso(binding.expires_at),
@@ -404,6 +510,16 @@ export class JumpserverAccessService {
     );
     if (!match || match.is_active === false)
       throw new BadRequestException('JumpServer 用户不存在或已禁用');
+    const remoteUser = this.userStateFromDetail(match);
+    if (remoteUser.status !== 'ACTIVE')
+      throw new BadRequestException({
+        code: `JUMPSERVER_USER_${remoteUser.status}`,
+        message:
+          remoteUser.status === 'EXPIRED'
+            ? `JumpServer 用户 ${String(match.username)} 已到期，请先在 JumpServer 中延长 date_expired`
+            : remoteUser.reason,
+        dateExpired: remoteUser.dateExpired,
+      });
     await this.db.query(
       `INSERT INTO jumpserver_identity_mappings(provider_key,dashboard_user_id,remote_user_id,remote_username,status,verified_at,created_by) VALUES('primary',?,?,?,?,UTC_TIMESTAMP(3),?) ON DUPLICATE KEY UPDATE remote_user_id=VALUES(remote_user_id),remote_username=VALUES(remote_username),status=VALUES(status),verified_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3)`,
       [
@@ -433,12 +549,13 @@ export class JumpserverAccessService {
       throw new BadRequestException('账号选择器和协议不能为空');
     const expiresAt = this.grantExpiration(input.expiresAt);
     const mappings = await this.db.query<any[]>(
-      `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
+      `SELECT m.id,m.remote_user_id,m.remote_username FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
         WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
       [dashboardUserId],
     );
     if (!mappings[0])
       throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
+    await this.assertRemoteUserActive(mappings[0]);
     const grant = await this.db.withTransaction(async (conn) => {
       const label = String(input.name || targets[0]?.name || 'asset')
         .trim()
@@ -511,12 +628,13 @@ export class JumpserverAccessService {
       ),
     );
     const mappings = await this.db.query<any[]>(
-      `SELECT m.id FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
+      `SELECT m.id,m.remote_user_id,m.remote_username FROM jumpserver_identity_mappings m JOIN users u ON u.id=m.dashboard_user_id
         WHERE m.provider_key='primary' AND m.dashboard_user_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1`,
       [dashboardUserId],
     );
     if (!mappings[0])
       throw new BadRequestException('用户尚未建立有效 JumpServer 身份映射');
+    await this.assertRemoteUserActive(mappings[0]);
     const grants = await this.db.withTransaction(async (conn) => {
       const createdGrants: Array<{
         bundleId: number;
@@ -638,6 +756,7 @@ export class JumpserverAccessService {
         status: 'REVOKED',
       });
     }
+    if (bundles.length > 0) await this.assertRemoteUserActive(mappings[0]);
     if (bundles.length === 0 && results.length === 0)
       throw new BadRequestException(
         '用户未绑定任何已启用的 JumpServer 授权包，请先由管理员为该用户分配授权包',
@@ -781,6 +900,9 @@ export class JumpserverAccessService {
     const synced = rows.filter(
       (r) => r.status === 'SYNCED' && r.remote_permission_id,
     );
+    const remoteUser = rows.length
+      ? await this.remoteUserState(String(rows[0].remote_user_id || ''))
+      : null;
     for (const row of synced) {
       try {
         const effective = await this.verifyEffectiveGrant(row);
@@ -796,8 +918,12 @@ export class JumpserverAccessService {
       mapped: rows.length > 0,
       eligible:
         synced.length > 0 &&
-        synced.every((r) => ['SYNCED', 'PARTIAL'].includes(r.status)),
+        synced.every((r) => ['SYNCED', 'PARTIAL'].includes(r.status)) &&
+        remoteUser?.status === 'ACTIVE',
       remoteUsername: rows[0]?.remote_username || null,
+      remoteUserStatus: remoteUser?.status || null,
+      remoteUserDateExpired: remoteUser?.dateExpired || null,
+      remoteUserReason: remoteUser?.reason || null,
       grants: rows
         .filter((r) => r.bundle_id)
         .map((r) => ({
@@ -933,14 +1059,27 @@ export class JumpserverAccessService {
     }
     const status = await this.myStatus(authorization);
     if (!status.eligible) {
+      const remoteDenied =
+        status.remoteUserStatus && status.remoteUserStatus !== 'ACTIVE';
       await this.event(
         actor.userId,
         actor.userId,
         'PORTAL_DENIED',
         'prepare',
         'DENIED',
-        '远端实际授权未生效或存在漂移，拒绝创建跳转 Ticket',
+        remoteDenied
+          ? `JumpServer 用户状态异常（${status.remoteUserStatus}），拒绝创建跳转 Ticket`
+          : '远端实际授权未生效或存在漂移，拒绝创建跳转 Ticket',
       );
+      if (remoteDenied)
+        throw new ForbiddenException({
+          code: `JUMPSERVER_USER_${status.remoteUserStatus}`,
+          message:
+            status.remoteUserStatus === 'EXPIRED'
+              ? `JumpServer 用户已到期，请联系管理员延长 date_expired 后重试`
+              : status.remoteUserReason,
+          dateExpired: status.remoteUserDateExpired,
+        });
       throw new ForbiddenException('JumpServer 实际授权尚未生效或存在漂移');
     }
     const ticket = randomBytes(32).toString('base64url');
@@ -1016,14 +1155,27 @@ export class JumpserverAccessService {
     }
     const status = await this.myStatus(authorization);
     if (!status.eligible) {
+      const remoteDenied =
+        status.remoteUserStatus && status.remoteUserStatus !== 'ACTIVE';
       await this.event(
         actor.userId,
         actor.userId,
         'PORTAL_DENIED',
         outcome.ticketId,
         'DENIED',
-        'Ticket 消费后远端实际授权已失效',
+        remoteDenied
+          ? `Ticket 消费后 JumpServer 用户状态异常（${status.remoteUserStatus}）`
+          : 'Ticket 消费后远端实际授权已失效',
       );
+      if (remoteDenied)
+        throw new ForbiddenException({
+          code: `JUMPSERVER_USER_${status.remoteUserStatus}`,
+          message:
+            status.remoteUserStatus === 'EXPIRED'
+              ? 'JumpServer 用户已到期，请联系管理员延长 date_expired 后重试'
+              : status.remoteUserReason,
+          dateExpired: status.remoteUserDateExpired,
+        });
       throw new ForbiddenException('JumpServer 实际授权已失效');
     }
     const c = await this.config('reader');

@@ -157,6 +157,8 @@ export type JumpserverCatalogItem = {
   fullValue?: string;
   nodesDisplay?: string[];
   isActive: boolean;
+  remoteUserStatus?: "ACTIVE" | "EXPIRED" | "DISABLED" | "MISSING" | "UNKNOWN";
+  dateExpired?: string;
 };
 export type JumpserverConfiguration = {
   mappings: Array<Record<string, unknown>>;
@@ -269,6 +271,10 @@ type MyJumpserverStatus = {
   mapped: boolean;
   eligible: boolean;
   remoteUsername?: string;
+  remoteUserStatus?:
+    "ACTIVE" | "EXPIRED" | "DISABLED" | "MISSING" | "UNKNOWN" | null;
+  remoteUserDateExpired?: string | null;
+  remoteUserReason?: string | null;
   grants: Array<{ bundleId: number; bundleName: string; status: string }>;
 };
 let pendingMyJumpserverStatus: Promise<MyJumpserverStatus> | null = null;
