@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Card, Collapse, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, App, Button, Card, Collapse, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd';
 import { BellOutlined, ExportOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
 import {
   DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
@@ -262,8 +262,7 @@ const CicdCatalogPage: React.FC = () => {
     const otpCode = actionType !== 'BUILD_DEPLOY'
       ? await new Promise<string | undefined>((resolve) => {
           let value = '';
-          let modalInstance: { update: (config: { okButtonProps: { disabled: boolean } }) => void } | undefined;
-          modalInstance = Modal.confirm({
+          const modalInstance = Modal.confirm({
             title: '验证 MFA 并确认执行制品推包',
             content: <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="该操作可能向目标仓库发布制品，请核对环境、Job 和参数。" description="请输入当前登录用户已绑定 Google Authenticator 的 6 位验证码；服务端验证通过后才会触发推包。" /><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { value = event.target.value.replace(/\s+/g, ''); modalInstance?.update({ okButtonProps: { disabled: !/^\d{6}$/.test(value) } }); }} /></Space>,
             okText: '确认触发', cancelText: '取消', okButtonProps: { disabled: true },
@@ -404,7 +403,7 @@ const CicdCatalogPage: React.FC = () => {
     });
   };
 
-  const recentRunColumns = [
+  const recentRunColumns: NonNullable<TableProps<CicdRun>['columns']> = [
     {
       key: 'job',
       title: 'Job',
@@ -560,7 +559,7 @@ const CicdCatalogPage: React.FC = () => {
       <ColumnSettingsPopover options={cicdRunColumnOptions} value={visibleRunColumns} onChange={setVisibleRunColumns} onReset={resetRunColumns} />
       <Button icon={<ReloadOutlined />} loading={runsLoading} onClick={() => void loadRuns()}>刷新列表</Button>
     </Space>}>
-      <OpsTable size="small" rowKey="run_id" loading={runsLoading} dataSource={runs} tableLayout="fixed" scroll={{ x: 1190 }} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }} columns={visibleRecentRunColumns as any} />
+      <OpsTable size="small" rowKey="run_id" loading={runsLoading} dataSource={runs} tableLayout="fixed" scroll={{ x: 1190 }} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }} columns={visibleRecentRunColumns} />
     </Card>
 
     <Modal title="Jenkins 控制台日志（实时）" open={logOpen} onCancel={closeLog} footer={<Button onClick={closeLog}>关闭</Button>} width={900} destroyOnHidden>

@@ -53,8 +53,8 @@ const MenuOrderManagementPage: React.FC = () => {
       setGroups(next);
       setSavedGroups(cloneGroups(next));
       setIsDefault(Boolean(data.isDefault));
-    } catch (error: any) {
-      message.error(error?.message || '加载菜单排序失败');
+    } catch (error: unknown) {
+      message.error((error as ApiError)?.response?.data?.message || (error as ApiError)?.message || '加载菜单排序失败');
     } finally {
       setLoading(false);
     }
@@ -90,8 +90,8 @@ const MenuOrderManagementPage: React.FC = () => {
       setIsDefault(false);
       writeCachedMenuOrder(next);
       message.success('菜单排序已保存；刷新页面后对所有用户生效');
-    } catch (error: any) {
-      message.error(error?.message || '保存菜单排序失败');
+    } catch (error: unknown) {
+      message.error((error as ApiError)?.response?.data?.message || (error as ApiError)?.message || '保存菜单排序失败');
     } finally {
       setSaving(false);
     }

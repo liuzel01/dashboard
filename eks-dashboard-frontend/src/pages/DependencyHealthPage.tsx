@@ -1,8 +1,8 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, InputNumber, message, Modal, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography, type TableProps } from 'antd';
 import { ReloadOutlined, SettingOutlined, SyncOutlined } from '@ant-design/icons';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { createDependencyHealthProviderProfile, createDependencyHealthTarget, deleteDependencyHealthProviderProfile, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfileRecords, listDependencyHealthProviderProfiles, listDependencyHealthProviderTypes, listDependencyHealthSiteConfReferences, listDependencyHealthTargets, updateDependencyHealthProviderProfile, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthProviderProfileRecord, type DependencyHealthResponse, type DependencyHealthTarget, type SiteConfReference } from '../services/api';
+import { createDependencyHealthProviderProfile, createDependencyHealthTarget, deleteDependencyHealthProviderProfile, deleteDependencyHealthTarget, getDependencyHealth, getDependencyHealthHistory, listDependencyHealthProviderProfileRecords, listDependencyHealthProviderProfiles, listDependencyHealthProviderTypes, listDependencyHealthSiteConfReferences, listDependencyHealthTargets, updateDependencyHealthProviderProfile, updateDependencyHealthTarget, verifyDependencyHealthTarget, type DependencyHealthHistory, type DependencyHealthItem, type DependencyHealthLayer, type DependencyHealthProviderProfile, type DependencyHealthProviderProfileRecord, type DependencyHealthResponse, type DependencyHealthTarget, type DependencyHealthVerificationResult, type SiteConfReference } from '../services/api';
 import { ColumnSettingsPopover, MetricGrid, OpsTable, PageHeader, useVisibleColumns } from '../components/ops';
 import { formatDateTime, formatTime } from '../utils/time';
 
@@ -29,15 +29,15 @@ const layerTag = (layer?: DependencyHealthLayer) => {
   return <Space><Tag color={color}>{text}</Tag><Typography.Text>{layer.summary}</Typography.Text></Space>;
 };
 
-const showVerificationResult = (result: any) => {
+const showVerificationResult = (result: DependencyHealthVerificationResult) => {
   const layers = [
     `L1 ${result?.l1?.healthy ? '通过' : '失败'}`,
     ...['L2', 'L3'].map((layer) => {
-      const item = (result?.provider || []).find((entry: any) => entry.layer === layer);
+      const item = result.provider.find((entry) => entry.layer === layer);
       return item ? `${layer} ${item.status === 'PASS' ? '通过' : item.status === 'SKIPPED' ? '跳过' : item.status === 'NOT_CONFIGURED' ? '未配置' : '失败'}` : `${layer} 未启用`;
     }),
   ];
-  const succeeded = result?.l1?.healthy && (result?.provider || []).every((item: any) => ['PASS', 'SKIPPED'].includes(item.status));
+  const succeeded = result.l1.healthy && result.provider.every((item) => ['PASS', 'SKIPPED'].includes(item.status));
   message.open({ type: succeeded ? 'success' : 'warning', content: `立即验证完成：${layers.join('；')}`, duration: 6 });
 };
 
@@ -118,7 +118,7 @@ const DependencyHealthPage: React.FC = () => {
     if (mode === 'manual') setManualRefreshing(true);
     setError(null);
     try { setData(await getDependencyHealth(mode === 'manual')); }
-    catch (reason: any) { setError(reason?.response?.data?.message || reason?.message || '加载外部依赖健康状态失败'); }
+    catch (reason: unknown) { setError((reason as ApiError)?.response?.data?.message || (reason as ApiError)?.message || '加载外部依赖健康状态失败'); }
     finally {
       requestInFlight.current = false;
       if (mode === 'initial') setInitialLoading(false);
@@ -221,7 +221,7 @@ const DependencyHealthPage: React.FC = () => {
     [data?.items, environmentNameById],
   );
 
-  const columns = useMemo(() => [
+  const columns = useMemo<NonNullable<TableProps<DependencyHealthItem>['columns']>>(() => [
     {
       title: '依赖', dataIndex: 'name', key: 'name', width: 230, fixed: 'left' as const, ellipsis: true,
       render: (value: string) => <Tooltip title={value}><Typography.Text strong ellipsis style={{ display: 'block' }}>{value}</Typography.Text></Tooltip>,
@@ -273,7 +273,7 @@ const DependencyHealthPage: React.FC = () => {
     <OpsTable
       rowKey="key"
       loading={initialLoading && !data}
-      columns={columns as any}
+      columns={columns}
       dataSource={data?.items || []}
       tableLayout="fixed"
       scroll={{ x: 1370 }}
@@ -315,8 +315,8 @@ const DependencyHealthPage: React.FC = () => {
         { title: '模块', dataIndex: 'module', render: (value: string) => <Tag>{value}</Tag> },
         { title: '连接档案', dataIndex: 'providerProfile', render: (value: string | null) => value ? <Tag color="blue">{providerProfiles.find((profile) => profile.id === value)?.label || value}</Tag> : '-' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" loading={targetVerifying === row.key} onClick={async () => { setTargetVerifying(row.key); try { showVerificationResult(await verifyDependencyHealthTarget(row.key)); await load('manual'); } catch (reason: any) { message.error(reason?.response?.data?.message || '立即验证失败'); } finally { setTargetVerifying(null); } }}>立即验证</Button><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
-      ] as any} />
+        { title: '操作', render: (_: unknown, row: DependencyHealthTarget) => <Space><Button type="link" loading={targetVerifying === row.key} onClick={async () => { setTargetVerifying(row.key); try { showVerificationResult(await verifyDependencyHealthTarget(row.key)); await load('manual'); } catch (reason: unknown) { message.error((reason as ApiError)?.response?.data?.message || (reason as ApiError)?.message || '立即验证失败'); } finally { setTargetVerifying(null); } }}>立即验证</Button><Button type="link" onClick={() => editTarget(row)}>编辑</Button><Popconfirm title="确认删除此目标？" onConfirm={async () => { await deleteDependencyHealthTarget(row.key); setTargets(await listDependencyHealthTargets()); await load('manual'); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
+      ]} />
       <Modal title={editingTarget ? `编辑 ${editingTarget.name}` : '新增依赖目标'} open={targetEditorOpen} onCancel={() => { setTargetEditorOpen(false); setEditingTarget(null); targetForm.resetFields(); }} onOk={() => void saveTarget()} confirmLoading={targetSaving} okText="仅保存" destroyOnHidden footer={(_, { OkBtn, CancelBtn }) => <Space><CancelBtn /><Button loading={targetSaving} onClick={() => void saveTarget(true)}>保存并立即验证</Button><OkBtn /></Space>}>
         <Form form={targetForm} layout="vertical">
           {!editingTarget && <Form.Item name="key" label="内部标识" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9._-]{1,63}$/, message: '仅允许小写字母、数字、点、下划线和短横线' }]}><Input /></Form.Item>}
@@ -343,7 +343,7 @@ const DependencyHealthPage: React.FC = () => {
         { title: '标识', dataIndex: 'id' }, { title: '名称', dataIndex: 'name' }, { title: '类型', dataIndex: 'providerType', render: (value: string) => <Tag>{value}</Tag> }, { title: '环境', dataIndex: 'environmentId' },
         { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '停用'}</Tag> },
         { title: '操作', render: (_: unknown, row: DependencyHealthProviderProfileRecord) => <Space><Button type="link" loading={profileEditorLoading} onClick={() => void editProfile(row)}>编辑</Button><Popconfirm title="确认删除此 Provider 连接档案？" onConfirm={async () => { await deleteDependencyHealthProviderProfile(row.id); setProfileRecords(await listDependencyHealthProviderProfileRecords()); }}><Button type="link" danger>删除</Button></Popconfirm></Space> },
-      ] as any} />
+      ]} />
       <Modal title={editingProfile ? `编辑 ${editingProfile.name}` : '新增 Provider 连接档案'} open={profileEditorOpen} onCancel={() => { setProfileEditorOpen(false); setEditingProfile(null); profileForm.resetFields(); }} onOk={() => void saveProfile()} confirmLoading={profileSaving} destroyOnHidden width={680}>
         <Form form={profileForm} layout="vertical">
           <Form.Item name="id" label="档案标识" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9._-]{1,63}$/, message: '仅允许小写字母、数字、点、下划线和短横线' }]}><Input disabled={Boolean(editingProfile)} /></Form.Item>

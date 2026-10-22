@@ -25,6 +25,7 @@ import {
   type AwsGovernanceResource,
   type AwsInventoryRun,
   type AwsRemediationTask,
+  type AwsRemediationPreview,
   type AwsResourceChange,
 } from "../services/api";
 import { formatDateTime } from "../utils/time";
@@ -68,7 +69,7 @@ const AwsGovernancePage: React.FC = () => {
   const [remediations, setRemediations] = useState<AwsRemediationTask[]>([]);
   const [remediationFinding, setRemediationFinding] = useState<AwsFinding | null>(null);
   const [remediationForm, setRemediationForm] = useState({ environment: "", owner: "", reason: "", rollbackPlan: "移除本次新增标签，恢复执行前标签值", maintenanceStart: "", maintenanceEnd: "" });
-  const [remediationPreview, setRemediationPreview] = useState<any>(null);
+  const [remediationPreview, setRemediationPreview] = useState<AwsRemediationPreview | null>(null);
   const [remediationSaving, setRemediationSaving] = useState(false);
   const [locatingRemediationResourceId, setLocatingRemediationResourceId] = useState<string | null>(null);
   const [taskAction, setTaskAction] = useState<{ task: AwsRemediationTask; action: "approve" | "execute" | "rollback" } | null>(null);

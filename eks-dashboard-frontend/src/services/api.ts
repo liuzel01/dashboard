@@ -3360,6 +3360,19 @@ export type DependencyHealthLayer = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type DependencyHealthVerificationResult = {
+  targetKey: string;
+  l1: {
+    healthy: boolean;
+  };
+  provider: Array<
+    DependencyHealthLayer & {
+      targetKey: string;
+      layer: "L2" | "L3";
+    }
+  >;
+};
+
 export type DependencyHealthResponse = {
   checkedAt: string;
   cached: boolean;
@@ -3505,7 +3518,7 @@ export const verifyDependencyHealthTarget = async (key: string) =>
     await api.post(
       `/dependency-health/targets/${encodeURIComponent(key)}/verify`,
     )
-  ).data;
+  ).data as DependencyHealthVerificationResult;
 export const deleteDependencyHealthTarget = async (key: string) =>
   (await api.delete(`/dependency-health/targets/${encodeURIComponent(key)}`))
     .data;
@@ -3683,8 +3696,20 @@ export type AwsRemediationInput = {
   maintenanceEnd: string;
   clientRequestId: string;
 };
+export type AwsRemediationPreview = {
+  findingId: number;
+  resourceType: string;
+  resourceId: string;
+  region: string;
+  currentTags: Record<string, string>;
+  desiredTags: Record<string, string>;
+  changes: Array<{ key: string; before: string | null; after: string }>;
+  dryRunRequired: boolean;
+  approvalRequired: boolean;
+  rollbackAvailable: boolean;
+};
 export const previewAwsRemediation = async (findingId: number, accountId: number, data: AwsRemediationInput) =>
-  (await api.post(`/aws-governance/findings/${findingId}/remediations/preview`, data, { params: { accountId } })).data;
+  (await api.post(`/aws-governance/findings/${findingId}/remediations/preview`, data, { params: { accountId } })).data as AwsRemediationPreview;
 export const createAwsRemediation = async (findingId: number, accountId: number, data: AwsRemediationInput) =>
   (await api.post(`/aws-governance/remediations/from-finding/${findingId}`, data, { params: { accountId } })).data as AwsRemediationTask;
 export const listAwsRemediations = async (accountId: number) =>
