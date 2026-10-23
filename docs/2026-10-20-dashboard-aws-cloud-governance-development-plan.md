@@ -587,6 +587,12 @@ Dashboard 已增加整改任务、不可变事件记录、预览、双人审批�
 
 临时人工写入扩展（2026-10-23）：`AWS 临时访问` 增加独立 `HUMAN_TAG_WRITE`（AWS 治理标签维护）模板，使用 `DashboardHashexHumanTagWriteRole`，不复用后端整改 Role。该 Role 在 `ViewOnlyAccess` 基础上，仅增加对 `ap-east-1` EC2 Instance、EBS Volume、Security Group 的 `environment`、`owner` 标签维护权限。当前阶段按产品决策沿用管理员 MFA 直接授权、有效期、一次性 ticket、会话时长限制和提前回收，不要求双人审批；双人审批和更高 assurance 保留为后续增强。
 
+第二批临时人工写入模板（2026-10-23）：
+
+- `HUMAN_SECURITY_GROUP_WRITE` 使用独立 `DashboardHashexHumanSecurityGroupWriteRole`，在 `ViewOnlyAccess` 基础上，允许对 hashex 账号 `ap-east-1` 区域内全部 Security Group 执行 `AuthorizeSecurityGroupIngress`、`RevokeSecurityGroupIngress`；明确不开放出站规则、安全组生命周期和其他网络写操作。
+- `HUMAN_S3_WRITE` 使用独立 `DashboardHashexHumanS3WriteRole`，在 `ViewOnlyAccess` 基础上，允许对 hashex 账号自身拥有的 S3 Bucket 执行 `PutObject`；使用 `s3:ResourceAccount=290368114919` 阻止跨账号 Bucket 写入，明确不开放 `DeleteObject` 以及桶策略、ACL、版本控制、生命周期等配置写操作。S3 是全局服务，资源边界以账号归属为准，会话访问入口仍受所选区域限制。
+- 两个模板均复用现有管理员 MFA 直接授权、有效期、一次性 ticket、会话时长限制和提前回收链路；资源范围通过 SiteConf 显式展示和维护。安全组模板已通过 IAM 模拟与真实 AssumeRole DryRun 验证；S3 模板已通过 IAM 允许/拒绝模拟与真实 AssumeRole 验证，真实对象上传留给人工验收。
+
 - 只按明确动作开放 Human Write Role，不开放通用写权限。
 - 增加普通用户自助申请、双人审批/更高 assurance、来源出口限制、维护窗口和回滚说明。
 - 按需接入 hashex 以外的环境和 AWS 账号，每个环境独立完成身份、策略和 E2E 验收。
