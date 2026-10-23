@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { getMe, login as loginApi, setAuthToken } from '../services/api';
 import { AuthContext } from './AuthContextValue';
@@ -39,14 +39,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [me, setMe] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const authRequestSequence = useRef(0);
 
   const fetchMe = useCallback(async () => {
+    const requestSequence = ++authRequestSequence.current;
     setLoading(true);
     setError(null);
     try {
       const data = await getMe();
+      if (requestSequence !== authRequestSequence.current) return;
       setMe(data);
+      setError(null);
     } catch (err: unknown) {
+      if (requestSequence !== authRequestSequence.current) return;
       const status = (err as ApiError)?.response?.status;
       if (status === 401) {
         setMe(null);
@@ -56,7 +61,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setMe(null);
       }
     } finally {
-      setLoading(false);
+      if (requestSequence === authRequestSequence.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -71,6 +78,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [fetchMe]);
 
   const login = useCallback(async (username: string, password: string, otpCode?: string) => {
+    // Invalidate a bootstrap /me request that may still be in flight while the
+    // user submits the login form. Its failure must not overwrite a successful login.
+    authRequestSequence.current += 1;
+    setLoading(false);
+    setError(null);
     const resp = await loginApi({ username, password, otpCode });
     const token = resp?.token as string | undefined;
     if (!token) {
@@ -80,6 +92,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAuthToken(token);
     if (resp?.user) {
       setMe(resp.user);
+      setError(null);
       setLoading(false);
     } else {
       await fetchMe();
@@ -90,13 +103,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const applyToken = useCallback(async (token: string) => {
     localStorage.setItem('authToken', token);
     setAuthToken(token);
+    setError(null);
     await fetchMe();
   }, [fetchMe]);
 
   const logout = useCallback(() => {
+    authRequestSequence.current += 1;
     localStorage.removeItem('authToken');
     setAuthToken(null);
     setMe(null);
+    setError(null);
+    setLoading(false);
   }, []);
 
   const value = useMemo(

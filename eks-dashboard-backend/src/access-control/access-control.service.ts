@@ -137,7 +137,8 @@ export class AccessControlService {
       });
 
       await this.db.query(
-        `INSERT INTO permissions (\`key\`, name, created_at, updated_at) VALUES ${valuesSql}`,
+        `INSERT INTO permissions (\`key\`, name, created_at, updated_at) VALUES ${valuesSql}
+         ON DUPLICATE KEY UPDATE name = VALUES(name)`,
         params,
       );
     }
