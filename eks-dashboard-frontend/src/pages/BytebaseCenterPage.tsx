@@ -3,6 +3,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -17,13 +18,12 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tabs,
   Tag,
   Typography,
 } from "antd";
 import { EyeOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
-import { InlineHelpTooltip } from "../components/ops";
+import { DetailDrawer, InlineHelpTooltip, OpsTable, PageHeader } from "../components/ops";
 import { formatDateTime } from '../utils/time';
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
@@ -62,10 +62,16 @@ const BytebaseCenterPage: React.FC = () => {
     [requests, setRequests] = useState<BytebaseRequest[]>([]);
   const [project, setProject] = useState<string>();
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [databasesLoading, setDatabasesLoading] = useState(false);
+  const [databasesError, setDatabasesError] = useState<string | null>(null);
+  const [databasesReloadKey, setDatabasesReloadKey] = useState(0);
   const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsError, setRequestsError] = useState<string | null>(null);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [detail, setDetail] = useState<BytebaseRequestDetail>();
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailLoadingRequestId, setDetailLoadingRequestId] = useState<string>();
+  const detailRequestSequence = useRef(0);
   const [form] = Form.useForm();
   const env = currentEnvironment?.id;
   const canSubmit = permissions.includes("bytebase:change:submit"),
@@ -73,21 +79,27 @@ const BytebaseCenterPage: React.FC = () => {
   const loadCatalog = useCallback(async () => {
     if (!env) return;
     setCatalogLoading(true);
+    setCatalogError(null);
     try {
       const catalog = await getBytebaseCatalog(env);
       setProjects(catalog.projects);
     } catch (e) {
-      message.error(errorText(e, "Bytebase 目录加载失败"));
+      const error = errorText(e, "Bytebase 目录加载失败");
+      setCatalogError(error);
+      message.error(error);
     } finally {
       setCatalogLoading(false);
     }
   }, [env, message]);
   const loadRequests = useCallback(async () => {
     setRequestsLoading(true);
+    setRequestsError(null);
     try {
       setRequests(await listBytebaseRequests());
     } catch (e) {
-      message.error(errorText(e, "Bytebase 申请记录加载失败"));
+      const error = errorText(e, "Bytebase 申请记录加载失败");
+      setRequestsError(error);
+      message.error(error);
     } finally {
       setRequestsLoading(false);
     }
@@ -95,6 +107,10 @@ const BytebaseCenterPage: React.FC = () => {
   useEffect(() => {
     setProject(undefined);
     setDatabases([]);
+    setDatabasesError(null);
+    setDetail(undefined);
+    detailRequestSequence.current += 1;
+    setDetailLoadingRequestId(undefined);
     void loadCatalog();
     void loadRequests();
   }, [env, loadCatalog, loadRequests]);
@@ -109,12 +125,31 @@ const BytebaseCenterPage: React.FC = () => {
   useEffect(() => {
     if (!env || !project) {
       setDatabases([]);
+      setDatabasesLoading(false);
+      setDatabasesError(null);
       return;
     }
+    let active = true;
+    setDatabases([]);
+    setDatabasesLoading(true);
+    setDatabasesError(null);
     getBytebaseDatabases(env, project)
-      .then((x) => setDatabases(x.databases || []))
-      .catch((e) => message.error(errorText(e, "数据库目录加载失败")));
-  }, [env, project, message]);
+      .then((x) => {
+        if (active) setDatabases(x.databases || []);
+      })
+      .catch((e) => {
+        if (!active) return;
+        const error = errorText(e, "数据库目录加载失败");
+        setDatabasesError(error);
+        message.error(error);
+      })
+      .finally(() => {
+        if (active) setDatabasesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [env, project, databasesReloadKey, message]);
   const projectOptions = useMemo(
     () =>
       projects.map((p) => ({
@@ -177,13 +212,21 @@ const BytebaseCenterPage: React.FC = () => {
     });
   };
   const openDetail = async (row: BytebaseRequest) => {
-    setDetailLoading(true);
+    const requestSequence = ++detailRequestSequence.current;
+    setDetailLoadingRequestId(row.request_id);
     try {
-      setDetail(await getBytebaseRequestDetail(row.request_id));
+      const nextDetail = await getBytebaseRequestDetail(row.request_id);
+      if (requestSequence === detailRequestSequence.current) {
+        setDetail(nextDetail);
+      }
     } catch (e) {
-      message.error(errorText(e, "申请详情加载失败"));
+      if (requestSequence === detailRequestSequence.current) {
+        message.error(errorText(e, "申请详情加载失败"));
+      }
     } finally {
-      setDetailLoading(false);
+      if (requestSequence === detailRequestSequence.current) {
+        setDetailLoadingRequestId(undefined);
+      }
     }
   };
   const cancelRequest = (row: BytebaseRequest) => {
@@ -217,17 +260,36 @@ const BytebaseCenterPage: React.FC = () => {
     });
   };
   if (!env) return <Alert type="warning" showIcon message="请先选择目标环境" />;
+  const tablePagination = {
+    defaultPageSize: 20,
+    pageSizeOptions: ["20", "50", "100"],
+    showSizeChanger: true,
+    showTotal: (total: number) => `共 ${total} 条`,
+  };
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
-      <Typography.Title level={3} style={{ margin: 0 }}>
-        <Space size={6} align="center">
-          <span>数据库访问与变更中心</span>
-          <InlineHelpTooltip
-            ariaLabel="数据库访问与变更说明"
-            content={`Dashboard 负责统一授权与审计；数据库变更由 Bytebase Issue / Plan / Rollout 执行。当前实时状态：${realtimeConnected ? "已连接" : "连接中或不可用"}。`}
-          />
-        </Space>
-      </Typography.Title>
+      <PageHeader
+        title={
+          <Space size={6} align="center">
+            <span>数据库访问与变更中心</span>
+            <InlineHelpTooltip
+              ariaLabel="数据库访问与变更说明"
+              content={`Dashboard 负责统一授权与审计；数据库变更由 Bytebase Issue / Plan / Rollout 执行。当前实时状态：${realtimeConnected ? "已连接" : "连接中或不可用"}。`}
+            />
+          </Space>
+        }
+        description="统一管理 Bytebase 数据库目录、变更申请、发布确认与执行审计。"
+        environmentName={currentEnvironment?.name || currentEnvironment?.id}
+      />
+      {catalogError && (
+        <Alert
+          type="error"
+          showIcon
+          message="Bytebase 项目目录加载失败"
+          description={catalogError}
+          action={<Button onClick={() => void loadCatalog()}>重试</Button>}
+        />
+      )}
       <Card>
         <Space wrap>
           <Select
@@ -254,11 +316,14 @@ const BytebaseCenterPage: React.FC = () => {
             key: "catalog",
             label: "数据库目录",
             children: (
-              <Table
+              <OpsTable
                 rowKey="name"
-                loading={catalogLoading}
+                loading={databasesLoading}
                 dataSource={databases}
-                pagination={{ pageSize: 20 }}
+                error={databasesError}
+                onRetry={() => setDatabasesReloadKey((value) => value + 1)}
+                emptyDescription={project ? "当前项目暂无数据库" : "请先选择 Bytebase 项目"}
+                pagination={tablePagination}
                 columns={[
                   {
                     title: "数据库",
@@ -330,11 +395,14 @@ const BytebaseCenterPage: React.FC = () => {
             key: "requests",
             label: "申请记录",
             children: (
-              <Table
+              <OpsTable
                 rowKey="request_id"
                 loading={requestsLoading}
                 dataSource={requests}
-                pagination={{ pageSize: 20 }}
+                error={requestsError}
+                onRetry={() => void loadRequests()}
+                emptyDescription="暂无 Bytebase 申请记录"
+                pagination={tablePagination}
                 scroll={{ x: 1200 }}
                 columns={[
                   { title: "标题", dataIndex: "title", fixed: "left" },
@@ -378,7 +446,7 @@ const BytebaseCenterPage: React.FC = () => {
                     fixed: "right",
                     width: 230,
                     render: (_, r) => <Space size={4}>
-                      <Button size="small" icon={<EyeOutlined />} loading={detailLoading} onClick={() => void openDetail(r)}>详情</Button>
+                      <Button size="small" icon={<EyeOutlined />} loading={detailLoadingRequestId === r.request_id} onClick={() => void openDetail(r)}>详情</Button>
                       {canRollout && r.plan_name && ["AWAITING_ADMIN_CONFIRMATION", "RELEASE_CONFIRMED", "ROLLOUT_READY"].includes(r.status) && (
                         <Button
                           danger
@@ -401,7 +469,7 @@ const BytebaseCenterPage: React.FC = () => {
           },
         ]}
       />
-      <Modal open={Boolean(detail)} title="Bytebase 申请详情" width={900} footer={null} onCancel={() => setDetail(undefined)}>
+      <DetailDrawer open={Boolean(detail)} title="Bytebase 申请详情" width={900} onClose={() => setDetail(undefined)}>
         {detail && <Space direction="vertical" size={12} style={{ width: "100%" }}>
           <Descriptions bordered size="small" column={2} items={[
             { key: "title", label: "标题", children: detail.request.title },
@@ -440,7 +508,7 @@ const BytebaseCenterPage: React.FC = () => {
             <Tag>{event.event_type}</Tag>{event.summary}
           </Typography.Paragraph>) : <Typography.Text type="secondary">暂无流转记录</Typography.Text>}
         </Space>}
-      </Modal>
+      </DetailDrawer>
     </Space>
   );
 };
