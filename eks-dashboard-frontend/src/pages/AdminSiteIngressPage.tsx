@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, Descriptions, Input, Modal, Select, Space, St
 import { CheckCircleOutlined, FileSearchOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { applyIngressManifestForLineOnboarding, applyTenantDomainForLineOnboarding, getIngressSourceCandidatesForLineOnboarding, getTenantsForEnvironment, previewCloneIngressForLineOnboarding } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
+import { MfaCodeInput } from '../components/ops';
 
 const { Text, Paragraph } = Typography;
 const DOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -173,7 +174,7 @@ const AdminSiteIngressPage: React.FC = () => {
     }
     if (!currentEnvironment?.id || !tenantId || !dryRun) return message.warning('请先选择租户并通过 dry-run');
     let otpCode = '';
-    Modal.confirm({ title: '验证 MFA 并确认写入 tenant_domain', width: 620, content: <Space direction="vertical" size={8} style={{ width: '100%' }}><Text>将向当前环境的 tenant_domain 写入管理端域名：</Text><Text code>{normalizedDomain}</Text><Text type="secondary">实际写入使用参数化 SQL，以下内容仅供本次确认核对：</Text><Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{tenantDomainSql}</Paragraph><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { otpCode = event.target.value.replace(/\s+/g, ''); }} /></Space>, okText: '验证并写入', cancelText: '返回检查', onOk: async () => {
+    Modal.confirm({ title: '验证 MFA 并确认写入 tenant_domain', width: 620, content: <Space direction="vertical" size={8} style={{ width: '100%' }}><Text>将向当前环境的 tenant_domain 写入管理端域名：</Text><Text code>{normalizedDomain}</Text><Text type="secondary">实际写入使用参数化 SQL，以下内容仅供本次确认核对：</Text><Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{tenantDomainSql}</Paragraph><MfaCodeInput onChange={(value) => { otpCode = value; }} /></Space>, okText: '验证并写入', cancelText: '返回检查', onOk: async () => {
       if (!/^\d{6}$/.test(otpCode)) {
         message.error('请输入当前有效的 6 位 Google Authenticator 验证码');
         throw new Error('MFA_REQUIRED');

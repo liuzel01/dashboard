@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../contexts/AuthContextValue';
 import { getRuntimeConfig } from '../services/runtimeConfig';
 import { resolveSsoRedirectUri } from '../services/sso';
+import { MfaCodeInput } from '../components/ops';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -171,11 +172,7 @@ const LoginPage: React.FC = () => {
                 label="Google 验证码"
                 rules={[{ required: true, message: '请输入 6 位验证码' }]}
               >
-                <Input
-                  autoComplete="one-time-code"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="6 位验证码"
+                <MfaCodeInput
                   onPressEnter={() => !loggingIn && form.submit()}
                 />
               </Form.Item>

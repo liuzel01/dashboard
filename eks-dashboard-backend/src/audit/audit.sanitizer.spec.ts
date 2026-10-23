@@ -15,4 +15,18 @@ describe('sanitizeAuditPayload', () => {
       nested: { signinToken: '***' },
     });
   });
+
+  it('redacts MFA codes from failed verification request summaries', () => {
+    expect(
+      sanitizeAuditPayload({
+        username: 'admin',
+        otpCode: '123456',
+        nested: { mfaCode: '654321', totp: '111111' },
+      }),
+    ).toEqual({
+      username: 'admin',
+      otpCode: '***',
+      nested: { mfaCode: '***', totp: '***' },
+    });
+  });
 });

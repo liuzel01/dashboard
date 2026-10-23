@@ -9,7 +9,7 @@ import {
 import { AuthContext } from '../contexts/AuthContextValue';
 import { CicdRealtimeContext } from '../contexts/CicdRealtimeContextValue';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { ColumnSettingsPopover, OpsTable, useVisibleColumns } from '../components/ops';
+import { ColumnSettingsPopover, MfaCodeInput, OpsTable, useVisibleColumns } from '../components/ops';
 import {
   diagnoseCicdExecutor,
   discoverCicdJobs,
@@ -264,7 +264,7 @@ const CicdCatalogPage: React.FC = () => {
           let value = '';
           const modalInstance = Modal.confirm({
             title: '验证 MFA 并确认执行制品推包',
-            content: <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="该操作可能向目标仓库发布制品，请核对环境、Job 和参数。" description="请输入当前登录用户已绑定 Google Authenticator 的 6 位验证码；服务端验证通过后才会触发推包。" /><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { value = event.target.value.replace(/\s+/g, ''); modalInstance?.update({ okButtonProps: { disabled: !/^\d{6}$/.test(value) } }); }} /></Space>,
+            content: <Space direction="vertical" style={{ width: '100%' }}><Alert type="warning" showIcon message="该操作可能向目标仓库发布制品，请核对环境、Job 和参数。" description="请输入当前登录用户已绑定 Google Authenticator 的 6 位验证码；服务端验证通过后才会触发推包。" /><MfaCodeInput onChange={(nextValue) => { value = nextValue; modalInstance?.update({ okButtonProps: { disabled: !/^\d{6}$/.test(value) } }); }} /></Space>,
             okText: '确认触发', cancelText: '取消', okButtonProps: { disabled: true },
             onOk: () => /^\d{6}$/.test(value) ? resolve(value) : Promise.reject(new Error('请输入 6 位 Google 验证码')),
             onCancel: () => resolve(undefined),

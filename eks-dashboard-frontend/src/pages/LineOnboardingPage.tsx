@@ -37,7 +37,7 @@ import {
 } from '../services/api';
 import { formatDateTime, formatTime } from '../utils/time';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
-import { PageHeader } from '../components/ops';
+import { MfaCodeInput, PageHeader } from '../components/ops';
 import TenantLinesTable from '../components/TenantLinesTable';
 import { buildProbeDetailUrl, getProbeDetailBaseUrl } from '../utils/probeDashboard';
 
@@ -1560,7 +1560,7 @@ const LineOnboardingPage: React.FC = () => {
     Modal.confirm({
       title: '验证 MFA 并写入 tenant_domain',
       width: 620,
-      content: <Space direction="vertical" size={8} style={{ width: '100%' }}><Text>将为租户 <Text code>{selectedTenantId}</Text> 写入域名：</Text><Text code>{confirmedSubdomain}</Text><Text type="secondary">以下 SQL 仅供本次确认核对，实际写入使用参数化 SQL：</Text><Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph><Input.Password maxLength={6} inputMode="numeric" autoComplete="one-time-code" placeholder="输入当前 Google Authenticator 6 位验证码" onChange={(event) => { otpCode = event.target.value.replace(/\s+/g, ''); }} /></Space>,
+      content: <Space direction="vertical" size={8} style={{ width: '100%' }}><Text>将为租户 <Text code>{selectedTenantId}</Text> 写入域名：</Text><Text code>{confirmedSubdomain}</Text><Text type="secondary">以下 SQL 仅供本次确认核对，实际写入使用参数化 SQL：</Text><Paragraph code style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{insertSql}</Paragraph><MfaCodeInput onChange={(value) => { otpCode = value; }} /></Space>,
       okText: '验证并写入',
       cancelText: '返回检查',
       onOk: async () => {

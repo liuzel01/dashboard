@@ -9,7 +9,7 @@ import {
   getSslCertificates,
   requestSslCertificate,
 } from '../services/api';
-import { InlineHelpTooltip } from '../components/ops';
+import { InlineHelpTooltip, MfaCodeInput } from '../components/ops';
 import { formatDateTime } from '../utils/time';
 
 const { Text } = Typography;
@@ -564,8 +564,8 @@ const SslCertificateExportPage: React.FC = () => {
             <Descriptions.Item label="证书 ARN">{actionTarget?.certificateArn || '-'}</Descriptions.Item>
           </Descriptions>
           <Form form={form} layout="vertical">
-            <Form.Item label="Google 验证码" name="otpCode" rules={[{ required: true, message: '请输入 Google 验证码' }]}>
-              <Input placeholder="6 位验证码" maxLength={12} autoComplete="one-time-code" />
+            <Form.Item label="Google 验证码" name="otpCode" rules={[{ required: true, pattern: /^\d{6}$/, message: '请输入 6 位验证码' }]}>
+              <MfaCodeInput />
             </Form.Item>
             <Form.Item label="Passphrase" name="passphrase" rules={[{ required: true, min: 8, message: '请输入至少 8 位 passphrase' }]}>
               <Input.Password placeholder="当次输入,不持久化" autoComplete="new-password" />

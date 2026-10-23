@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, App, Button, Card, Col, Collapse, Form, Input, Row, Select, Space, Table, Tooltip, Typography } from 'antd';
 import { CopyOutlined, LockOutlined, UnlockOutlined } from '@ant-design/icons';
 import { decryptKmsValue, encryptKmsValue, getEnvironmentConfigs, getKmsValueConfiguration } from '../services/api';
+import { MfaCodeInput } from '../components/ops';
 
 const { Text } = Typography;
 type Env = { id: string; name: string; aws_region?: string };
@@ -81,7 +82,7 @@ const KmsValuesPage: React.FC = () => {
       <Col xs={24} lg={12}><Card title="解密变量值" extra={<UnlockOutlined />}>
         <Form form={decryptForm} layout="vertical" onFinish={async (v) => { setDecrypted(''); setDecrypting(true); try { const r = await decryptKmsValue({ environmentId, value: v.value, otpCode: v.otpCode }); setDecrypted(r.value); message.success('KMS 解密成功'); } catch (e: unknown) { setDecrypted(''); message.error((e as ApiError)?.response?.data?.message || (e as ApiError)?.message || '解密失败'); } finally { setDecrypting(false); } }}>
           <Form.Item name="value" label="{kms-app} 密文" rules={[{ required: true, message: '请输入密文' }]}><Input.TextArea rows={6} autoComplete="off" /></Form.Item>
-          <Form.Item name="otpCode" label="Google 验证码" rules={[{ required: true, message: '请输入验证码' }]}><Input.Password maxLength={12} autoComplete="one-time-code" /></Form.Item>
+          <Form.Item name="otpCode" label="Google 验证码" rules={[{ required: true, pattern: /^\d{6}$/, message: '请输入 6 位验证码' }]}><MfaCodeInput /></Form.Item>
           <Button htmlType="submit" danger loading={decrypting}>验证 MFA 并解密</Button>
         </Form>
         {decrypted && <><Text strong style={{ display: 'block', marginTop: 16 }}>解密结果（请及时复制并清除）</Text><Input.TextArea value={decrypted} readOnly rows={4} /><Button icon={<CopyOutlined />} style={{ marginTop: 8 }} onClick={() => copy(decrypted)}>复制明文</Button></>}

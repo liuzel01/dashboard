@@ -5,7 +5,7 @@ import './ops-ui.css';
 
 const { Text } = Typography;
 
-type RiskConfirmProps = Omit<ModalProps, 'children' | 'title'> & {
+export type RiskConfirmProps = Omit<ModalProps, 'children' | 'title'> & {
   title: React.ReactNode;
   environmentName?: string | null;
   resourceName?: string | null;

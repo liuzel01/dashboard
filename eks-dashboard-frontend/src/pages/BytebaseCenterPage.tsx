@@ -15,15 +15,14 @@ import {
   Divider,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Tabs,
   Tag,
   Typography,
 } from "antd";
-import { EyeOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
-import { DetailDrawer, InlineHelpTooltip, OpsTable, PageHeader } from "../components/ops";
+import { EyeOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
+import { DetailDrawer, InlineHelpTooltip, MfaRiskConfirm, OpsTable, PageHeader } from "../components/ops";
 import { formatDateTime } from '../utils/time';
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
@@ -71,6 +70,11 @@ const BytebaseCenterPage: React.FC = () => {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [detail, setDetail] = useState<BytebaseRequestDetail>();
   const [detailLoadingRequestId, setDetailLoadingRequestId] = useState<string>();
+  const [mfaAction, setMfaAction] = useState<{
+    type: "rollout" | "cancel";
+    row: BytebaseRequest;
+  }>();
+  const [cancelReason, setCancelReason] = useState("");
   const detailRequestSequence = useRef(0);
   const [form] = Form.useForm();
   const env = currentEnvironment?.id;
@@ -183,33 +187,7 @@ const BytebaseCenterPage: React.FC = () => {
     }
   };
   const rollout = (row: BytebaseRequest) => {
-    let code = "";
-    Modal.confirm({
-      title: "确认 Bytebase 发布",
-      icon: <SafetyCertificateOutlined />,
-      content: <Space direction="vertical" style={{ width: "100%" }}>
-        <Alert type="warning" showIcon message="确认后将立即执行数据库变更" description="Dashboard 会发布 Bytebase Draft，并创建真实 TaskRun 执行当前可运行的部署阶段。" />
-        <Input.Password
-          placeholder="Google Authenticator 验证码"
-          onChange={(e) => {
-            code = e.target.value;
-          }}
-        />
-      </Space>,
-      okText: "确认发布",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        if (!row.plan_name) throw new Error("申请缺少 Plan");
-        try {
-          const result = await confirmBytebaseRelease(row.environment_id, row.plan_name, code);
-          message.success(result.executionPending ? "发布已确认，Bytebase 正在准备部署阶段，可稍后再次点击确认发布" : "Bytebase 发布已开始，正在追踪执行状态");
-          await loadRequests();
-        } catch (e) {
-          message.error(errorText(e, "发布失败"));
-          throw e;
-        }
-      },
-    });
+    setMfaAction({ type: "rollout", row });
   };
   const openDetail = async (row: BytebaseRequest) => {
     const requestSequence = ++detailRequestSequence.current;
@@ -230,34 +208,44 @@ const BytebaseCenterPage: React.FC = () => {
     }
   };
   const cancelRequest = (row: BytebaseRequest) => {
-    let code = "", reason = "";
-    const beforeRelease = row.status === "AWAITING_ADMIN_CONFIRMATION";
-    Modal.confirm({
-      title: beforeRelease ? "撤销待确认申请" : "停止 Bytebase 发布",
-      icon: <StopOutlined />,
-      width: 620,
-      content: <Space direction="vertical" style={{ width: "100%" }}>
-        <Alert type="warning" showIcon
-          message={beforeRelease ? "撤销后不能再确认发布" : "停止为尽力而为，不是数据库回滚"}
-          description={beforeRelease ? "Bytebase Draft Issue 会被取消，SQL 不会执行。" : "运行中的数据库语句可能无法中断，已经执行的 SQL 不会撤销；后台会继续对账最终状态。"}
-        />
-        <Input.TextArea rows={2} placeholder="取消原因（可选）" onChange={(e) => { reason = e.target.value; }} />
-        <Input.Password placeholder="Google Authenticator 验证码" onChange={(e) => { code = e.target.value; }} />
-      </Space>,
-      okText: beforeRelease ? "确认撤销" : "确认停止发布",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          const result = await cancelBytebaseRequest(row.request_id, code, reason);
-          message.success(result.bestEffort ? "已提交停止请求，正在确认最终状态" : "申请已撤销");
-          setDetail(undefined);
-          await loadRequests();
-        } catch (e) {
-          message.error(errorText(e, "取消失败"));
-          throw e;
-        }
-      },
-    });
+    setCancelReason("");
+    setMfaAction({ type: "cancel", row });
+  };
+  const confirmMfaAction = async (mfaCode: string) => {
+    if (!mfaAction) return;
+    const { row, type } = mfaAction;
+    try {
+      if (type === "rollout") {
+        if (!row.plan_name) throw new Error("申请缺少 Plan");
+        const result = await confirmBytebaseRelease(
+          row.environment_id,
+          row.plan_name,
+          mfaCode,
+        );
+        message.success(
+          result.executionPending
+            ? "发布已确认，Bytebase 正在准备部署阶段，可稍后再次点击确认发布"
+            : "Bytebase 发布已开始，正在追踪执行状态",
+        );
+      } else {
+        const result = await cancelBytebaseRequest(
+          row.request_id,
+          mfaCode,
+          cancelReason,
+        );
+        message.success(
+          result.bestEffort
+            ? "已提交停止请求，正在确认最终状态"
+            : "申请已撤销",
+        );
+        setDetail(undefined);
+      }
+      setMfaAction(undefined);
+      await loadRequests();
+    } catch (e) {
+      message.error(errorText(e, type === "rollout" ? "发布失败" : "取消失败"));
+      throw e;
+    }
   };
   if (!env) return <Alert type="warning" showIcon message="请先选择目标环境" />;
   const tablePagination = {
@@ -509,6 +497,29 @@ const BytebaseCenterPage: React.FC = () => {
           </Typography.Paragraph>) : <Typography.Text type="secondary">暂无流转记录</Typography.Text>}
         </Space>}
       </DetailDrawer>
+      <MfaRiskConfirm
+        open={Boolean(mfaAction)}
+        title={mfaAction?.type === "rollout" ? "确认 Bytebase 发布" : mfaAction?.row.status === "AWAITING_ADMIN_CONFIRMATION" ? "撤销待确认申请" : "停止 Bytebase 发布"}
+        environmentName={mfaAction?.row.environment_id}
+        resourceName={mfaAction?.row.title}
+        impact={mfaAction?.type === "rollout"
+          ? "将发布 Bytebase Draft，并创建真实 TaskRun 执行当前可运行的数据库变更阶段。"
+          : mfaAction?.row.status === "AWAITING_ADMIN_CONFIRMATION"
+            ? "Bytebase Draft Issue 会被取消，SQL 不会执行。"
+            : "停止为尽力而为；运行中的语句可能无法中断，已经执行的 SQL 不会回滚。"}
+        okText={mfaAction?.type === "rollout" ? "验证 MFA 并发布" : "验证 MFA 并确认"}
+        onCancel={() => setMfaAction(undefined)}
+        onConfirm={confirmMfaAction}
+      >
+        {mfaAction?.type === "cancel" && (
+          <Input.TextArea
+            rows={2}
+            value={cancelReason}
+            placeholder="取消原因（可选）"
+            onChange={(event) => setCancelReason(event.target.value)}
+          />
+        )}
+      </MfaRiskConfirm>
     </Space>
   );
 };

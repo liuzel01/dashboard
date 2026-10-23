@@ -416,8 +416,14 @@ export class AuthService {
           'UPDATE users SET mfa_enabled = 1, mfa_confirmed_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?',
           [user.id],
         );
-      } else if (!this.verifyMfaCode(user.mfa_secret, otpCode)) {
+      } else if (!otpCode) {
         return { mfaRequired: true, username: user.username, message: '请输入 Google Authenticator 验证码' };
+      } else {
+        await this.mfaVerification.verifyLoginForUser(
+          Number(user.id),
+          String(user.mfa_secret),
+          otpCode,
+        );
       }
     }
 

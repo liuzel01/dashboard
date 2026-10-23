@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { Alert, Button, Descriptions, Input, message, Modal, Select, Space, Tabs, Tag, Typography } from "antd";
 import { CloudSyncOutlined, SafetyCertificateOutlined, SearchOutlined } from "@ant-design/icons";
 import { AuthContext } from "../contexts/AuthContextValue";
-import { DetailDrawer, MetricGrid, OpsTable, PageHeader } from "../components/ops";
+import { DetailDrawer, MetricGrid, MfaRiskConfirm, OpsTable, PageHeader } from "../components/ops";
 import {
   diagnoseAwsGovernanceAccount,
   approveAwsRemediation,
@@ -73,7 +73,6 @@ const AwsGovernancePage: React.FC = () => {
   const [remediationSaving, setRemediationSaving] = useState(false);
   const [locatingRemediationResourceId, setLocatingRemediationResourceId] = useState<string | null>(null);
   const [taskAction, setTaskAction] = useState<{ task: AwsRemediationTask; action: "approve" | "execute" | "rollback" } | null>(null);
-  const [mfaCode, setMfaCode] = useState("");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [keyword, setKeyword] = useState("");
   const [resourceType, setResourceType] = useState<string>();
@@ -270,16 +269,19 @@ const AwsGovernancePage: React.FC = () => {
     finally { setRemediationSaving(false); }
   };
 
-  const submitTaskAction = async () => {
-    if (!accountId || !taskAction || !/^\d{6}$/.test(mfaCode)) return;
+  const submitTaskAction = async (mfaCode: string) => {
+    if (!accountId || !taskAction) return;
     setRemediationSaving(true);
     try {
       if (taskAction.action === "approve") await approveAwsRemediation(taskAction.task.id, accountId, mfaCode);
       else if (taskAction.action === "execute") await executeAwsRemediation(taskAction.task.id, accountId, mfaCode);
       else await rollbackAwsRemediation(taskAction.task.id, accountId, mfaCode);
       message.success(taskAction.action === "approve" ? "整改任务已审批" : taskAction.action === "execute" ? "整改已执行，正在重新盘点" : "整改已回滚，正在重新盘点");
-      setTaskAction(null); setMfaCode(""); await refreshAll();
-    } catch (reason: unknown) { message.error(requestErrorMessage(reason, "操作失败")); }
+      setTaskAction(null); await refreshAll();
+    } catch (reason: unknown) {
+      message.error(requestErrorMessage(reason, "操作失败"));
+      throw reason;
+    }
     finally { setRemediationSaving(false); }
   };
 
@@ -382,9 +384,16 @@ const AwsGovernancePage: React.FC = () => {
         {remediationPreview && <Descriptions bordered column={1} size="small"><Descriptions.Item label="资源">{remediationPreview.resourceId}</Descriptions.Item><Descriptions.Item label="变更预览"><pre style={{ margin: 0 }}>{JSON.stringify(remediationPreview.changes, null, 2)}</pre></Descriptions.Item></Descriptions>}
       </Space>
     </Modal>
-    <Modal open={Boolean(taskAction)} title={taskAction?.action === "approve" ? "审批整改任务" : taskAction?.action === "execute" ? "确认执行整改" : "确认回滚整改"} okText="确认" cancelText="取消" confirmLoading={remediationSaving} okButtonProps={{ disabled: !/^\d{6}$/.test(mfaCode), danger: taskAction?.action === "rollback" }} onOk={() => void submitTaskAction()} onCancel={() => { setTaskAction(null); setMfaCode(""); }}>
-      <Space direction="vertical" style={{ width: "100%" }}><Alert type="warning" showIcon message={taskAction?.action === "execute" ? "执行前会先调用 AWS DryRun；成功后自动重新盘点。" : taskAction?.action === "rollback" ? "将恢复执行前标签，并自动重新盘点。" : "提交人与审批人必须是不同管理员。"} /><Input.Password value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="请输入 6 位 MFA 验证码" /></Space>
-    </Modal>
+    <MfaRiskConfirm
+      open={Boolean(taskAction)}
+      title={taskAction?.action === "approve" ? "审批整改任务" : taskAction?.action === "execute" ? "确认执行整改" : "确认回滚整改"}
+      environmentName={selectedAccount?.environmentId}
+      resourceName={taskAction?.task.resourceId}
+      impact={taskAction?.action === "execute" ? "执行前会先调用 AWS DryRun；成功后自动重新盘点。" : taskAction?.action === "rollback" ? "将恢复执行前标签，并自动重新盘点。" : "提交人与审批人必须是不同管理员。"}
+      okText="验证 MFA 并确认"
+      onConfirm={submitTaskAction}
+      onCancel={() => setTaskAction(null)}
+    />
   </Space>;
 };
 

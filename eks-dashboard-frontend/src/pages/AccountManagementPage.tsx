@@ -34,6 +34,7 @@ import {
   type AccessUserMfaEnrollment,
 } from '../services/api';
 import { formatDateTime } from '../utils/time';
+import { MfaCodeInput } from '../components/ops';
 
 const { Title, Text } = Typography;
 
@@ -659,12 +660,11 @@ const AccountManagementPage: React.FC = () => {
             <Text>请让目标用户使用 Google Authenticator 扫描二维码，然后提供设备当前显示的 6 位验证码。</Text>
             <img src={mfaEnrollment.qrCodeDataUrl} alt="用户 MFA 二维码" style={{ width: 180, height: 180 }} />
             <Text copyable={{ text: mfaEnrollment.secret }}>手动设置密钥：{mfaEnrollment.secret}</Text>
-            <Input
+            <MfaCodeInput
               value={mfaCode}
-              onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              onChange={setMfaCode}
               placeholder="输入目标用户设备显示的 6 位验证码"
-              maxLength={6}
-              inputMode="numeric"
+              showGraceHint={false}
             />
           </Space>
         )}

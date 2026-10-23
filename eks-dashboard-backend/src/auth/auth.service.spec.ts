@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { AuthService } from './auth.service';
 
 const createService = () => {
@@ -9,7 +10,10 @@ const createService = () => {
   };
   const config = { get: jest.fn() };
   const siteConf = { getString: jest.fn() };
-  const mfaVerification = { verifyForUser: jest.fn() };
+  const mfaVerification = {
+    verifyForUser: jest.fn(),
+    verifyLoginForUser: jest.fn(),
+  };
   return {
     service: new AuthService(db as any, accessControl as any, config as any, siteConf as any, mfaVerification as any),
     db,
@@ -95,5 +99,38 @@ describe('AuthService MFA management', () => {
     });
     mfaVerification.verifyForUser.mockRejectedValue(new BadRequestException('当前账号未启用 Google Authenticator MFA'));
     await expect(service.verifyMfaForUser(27, '123456')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('uses the shared rate-limited verifier for an admin login challenge', async () => {
+    const { service, db, accessControl, mfaVerification } = createService();
+    const password = 'correct-password';
+    const salt = 'test-salt';
+    const hash = createHash('sha256')
+      .update(`${salt}:${password}`)
+      .digest('hex');
+    db.query
+      .mockResolvedValueOnce([{
+        id: 1,
+        username: 'admin',
+        password_hash: `${salt}$${hash}`,
+        status: 'active',
+        mfa_enabled: 1,
+        mfa_secret: 'shared-secret',
+      }])
+      .mockResolvedValueOnce({ affectedRows: 1 });
+    accessControl.getMe.mockResolvedValue({
+      id: 1,
+      username: 'admin',
+      roles: [],
+      permissions: [],
+    });
+
+    await service.login('admin', password, '123456');
+
+    expect(mfaVerification.verifyLoginForUser).toHaveBeenCalledWith(
+      1,
+      'shared-secret',
+      '123456',
+    );
   });
 });

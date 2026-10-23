@@ -1,5 +1,8 @@
 import { verifySync } from 'otplib';
 
+export const MFA_TOTP_PERIOD_SECONDS = 30;
+export const MFA_TOTP_PAST_TOLERANCE_SECONDS = 30;
+
 export const normalizeOtpCode = (code?: string) => String(code || '').replace(/\s+/g, '');
 
 /**
@@ -9,6 +12,13 @@ export const normalizeOtpCode = (code?: string) => String(code || '').replace(/\
 export const verifyTotpCode = (secret: string, code?: string) => {
   const token = normalizeOtpCode(code);
   if (!secret || !token) return false;
-  const result = verifySync({ strategy: 'totp', secret, token, epochTolerance: 0 });
+  const result = verifySync({
+    strategy: 'totp',
+    secret,
+    token,
+    period: MFA_TOTP_PERIOD_SECONDS,
+    // Accept transmission delay across one boundary, but never accept a future token.
+    epochTolerance: [MFA_TOTP_PAST_TOLERANCE_SECONDS, 0],
+  });
   return typeof result === 'boolean' ? result : result.valid === true;
 };

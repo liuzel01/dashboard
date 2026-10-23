@@ -28,7 +28,7 @@ import {
 import dayjs from "dayjs";
 import { AuthContext } from "../contexts/AuthContextValue";
 import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
-import { OpsTable, PageHeader } from "../components/ops";
+import { MfaCodeInput, OpsTable, PageHeader } from "../components/ops";
 import {
   createAwsAccessGrant,
   getAccessUsers,
@@ -459,11 +459,7 @@ export default function AwsAccessPage() {
               },
             ]}
           >
-            <Input.Password
-              maxLength={6}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-            />
+            <MfaCodeInput />
           </Form.Item>
         </Form>
       </Modal>
@@ -531,11 +527,7 @@ export default function AwsAccessPage() {
               },
             ]}
           >
-            <Input.Password
-              maxLength={6}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-            />
+            <MfaCodeInput />
           </Form.Item>
         </Form>
       </Modal>
