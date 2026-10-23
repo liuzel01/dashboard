@@ -13,7 +13,11 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { LoginOutlined, PlusOutlined } from "@ant-design/icons";
+import {
+  LoginOutlined,
+  PlusOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 import dayjs from "dayjs";
 import { AuthContext } from "../contexts/AuthContextValue";
 import { OpsTable, PageHeader } from "../components/ops";
@@ -103,6 +107,17 @@ export default function AwsAccessPage() {
 
   const templateName = (key: string) =>
     configuration?.templates.find((item) => item.key === key)?.name || key;
+
+  const openTemplateSettings = () => {
+    const defaultTemplate =
+      configuration?.templates.find((item) => item.key === "HUMAN_READ") ||
+      configuration?.templates[0];
+    if (!defaultTemplate) {
+      message.warning("当前没有可管理的 AWS 权限模板");
+      return;
+    }
+    setTemplateDetailKey(defaultTemplate.key);
+  };
 
   const riskTag = (riskLevel: AwsAccessTemplate["riskLevel"]) => {
     if (riskLevel === "HIGH") return <Tag color="red">高风险写入</Tag>;
@@ -268,21 +283,29 @@ export default function AwsAccessPage() {
         description="管理员按明确的权限模板向用户授予有时限的 hashex AWS 访问；AWS 临时凭据不会进入浏览器或数据库。"
         actions={
           canManage ? (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                form.resetFields();
-                form.setFieldsValue({
-                  permissionTemplateKey: "HUMAN_READ",
-                  regions: configuration?.regions,
-                  validUntil: dayjs().add(1, "hour"),
-                });
-                setCreateOpen(true);
-              }}
-            >
-              新增临时授权
-            </Button>
+            <Space>
+              <Button
+                icon={<SettingOutlined />}
+                onClick={openTemplateSettings}
+              >
+                权限模板设置
+              </Button>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  form.resetFields();
+                  form.setFieldsValue({
+                    permissionTemplateKey: "HUMAN_READ",
+                    regions: configuration?.regions,
+                    validUntil: dayjs().add(1, "hour"),
+                  });
+                  setCreateOpen(true);
+                }}
+              >
+                新增临时授权
+              </Button>
+            </Space>
           ) : undefined
         }
       />
@@ -291,7 +314,7 @@ export default function AwsAccessPage() {
         type="info"
         style={{ marginBottom: 16 }}
         message="临时访问使用受控权限模板"
-        description={<Space wrap><Typography.Text>当前模板包括资源配置只读、治理标签维护、安全组入站规则维护和 S3 对象写入；所有写权限均由独立 Role、账号和区域边界限制。</Typography.Text><Button type="link" size="small" onClick={() => setTemplateDetailKey("HUMAN_READ")}>查看完整权限范围</Button></Space>}
+        description="当前模板包括资源配置只读、治理标签维护、安全组入站规则维护和 S3 对象写入；所有写权限均由独立 Role、账号和区域边界限制。"
       />
       {!configuration?.enabled && !loading && (
         <Alert type="warning" showIcon message="hashex AWS 临时访问尚未启用" />
@@ -405,7 +428,7 @@ export default function AwsAccessPage() {
       </Modal>
 
       <Modal
-        title="AWS 权限模板详情"
+        title="AWS 权限模板设置"
         width={760}
         open={Boolean(templateDetailKey)}
         footer={null}
