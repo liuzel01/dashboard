@@ -1902,11 +1902,12 @@ export type AwsAccessTemplate = {
 export const getAwsAccessConfiguration = async () =>
   (await api.get("/aws-access/configuration")).data as {
     enabled: boolean;
-    account: { id: number; environmentId: string; accountId: string; displayName: string };
+    account: { id: number; environmentId: string; accountId: string; displayName: string } | null;
     templates: AwsAccessTemplate[];
     regions: string[];
     canManage: boolean;
     deliveryMode: string;
+    unavailableReason?: string;
   };
 
 export const listAwsAccessGrants = async () =>

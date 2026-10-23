@@ -1,4 +1,11 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   Button,
@@ -20,6 +27,7 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { AuthContext } from "../contexts/AuthContextValue";
+import { EnvironmentContext } from "../contexts/EnvironmentContextValue";
 import { OpsTable, PageHeader } from "../components/ops";
 import {
   createAwsAccessGrant,
@@ -43,6 +51,7 @@ const errorText = (error: unknown, fallback: string) => {
 
 export default function AwsAccessPage() {
   const { me, permissions } = useContext(AuthContext);
+  const { currentEnvironment } = useContext(EnvironmentContext);
   const canManage = permissions.includes("aws-access:grant:manage");
   const canStart = permissions.includes("aws-access:session:start");
   const [configuration, setConfiguration] = useState<Awaited<
@@ -58,6 +67,7 @@ export default function AwsAccessPage() {
     }>
   >([]);
   const [loading, setLoading] = useState(true);
+  const loadSequence = useRef(0);
   const [launching, setLaunching] = useState<number>();
   const [createOpen, setCreateOpen] = useState(false);
   const [templateDetailKey, setTemplateDetailKey] = useState<string>();
@@ -74,21 +84,34 @@ export default function AwsAccessPage() {
   );
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
+    if (!currentEnvironment?.id) {
+      setConfiguration(null);
+      setGrants([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [config, items] = await Promise.all([
         getAwsAccessConfiguration(),
         listAwsAccessGrants(),
       ]);
+      if (sequence !== loadSequence.current) return;
       setConfiguration(config);
       setGrants(items);
-      if (config.canManage) setUsers(await getAccessUsers());
+      if (config.canManage) {
+        const accessUsers = await getAccessUsers();
+        if (sequence !== loadSequence.current) return;
+        setUsers(accessUsers);
+      }
     } catch (error) {
+      if (sequence !== loadSequence.current) return;
       message.error(errorText(error, "加载 AWS 临时访问失败"));
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }, []);
+  }, [currentEnvironment?.id]);
 
   useEffect(() => {
     void load();
@@ -283,7 +306,7 @@ export default function AwsAccessPage() {
     <>
       <PageHeader
         title="AWS 临时访问"
-        description="管理员按明确的权限模板向用户授予有时限的 hashex AWS 访问；AWS 临时凭据不会进入浏览器或数据库。"
+        description={`管理员按明确的权限模板向用户授予有时限的 ${currentEnvironment?.name || currentEnvironment?.id || "当前环境"} AWS 访问；AWS 临时凭据不会进入浏览器或数据库。`}
         actions={
           canManage ? (
             <Space>
@@ -296,6 +319,7 @@ export default function AwsAccessPage() {
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
+                disabled={!configuration?.enabled || !configuration.account}
                 onClick={() => {
                   form.resetFields();
                   form.setFieldsValue({
@@ -320,7 +344,14 @@ export default function AwsAccessPage() {
         description="当前模板包括资源配置只读、治理标签维护、安全组入站规则维护和 S3 对象写入；所有写权限均由独立 Role、账号和区域边界限制。"
       />
       {!configuration?.enabled && !loading && (
-        <Alert type="warning" showIcon message="hashex AWS 临时访问尚未启用" />
+        <Alert
+          type="warning"
+          showIcon
+          message={
+            configuration?.unavailableReason ||
+            `环境 ${currentEnvironment?.name || currentEnvironment?.id || "当前选择"} 的 AWS 临时访问尚未启用`
+          }
+        />
       )}
       <OpsTable
         rowKey="id"
@@ -346,7 +377,7 @@ export default function AwsAccessPage() {
             try {
               await createAwsAccessGrant({
                 ...values,
-                cloudAccountId: configuration!.account.id,
+                cloudAccountId: configuration!.account!.id,
                 validUntil: values.validUntil.toISOString(),
               });
               message.success("AWS 临时授权已创建");
