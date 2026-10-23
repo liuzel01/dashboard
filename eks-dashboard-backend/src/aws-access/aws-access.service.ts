@@ -24,6 +24,45 @@ const HUMAN_S3_WRITE = 'HUMAN_S3_WRITE';
 const HUMAN_READ_POLICY_ARN =
   'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess';
 
+export const AWS_GLOBAL_SERVICE_ACTIONS = [
+  'account:*',
+  'budgets:*',
+  'ce:*',
+  'cloudfront:*',
+  'cur:*',
+  'globalaccelerator:*',
+  'iam:*',
+  'organizations:*',
+  'route53:*',
+  'shield:*',
+  'support:*',
+  'supportapp:*',
+  'waf:*',
+  'wafv2:*',
+];
+
+export const buildAwsAccessSessionPolicy = (regions: string[]) => ({
+  Version: '2012-10-17',
+  Statement: [
+    {
+      Sid: 'AllowWithinRolePermissions',
+      Effect: 'Allow',
+      Action: '*',
+      Resource: '*',
+    },
+    {
+      Sid: 'DenyRegionalServicesOutsideGrantedRegions',
+      Effect: 'Deny',
+      NotAction: AWS_GLOBAL_SERVICE_ACTIONS,
+      Resource: '*',
+      Condition: {
+        StringNotEquals: { 'aws:RequestedRegion': regions },
+        Null: { 'aws:RequestedRegion': 'false' },
+      },
+    },
+  ],
+});
+
 @Injectable()
 export class AwsAccessService {
   private readonly logger = new Logger(AwsAccessService.name);
@@ -100,8 +139,8 @@ export class AwsAccessService {
         ? [
             {
               key: HUMAN_READ,
-              name: 'AWS 全局资源配置只读',
-              shortName: '资源配置只读',
+              name: 'AWS 资源配置受控只读',
+              shortName: '受控资源配置只读',
               description:
                 '查看 AWS 资源的配置、状态和关联关系，不允许创建、修改或删除资源。',
               riskLevel: 'LOW',
@@ -137,6 +176,7 @@ export class AwsAccessService {
               },
               notes: [
                 '区域由临时会话策略进一步限制。',
+                'IAM、Route 53 等 AWS 全局服务不参与区域限制，但仍受 ViewOnlyAccess 权限边界约束。',
                 'AWS 托管策略可能由 AWS 更新，实际权限以当前策略版本和会话策略交集为准。',
               ],
             },
@@ -748,27 +788,7 @@ export class AwsAccessService {
           { Key: 'DashboardUserId', Value: String(actor.userId) },
           { Key: 'DashboardGrantId', Value: String(session.grant_id) },
         ],
-        Policy: JSON.stringify({
-          Version: '2012-10-17',
-          Statement: [
-            {
-              Sid: 'AllowWithinRolePermissions',
-              Effect: 'Allow',
-              Action: '*',
-              Resource: '*',
-            },
-            {
-              Sid: 'DenyOutsideGrantedRegions',
-              Effect: 'Deny',
-              Action: '*',
-              Resource: '*',
-              Condition: {
-                StringNotEquals: { 'aws:RequestedRegion': regions },
-                Null: { 'aws:RequestedRegion': 'false' },
-              },
-            },
-          ],
-        }),
+        Policy: JSON.stringify(buildAwsAccessSessionPolicy(regions)),
       }),
     );
     const c = assumed.Credentials;

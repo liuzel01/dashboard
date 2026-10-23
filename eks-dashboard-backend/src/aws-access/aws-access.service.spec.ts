@@ -1,5 +1,9 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { AwsAccessService } from './aws-access.service';
+import {
+  AWS_GLOBAL_SERVICE_ACTIONS,
+  AwsAccessService,
+  buildAwsAccessSessionPolicy,
+} from './aws-access.service';
 
 const actor = {
   userId: 7,
@@ -105,7 +109,7 @@ describe('AwsAccessService', () => {
 
     expect(result.templates[0]).toMatchObject({
       key: 'HUMAN_READ',
-      name: 'AWS 全局资源配置只读',
+      name: 'AWS 资源配置受控只读',
       riskLevel: 'LOW',
       maxDurationMinutes: 43200,
       verification: { writeActionsDenied: true },
@@ -164,6 +168,23 @@ describe('AwsAccessService', () => {
     expect(tagTemplate?.notes).toContain(
       '写权限仅适用于 ap-southeast-1 的 EC2 Instance、EBS Volume 和 Security Group。',
     );
+  });
+
+  it('exempts global services from the regional deny boundary', () => {
+    const policy = buildAwsAccessSessionPolicy(['ap-southeast-1']);
+    const regionalDeny = policy.Statement[1];
+
+    expect(regionalDeny).toMatchObject({
+      Effect: 'Deny',
+      NotAction: AWS_GLOBAL_SERVICE_ACTIONS,
+      Condition: {
+        StringNotEquals: {
+          'aws:RequestedRegion': ['ap-southeast-1'],
+        },
+      },
+    });
+    expect(AWS_GLOBAL_SERVICE_ACTIONS).toContain('iam:*');
+    expect(AWS_GLOBAL_SERVICE_ACTIONS).toContain('route53:*');
   });
 
   it.each([
