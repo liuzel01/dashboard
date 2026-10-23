@@ -104,6 +104,12 @@ export default function AwsAccessPage() {
   const templateName = (key: string) =>
     configuration?.templates.find((item) => item.key === key)?.name || key;
 
+  const riskTag = (riskLevel: AwsAccessTemplate["riskLevel"]) => {
+    if (riskLevel === "HIGH") return <Tag color="red">高风险写入</Tag>;
+    if (riskLevel === "MEDIUM") return <Tag color="orange">受限写入</Tag>;
+    return <Tag color="green">只读</Tag>;
+  };
+
   const templateDetail = (template: AwsAccessTemplate) => (
     <Space direction="vertical" size={12} style={{ width: "100%" }}>
       <Alert
@@ -114,7 +120,7 @@ export default function AwsAccessPage() {
       />
       <Descriptions bordered size="small" column={1}>
         <Descriptions.Item label="风险等级">
-          <Tag color="green">{template.riskLevel}</Tag>
+          {riskTag(template.riskLevel)}
         </Descriptions.Item>
         <Descriptions.Item label="主要服务">
           <Space wrap>
@@ -186,7 +192,8 @@ export default function AwsAccessPage() {
         <Space direction="vertical" size={2}>
           <Tag>{row.environment_id}</Tag>
           <span>{templateName(row.permission_template_key)}</span>
-          {configuration?.templates.find((item) => item.key === row.permission_template_key)?.riskLevel === "MEDIUM" && <Tag color="orange">受限写入</Tag>}
+          {configuration?.templates.find((item) => item.key === row.permission_template_key) &&
+            riskTag(configuration.templates.find((item) => item.key === row.permission_template_key)!.riskLevel)}
         </Space>
       ),
     },
@@ -284,7 +291,7 @@ export default function AwsAccessPage() {
         type="info"
         style={{ marginBottom: 16 }}
         message="临时访问使用受控权限模板"
-        description={<Space wrap><Typography.Text>当前提供资源配置只读和治理标签维护；写入模板仅允许维护 environment、owner 标签。</Typography.Text><Button type="link" size="small" onClick={() => setTemplateDetailKey("HUMAN_READ")}>查看完整权限范围</Button></Space>}
+        description={<Space wrap><Typography.Text>当前模板包括资源配置只读、治理标签维护、安全组入站规则维护和 S3 对象写入；所有写权限均由独立 Role、账号和区域边界限制。</Typography.Text><Button type="link" size="small" onClick={() => setTemplateDetailKey("HUMAN_READ")}>查看完整权限范围</Button></Space>}
       />
       {!configuration?.enabled && !loading && (
         <Alert type="warning" showIcon message="hashex AWS 临时访问尚未启用" />
