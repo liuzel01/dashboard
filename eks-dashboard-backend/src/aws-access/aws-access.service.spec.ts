@@ -44,6 +44,38 @@ const createService = (query: jest.Mock) => {
 };
 
 describe('AwsAccessService', () => {
+  it('returns a disabled environment configuration instead of falling back to hashex', async () => {
+    const query = jest.fn().mockResolvedValueOnce([]);
+    const { service } = createService(query);
+
+    const result = await service.configuration(actor, 'mgbx');
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('environment_id=?'),
+      ['mgbx'],
+    );
+    expect(result).toMatchObject({
+      enabled: false,
+      account: null,
+      templates: [],
+      regions: [],
+    });
+    expect(result.unavailableReason).toContain('mgbx');
+  });
+
+  it('filters the grant list by the selected environment', async () => {
+    const query = jest.fn().mockResolvedValueOnce([]);
+    const { service } = createService(query);
+
+    await service.listGrants(
+      { ...actor, permissions: ['aws-access:grant:read-all'] },
+      'mgbx',
+    );
+
+    expect(query.mock.calls[0][0]).toContain('WHERE g.environment_id=?');
+    expect(query.mock.calls[0][1]).toEqual(['mgbx']);
+  });
+
   it('exposes a clear, bounded contract for the human read template', async () => {
     const query = jest.fn().mockResolvedValueOnce([
       {
@@ -69,7 +101,7 @@ describe('AwsAccessService', () => {
       return roles[key] || '';
     });
 
-    const result = await service.configuration(actor);
+    const result = await service.configuration(actor, 'hashex');
 
     expect(result.templates[0]).toMatchObject({
       key: 'HUMAN_READ',
@@ -139,6 +171,7 @@ describe('AwsAccessService', () => {
 
     await service.createGrant(
       { ...actor, permissions: ['aws-access:grant:manage'] },
+      'hashex',
       {
         granteeUserId: 8,
         cloudAccountId: 1,
@@ -180,6 +213,7 @@ describe('AwsAccessService', () => {
 
     await service.createGrant(
       { ...actor, permissions: ['aws-access:grant:manage'] },
+      'hashex',
       {
         granteeUserId: 8,
         cloudAccountId: 1,
@@ -268,6 +302,7 @@ describe('AwsAccessService', () => {
     await expect(
       service.createGrant(
         { ...actor, permissions: ['aws-access:grant:manage'] },
+        'hashex',
         {
           granteeUserId: 7,
           cloudAccountId: 1,

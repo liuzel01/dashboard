@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -56,28 +57,37 @@ export class AwsAccessController {
   ) {}
 
   @Get('configuration')
-  async configuration(@Headers('authorization') authorization?: string) {
+  async configuration(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('x-target-environment') environmentId: string | undefined,
+  ) {
     return this.service.configuration(
       await this.actor(authorization, 'aws-access:grant:read-own'),
+      this.environmentId(environmentId),
     );
   }
 
   @Get('grants')
-  async grants(@Headers('authorization') authorization?: string) {
+  async grants(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('x-target-environment') environmentId: string | undefined,
+  ) {
     const actor = await this.actorAny(authorization, [
       'aws-access:grant:read-own',
       'aws-access:grant:read-all',
     ]);
-    return this.service.listGrants(actor);
+    return this.service.listGrants(actor, this.environmentId(environmentId));
   }
 
   @Post('grants')
   async create(
     @Headers('authorization') authorization: string | undefined,
+    @Headers('x-target-environment') environmentId: string | undefined,
     @Body() body: CreateGrantDto,
   ) {
     return this.service.createGrant(
       await this.actor(authorization, 'aws-access:grant:manage'),
+      this.environmentId(environmentId),
       body,
     );
   }
@@ -119,6 +129,15 @@ export class AwsAccessController {
 
   private actor(authorization: string | undefined, permission: string) {
     return this.actorAny(authorization, [permission]);
+  }
+
+  private environmentId(value: string | undefined) {
+    const environmentId = String(value || '').trim();
+    if (!environmentId)
+      throw new BadRequestException('请选择目标环境后重试');
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(environmentId))
+      throw new BadRequestException('目标环境标识不合法');
+    return environmentId;
   }
 
   private async actorAny(

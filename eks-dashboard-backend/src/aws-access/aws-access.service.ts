@@ -38,31 +38,52 @@ export class AwsAccessService {
     private readonly credentials: AwsCredentialProviderFactory,
   ) {}
 
-  async configuration(actor: AwsGovernanceActor) {
-    const account = await this.hashexAccount();
+  async configuration(actor: AwsGovernanceActor, environmentId: string) {
+    const account = await this.account(environmentId, false);
+    if (!account) {
+      return {
+        enabled: false,
+        account: null,
+        templates: [],
+        regions: [],
+        canManage: actor.permissions.includes('aws-access:grant:manage'),
+        deliveryMode: 'AWS_CONSOLE_FEDERATION',
+        unavailableReason: `环境 ${environmentId} 尚未配置 AWS 云账号和临时访问角色`,
+      };
+    }
+    const confPrefix = `aws_access.${environmentId}`;
     const enabled = await this.siteConf.getBoolean(
-      'aws_access.hashex.enabled',
+      `${confPrefix}.enabled`,
       false,
     );
     const humanReadRoleArn = await this.siteConf.getString(
-      'aws_access.hashex.human_read_role_arn',
+      `${confPrefix}.human_read_role_arn`,
     );
     const humanTagWriteRoleArn = await this.siteConf.getString(
-      'aws_access.hashex.human_tag_write_role_arn',
+      `${confPrefix}.human_tag_write_role_arn`,
     );
     const humanSecurityGroupWriteRoleArn = await this.siteConf.getString(
-      'aws_access.hashex.human_security_group_write_role_arn',
+      `${confPrefix}.human_security_group_write_role_arn`,
     );
     const humanS3WriteRoleArn = await this.siteConf.getString(
-      'aws_access.hashex.human_s3_write_role_arn',
+      `${confPrefix}.human_s3_write_role_arn`,
     );
     const securityGroupScope = await this.siteConf.getJson<string[]>(
-      'aws_access.hashex.security_group_write_scope',
+      `${confPrefix}.security_group_write_scope`,
       [],
     );
     const s3WriteScope = await this.siteConf.getJson<
       Array<{ resourceAccount: string; bucket: string; prefix: string }>
-    >('aws_access.hashex.s3_write_scope', []);
+    >(`${confPrefix}.s3_write_scope`, []);
+    const tagWritePolicyArn = await this.siteConf.getString(
+      `${confPrefix}.human_tag_write_policy_arn`,
+    );
+    const securityGroupWritePolicyArn = await this.siteConf.getString(
+      `${confPrefix}.human_security_group_write_policy_arn`,
+    );
+    const s3WritePolicyArn = await this.siteConf.getString(
+      `${confPrefix}.human_s3_write_policy_arn`,
+    );
     return {
       enabled,
       account: {
@@ -145,8 +166,8 @@ export class AwsAccessService {
                     targetRoleArn: humanTagWriteRoleArn,
                     policyReferences: [
                       HUMAN_READ_POLICY_ARN,
-                      'arn:aws:iam::290368114919:policy/DashboardHashexHumanTagWritePolicy',
-                    ],
+                      tagWritePolicyArn,
+                    ].filter(Boolean),
                     policyModel: 'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY',
                     verification: {
                       method: 'IAM Policy Simulation + real AssumeRole DryRun',
@@ -185,8 +206,8 @@ export class AwsAccessService {
                     targetRoleArn: humanSecurityGroupWriteRoleArn,
                     policyReferences: [
                       HUMAN_READ_POLICY_ARN,
-                      'arn:aws:iam::290368114919:policy/DashboardHashexHumanSecurityGroupRulePolicy',
-                    ],
+                      securityGroupWritePolicyArn,
+                    ].filter(Boolean),
                     policyModel: 'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY',
                     verification: {
                       method: 'IAM Policy Simulation + real AssumeRole DryRun',
@@ -207,7 +228,7 @@ export class AwsAccessService {
                     name: 'AWS S3 对象写入',
                     shortName: 'S3 对象写入',
                     description:
-                      '在全局资源配置只读的基础上，允许向 hashex 账号自身拥有的 S3 Bucket 上传或覆盖对象。',
+                      `在全局资源配置只读的基础上，允许向 ${environmentId} 账号自身拥有的 S3 Bucket 上传或覆盖对象。`,
                     riskLevel: 'HIGH',
                     primaryServices: ['Amazon S3'],
                     allowedCapabilities: [
@@ -227,8 +248,8 @@ export class AwsAccessService {
                     targetRoleArn: humanS3WriteRoleArn,
                     policyReferences: [
                       HUMAN_READ_POLICY_ARN,
-                      'arn:aws:iam::290368114919:policy/DashboardHashexHumanS3WritePolicy',
-                    ],
+                      s3WritePolicyArn,
+                    ].filter(Boolean),
                     policyModel: 'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY',
                     verification: {
                       method: 'IAM Policy Simulation + real AssumeRole',
@@ -236,7 +257,7 @@ export class AwsAccessService {
                       writeActionsDenied: false,
                     },
                     notes: [
-                      '写入范围按 s3:ResourceAccount 限制为 hashex AWS 账号自身拥有的 Bucket。',
+                      `写入范围按 s3:ResourceAccount 限制为账号 ${account.account_id} 自身拥有的 Bucket。`,
                       'S3 为全局服务；会话仍要求从所选区域访问，但资源边界以账号归属为准。',
                       'S3 PutObject 不支持 DryRun，真实上传需由人工验收。',
                       '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
@@ -252,10 +273,14 @@ export class AwsAccessService {
     };
   }
 
-  async listGrants(actor: AwsGovernanceActor) {
+  async listGrants(actor: AwsGovernanceActor, environmentId: string) {
     const readAll = actor.permissions.includes('aws-access:grant:read-all');
-    const where = readAll ? '' : 'WHERE g.grantee_user_id=?';
-    const params = readAll ? [] : [actor.userId];
+    const where = readAll
+      ? 'WHERE g.environment_id=?'
+      : 'WHERE g.environment_id=? AND g.grantee_user_id=?';
+    const params = readAll
+      ? [environmentId]
+      : [environmentId, actor.userId];
     const rows = await this.db.query<any[]>(
       `SELECT g.id,g.grantee_user_id,u.username,u.display_name,g.environment_id,
               g.permission_template_key,g.regions_json,g.reason,g.status,g.valid_from,
@@ -279,6 +304,7 @@ export class AwsAccessService {
 
   async createGrant(
     actor: AwsGovernanceActor,
+    environmentId: string,
     input: {
       granteeUserId: number;
       cloudAccountId: number;
@@ -290,17 +316,20 @@ export class AwsAccessService {
     },
   ) {
     await this.mfa.verifyForUser(actor.userId, input.mfaCode);
-    const account = await this.hashexAccount();
+    const account = await this.account(environmentId);
     if (Number(account.id) !== Number(input.cloudAccountId))
-      throw new BadRequestException('首版仅支持 hashex 云账号');
-    if (!(await this.siteConf.getBoolean('aws_access.hashex.enabled', false)))
-      throw new BadRequestException('hashex AWS 临时访问尚未启用');
+      throw new BadRequestException('云账号与当前目标环境不匹配');
+    const confPrefix = `aws_access.${environmentId}`;
+    if (!(await this.siteConf.getBoolean(`${confPrefix}.enabled`, false)))
+      throw new BadRequestException(
+        `环境 ${environmentId} 的 AWS 临时访问尚未启用`,
+      );
     const templateRoleConfKeys: Record<string, string> = {
-      [HUMAN_READ]: 'aws_access.hashex.human_read_role_arn',
-      [HUMAN_TAG_WRITE]: 'aws_access.hashex.human_tag_write_role_arn',
+      [HUMAN_READ]: `${confPrefix}.human_read_role_arn`,
+      [HUMAN_TAG_WRITE]: `${confPrefix}.human_tag_write_role_arn`,
       [HUMAN_SECURITY_GROUP_WRITE]:
-        'aws_access.hashex.human_security_group_write_role_arn',
-      [HUMAN_S3_WRITE]: 'aws_access.hashex.human_s3_write_role_arn',
+        `${confPrefix}.human_security_group_write_role_arn`,
+      [HUMAN_S3_WRITE]: `${confPrefix}.human_s3_write_role_arn`,
     };
     if (!templateRoleConfKeys[input.permissionTemplateKey])
       throw new BadRequestException('不支持的权限模板');
@@ -318,7 +347,9 @@ export class AwsAccessService {
       !regions.length ||
       regions.some((item) => !allowedRegions.includes(item))
     )
-      throw new BadRequestException('所选区域不在 hashex 受控范围内');
+      throw new BadRequestException(
+        `所选区域不在 ${environmentId} 受控范围内`,
+      );
     const validUntil = new Date(input.validUntil);
     const now = Date.now();
     if (
@@ -668,10 +699,16 @@ export class AwsAccessService {
 
   private async consoleUrl(actor: AwsGovernanceActor, session: any) {
     const region = this.json<string[]>(session.regions_json, [])[0];
+    const environmentId = String(session.environment_id);
+    const account = await this.account(environmentId);
     const brokerRoleArn = await this.siteConf.getString(
-      'aws_access.hashex.broker_role_arn',
+      `aws_access.${environmentId}.broker_role_arn`,
     );
-    this.requireRoleArn(brokerRoleArn, '290368114919', 'Credential Broker');
+    this.requireRoleArn(
+      brokerRoleArn,
+      String(account.account_id),
+      `${environmentId} Credential Broker`,
+    );
     const brokerCredentials = this.credentials.createAssumeRoleCredentials({
       roleArn: brokerRoleArn,
       region,
@@ -742,7 +779,7 @@ export class AwsAccessService {
           assumedRoleArn: assumed.AssumedRoleUser?.Arn || null,
           dashboardUserId: actor.userId,
           dashboardGrantId: Number(session.grant_id),
-          accountId: '290368114919',
+          accountId: String(account.account_id),
           region,
         }),
         session.id,
@@ -782,12 +819,21 @@ export class AwsAccessService {
     );
   }
 
-  private async hashexAccount() {
+  private async account(environmentId: string, required?: true): Promise<any>;
+  private async account(
+    environmentId: string,
+    required: false,
+  ): Promise<any | null>;
+  private async account(environmentId: string, required = true) {
     const rows = await this.db.query<any[]>(
-      "SELECT * FROM aws_cloud_accounts WHERE environment_id='hashex' AND enabled=1 LIMIT 1",
+      'SELECT * FROM aws_cloud_accounts WHERE environment_id=? AND enabled=1 LIMIT 1',
+      [environmentId],
     );
-    if (!rows[0]) throw new NotFoundException('hashex AWS 云账号未配置');
-    return rows[0];
+    if (!rows[0] && required)
+      throw new NotFoundException(
+        `环境 ${environmentId} 的 AWS 云账号未配置`,
+      );
+    return rows[0] || null;
   }
 
   private async grant(id: number) {
