@@ -187,6 +187,43 @@ describe('AwsAccessService', () => {
     expect(AWS_GLOBAL_SERVICE_ACTIONS).toContain('route53:*');
   });
 
+  it('exposes the account-wide read-only template only when configured', async () => {
+    const query = jest.fn().mockResolvedValueOnce([
+      {
+        id: 2,
+        environment_id: 'mgbx',
+        account_id: '931324892624',
+        display_name: 'mgbx',
+        default_regions_json: '["ap-southeast-1"]',
+      },
+    ]);
+    const { service, siteConf } = createService(query);
+    siteConf.getString.mockImplementation(async (key: string) => {
+      const values: Record<string, string> = {
+        'aws_access.mgbx.human_read_role_arn':
+          'arn:aws:iam::931324892624:role/DashboardMgbxHumanReadRole',
+        'aws_access.mgbx.human_account_read_only_role_arn':
+          'arn:aws:iam::931324892624:role/DashboardMgbxHumanAccountReadOnlyRole',
+        'aws_access.mgbx.human_account_read_only_policy_arn':
+          'arn:aws:iam::931324892624:policy/DashboardMgbxHumanAccountReadOnlyGuardrail',
+      };
+      return values[key] || '';
+    });
+
+    const result = await service.configuration(actor, 'mgbx');
+    expect(result.templates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'HUMAN_ACCOUNT_READ_ONLY',
+          name: 'AWS 账号资源全面只读',
+          riskLevel: 'MEDIUM',
+          targetRoleArn:
+            'arn:aws:iam::931324892624:role/DashboardMgbxHumanAccountReadOnlyRole',
+        }),
+      ]),
+    );
+  });
+
   it.each([
     [
       'HUMAN_SECURITY_GROUP_WRITE',

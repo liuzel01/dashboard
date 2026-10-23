@@ -18,11 +18,14 @@ import type { AwsGovernanceActor } from '../aws-governance/aws-governance.types'
 import { SiteConfService } from '../site-conf/site-conf.service';
 
 const HUMAN_READ = 'HUMAN_READ';
+const HUMAN_ACCOUNT_READ_ONLY = 'HUMAN_ACCOUNT_READ_ONLY';
 const HUMAN_TAG_WRITE = 'HUMAN_TAG_WRITE';
 const HUMAN_SECURITY_GROUP_WRITE = 'HUMAN_SECURITY_GROUP_WRITE';
 const HUMAN_S3_WRITE = 'HUMAN_S3_WRITE';
 const HUMAN_READ_POLICY_ARN =
   'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess';
+const HUMAN_ACCOUNT_READ_ONLY_POLICY_ARN =
+  'arn:aws:iam::aws:policy/ReadOnlyAccess';
 
 export const AWS_GLOBAL_SERVICE_ACTIONS = [
   'account:*',
@@ -102,6 +105,9 @@ export class AwsAccessService {
     const humanReadRoleArn = await this.siteConf.getString(
       `${confPrefix}.human_read_role_arn`,
     );
+    const humanAccountReadOnlyRoleArn = await this.siteConf.getString(
+      `${confPrefix}.human_account_read_only_role_arn`,
+    );
     const humanTagWriteRoleArn = await this.siteConf.getString(
       `${confPrefix}.human_tag_write_role_arn`,
     );
@@ -120,6 +126,9 @@ export class AwsAccessService {
     >(`${confPrefix}.s3_write_scope`, []);
     const tagWritePolicyArn = await this.siteConf.getString(
       `${confPrefix}.human_tag_write_policy_arn`,
+    );
+    const humanAccountReadOnlyPolicyArn = await this.siteConf.getString(
+      `${confPrefix}.human_account_read_only_policy_arn`,
     );
     const securityGroupWritePolicyArn = await this.siteConf.getString(
       `${confPrefix}.human_security_group_write_policy_arn`,
@@ -180,6 +189,47 @@ export class AwsAccessService {
                 'AWS 托管策略可能由 AWS 更新，实际权限以当前策略版本和会话策略交集为准。',
               ],
             },
+            ...(humanAccountReadOnlyRoleArn
+              ? [
+                  {
+                    key: HUMAN_ACCOUNT_READ_ONLY,
+                    name: 'AWS 账号资源全面只读',
+                    shortName: '账号资源全面只读',
+                    description:
+                      '在限定 AWS 账号和区域内提供比资源配置视图更完整的只读能力，同时显式阻止敏感业务数据、密钥和凭据读取。',
+                    riskLevel: 'MEDIUM',
+                    primaryServices: ['全部 AWS 服务（只读）'],
+                    allowedCapabilities: [
+                      '列举和查看账号内 AWS 服务及资源',
+                      `查看授权区域内的资源配置、状态和关联关系：${regionLabel}`,
+                      '查看 IAM、Route 53、CloudFront 等全局服务的非敏感配置',
+                    ],
+                    deniedCapabilities: [
+                      '创建、修改或删除 AWS 资源',
+                      '读取 Secret、Parameter Store 参数值或执行 KMS 解密',
+                      '下载 S3 对象、容器镜像、Lambda 代码或数据库日志',
+                      '读取业务数据、消息内容或 CloudWatch Logs 日志正文',
+                    ],
+                    maxDurationMinutes: 30 * 24 * 60,
+                    targetRoleArn: humanAccountReadOnlyRoleArn,
+                    policyReferences: [
+                      HUMAN_ACCOUNT_READ_ONLY_POLICY_ARN,
+                      humanAccountReadOnlyPolicyArn,
+                    ].filter(Boolean),
+                    policyModel:
+                      'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_DENY_GUARDRAIL',
+                    verification: {
+                      method: 'IAM Policy Simulation + real AssumeRole',
+                      verifiedAt: '2026-10-23',
+                      writeActionsDenied: true,
+                    },
+                    notes: [
+                      '区域型服务受临时会话策略限制；AWS 全局服务不参与区域限制。',
+                      'AWS ReadOnlyAccess 会持续更新，敏感数据面动作由独立 Guardrail 显式拒绝。',
+                    ],
+                  },
+                ]
+              : []),
             ...(humanTagWriteRoleArn
               ? [
                   {
@@ -370,6 +420,8 @@ export class AwsAccessService {
       );
     const templateRoleConfKeys: Record<string, string> = {
       [HUMAN_READ]: `${confPrefix}.human_read_role_arn`,
+      [HUMAN_ACCOUNT_READ_ONLY]:
+        `${confPrefix}.human_account_read_only_role_arn`,
       [HUMAN_TAG_WRITE]: `${confPrefix}.human_tag_write_role_arn`,
       [HUMAN_SECURITY_GROUP_WRITE]:
         `${confPrefix}.human_security_group_write_role_arn`,
