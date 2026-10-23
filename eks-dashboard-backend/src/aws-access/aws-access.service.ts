@@ -18,6 +18,7 @@ import type { AwsGovernanceActor } from '../aws-governance/aws-governance.types'
 import { SiteConfService } from '../site-conf/site-conf.service';
 
 const HUMAN_READ = 'HUMAN_READ';
+const HUMAN_TAG_WRITE = 'HUMAN_TAG_WRITE';
 const HUMAN_READ_POLICY_ARN =
   'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess';
 
@@ -43,6 +44,9 @@ export class AwsAccessService {
     );
     const humanReadRoleArn = await this.siteConf.getString(
       'aws_access.hashex.human_read_role_arn',
+    );
+    const humanTagWriteRoleArn = await this.siteConf.getString(
+      'aws_access.hashex.human_tag_write_role_arn',
     );
     return {
       enabled,
@@ -96,6 +100,52 @@ export class AwsAccessService {
                 'AWS 托管策略可能由 AWS 更新，实际权限以当前策略版本和会话策略交集为准。',
               ],
             },
+            ...(humanTagWriteRoleArn
+              ? [
+                  {
+                    key: HUMAN_TAG_WRITE,
+                    name: 'AWS 治理标签维护',
+                    shortName: '治理标签维护',
+                    description:
+                      '在查看 AWS 资源配置的基础上，仅允许维护 EC2 实例、EBS 卷和安全组的 environment、owner 标签。',
+                    riskLevel: 'MEDIUM',
+                    primaryServices: [
+                      'EC2 Instance',
+                      'EBS Volume',
+                      'Security Group',
+                    ],
+                    allowedCapabilities: [
+                      '列举和查看 AWS 资源配置与状态',
+                      '新增、修改或移除 environment 标签',
+                      '新增、修改或移除 owner 标签',
+                      '在授权区域内进入 AWS Console 执行上述操作',
+                    ],
+                    deniedCapabilities: [
+                      '修改 Name 或其他非白名单标签',
+                      '创建、删除、启动、停止或重启 AWS 资源',
+                      '修改安全组规则、网络、IAM 或存储配置',
+                      '上传对象或修改业务数据',
+                    ],
+                    maxDurationMinutes: 30 * 24 * 60,
+                    targetRoleArn: humanTagWriteRoleArn,
+                    policyReferences: [
+                      HUMAN_READ_POLICY_ARN,
+                      'arn:aws:iam::290368114919:policy/DashboardHashexHumanTagWritePolicy',
+                    ],
+                    policyModel: 'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY',
+                    verification: {
+                      method: 'IAM Policy Simulation + real AssumeRole DryRun',
+                      verifiedAt: '2026-10-23',
+                      writeActionsDenied: false,
+                    },
+                    notes: [
+                      '写权限仅适用于 ap-east-1 的 EC2 Instance、EBS Volume 和 Security Group。',
+                      '允许的标签键仅为 environment、owner；其他写操作由目标 Role 拒绝。',
+                      '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
+                    ],
+                  },
+                ]
+              : []),
           ]
         : [],
       regions: this.json<string[]>(account.default_regions_json, ['ap-east-1']),
@@ -147,7 +197,7 @@ export class AwsAccessService {
       throw new BadRequestException('首版仅支持 hashex 云账号');
     if (!(await this.siteConf.getBoolean('aws_access.hashex.enabled', false)))
       throw new BadRequestException('hashex AWS 临时访问尚未启用');
-    if (input.permissionTemplateKey !== HUMAN_READ)
+    if (![HUMAN_READ, HUMAN_TAG_WRITE].includes(input.permissionTemplateKey))
       throw new BadRequestException('不支持的权限模板');
     const userRows = await this.db.query<any[]>(
       "SELECT id,username,status FROM users WHERE id=? AND status='active' LIMIT 1",
@@ -174,16 +224,24 @@ export class AwsAccessService {
     if (validUntil.getTime() > now + 30 * 24 * 60 * 60_000)
       throw new BadRequestException('首版单次授权最长 30 天');
     const targetRoleArn = await this.siteConf.getString(
-      'aws_access.hashex.human_read_role_arn',
+      input.permissionTemplateKey === HUMAN_TAG_WRITE
+        ? 'aws_access.hashex.human_tag_write_role_arn'
+        : 'aws_access.hashex.human_read_role_arn',
     );
-    this.requireRoleArn(targetRoleArn, account.account_id, 'Human Read');
+    this.requireRoleArn(
+      targetRoleArn,
+      account.account_id,
+      input.permissionTemplateKey === HUMAN_TAG_WRITE
+        ? 'Human Tag Write'
+        : 'Human Read',
+    );
     const snapshot = {
       version: 1,
       granteeUserId: Number(input.granteeUserId),
       cloudAccountId: Number(account.id),
       environmentId: String(account.environment_id),
       accountId: String(account.account_id),
-      permissionTemplateKey: HUMAN_READ,
+      permissionTemplateKey: input.permissionTemplateKey,
       targetRoleArn,
       regions: [...regions].sort(),
       validUntil: validUntil.toISOString(),
@@ -220,7 +278,10 @@ export class AwsAccessService {
           insert.insertId,
           actor.userId,
           grantHash,
-          JSON.stringify({ template: HUMAN_READ, regions: snapshot.regions }),
+          JSON.stringify({
+            template: snapshot.permissionTemplateKey,
+            regions: snapshot.regions,
+          }),
         ],
       );
       await conn.execute(
@@ -231,7 +292,7 @@ export class AwsAccessService {
           'GRANTED',
           actor.userId,
           JSON.stringify({
-            template: HUMAN_READ,
+            template: snapshot.permissionTemplateKey,
             granteeUserId: snapshot.granteeUserId,
           }),
         ],
@@ -250,7 +311,7 @@ export class AwsAccessService {
       targetId: String(result.id),
       meta: {
         granteeUserId: snapshot.granteeUserId,
-        template: HUMAN_READ,
+        template: snapshot.permissionTemplateKey,
         validUntil: snapshot.validUntil,
       },
       status: 'success',

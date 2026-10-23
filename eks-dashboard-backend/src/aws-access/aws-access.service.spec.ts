@@ -48,8 +48,10 @@ describe('AwsAccessService', () => {
       },
     ]);
     const { service, siteConf } = createService(query);
-    siteConf.getString.mockResolvedValue(
-      'arn:aws:iam::290368114919:role/DashboardHashexHumanReadRole',
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key.endsWith('human_tag_write_role_arn')
+        ? 'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole'
+        : 'arn:aws:iam::290368114919:role/DashboardHashexHumanReadRole',
     );
 
     const result = await service.configuration(actor);
@@ -65,6 +67,54 @@ describe('AwsAccessService', () => {
     expect(result.templates[0].deniedCapabilities.length).toBeGreaterThan(0);
     expect(result.templates[0].policyReferences).toContain(
       'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess',
+    );
+    expect(result.templates[1]).toMatchObject({
+      key: 'HUMAN_TAG_WRITE',
+      name: 'AWS 治理标签维护',
+      riskLevel: 'MEDIUM',
+      targetRoleArn:
+        'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole',
+    });
+  });
+
+  it('binds a human tag write grant to its dedicated role', async () => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          environment_id: 'hashex',
+          account_id: '290368114919',
+          default_regions_json: '["ap-east-1"]',
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 8, username: 'writer', status: 'active' }])
+      .mockResolvedValueOnce([{ insertId: 31 }, []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+    const { service, siteConf } = createService(query);
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key.endsWith('human_tag_write_role_arn')
+        ? 'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole'
+        : '',
+    );
+
+    await service.createGrant(
+      { ...actor, permissions: ['aws-access:grant:manage'] },
+      {
+        granteeUserId: 8,
+        cloudAccountId: 1,
+        permissionTemplateKey: 'HUMAN_TAG_WRITE',
+        regions: ['ap-east-1'],
+        validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+        reason: '维护治理标签',
+        mfaCode: '123456',
+      },
+    );
+
+    expect(query.mock.calls[2][1][4]).toBe('HUMAN_TAG_WRITE');
+    expect(query.mock.calls[2][1][5]).toBe(
+      'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole',
     );
   });
 
