@@ -20,6 +20,13 @@ const createService = (query: jest.Mock) => {
     getBoolean: jest.fn().mockResolvedValue(true),
     getNumber: jest.fn().mockResolvedValue(120),
     getString: jest.fn(),
+    getJson: jest.fn().mockImplementation(async (key: string) =>
+      key.endsWith('security_group_write_scope')
+        ? ['arn:aws:ec2:ap-east-1:290368114919:security-group/*']
+        : [
+            { resourceAccount: '290368114919', bucket: '*', prefix: '*' },
+          ],
+    ),
   };
   const credentials = { createAssumeRoleCredentials: jest.fn() };
   return {
@@ -48,11 +55,19 @@ describe('AwsAccessService', () => {
       },
     ]);
     const { service, siteConf } = createService(query);
-    siteConf.getString.mockImplementation(async (key: string) =>
-      key.endsWith('human_tag_write_role_arn')
-        ? 'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole'
-        : 'arn:aws:iam::290368114919:role/DashboardHashexHumanReadRole',
-    );
+    siteConf.getString.mockImplementation(async (key: string) => {
+      const roles: Record<string, string> = {
+        'aws_access.hashex.human_read_role_arn':
+          'arn:aws:iam::290368114919:role/DashboardHashexHumanReadRole',
+        'aws_access.hashex.human_tag_write_role_arn':
+          'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole',
+        'aws_access.hashex.human_security_group_write_role_arn':
+          'arn:aws:iam::290368114919:role/DashboardHashexHumanSecurityGroupWriteRole',
+        'aws_access.hashex.human_s3_write_role_arn':
+          'arn:aws:iam::290368114919:role/DashboardHashexHumanS3WriteRole',
+      };
+      return roles[key] || '';
+    });
 
     const result = await service.configuration(actor);
 
@@ -75,6 +90,70 @@ describe('AwsAccessService', () => {
       targetRoleArn:
         'arn:aws:iam::290368114919:role/DashboardHashexHumanTagWriteRole',
     });
+    expect(result.templates[2]).toMatchObject({
+      key: 'HUMAN_SECURITY_GROUP_WRITE',
+      riskLevel: 'HIGH',
+      targetRoleArn:
+        'arn:aws:iam::290368114919:role/DashboardHashexHumanSecurityGroupWriteRole',
+    });
+    expect(result.templates[3]).toMatchObject({
+      key: 'HUMAN_S3_WRITE',
+      riskLevel: 'HIGH',
+      targetRoleArn:
+        'arn:aws:iam::290368114919:role/DashboardHashexHumanS3WriteRole',
+    });
+  });
+
+  it.each([
+    [
+      'HUMAN_SECURITY_GROUP_WRITE',
+      'human_security_group_write_role_arn',
+      'DashboardHashexHumanSecurityGroupWriteRole',
+    ],
+    [
+      'HUMAN_S3_WRITE',
+      'human_s3_write_role_arn',
+      'DashboardHashexHumanS3WriteRole',
+    ],
+  ])('binds %s to its dedicated role', async (templateKey, confSuffix, roleName) => {
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: 1,
+          environment_id: 'hashex',
+          account_id: '290368114919',
+          default_regions_json: '["ap-east-1"]',
+        },
+      ])
+      .mockResolvedValueOnce([{ id: 8, username: 'writer', status: 'active' }])
+      .mockResolvedValueOnce([{ insertId: 31 }, []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+    const { service, siteConf } = createService(query);
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key.endsWith(confSuffix)
+        ? `arn:aws:iam::290368114919:role/${roleName}`
+        : '',
+    );
+
+    await service.createGrant(
+      { ...actor, permissions: ['aws-access:grant:manage'] },
+      {
+        granteeUserId: 8,
+        cloudAccountId: 1,
+        permissionTemplateKey: templateKey,
+        regions: ['ap-east-1'],
+        validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+        reason: '受控写入',
+        mfaCode: '123456',
+      },
+    );
+
+    expect(query.mock.calls[2][1][4]).toBe(templateKey);
+    expect(query.mock.calls[2][1][5]).toBe(
+      `arn:aws:iam::290368114919:role/${roleName}`,
+    );
   });
 
   it('binds a human tag write grant to its dedicated role', async () => {

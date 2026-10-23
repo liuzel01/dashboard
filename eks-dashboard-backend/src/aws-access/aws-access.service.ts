@@ -19,6 +19,8 @@ import { SiteConfService } from '../site-conf/site-conf.service';
 
 const HUMAN_READ = 'HUMAN_READ';
 const HUMAN_TAG_WRITE = 'HUMAN_TAG_WRITE';
+const HUMAN_SECURITY_GROUP_WRITE = 'HUMAN_SECURITY_GROUP_WRITE';
+const HUMAN_S3_WRITE = 'HUMAN_S3_WRITE';
 const HUMAN_READ_POLICY_ARN =
   'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess';
 
@@ -48,6 +50,19 @@ export class AwsAccessService {
     const humanTagWriteRoleArn = await this.siteConf.getString(
       'aws_access.hashex.human_tag_write_role_arn',
     );
+    const humanSecurityGroupWriteRoleArn = await this.siteConf.getString(
+      'aws_access.hashex.human_security_group_write_role_arn',
+    );
+    const humanS3WriteRoleArn = await this.siteConf.getString(
+      'aws_access.hashex.human_s3_write_role_arn',
+    );
+    const securityGroupScope = await this.siteConf.getJson<string[]>(
+      'aws_access.hashex.security_group_write_scope',
+      [],
+    );
+    const s3WriteScope = await this.siteConf.getJson<
+      Array<{ resourceAccount: string; bucket: string; prefix: string }>
+    >('aws_access.hashex.s3_write_scope', []);
     return {
       enabled,
       account: {
@@ -146,6 +161,89 @@ export class AwsAccessService {
                   },
                 ]
               : []),
+            ...(humanSecurityGroupWriteRoleArn
+              ? [
+                  {
+                    key: HUMAN_SECURITY_GROUP_WRITE,
+                    name: 'AWS 安全组入站规则维护',
+                    shortName: '安全组入站规则维护',
+                    description:
+                      '在查看 AWS 资源配置的基础上，仅允许为白名单安全组新增或移除入站规则。',
+                    riskLevel: 'HIGH',
+                    primaryServices: ['EC2 Security Group'],
+                    allowedCapabilities: [
+                      '列举和查看 AWS 资源配置与状态',
+                      `新增或移除账号区域内安全组的入站规则：${securityGroupScope.join('、')}`,
+                      '在授权区域内进入 AWS Console 执行上述操作',
+                    ],
+                    deniedCapabilities: [
+                      '修改安全组出站规则',
+                      '创建、删除安全组或维护其他安全组',
+                      '修改 VPC、子网、路由、IAM 或其他 AWS 资源',
+                    ],
+                    maxDurationMinutes: 30 * 24 * 60,
+                    targetRoleArn: humanSecurityGroupWriteRoleArn,
+                    policyReferences: [
+                      HUMAN_READ_POLICY_ARN,
+                      'arn:aws:iam::290368114919:policy/DashboardHashexHumanSecurityGroupRulePolicy',
+                    ],
+                    policyModel: 'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY',
+                    verification: {
+                      method: 'IAM Policy Simulation + real AssumeRole DryRun',
+                      verifiedAt: '2026-10-23',
+                      writeActionsDenied: false,
+                    },
+                    notes: [
+                      '仅开放 AuthorizeSecurityGroupIngress、RevokeSecurityGroupIngress。',
+                      '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
+                    ],
+                  },
+                ]
+              : []),
+            ...(humanS3WriteRoleArn
+              ? [
+                  {
+                    key: HUMAN_S3_WRITE,
+                    name: 'AWS S3 对象写入',
+                    shortName: 'S3 对象写入',
+                    description:
+                      '在全局资源配置只读的基础上，允许向 hashex 账号自身拥有的 S3 Bucket 上传或覆盖对象。',
+                    riskLevel: 'HIGH',
+                    primaryServices: ['Amazon S3'],
+                    allowedCapabilities: [
+                      '列举和查看 AWS 资源配置与状态',
+                      '上传或覆盖账号自身 Bucket 中的对象',
+                      ...s3WriteScope.map(
+                        (item) =>
+                          `账号 ${item.resourceAccount}：s3://${item.bucket}/${item.prefix}`,
+                      ),
+                    ],
+                    deniedCapabilities: [
+                      '删除对象或对象版本',
+                      '写入其他 AWS 账号拥有的 Bucket',
+                      '修改桶策略、ACL、版本控制、生命周期或加密配置',
+                    ],
+                    maxDurationMinutes: 30 * 24 * 60,
+                    targetRoleArn: humanS3WriteRoleArn,
+                    policyReferences: [
+                      HUMAN_READ_POLICY_ARN,
+                      'arn:aws:iam::290368114919:policy/DashboardHashexHumanS3WritePolicy',
+                    ],
+                    policyModel: 'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY',
+                    verification: {
+                      method: 'IAM Policy Simulation + real AssumeRole',
+                      verifiedAt: '2026-10-23',
+                      writeActionsDenied: false,
+                    },
+                    notes: [
+                      '写入范围按 s3:ResourceAccount 限制为 hashex AWS 账号自身拥有的 Bucket。',
+                      'S3 为全局服务；会话仍要求从所选区域访问，但资源边界以账号归属为准。',
+                      'S3 PutObject 不支持 DryRun，真实上传需由人工验收。',
+                      '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
+                    ],
+                  },
+                ]
+              : []),
           ]
         : [],
       regions: this.json<string[]>(account.default_regions_json, ['ap-east-1']),
@@ -197,7 +295,14 @@ export class AwsAccessService {
       throw new BadRequestException('首版仅支持 hashex 云账号');
     if (!(await this.siteConf.getBoolean('aws_access.hashex.enabled', false)))
       throw new BadRequestException('hashex AWS 临时访问尚未启用');
-    if (![HUMAN_READ, HUMAN_TAG_WRITE].includes(input.permissionTemplateKey))
+    const templateRoleConfKeys: Record<string, string> = {
+      [HUMAN_READ]: 'aws_access.hashex.human_read_role_arn',
+      [HUMAN_TAG_WRITE]: 'aws_access.hashex.human_tag_write_role_arn',
+      [HUMAN_SECURITY_GROUP_WRITE]:
+        'aws_access.hashex.human_security_group_write_role_arn',
+      [HUMAN_S3_WRITE]: 'aws_access.hashex.human_s3_write_role_arn',
+    };
+    if (!templateRoleConfKeys[input.permissionTemplateKey])
       throw new BadRequestException('不支持的权限模板');
     const userRows = await this.db.query<any[]>(
       "SELECT id,username,status FROM users WHERE id=? AND status='active' LIMIT 1",
@@ -224,16 +329,12 @@ export class AwsAccessService {
     if (validUntil.getTime() > now + 30 * 24 * 60 * 60_000)
       throw new BadRequestException('首版单次授权最长 30 天');
     const targetRoleArn = await this.siteConf.getString(
-      input.permissionTemplateKey === HUMAN_TAG_WRITE
-        ? 'aws_access.hashex.human_tag_write_role_arn'
-        : 'aws_access.hashex.human_read_role_arn',
+      templateRoleConfKeys[input.permissionTemplateKey],
     );
     this.requireRoleArn(
       targetRoleArn,
       account.account_id,
-      input.permissionTemplateKey === HUMAN_TAG_WRITE
-        ? 'Human Tag Write'
-        : 'Human Read',
+      input.permissionTemplateKey,
     );
     const snapshot = {
       version: 1,
