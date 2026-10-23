@@ -52,6 +52,10 @@ export class AwsAccessService {
       };
     }
     const confPrefix = `aws_access.${environmentId}`;
+    const regions = this.json<string[]>(account.default_regions_json, [
+      'ap-east-1',
+    ]);
+    const regionLabel = regions.join('、') || '未配置区域';
     const enabled = await this.siteConf.getBoolean(
       `${confPrefix}.enabled`,
       false,
@@ -175,7 +179,7 @@ export class AwsAccessService {
                       writeActionsDenied: false,
                     },
                     notes: [
-                      '写权限仅适用于 ap-east-1 的 EC2 Instance、EBS Volume 和 Security Group。',
+                      `写权限仅适用于 ${regionLabel} 的 EC2 Instance、EBS Volume 和 Security Group。`,
                       '允许的标签键仅为 environment、owner；其他写操作由目标 Role 拒绝。',
                       '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
                     ],
@@ -267,7 +271,7 @@ export class AwsAccessService {
               : []),
           ]
         : [],
-      regions: this.json<string[]>(account.default_regions_json, ['ap-east-1']),
+      regions,
       canManage: actor.permissions.includes('aws-access:grant:manage'),
       deliveryMode: 'AWS_CONSOLE_FEDERATION',
     };

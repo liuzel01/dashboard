@@ -136,6 +136,36 @@ describe('AwsAccessService', () => {
     });
   });
 
+  it('renders template regions from the selected cloud account', async () => {
+    const query = jest.fn().mockResolvedValueOnce([
+      {
+        id: 2,
+        environment_id: 'mgbx',
+        account_id: '931324892624',
+        display_name: 'mgbx',
+        default_regions_json: '["ap-southeast-1"]',
+      },
+    ]);
+    const { service, siteConf } = createService(query);
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key === 'aws_access.mgbx.human_tag_write_role_arn'
+        ? 'arn:aws:iam::931324892624:role/DashboardMgbxHumanTagWriteRole'
+        : key === 'aws_access.mgbx.human_read_role_arn'
+          ? 'arn:aws:iam::931324892624:role/DashboardMgbxHumanReadRole'
+          : '',
+    );
+
+    const result = await service.configuration(actor, 'mgbx');
+    const tagTemplate = result.templates.find(
+      (template) => template.key === 'HUMAN_TAG_WRITE',
+    );
+
+    expect(result.regions).toEqual(['ap-southeast-1']);
+    expect(tagTemplate?.notes).toContain(
+      '写权限仅适用于 ap-southeast-1 的 EC2 Instance、EBS Volume 和 Security Group。',
+    );
+  });
+
   it.each([
     [
       'HUMAN_SECURITY_GROUP_WRITE',
