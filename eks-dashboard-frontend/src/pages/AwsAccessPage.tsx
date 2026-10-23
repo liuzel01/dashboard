@@ -56,7 +56,7 @@ export default function AwsAccessPage() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<number>();
   const [createOpen, setCreateOpen] = useState(false);
-  const [templateDetailOpen, setTemplateDetailOpen] = useState(false);
+  const [templateDetailKey, setTemplateDetailKey] = useState<string>();
   const [revokeGrant, setRevokeGrant] = useState<AwsAccessGrant>();
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
@@ -65,8 +65,8 @@ export default function AwsAccessPage() {
   const selectedTemplate = configuration?.templates.find(
     (item) => item.key === selectedTemplateKey,
   );
-  const humanReadTemplate = configuration?.templates.find(
-    (item) => item.key === "HUMAN_READ",
+  const detailTemplate = configuration?.templates.find(
+    (item) => item.key === templateDetailKey,
   );
 
   const load = useCallback(async () => {
@@ -160,7 +160,7 @@ export default function AwsAccessPage() {
       const result = await launchAwsAccessSession(grant.id);
       if (popup) popup.location.href = result.redirectUrl;
       else window.location.assign(result.redirectUrl);
-      message.success("AWS 只读会话已签发");
+      message.success("AWS 临时会话已签发");
       await load();
     } catch (error) {
       popup?.close();
@@ -185,9 +185,8 @@ export default function AwsAccessPage() {
       render: (_: unknown, row: AwsAccessGrant) => (
         <Space direction="vertical" size={2}>
           <Tag>{row.environment_id}</Tag>
-          <span>
-            {templateName(row.permission_template_key)}
-          </span>
+          <span>{templateName(row.permission_template_key)}</span>
+          {configuration?.templates.find((item) => item.key === row.permission_template_key)?.riskLevel === "MEDIUM" && <Tag color="orange">受限写入</Tag>}
         </Space>
       ),
     },
@@ -284,8 +283,8 @@ export default function AwsAccessPage() {
         showIcon
         type="info"
         style={{ marginBottom: 16 }}
-        message="当前模板：AWS 全局资源配置只读"
-        description={<Space wrap><Typography.Text>可查看资源配置和状态，不允许创建、修改、删除资源；一次性 ticket 仅可消费一次。</Typography.Text>{humanReadTemplate && <Button type="link" size="small" onClick={() => setTemplateDetailOpen(true)}>查看完整权限范围</Button>}</Space>}
+        message="临时访问使用受控权限模板"
+        description={<Space wrap><Typography.Text>当前提供资源配置只读和治理标签维护；写入模板仅允许维护 environment、owner 标签。</Typography.Text><Button type="link" size="small" onClick={() => setTemplateDetailKey("HUMAN_READ")}>查看完整权限范围</Button></Space>}
       />
       {!configuration?.enabled && !loading && (
         <Alert type="warning" showIcon message="hashex AWS 临时访问尚未启用" />
@@ -401,11 +400,19 @@ export default function AwsAccessPage() {
       <Modal
         title="AWS 权限模板详情"
         width={760}
-        open={templateDetailOpen}
+        open={Boolean(templateDetailKey)}
         footer={null}
-        onCancel={() => setTemplateDetailOpen(false)}
+        onCancel={() => setTemplateDetailKey(undefined)}
       >
-        {humanReadTemplate && templateDetail(humanReadTemplate)}
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Select
+            value={templateDetailKey}
+            onChange={setTemplateDetailKey}
+            options={configuration?.templates.map((item) => ({ value: item.key, label: item.name }))}
+            style={{ width: "100%" }}
+          />
+          {detailTemplate && templateDetail(detailTemplate)}
+        </Space>
       </Modal>
 
       <Modal
