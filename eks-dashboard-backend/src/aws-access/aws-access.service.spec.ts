@@ -37,6 +37,37 @@ const createService = (query: jest.Mock) => {
 };
 
 describe('AwsAccessService', () => {
+  it('exposes a clear, bounded contract for the human read template', async () => {
+    const query = jest.fn().mockResolvedValueOnce([
+      {
+        id: 1,
+        environment_id: 'hashex',
+        account_id: '290368114919',
+        display_name: 'hashex',
+        default_regions_json: '["ap-east-1"]',
+      },
+    ]);
+    const { service, siteConf } = createService(query);
+    siteConf.getString.mockResolvedValue(
+      'arn:aws:iam::290368114919:role/DashboardHashexHumanReadRole',
+    );
+
+    const result = await service.configuration(actor);
+
+    expect(result.templates[0]).toMatchObject({
+      key: 'HUMAN_READ',
+      name: 'AWS 全局资源配置只读',
+      riskLevel: 'LOW',
+      maxDurationMinutes: 43200,
+      verification: { writeActionsDenied: true },
+    });
+    expect(result.templates[0].allowedCapabilities.length).toBeGreaterThan(0);
+    expect(result.templates[0].deniedCapabilities.length).toBeGreaterThan(0);
+    expect(result.templates[0].policyReferences).toContain(
+      'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess',
+    );
+  });
+
   it('rejects preparing a grant owned by another user', async () => {
     const query = jest.fn().mockResolvedValueOnce([
       {

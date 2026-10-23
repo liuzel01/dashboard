@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   DatePicker,
+  Descriptions,
   Form,
   Input,
   message,
@@ -24,6 +25,7 @@ import {
   listAwsAccessGrants,
   revokeAwsAccessGrant,
   type AwsAccessGrant,
+  type AwsAccessTemplate,
 } from "../services/api";
 import { formatDateTime } from "../utils/time";
 
@@ -54,10 +56,18 @@ export default function AwsAccessPage() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<number>();
   const [createOpen, setCreateOpen] = useState(false);
+  const [templateDetailOpen, setTemplateDetailOpen] = useState(false);
   const [revokeGrant, setRevokeGrant] = useState<AwsAccessGrant>();
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
   const [revokeForm] = Form.useForm();
+  const selectedTemplateKey = Form.useWatch("permissionTemplateKey", form);
+  const selectedTemplate = configuration?.templates.find(
+    (item) => item.key === selectedTemplateKey,
+  );
+  const humanReadTemplate = configuration?.templates.find(
+    (item) => item.key === "HUMAN_READ",
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -89,6 +99,57 @@ export default function AwsAccessPage() {
           label: `${user.display_name || user.username}（${user.username}）`,
         })),
     [users],
+  );
+
+  const templateName = (key: string) =>
+    configuration?.templates.find((item) => item.key === key)?.name || key;
+
+  const templateDetail = (template: AwsAccessTemplate) => (
+    <Space direction="vertical" size={12} style={{ width: "100%" }}>
+      <Alert
+        showIcon
+        type="info"
+        message={template.name}
+        description={template.description}
+      />
+      <Descriptions bordered size="small" column={1}>
+        <Descriptions.Item label="风险等级">
+          <Tag color="green">{template.riskLevel}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="主要服务">
+          <Space wrap>
+            {template.primaryServices.map((service) => (
+              <Tag key={service}>{service}</Tag>
+            ))}
+          </Space>
+        </Descriptions.Item>
+        <Descriptions.Item label="允许能力">
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            {template.allowedCapabilities.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </Descriptions.Item>
+        <Descriptions.Item label="明确不允许">
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            {template.deniedCapabilities.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </Descriptions.Item>
+        <Descriptions.Item label="最长授权时长">
+          {template.maxDurationMinutes / 60 / 24} 天
+        </Descriptions.Item>
+        <Descriptions.Item label="目标 Role">
+          <Typography.Text copyable>{template.targetRoleArn}</Typography.Text>
+        </Descriptions.Item>
+        <Descriptions.Item label="策略来源">
+          {template.policyReferences.map((item) => (
+            <Typography.Text key={item} copyable style={{ display: "block" }}>{item}</Typography.Text>
+          ))}
+        </Descriptions.Item>
+        <Descriptions.Item label="最近验证">
+          {template.verification.verifiedAt} · {template.verification.method}
+        </Descriptions.Item>
+      </Descriptions>
+      {template.notes.map((note) => <Typography.Text key={note} type="secondary">• {note}</Typography.Text>)}
+    </Space>
   );
 
   const launch = async (grant: AwsAccessGrant) => {
@@ -125,9 +186,7 @@ export default function AwsAccessPage() {
         <Space direction="vertical" size={2}>
           <Tag>{row.environment_id}</Tag>
           <span>
-            {row.permission_template_key === "HUMAN_READ"
-              ? "Human Read（只读）"
-              : row.permission_template_key}
+            {templateName(row.permission_template_key)}
           </span>
         </Space>
       ),
@@ -200,7 +259,7 @@ export default function AwsAccessPage() {
     <>
       <PageHeader
         title="AWS 临时访问"
-        description="管理员向用户授予有时限的 hashex AWS 只读权限；AWS 临时凭据不会进入浏览器或数据库。"
+        description="管理员按明确的权限模板向用户授予有时限的 hashex AWS 访问；AWS 临时凭据不会进入浏览器或数据库。"
         actions={
           canManage ? (
             <Button
@@ -225,8 +284,8 @@ export default function AwsAccessPage() {
         showIcon
         type="info"
         style={{ marginBottom: 16 }}
-        message="安全边界"
-        description="当前仅开放 Human Read（AWS ViewOnlyAccess）。一次性 ticket 仅可消费一次，到期后服务端立即拒绝新会话；已签发 STS 会话不会晚于授权到期时间。"
+        message="当前模板：AWS 全局资源配置只读"
+        description={<Space wrap><Typography.Text>可查看资源配置和状态，不允许创建、修改、删除资源；一次性 ticket 仅可消费一次。</Typography.Text>{humanReadTemplate && <Button type="link" size="small" onClick={() => setTemplateDetailOpen(true)}>查看完整权限范围</Button>}</Space>}
       />
       {!configuration?.enabled && !loading && (
         <Alert type="warning" showIcon message="hashex AWS 临时访问尚未启用" />
@@ -240,6 +299,7 @@ export default function AwsAccessPage() {
 
       <Modal
         title="新增 AWS 临时授权"
+        width={720}
         open={createOpen}
         confirmLoading={saving}
         okText="验证 MFA 并授权"
@@ -286,6 +346,7 @@ export default function AwsAccessPage() {
               }))}
             />
           </Form.Item>
+          {selectedTemplate && templateDetail(selectedTemplate)}
           <Form.Item
             name="regions"
             label="允许区域"
@@ -335,6 +396,16 @@ export default function AwsAccessPage() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="AWS 权限模板详情"
+        width={760}
+        open={templateDetailOpen}
+        footer={null}
+        onCancel={() => setTemplateDetailOpen(false)}
+      >
+        {humanReadTemplate && templateDetail(humanReadTemplate)}
       </Modal>
 
       <Modal

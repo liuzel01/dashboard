@@ -1878,11 +1878,32 @@ export type AwsAccessGrant = {
   last_session_at?: string | null;
 };
 
+export type AwsAccessTemplate = {
+  key: string;
+  name: string;
+  shortName: string;
+  description: string;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH";
+  primaryServices: string[];
+  allowedCapabilities: string[];
+  deniedCapabilities: string[];
+  maxDurationMinutes: number;
+  targetRoleArn: string;
+  policyReferences: string[];
+  policyModel: string;
+  verification: {
+    method: string;
+    verifiedAt: string;
+    writeActionsDenied: boolean;
+  };
+  notes: string[];
+};
+
 export const getAwsAccessConfiguration = async () =>
   (await api.get("/aws-access/configuration")).data as {
     enabled: boolean;
     account: { id: number; environmentId: string; accountId: string; displayName: string };
-    templates: Array<{ key: string; name: string; description: string }>;
+    templates: AwsAccessTemplate[];
     regions: string[];
     canManage: boolean;
     deliveryMode: string;

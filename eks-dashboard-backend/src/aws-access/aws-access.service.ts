@@ -18,6 +18,8 @@ import type { AwsGovernanceActor } from '../aws-governance/aws-governance.types'
 import { SiteConfService } from '../site-conf/site-conf.service';
 
 const HUMAN_READ = 'HUMAN_READ';
+const HUMAN_READ_POLICY_ARN =
+  'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess';
 
 @Injectable()
 export class AwsAccessService {
@@ -39,6 +41,9 @@ export class AwsAccessService {
       'aws_access.hashex.enabled',
       false,
     );
+    const humanReadRoleArn = await this.siteConf.getString(
+      'aws_access.hashex.human_read_role_arn',
+    );
     return {
       enabled,
       account: {
@@ -51,8 +56,45 @@ export class AwsAccessService {
         ? [
             {
               key: HUMAN_READ,
-              name: 'Human Read（只读）',
-              description: 'AWS ViewOnlyAccess；禁止写入，区域由会话策略约束。',
+              name: 'AWS 全局资源配置只读',
+              shortName: '资源配置只读',
+              description:
+                '查看 AWS 资源的配置、状态和关联关系，不允许创建、修改或删除资源。',
+              riskLevel: 'LOW',
+              primaryServices: [
+                'EC2 / EBS',
+                'ELB',
+                'EKS',
+                'RDS',
+                'S3',
+                'Route 53',
+                'ACM',
+                'IAM',
+              ],
+              allowedCapabilities: [
+                '列举和查看 AWS 资源',
+                '读取资源配置、状态和关联关系',
+                '在授权区域内进入 AWS Console 进行只读排查',
+              ],
+              deniedCapabilities: [
+                '创建、修改或删除 AWS 资源',
+                '启动、停止或重启计算资源',
+                '修改 IAM、网络、安全组或资源标签',
+                '上传对象或修改业务数据',
+              ],
+              maxDurationMinutes: 30 * 24 * 60,
+              targetRoleArn: humanReadRoleArn,
+              policyReferences: [HUMAN_READ_POLICY_ARN],
+              policyModel: 'AWS_MANAGED_POLICY',
+              verification: {
+                method: 'IAM Policy Simulation + real AssumeRole',
+                verifiedAt: '2026-10-21',
+                writeActionsDenied: true,
+              },
+              notes: [
+                '区域由临时会话策略进一步限制。',
+                'AWS 托管策略可能由 AWS 更新，实际权限以当前策略版本和会话策略交集为准。',
+              ],
             },
           ]
         : [],
