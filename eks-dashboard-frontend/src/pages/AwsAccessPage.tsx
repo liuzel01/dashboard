@@ -42,7 +42,7 @@ const errorText = (error: unknown, fallback: string) => {
 };
 
 export default function AwsAccessPage() {
-  const { permissions } = useContext(AuthContext);
+  const { me, permissions } = useContext(AuthContext);
   const canManage = permissions.includes("aws-access:grant:manage");
   const canStart = permissions.includes("aws-access:session:start");
   const [configuration, setConfiguration] = useState<Awaited<
@@ -248,31 +248,34 @@ export default function AwsAccessPage() {
     },
     {
       title: "操作",
-      render: (_: unknown, row: AwsAccessGrant) => (
-        <Space>
-          {canStart && row.status === "ACTIVE" && (
-            <Button
-              type="primary"
-              icon={<LoginOutlined />}
-              loading={launching === row.id}
-              onClick={() => void launch(row)}
-            >
-              进入 AWS
-            </Button>
-          )}
-          {canManage && row.status === "ACTIVE" && (
-            <Button
-              danger
-              onClick={() => {
-                setRevokeGrant(row);
-                revokeForm.resetFields();
-              }}
-            >
-              提前回收
-            </Button>
-          )}
-        </Space>
-      ),
+      render: (_: unknown, row: AwsAccessGrant) => {
+        const isOwnGrant = Number(row.grantee_user_id) === Number(me?.id);
+        return (
+          <Space>
+            {canStart && isOwnGrant && row.status === "ACTIVE" && (
+              <Button
+                type="primary"
+                icon={<LoginOutlined />}
+                loading={launching === row.id}
+                onClick={() => void launch(row)}
+              >
+                进入 AWS
+              </Button>
+            )}
+            {canManage && row.status === "ACTIVE" && (
+              <Button
+                danger
+                onClick={() => {
+                  setRevokeGrant(row);
+                  revokeForm.resetFields();
+                }}
+              >
+                提前回收
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
