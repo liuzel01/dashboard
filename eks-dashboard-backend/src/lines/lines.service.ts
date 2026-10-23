@@ -366,13 +366,23 @@ export class LinesService {
       providerMap,
       forceRefresh,
     );
+    const expectedRegionCount = new Set(
+      probeSnapshot.records
+        .map((record) => record.region)
+        .filter((region) => region && region !== 'unknown'),
+    ).size;
 
     let enrichedItems: LineInventoryItem[] = await Promise.all(itemsToEnrich.map(async (item) => {
       const host = this.safeNormalizeToHost(item.lineUrl || '');
       const providerInfo = host ? providerMap.get(host) : null;
       const sslSummary = host ? sslMap.get(host) : null;
       const availabilitySummary = host
-        ? await this.buildAvailabilitySummaryByHost(host, probeSnapshot.records, probeSourceUnavailable)
+        ? await this.buildAvailabilitySummaryByHost(
+            host,
+            probeSnapshot.records,
+            probeSourceUnavailable,
+            expectedRegionCount,
+          )
         : {
             availability: 'unknown' as LineInventoryAvailability,
             error: 'unknown_error' as LineInventoryErrorCode,
@@ -1168,6 +1178,7 @@ export class LinesService {
     host: string,
     records: ProbeRecord[],
     sourceUnavailable: boolean,
+    expectedRegionCount = 0,
   ): Promise<{
     availability: LineInventoryAvailability;
     error: LineInventoryErrorCode;
@@ -1179,6 +1190,10 @@ export class LinesService {
     totalRegions: number;
   }> {
     const hostRecords = records.filter((record) => record.host === host);
+    const totalRegions = Math.max(
+      expectedRegionCount,
+      new Set(hostRecords.map((record) => record.region)).size,
+    );
     if (hostRecords.length === 0) {
       return {
         availability: 'unknown',
@@ -1187,8 +1202,8 @@ export class LinesService {
         availabilityScore: null,
         successRegions: 0,
         failedRegions: 0,
-        unknownRegions: 0,
-        totalRegions: 0,
+        unknownRegions: totalRegions,
+        totalRegions,
       };
     }
 
@@ -1209,14 +1224,13 @@ export class LinesService {
         availabilityScore: null,
         successRegions: 0,
         failedRegions: 0,
-        unknownRegions: hostRecords.length,
-        totalRegions: hostRecords.length,
+        unknownRegions: totalRegions,
+        totalRegions,
       };
     }
 
     let successRegions = 0;
     let failedRegions = 0;
-    let unknownRegions = 0;
     const failures: ProbeRecord[] = [];
     freshRecords.forEach((record) => {
       if (record.ok === true) {
@@ -1224,11 +1238,10 @@ export class LinesService {
       } else if (record.ok === false) {
         failedRegions += 1;
         failures.push(record);
-      } else {
-        unknownRegions += 1;
       }
     });
     const effectiveRegions = successRegions + failedRegions;
+    const unknownRegions = Math.max(0, totalRegions - effectiveRegions);
     if (effectiveRegions === 0) {
       return {
         availability: 'unknown',
@@ -1238,7 +1251,7 @@ export class LinesService {
         successRegions,
         failedRegions,
         unknownRegions,
-        totalRegions: freshRecords.length,
+        totalRegions,
       };
     }
 
@@ -1253,7 +1266,7 @@ export class LinesService {
       successRegions,
       failedRegions,
       unknownRegions,
-      totalRegions: freshRecords.length,
+      totalRegions,
     };
   }
 

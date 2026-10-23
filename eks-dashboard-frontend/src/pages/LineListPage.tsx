@@ -1,9 +1,9 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
-import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, InputNumber, Modal, Progress, Select, Space, Tag, Tooltip, Typography, message } from 'antd';
 import { getLineInventory, getTenantsForEnvironment, previewDcdnSslSyncForLine, syncDcdnSslForLine } from '../services/api';
 import { EnvironmentContext } from '../contexts/EnvironmentContextValue';
 import { buildProbeDetailUrl } from '../utils/probeDashboard';
-import { PageHeader } from '../components/ops';
+import { FilterBar, OpsTable, PageHeader } from '../components/ops';
 import { formatDateTime } from '../utils/time';
 
 type TenantOption = {
@@ -88,71 +88,6 @@ const LineListPage: React.FC = () => {
   const [size, setSize] = useState(20);
   const [total, setTotal] = useState(0);
   const { currentEnvironment } = useContext(EnvironmentContext);
-  const autoLoadedEnvironmentRef = React.useRef<string | null>(null);
-
-  useEffect(() => {
-    const envId = currentEnvironment?.id;
-    if (!envId) {
-      setTenants([]);
-      setTenantLoadError(null);
-      setQuery({ lineUrl: '', status: true });
-      setSearched(false);
-      setItems([]);
-      setWarning(null);
-      setRequestError(null);
-      setPage(1);
-      setSize(20);
-      setTotal(0);
-      autoLoadedEnvironmentRef.current = null;
-      form.resetFields();
-      return;
-    }
-
-    let cancelled = false;
-    const loadTenants = async () => {
-      setTenantLoading(true);
-      setTenantLoadError(null);
-      setTenants([]);
-      try {
-        const data = (await getTenantsForEnvironment()) as TenantOption[];
-        if (cancelled) return;
-        const normalized = Array.isArray(data)
-          ? data
-              .map((item) => ({
-                id: Number(item.id),
-                name: String(item.name || ''),
-              }))
-              .filter((item) => Number.isInteger(item.id) && item.id > 0)
-          : [];
-        setTenants(normalized);
-        autoLoadedEnvironmentRef.current = envId;
-        const defaultTenant = normalized.find((tenant) => tenant.id === 1);
-        if (defaultTenant) {
-          const nextQuery: InventoryQuery = { tenantId: 1, status: true, lineUrl: '' };
-          form.setFieldsValue({ tenantId: defaultTenant.id, status: true });
-          setQuery(nextQuery);
-          setSearched(true);
-          setPage(1);
-          void loadInventory(1, size, nextQuery, false);
-        }
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setTenants([]);
-        const backendMsg = (error as ApiError)?.response?.data?.message;
-        const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '加载租户列表失败';
-        setTenantLoadError(msg);
-      } finally {
-        if (!cancelled) {
-          setTenantLoading(false);
-        }
-      }
-    };
-
-    void loadTenants();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentEnvironment?.id, form]);
 
   const loadInventory = useCallback(
     async (
@@ -197,6 +132,68 @@ const LineListPage: React.FC = () => {
     },
     [],
   );
+
+  useEffect(() => {
+    const envId = currentEnvironment?.id;
+    if (!envId) {
+      setTenants([]);
+      setTenantLoadError(null);
+      setQuery({ lineUrl: '', status: true });
+      setSearched(false);
+      setItems([]);
+      setWarning(null);
+      setRequestError(null);
+      setPage(1);
+      setSize(20);
+      setTotal(0);
+      form.resetFields();
+      return;
+    }
+
+    let cancelled = false;
+    const loadTenants = async () => {
+      setTenantLoading(true);
+      setTenantLoadError(null);
+      setTenants([]);
+      try {
+        const data = (await getTenantsForEnvironment()) as TenantOption[];
+        if (cancelled) return;
+        const normalized = Array.isArray(data)
+          ? data
+              .map((item) => ({
+                id: Number(item.id),
+                name: String(item.name || ''),
+              }))
+              .filter((item) => Number.isInteger(item.id) && item.id > 0)
+          : [];
+        setTenants(normalized);
+        const defaultTenant = normalized.find((tenant) => tenant.id === 1);
+        if (defaultTenant) {
+          const nextQuery: InventoryQuery = { tenantId: 1, status: true, lineUrl: '' };
+          form.setFieldsValue({ tenantId: defaultTenant.id, status: true });
+          setQuery(nextQuery);
+          setSearched(true);
+          setPage(1);
+          void loadInventory(1, 20, nextQuery, false);
+        }
+      } catch (error: unknown) {
+        if (cancelled) return;
+        setTenants([]);
+        const backendMsg = (error as ApiError)?.response?.data?.message;
+        const msg = Array.isArray(backendMsg) ? backendMsg.join('; ') : backendMsg || '加载租户列表失败';
+        setTenantLoadError(msg);
+      } finally {
+        if (!cancelled) {
+          setTenantLoading(false);
+        }
+      }
+    };
+
+    void loadTenants();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEnvironment?.id, form, loadInventory]);
 
   const handleSearch = (values: {
     tenantId?: number;
@@ -307,18 +304,42 @@ const LineListPage: React.FC = () => {
     return String(value);
   };
 
-  const toDisplayScore = (value?: number | null) => {
-    if (typeof value !== 'number' || Number.isNaN(value)) return '-';
-    return `${value.toFixed(2)}%`;
-  };
-
-  const toSampleText = (record: InventoryItem) => {
+  const renderCurrentRegionSuccess = (record: InventoryItem) => {
     const success = record.successRegions ?? 0;
     const failed = record.failedRegions ?? 0;
     const unknown = record.unknownRegions ?? 0;
     const total = record.totalRegions ?? success + failed + unknown;
-    if (total <= 0) return '-';
-    return `${success}/${failed}/${unknown}`;
+    if (total <= 0) return <Text type="secondary">暂无探测</Text>;
+    const percentage = Number(((success / total) * 100).toFixed(1));
+    const effective = success + failed;
+    const detail = `当前 ${total} 个 Agent：成功 ${success}，失败 ${failed}，未知或结果过期 ${unknown}；有效覆盖 ${effective}/${total}`;
+    return <Tooltip title={detail}>
+      <div style={{ width: '100%' }}>
+        <Progress
+          percent={percentage}
+          size="small"
+          status={failed > 0 ? 'exception' : unknown > 0 ? 'normal' : 'success'}
+          format={(value) => `${value}%`}
+        />
+      </div>
+    </Tooltip>;
+  };
+
+  const renderAgentCoverage = (record: InventoryItem) => {
+    const success = record.successRegions ?? 0;
+    const failed = record.failedRegions ?? 0;
+    const unknown = record.unknownRegions ?? 0;
+    const total = record.totalRegions ?? success + failed + unknown;
+    if (total <= 0) return <Tag>无数据</Tag>;
+    const effective = success + failed;
+    return <Space direction="vertical" size={4}>
+      <Tag color={effective === total ? 'success' : 'warning'}>有效覆盖 {effective}/{total}</Tag>
+      <Space size={2} wrap>
+        <Tag color="success">成 {success}</Tag>
+        <Tag color={failed > 0 ? 'error' : 'default'}>败 {failed}</Tag>
+        <Tag color={unknown > 0 ? 'warning' : 'default'}>未知 {unknown}</Tag>
+      </Space>
+    </Space>;
   };
 
   const selectedTenantText = query.tenantId
@@ -332,83 +353,73 @@ const LineListPage: React.FC = () => {
         description="按租户、线路、服务商和可用性查看线路库存；强制刷新仍沿用现有探测与查询流程。"
         environmentName={currentEnvironment?.name}
       />
-      <Form
-        form={form}
-        layout="inline"
-        initialValues={{ status: true }}
-        onFinish={handleSearch}
-        style={{ marginBottom: 16 }}
-      >
-        <Form.Item name="tenantId" label="租户">
-          <Select
-            allowClear
-            style={{ width: 240 }}
-            placeholder={tenantLoading ? '加载中...' : '全部租户'}
-            loading={tenantLoading}
-            showSearch
-            optionFilterProp="label"
-            options={tenants.map((tenant) => ({
-              value: tenant.id,
-              label: `${tenant.id} - ${tenant.name}`,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="lineUrl" label="线路地址">
-          <Input placeholder="可选：按 lineUrl 过滤" style={{ width: 260 }} />
-        </Form.Item>
-        <Form.Item name="provider" label="Provider">
-          <Select
-            allowClear
-            style={{ width: 180 }}
-            placeholder="全部"
-            options={[
-              { value: 'aliyun_dcdn', label: 'Aliyun DCDN' },
-              { value: 'aws_global', label: 'AWS Global' },
-              { value: 'aliyun_esa', label: 'Aliyun ESA' },
-              { value: 'unknown', label: 'Unknown' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item name="status" label="是否启用">
-          <Select
-            allowClear
-            style={{ width: 140 }}
-            placeholder="全部"
-            options={[
-              { value: true, label: '启用' },
-              { value: false, label: '未启用' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item name="availability" label="可用性">
-          <Select
-            allowClear
-            style={{ width: 140 }}
-            placeholder="全部"
-            options={[
-              { value: 'up', label: '可用' },
-              { value: 'down', label: '不可用' },
-              { value: 'unknown', label: '未知' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item name="certExpireDaysLt" label="证书剩余天数≤">
-          <InputNumber min={0} precision={0} style={{ width: 160 }} placeholder="例如 30" />
-        </Form.Item>
-        <Form.Item>
-          <Space>
-            <Button type="primary" htmlType="submit">
-              查询
-            </Button>
-            <Button onClick={handleForceRefresh} disabled={!searched} loading={loading}>
-              强制刷新
-            </Button>
-          </Space>
-        </Form.Item>
+      <Form form={form} layout="inline" initialValues={{ status: true }} onFinish={handleSearch}>
+        <FilterBar
+          actions={<Space>
+            <Button type="primary" htmlType="submit" loading={loading}>查询</Button>
+            <Button onClick={handleForceRefresh} disabled={!searched} loading={loading}>强制刷新</Button>
+          </Space>}
+        >
+          <Form.Item name="tenantId" label="租户" style={{ marginBottom: 0 }}>
+            <Select
+              allowClear
+              style={{ width: 240 }}
+              placeholder={tenantLoading ? '加载中...' : '全部租户'}
+              loading={tenantLoading}
+              showSearch
+              optionFilterProp="label"
+              options={tenants.map((tenant) => ({
+                value: tenant.id,
+                label: `${tenant.id} - ${tenant.name}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="lineUrl" label="线路地址" style={{ marginBottom: 0 }}>
+            <Input placeholder="可选：按 lineUrl 过滤" style={{ width: 260 }} />
+          </Form.Item>
+          <Form.Item name="provider" label="Provider" style={{ marginBottom: 0 }}>
+            <Select
+              allowClear
+              style={{ width: 180 }}
+              placeholder="全部"
+              options={[
+                { value: 'aliyun_dcdn', label: 'Aliyun DCDN' },
+                { value: 'aws_global', label: 'AWS Global' },
+                { value: 'aliyun_esa', label: 'Aliyun ESA' },
+                { value: 'unknown', label: 'Unknown' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="status" label="是否启用" style={{ marginBottom: 0 }}>
+            <Select
+              allowClear
+              style={{ width: 140 }}
+              placeholder="全部"
+              options={[
+                { value: true, label: '启用' },
+                { value: false, label: '未启用' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="availability" label="可用性" style={{ marginBottom: 0 }}>
+            <Select
+              allowClear
+              style={{ width: 140 }}
+              placeholder="全部"
+              options={[
+                { value: 'up', label: '可用' },
+                { value: 'down', label: '不可用' },
+                { value: 'unknown', label: '未知' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="certExpireDaysLt" label="证书剩余天数≤" style={{ marginBottom: 0 }}>
+            <InputNumber min={0} precision={0} style={{ width: 160 }} placeholder="例如 30" />
+          </Form.Item>
+        </FilterBar>
       </Form>
 
       {tenantLoadError ? <Alert type="error" showIcon message={tenantLoadError} style={{ marginBottom: 12 }} /> : null}
-      {requestError ? <Alert type="error" showIcon message={requestError} style={{ marginBottom: 12 }} /> : null}
       {warning ? <Alert type="info" showIcon message={warning} style={{ marginBottom: 12 }} /> : null}
 
       {!searched ? (
@@ -420,15 +431,20 @@ const LineListPage: React.FC = () => {
           <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
             当前查询范围：{selectedTenantText}
           </Text>
-          <Table<InventoryItem>
+          <OpsTable<InventoryItem>
             rowKey={(record, index) => String(record.id || record.lineUrl || index)}
             loading={loading}
             dataSource={items}
+            error={requestError}
+            onRetry={() => void loadInventory(page, size, query, false)}
+            emptyDescription="暂无线路数据"
+            tableLayout="fixed"
             pagination={{
               current: page,
               pageSize: size,
               total,
               showSizeChanger: true,
+              pageSizeOptions: [10, 20, 50, 100],
               showTotal: (totalCount, range) => `${range[0]}-${range[1]} of ${totalCount} items`,
               onChange: (nextPage, nextSize) => {
                 const resolvedSize = nextSize || size;
@@ -436,7 +452,7 @@ const LineListPage: React.FC = () => {
               },
             }}
             columns={[
-              { title: 'ID', dataIndex: 'id', width: 90 },
+              { title: 'ID', dataIndex: 'id', width: 90, fixed: 'left' },
               { title: '租户ID', dataIndex: 'tenantId', width: 100 },
               { title: '中文名', dataIndex: 'zh', width: 140 },
               { title: '英文名', dataIndex: 'en', width: 140 },
@@ -445,15 +461,14 @@ const LineListPage: React.FC = () => {
               { title: 'Provider', dataIndex: 'provider', width: 140, render: renderProviderTag },
               { title: '可用性', dataIndex: 'availability', width: 110, render: renderAvailabilityTag },
               {
-                title: '可用率',
-                dataIndex: 'availabilityScore',
-                width: 110,
-                render: (value: number | null | undefined) => toDisplayScore(value),
+                title: '当前区域成功率',
+                width: 180,
+                render: (_, record) => renderCurrentRegionSuccess(record),
               },
               {
-                title: '区域样本(成/败/未知)',
-                width: 170,
-                render: (_, record) => toSampleText(record),
+                title: 'Agent 覆盖',
+                width: 190,
+                render: (_, record) => renderAgentCoverage(record),
               },
               {
                 title: '证书到期',
@@ -513,7 +528,6 @@ const LineListPage: React.FC = () => {
             ]}
             size="small"
             scroll={{ x: 2000 }}
-            locale={{ emptyText: '暂无线路数据' }}
           />
         </>
       )}
@@ -532,7 +546,7 @@ const LineListPage: React.FC = () => {
         cancelText="取消"
         confirmLoading={Boolean(syncingSslLineUrl)}
         okButtonProps={{ disabled: !sslPreview }}
-        destroyOnClose
+        destroyOnHidden
       >
         {sslPreview ? (
           <Descriptions column={1} size="small" bordered>
