@@ -1897,6 +1897,7 @@ export type AwsAccessTemplate = {
     writeActionsDenied: boolean;
   };
   notes: string[];
+  canGrant: boolean;
 };
 
 export const getAwsAccessConfiguration = async () =>

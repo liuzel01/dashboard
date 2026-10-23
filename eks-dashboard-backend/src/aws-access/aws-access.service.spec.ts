@@ -224,6 +224,72 @@ describe('AwsAccessService', () => {
     );
   });
 
+  it('only marks the temporary admin template grantable for the independent permission holder', async () => {
+    const account = {
+      id: 2,
+      environment_id: 'mgbx',
+      account_id: '931324892624',
+      display_name: 'mgbx',
+      default_regions_json: '["ap-southeast-1"]',
+    };
+    const query = jest.fn().mockResolvedValue([account]);
+    const { service, siteConf } = createService(query);
+    siteConf.getString.mockImplementation(async (key: string) =>
+      key === 'aws_access.mgbx.human_temporary_admin_role_arn'
+        ? 'arn:aws:iam::931324892624:role/DashboardMgbxHumanTemporaryAdminRole'
+        : '',
+    );
+
+    const ordinaryManager = await service.configuration(
+      { ...actor, permissions: ['aws-access:grant:manage'] },
+      'mgbx',
+    );
+    const privilegedManager = await service.configuration(
+      {
+        ...actor,
+        permissions: [
+          'aws-access:grant:manage',
+          'aws-access:grant:temporary-admin',
+        ],
+      },
+      'mgbx',
+    );
+
+    expect(
+      ordinaryManager.templates.find(
+        (template) => template.key === 'HUMAN_TEMPORARY_ADMIN',
+      ),
+    ).toMatchObject({ canGrant: false, riskLevel: 'HIGH' });
+    expect(
+      privilegedManager.templates.find(
+        (template) => template.key === 'HUMAN_TEMPORARY_ADMIN',
+      ),
+    ).toMatchObject({ canGrant: true, riskLevel: 'HIGH' });
+  });
+
+  it('rejects temporary admin grants before MFA without the independent permission', async () => {
+    const query = jest.fn();
+    const { service, mfa } = createService(query);
+
+    await expect(
+      service.createGrant(
+        { ...actor, permissions: ['aws-access:grant:manage'] },
+        'mgbx',
+        {
+          granteeUserId: 8,
+          cloudAccountId: 2,
+          permissionTemplateKey: 'HUMAN_TEMPORARY_ADMIN',
+          regions: ['ap-southeast-1'],
+          validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+          reason: '临时运维处理',
+          mfaCode: '123456',
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mfa.verifyForUser).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       'HUMAN_SECURITY_GROUP_WRITE',

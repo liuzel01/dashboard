@@ -22,6 +22,8 @@ const HUMAN_ACCOUNT_READ_ONLY = 'HUMAN_ACCOUNT_READ_ONLY';
 const HUMAN_TAG_WRITE = 'HUMAN_TAG_WRITE';
 const HUMAN_SECURITY_GROUP_WRITE = 'HUMAN_SECURITY_GROUP_WRITE';
 const HUMAN_S3_WRITE = 'HUMAN_S3_WRITE';
+const HUMAN_TEMPORARY_ADMIN = 'HUMAN_TEMPORARY_ADMIN';
+const TEMPORARY_ADMIN_GRANT_PERMISSION = 'aws-access:grant:temporary-admin';
 const HUMAN_READ_POLICY_ARN =
   'arn:aws:iam::aws:policy/job-function/ViewOnlyAccess';
 const HUMAN_ACCOUNT_READ_ONLY_POLICY_ARN =
@@ -117,6 +119,9 @@ export class AwsAccessService {
     const humanS3WriteRoleArn = await this.siteConf.getString(
       `${confPrefix}.human_s3_write_role_arn`,
     );
+    const humanTemporaryAdminRoleArn = await this.siteConf.getString(
+      `${confPrefix}.human_temporary_admin_role_arn`,
+    );
     const securityGroupScope = await this.siteConf.getJson<string[]>(
       `${confPrefix}.security_group_write_scope`,
       [],
@@ -136,6 +141,16 @@ export class AwsAccessService {
     const s3WritePolicyArn = await this.siteConf.getString(
       `${confPrefix}.human_s3_write_policy_arn`,
     );
+    const temporaryAdminIamPolicyArn = await this.siteConf.getString(
+      `${confPrefix}.human_temporary_admin_iam_policy_arn`,
+    );
+    const temporaryAdminBoundaryArn = await this.siteConf.getString(
+      `${confPrefix}.human_temporary_admin_boundary_arn`,
+    );
+    const canManage = actor.permissions.includes('aws-access:grant:manage');
+    const canGrantTemporaryAdmin =
+      canManage &&
+      actor.permissions.includes(TEMPORARY_ADMIN_GRANT_PERMISSION);
     return {
       enabled,
       account: {
@@ -188,6 +203,7 @@ export class AwsAccessService {
                 'IAM、Route 53 等 AWS 全局服务不参与区域限制，但仍受 ViewOnlyAccess 权限边界约束。',
                 'AWS 托管策略可能由 AWS 更新，实际权限以当前策略版本和会话策略交集为准。',
               ],
+              canGrant: canManage,
             },
             ...(humanAccountReadOnlyRoleArn
               ? [
@@ -227,6 +243,7 @@ export class AwsAccessService {
                       '区域型服务受临时会话策略限制；AWS 全局服务不参与区域限制。',
                       'AWS ReadOnlyAccess 会持续更新，敏感数据面动作由独立 Guardrail 显式拒绝。',
                     ],
+                    canGrant: canManage,
                   },
                 ]
               : []),
@@ -273,6 +290,7 @@ export class AwsAccessService {
                       '允许的标签键仅为 environment、owner；其他写操作由目标 Role 拒绝。',
                       '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
                     ],
+                    canGrant: canManage,
                   },
                 ]
               : []),
@@ -312,6 +330,7 @@ export class AwsAccessService {
                       '仅开放 AuthorizeSecurityGroupIngress、RevokeSecurityGroupIngress。',
                       '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
                     ],
+                    canGrant: canManage,
                   },
                 ]
               : []),
@@ -356,13 +375,63 @@ export class AwsAccessService {
                       'S3 PutObject 不支持 DryRun，真实上传需由人工验收。',
                       '当前沿用管理员 MFA 直接授权流程，双人审批作为后续增强。',
                     ],
+                    canGrant: canManage,
+                  },
+                ]
+              : []),
+            ...(humanTemporaryAdminRoleArn
+              ? [
+                  {
+                    key: HUMAN_TEMPORARY_ADMIN,
+                    name: 'AWS 临时运维管理员',
+                    shortName: '临时运维管理员',
+                    description:
+                      '在限定 AWS 账号和区域内提供大部分服务资源读写能力，并开放受控 IAM 身份维护；持久凭据、提权链路和关键审计破坏操作由权限边界显式拒绝。',
+                    riskLevel: 'HIGH',
+                    primaryServices: [
+                      '大部分 AWS 服务',
+                      'IAM（受控）',
+                      'Route 53',
+                    ],
+                    allowedCapabilities: [
+                      '在授权区域内创建、修改和删除大部分 AWS 服务资源',
+                      '维护 Route 53 等全局服务资源',
+                      '受控创建、更新、标记和删除 IAM 用户与用户组',
+                    ],
+                    deniedCapabilities: [
+                      '创建或更新 Access Key、控制台密码及其他持久登录凭据',
+                      '创建 Role、修改信任策略、传递 Role 或继续 AssumeRole',
+                      '创建或修改 IAM Policy、挂载策略或移除权限边界',
+                      '停止或删除 CloudTrail、Config、GuardDuty、Security Hub 等关键审计与安全能力',
+                      '禁用 KMS Key、计划删除 KMS Key、退出组织或关闭账号',
+                    ],
+                    maxDurationMinutes: 30 * 24 * 60,
+                    targetRoleArn: humanTemporaryAdminRoleArn,
+                    policyReferences: [
+                      'arn:aws:iam::aws:policy/PowerUserAccess',
+                      temporaryAdminIamPolicyArn,
+                      temporaryAdminBoundaryArn,
+                    ].filter(Boolean),
+                    policyModel:
+                      'AWS_MANAGED_POLICY + CUSTOMER_MANAGED_POLICY + PERMISSIONS_BOUNDARY',
+                    verification: {
+                      method: 'IAM Policy Simulation + real AssumeRole',
+                      verifiedAt: '2026-10-23',
+                      writeActionsDenied: false,
+                    },
+                    notes: [
+                      `区域型服务受临时会话策略限制为：${regionLabel}。`,
+                      '只有持有 AWS 临时管理员授权权限的运维系统角色才能授予此模板。',
+                      '权限边界是最终上限，即使附加策略后续变化也不能突破显式拒绝项。',
+                    ],
+                    canGrant: canGrantTemporaryAdmin,
                   },
                 ]
               : []),
           ]
         : [],
       regions,
-      canManage: actor.permissions.includes('aws-access:grant:manage'),
+      canManage,
       deliveryMode: 'AWS_CONSOLE_FEDERATION',
     };
   }
@@ -409,6 +478,11 @@ export class AwsAccessService {
       mfaCode: string;
     },
   ) {
+    if (
+      input.permissionTemplateKey === HUMAN_TEMPORARY_ADMIN &&
+      !actor.permissions.includes(TEMPORARY_ADMIN_GRANT_PERMISSION)
+    )
+      throw new ForbiddenException('当前角色无权授予 AWS 临时运维管理员模板');
     await this.mfa.verifyForUser(actor.userId, input.mfaCode);
     const account = await this.account(environmentId);
     if (Number(account.id) !== Number(input.cloudAccountId))
@@ -426,6 +500,8 @@ export class AwsAccessService {
       [HUMAN_SECURITY_GROUP_WRITE]:
         `${confPrefix}.human_security_group_write_role_arn`,
       [HUMAN_S3_WRITE]: `${confPrefix}.human_s3_write_role_arn`,
+      [HUMAN_TEMPORARY_ADMIN]:
+        `${confPrefix}.human_temporary_admin_role_arn`,
     };
     if (!templateRoleConfKeys[input.permissionTemplateKey])
       throw new BadRequestException('不支持的权限模板');

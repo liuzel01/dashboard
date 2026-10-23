@@ -46,6 +46,10 @@ const DEFAULT_PERMISSIONS = [
   { key: 'aws-access:grant:read-own', name: 'AWS 临时授权本人读取' },
   { key: 'aws-access:grant:read-all', name: 'AWS 临时授权全局读取' },
   { key: 'aws-access:grant:manage', name: 'AWS 临时授权管理' },
+  {
+    key: 'aws-access:grant:temporary-admin',
+    name: 'AWS 临时运维管理员授权',
+  },
   { key: 'aws-access:session:start', name: 'AWS 临时会话启动' },
   { key: 'aws-access:session:revoke', name: 'AWS 临时会话回收' },
   { key: 'aws-access:audit:read', name: 'AWS 临时访问审计读取' },

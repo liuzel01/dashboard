@@ -76,6 +76,10 @@ export default function AwsAccessPage() {
   const [form] = Form.useForm();
   const [revokeForm] = Form.useForm();
   const selectedTemplateKey = Form.useWatch("permissionTemplateKey", form);
+  const grantableTemplates = useMemo(
+    () => configuration?.templates.filter((item) => item.canGrant) || [],
+    [configuration?.templates],
+  );
   const selectedTemplate = configuration?.templates.find(
     (item) => item.key === selectedTemplateKey,
   );
@@ -322,8 +326,11 @@ export default function AwsAccessPage() {
                 disabled={!configuration?.enabled || !configuration.account}
                 onClick={() => {
                   form.resetFields();
+                  const defaultTemplate =
+                    grantableTemplates.find((item) => item.key === "HUMAN_READ") ||
+                    grantableTemplates[0];
                   form.setFieldsValue({
-                    permissionTemplateKey: "HUMAN_READ",
+                    permissionTemplateKey: defaultTemplate?.key,
                     regions: configuration?.regions,
                     validUntil: dayjs().add(1, "hour"),
                   });
@@ -403,7 +410,7 @@ export default function AwsAccessPage() {
             rules={[{ required: true }]}
           >
             <Select
-              options={configuration?.templates.map((item) => ({
+              options={grantableTemplates.map((item) => ({
                 value: item.key,
                 label: item.name,
               }))}
