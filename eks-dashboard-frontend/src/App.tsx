@@ -773,6 +773,24 @@ const AppLayout: React.FC = () => {
       : []),
   ];
 
+  const desktopNotificationPrompt = location.pathname.startsWith("/cicd-runs") &&
+    permissions.includes("menu:cicd-runs")
+    ? {
+        scope: "cicd" as const,
+        description:
+          "Jenkins 构建或推包完成后，即使切换到其他标签页，也能收到系统提醒。",
+        testNotificationBody: "CI/CD 任务完成后将在此处提醒。",
+      }
+    : location.pathname.startsWith("/bytebase") &&
+        permissions.includes("menu:bytebase")
+      ? {
+          scope: "bytebase" as const,
+          description:
+            "Bytebase 数据库变更任务完成后，即使切换到其他标签页，也能收到系统提醒。",
+          testNotificationBody: "Bytebase 数据库变更任务完成后将在此处提醒。",
+        }
+      : undefined;
+
   return (
     <CicdRealtimeProvider>
       <BytebaseRealtimeProvider>
@@ -788,13 +806,12 @@ const AppLayout: React.FC = () => {
           onLogout={handleLogout}
           authError={authError}
         >
-          <DesktopNotificationPrompt
-            userKey={String(me?.id || me?.username || "unknown")}
-            visible={
-              permissions.includes("menu:cicd-runs") ||
-              permissions.includes("menu:bytebase")
-            }
-          />
+          {desktopNotificationPrompt && (
+            <DesktopNotificationPrompt
+              userKey={String(me?.id || me?.username || "unknown")}
+              {...desktopNotificationPrompt}
+            />
+          )}
           <Suspense fallback={<PageLoadingFallback />}>
             <Routes>
               <Route

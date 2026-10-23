@@ -11,12 +11,14 @@ const DISMISS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const DesktopNotificationPrompt: React.FC<{
   userKey: string;
-  visible: boolean;
-}> = ({ userKey, visible }) => {
+  scope: 'cicd' | 'bytebase';
+  description: string;
+  testNotificationBody: string;
+}> = ({ userKey, scope, description, testNotificationBody }) => {
   const { message } = App.useApp();
   const storageKey = useMemo(
-    () => `dashboard.desktop-notifications.dismissed-until:${userKey}`,
-    [userKey],
+    () => `dashboard.desktop-notifications.dismissed-until:${userKey}:${scope}`,
+    [scope, userKey],
   );
   const [permission, setPermission] = useState(desktopNotificationPermission);
   const [dismissedUntil, setDismissedUntil] = useState(() =>
@@ -45,7 +47,6 @@ export const DesktopNotificationPrompt: React.FC<{
   }, []);
 
   if (
-    !visible ||
     permission !== 'default' ||
     dismissedUntil > Date.now() ||
     typeof Notification === 'undefined' ||
@@ -57,8 +58,8 @@ export const DesktopNotificationPrompt: React.FC<{
     setPermission(result.permission);
     if (result.permission === 'granted') {
       new Notification('Dashboard 通知已开启', {
-        body: 'CI/CD 任务完成后将在此处提醒。',
-        tag: 'cicd-notification-test',
+        body: testNotificationBody,
+        tag: `${scope}-notification-test`,
       });
     } else if (result.permission === 'denied') {
       message.warning('浏览器已拒绝通知，可在地址栏的站点设置中重新允许');
@@ -77,7 +78,7 @@ export const DesktopNotificationPrompt: React.FC<{
       showIcon
       icon={<BellOutlined />}
       message="开启桌面通知"
-      description="Jenkins 构建或推包完成后，即使切换到其他标签页，也能收到系统提醒。"
+      description={description}
       action={(
         <Space>
           <Button size="small" onClick={dismiss}>暂不提醒</Button>
