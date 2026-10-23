@@ -729,6 +729,7 @@ const AppLayout: React.FC = () => {
       "/deployments",
       "/jump-servers",
       "/security-groups",
+      "/aws-governance",
       "/s3-upload",
     ].some((path) => location.pathname.startsWith(path))
       ? ["/cloud-resources"]
@@ -741,9 +742,12 @@ const AppLayout: React.FC = () => {
     )
       ? ["/line-management"]
       : []),
-    ...(["/site-monitors", "/monitoring-requests", "/oncall"].some((path) =>
-      location.pathname.startsWith(path),
-    )
+    ...([
+      "/site-monitors",
+      "/dependency-health",
+      "/monitoring-requests",
+      "/oncall",
+    ].some((path) => location.pathname.startsWith(path))
       ? ["/monitoring"]
       : []),
     ...([
@@ -753,6 +757,8 @@ const AppLayout: React.FC = () => {
       "/ssl-certificates",
       "/kms-values",
       "/cicd-runs",
+      "/jumpserver-access",
+      "/aws-access",
     ].some((path) => location.pathname.startsWith(path))
       ? ["/ops-tools"]
       : []),

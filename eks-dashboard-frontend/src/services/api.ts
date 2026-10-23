@@ -1112,9 +1112,15 @@ export const deleteDashboardSiteConf = async (confKey: string) => {
 };
 
 export type MenuOrderMap = Record<string, string[]>;
+export type MenuCatalogGroup = {
+  key: string;
+  label: string;
+  items: Array<{ key: string; label: string }>;
+};
 
 export const getMenuOrder = async (): Promise<{
   groups: MenuOrderMap;
+  catalog: MenuCatalogGroup[];
   isDefault: boolean;
 }> => {
   const response = await api.get("/menu-order");
@@ -1123,13 +1129,14 @@ export const getMenuOrder = async (): Promise<{
 
 export const saveMenuOrder = async (
   groups: MenuOrderMap,
-): Promise<{ groups: MenuOrderMap; isDefault: boolean }> => {
+): Promise<{ groups: MenuOrderMap; catalog: MenuCatalogGroup[]; isDefault: boolean }> => {
   const response = await api.put("/menu-order", { groups });
   return response.data;
 };
 
 export const resetMenuOrder = async (): Promise<{
   groups: MenuOrderMap;
+  catalog: MenuCatalogGroup[];
   isDefault: boolean;
 }> => {
   const response = await api.delete("/menu-order");

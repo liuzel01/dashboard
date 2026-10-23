@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { DEFAULT_MENU_ORDERS, MenuOrderService } from './menu-order.service';
+import { DEFAULT_MENU_ORDERS, MENU_CATALOG, MenuOrderService } from './menu-order.service';
 
 describe('MenuOrderService', () => {
   const db = { query: jest.fn().mockResolvedValue([]) };
@@ -25,6 +25,34 @@ describe('MenuOrderService', () => {
     ]);
   });
 
+  it('includes every recently added sidebar menu in the catalog', () => {
+    const keys = MENU_CATALOG.flatMap((group) => group.items.map((item) => item.key));
+    expect(keys).toEqual(expect.arrayContaining([
+      '/dependency-health',
+      '/jumpserver-access',
+      '/bytebase',
+      '/aws-access',
+      '/aws-governance',
+    ]));
+  });
+
+  it('keeps saved positions and appends newly registered menus', async () => {
+    const stored = Object.fromEntries(
+      Object.entries(DEFAULT_MENU_ORDERS).map(([group, entries]) => [group, [...entries]]),
+    );
+    stored['/ops-tools'] = ['/ai-ops', '/data-query'];
+    db.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith('SELECT order_json')) return [{ order_json: stored }];
+      return [];
+    });
+
+    const result = await service.get();
+
+    expect(result.groups['/ops-tools'].slice(0, 2)).toEqual(['/ai-ops', '/data-query']);
+    expect(result.groups['/ops-tools']).toEqual(expect.arrayContaining(DEFAULT_MENU_ORDERS['/ops-tools']));
+    expect(result.catalog).toBe(MENU_CATALOG);
+  });
+
   it('reads the JSON object shape returned by mysql2 without falling back to defaults', async () => {
     const custom = Object.fromEntries(Object.entries(DEFAULT_MENU_ORDERS).map(([group, entries]) => [group, [...entries]]));
     custom['/cloud-resources'] = ['/deployments', '/jump-servers', '/s3-upload', '/security-groups'];
@@ -33,10 +61,12 @@ describe('MenuOrderService', () => {
       return [];
     });
 
-    await expect(service.get()).resolves.toMatchObject({
-      isDefault: false,
-      groups: { '/cloud-resources': custom['/cloud-resources'] },
-    });
+    const result = await service.get();
+    expect(result.isDefault).toBe(false);
+    expect(result.groups['/cloud-resources']).toEqual([
+      ...custom['/cloud-resources'],
+      '/aws-governance',
+    ]);
   });
 
   it('does not persist a custom order when reset', async () => {

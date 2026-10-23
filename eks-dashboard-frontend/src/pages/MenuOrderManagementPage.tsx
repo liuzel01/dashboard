@@ -1,33 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, List, Modal, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, CaretDownOutlined, CaretRightOutlined, HolderOutlined, InfoCircleOutlined, ReloadOutlined, SaveOutlined } from '@ant-design/icons';
-import { getMenuOrder, type MenuOrderMap, resetMenuOrder, saveMenuOrder } from '../services/api';
+import { getMenuOrder, type MenuCatalogGroup, type MenuOrderMap, resetMenuOrder, saveMenuOrder } from '../services/api';
 import { PageHeader } from '../components/ops';
 import { writeCachedMenuOrder } from '../utils/menuOrderCache';
 
 const { Text } = Typography;
-
-const ROOT_GROUPS = [
-  { key: '/cloud-resources', label: '云资源' },
-  { key: '/asset-management', label: '资产管理' },
-  { key: '/line-management', label: '线路管理' },
-  { key: '/monitoring', label: '监控与告警' },
-  { key: '/ops-tools', label: '运维工具' },
-  { key: '/system-management', label: '系统管理' },
-  { key: '/cert-study', label: '证书题库' },
-  { key: '/signal-monitor', label: 'Signal Monitor' },
-];
-
-const LABELS: Record<string, string> = {
-  '/deployments': 'EKS 部署', '/jump-servers': 'Windows 跳板机', '/security-groups': '安全组管理', '/s3-upload': 'S3 上传',
-  '/asset-management/overview': '资产总览', '/asset-management/resources': '服务资源', '/asset-management/domains': '域名管理', '/asset-management/accounts': '账号管理', '/asset-management/credential-refs': '凭证索引', '/asset-management/change-logs': '变更记录',
-  '/lines': '线路总览', '/line-onboarding': '新增线路', '/admin-site-ingress': '管理端网站 Ingress',
-  '/site-monitors': '站点监控', '/monitoring-requests': '监控资源申请', '/oncall': 'Oncall 告警',
-  '/data-query': '查询中心', '/cicd-runs': 'CI/CD 执行中心', '/ssl-certificates': 'SSL证书申请', '/kms-values': 'KMS 配置加解密', '/ai-ops': 'AI 运维',
-  '/access-control': '账号管理', '/access-control/users': '账号与权限', '/access-control/audit-logs': '审计日志', '/environments': '环境管理', '/site-conf': 'siteconf 配置', '/menu-management': '菜单排序管理',
-  '/cert-study/sap-c02': 'SAP-C02', '/cert-study/dop-c02': 'DOP-C02', '/cert-study/scs-c03': 'SCS-C03',
-  '/signal-monitor/realtime': '实时', '/signal-monitor/history': '触发记录', '/signal-monitor/stats': '统计', '/signal-monitor/daily': '日报',
-};
 
 const cloneGroups = (groups: MenuOrderMap): MenuOrderMap =>
   Object.fromEntries(Object.entries(groups).map(([key, values]) => [key, [...values]]));
@@ -37,6 +15,7 @@ type DragSource = { groupKey: string; index: number } | null;
 const MenuOrderManagementPage: React.FC = () => {
   const [groups, setGroups] = useState<MenuOrderMap>({});
   const [savedGroups, setSavedGroups] = useState<MenuOrderMap>({});
+  const [catalog, setCatalog] = useState<MenuCatalogGroup[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dragSource, setDragSource] = useState<DragSource>(null);
   const [loading, setLoading] = useState(true);
@@ -52,6 +31,7 @@ const MenuOrderManagementPage: React.FC = () => {
       const next = cloneGroups(data.groups || {});
       setGroups(next);
       setSavedGroups(cloneGroups(next));
+      setCatalog(data.catalog || []);
       setIsDefault(Boolean(data.isDefault));
     } catch (error: unknown) {
       message.error((error as ApiError)?.response?.data?.message || (error as ApiError)?.message || '加载菜单排序失败');
@@ -114,6 +94,7 @@ const MenuOrderManagementPage: React.FC = () => {
 
   const renderEntries = (groupKey: string, depth = 0): React.ReactNode => {
     const entries = groups[groupKey] || [];
+    const labels = new Map(catalog.flatMap((group) => group.items.map((item) => [item.key, item.label])));
     return <List
       size="small"
       dataSource={entries}
@@ -133,15 +114,15 @@ const MenuOrderManagementPage: React.FC = () => {
             }}
             style={{ paddingLeft: depth * 28, cursor: 'grab' }}
             actions={[
-              <Button key="up" size="small" aria-label={`上移 ${LABELS[item] || item}`} icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => reorder(groupKey, index, index - 1)} />,
-              <Button key="down" size="small" aria-label={`下移 ${LABELS[item] || item}`} icon={<ArrowDownOutlined />} disabled={index === entries.length - 1} onClick={() => reorder(groupKey, index, index + 1)} />,
+              <Button key="up" size="small" aria-label={`上移 ${labels.get(item) || item}`} icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => reorder(groupKey, index, index - 1)} />,
+              <Button key="down" size="small" aria-label={`下移 ${labels.get(item) || item}`} icon={<ArrowDownOutlined />} disabled={index === entries.length - 1} onClick={() => reorder(groupKey, index, index + 1)} />,
             ]}
           >
             <Space>
               <HolderOutlined style={{ color: '#8c8c8c' }} />
               <Tag>{index + 1}</Tag>
-              {nested && <Button type="text" size="small" aria-label={`${open ? '收起' : '展开'} ${LABELS[item] || item}`} icon={open ? <CaretDownOutlined /> : <CaretRightOutlined />} onClick={() => toggleExpanded(item)} />}
-              <Text>{LABELS[item] || item}</Text>
+              {nested && <Button type="text" size="small" aria-label={`${open ? '收起' : '展开'} ${labels.get(item) || item}`} icon={open ? <CaretDownOutlined /> : <CaretRightOutlined />} onClick={() => toggleExpanded(item)} />}
+              <Text>{labels.get(item) || item}</Text>
             </Space>
           </List.Item>
           {nested && open && <div style={{ marginLeft: 20, borderLeft: '1px solid #f0f0f0' }}>{renderEntries(item, depth + 1)}</div>}
@@ -157,7 +138,7 @@ const MenuOrderManagementPage: React.FC = () => {
       actions={<Space>{dirty && <Tag color="gold">排序已调整，尚未保存</Tag>}<Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button><Button danger disabled={loading || isDefault} onClick={reset}>恢复默认</Button><Button type="primary" icon={<SaveOutlined />} disabled={!dirty || loading} loading={saving} onClick={() => void save()}>保存排序</Button></Space>}
     />
     {loading ? <Spin /> : <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      {ROOT_GROUPS.map((group) => <Card key={group.key} title={group.label} size="small">{renderEntries(group.key)}</Card>)}
+      {catalog.filter((group) => group.key !== '/access-control').map((group) => <Card key={group.key} title={group.label} size="small">{renderEntries(group.key)}</Card>)}
     </Space>}
   </div>;
 };
