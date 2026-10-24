@@ -163,6 +163,7 @@ export type JumpserverCatalogItem = {
 export type JumpserverConfiguration = {
   mappings: Array<Record<string, unknown>>;
   userBindings: Array<{
+    id: number;
     dashboard_user_id: number;
     dashboard_username: string;
     bundle_id: number;
@@ -183,6 +184,10 @@ export type JumpserverConfiguration = {
     source_permission_id?: string;
     source_permission_name?: string;
     source_snapshot_hash?: string;
+    reauthorized_from_binding_id?: number | null;
+    authorization_cycle_number: number;
+    successor_binding_id?: number | null;
+    active_successor_binding_id?: number | null;
   }>;
 };
 export type JumpserverPermissionTemplate = {
@@ -267,6 +272,16 @@ export const unbindJumpserverUser = async (
   ).data;
 export const syncJumpserverUser = async (userId: number) =>
   (await api.post(`/jumpserver-access/users/${userId}/sync`)).data;
+export const adjustJumpserverGrantExpiration = async (
+  bindingId: number,
+  input: { expiresAt?: string; reason: string; mfaCode: string },
+) =>
+  (await api.post(`/jumpserver-access/user-grants/${bindingId}/expiration`, input)).data;
+export const reauthorizeJumpserverGrant = async (
+  bindingId: number,
+  input: { expiresAt?: string; reason: string; mfaCode: string },
+) =>
+  (await api.post(`/jumpserver-access/user-grants/${bindingId}/reauthorize`, input)).data;
 type MyJumpserverStatus = {
   mapped: boolean;
   eligible: boolean;

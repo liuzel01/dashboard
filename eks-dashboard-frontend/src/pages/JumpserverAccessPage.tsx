@@ -22,6 +22,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { AuthContext } from "../contexts/AuthContextValue";
 import {
   consumeJumpserverPortal,
+  adjustJumpserverGrantExpiration,
   createJumpserverUserGrant,
   createJumpserverUserGrantFromTemplate,
   diagnoseJumpserver,
@@ -31,12 +32,14 @@ import {
   getJumpserverPermissionTemplate,
   getMyJumpserverStatus,
   prepareJumpserverPortal,
+  reauthorizeJumpserverGrant,
   syncJumpserverUser,
   unbindJumpserverUser,
   upsertJumpserverMapping,
   type JumpserverCatalogItem,
   type JumpserverPermissionTemplate,
 } from "../services/api";
+import { MfaRiskConfirm } from "../components/ops";
 const { Title, Text } = Typography;
 type UserCatalogData = {
   dashboardUsers: any[];
@@ -88,6 +91,10 @@ export default function JumpserverAccessPage() {
     [grantSearch, setGrantSearch] = useState(""),
     [grantPage, setGrantPage] = useState(1),
     [grantPageSize, setGrantPageSize] = useState(20);
+  const [grantView, setGrantView] = useState<"CURRENT" | "HISTORY">("CURRENT");
+  const [lifecycleAction, setLifecycleAction] = useState<{ type: "ADJUST" | "REAUTHORIZE"; binding: any }>();
+  const [lifecycleExpiresAt, setLifecycleExpiresAt] = useState<Dayjs | null>(null);
+  const [lifecycleReason, setLifecycleReason] = useState("");
   const configurationLoadedRef = useRef(false);
   const configurationDataRef = useRef<any>({ mappings: [], userBindings: [] });
   const configurationRequestRef = useRef<Promise<any> | null>(null);
@@ -657,7 +664,8 @@ export default function JumpserverAccessPage() {
     ]),
   );
   const visibleUserBindings = cfg.userBindings.filter((binding: any) => {
-    if (Number(binding.enabled) !== 1) return false;
+    if (grantView === "CURRENT" && Number(binding.enabled) !== 1) return false;
+    if (grantView === "HISTORY" && Number(binding.enabled) === 1) return false;
     if (!normalizedGrantSearch) return true;
     const searchable = [
       binding.dashboard_display_name,
@@ -677,6 +685,33 @@ export default function JumpserverAccessPage() {
       .toLowerCase();
     return searchable.includes(normalizedGrantSearch);
   });
+  const openLifecycleAction = (type: "ADJUST" | "REAUTHORIZE", binding: any) => {
+    setLifecycleAction({ type, binding });
+    setLifecycleExpiresAt(type === "ADJUST" && binding.expires_at ? dayjs(binding.expires_at) : dayjs().add(30, "day"));
+    setLifecycleReason("");
+  };
+  const confirmLifecycleAction = async (mfaCode: string) => {
+    if (!lifecycleAction) return;
+    if (!lifecycleExpiresAt || lifecycleExpiresAt.diff(dayjs(), "second") < 120) {
+      message.error("请选择至少 2 分钟后的授权到期时间");
+      throw new Error("invalid expiration");
+    }
+    if (lifecycleReason.trim().length < 5) {
+      message.error("请填写至少 5 个字符的操作原因");
+      throw new Error("reason required");
+    }
+    const input = { expiresAt: lifecycleExpiresAt.toISOString(), reason: lifecycleReason.trim(), mfaCode };
+    try {
+      if (lifecycleAction.type === "ADJUST") await adjustJumpserverGrantExpiration(lifecycleAction.binding.id, input);
+      else await reauthorizeJumpserverGrant(lifecycleAction.binding.id, input);
+      message.success(lifecycleAction.type === "ADJUST" ? "授权有效期已调整" : "历史授权已重新创建并同步");
+      setLifecycleAction(undefined);
+      await refreshAfterAdminChange();
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || "授权操作失败");
+      throw e;
+    }
+  };
   const expiryFilter = (record: any, filter: string) => {
     if (filter === "FAILED") return record.revocation_status === "FAILED";
     if (filter === "ACTIVE")
@@ -781,6 +816,7 @@ export default function JumpserverAccessPage() {
                 setGrantPage(1);
               }}
             />
+            <Select value={grantView} style={{ width: 130 }} onChange={(value) => { setGrantView(value); setGrantPage(1); }} options={[{ value: "CURRENT", label: "当前授权" }, { value: "HISTORY", label: "历史授权" }]} />
             <Button
               loading={customGrantCatalogLoading}
               onClick={() => void openUserGrant()}
@@ -798,7 +834,7 @@ export default function JumpserverAccessPage() {
         }
       >
         <Table
-          rowKey={(row: any) => `${row.dashboard_user_id}:${row.bundle_id}`}
+          rowKey="id"
           pagination={{
             current: grantPage,
             pageSize: grantPageSize,
@@ -845,6 +881,28 @@ export default function JumpserverAccessPage() {
                 ),
             },
             {
+              title: "授权周期",
+              width: 150,
+              render: (_, row: any) => (
+                <Space direction="vertical" size={0}>
+                  <Tag color={row.authorization_cycle_number > 1 ? "purple" : "default"}>
+                    {row.authorization_cycle_number > 1
+                      ? `重新授权第 ${row.authorization_cycle_number - 1} 次`
+                      : "原始授权"}
+                  </Tag>
+                  {row.reauthorized_from_binding_id ? (
+                    <Text type="secondary">
+                      来源 #{row.reauthorized_from_binding_id}
+                    </Text>
+                  ) : row.successor_binding_id ? (
+                    <Text type="secondary">
+                      后续 #{row.successor_binding_id}
+                    </Text>
+                  ) : null}
+                </Space>
+              ),
+            },
+            {
               title: "有效期",
               dataIndex: "expires_at",
               filters: [
@@ -873,6 +931,21 @@ export default function JumpserverAccessPage() {
                 );
               },
               render: (_, row: any) => {
+                if (
+                  Number(row.enabled) !== 1 &&
+                  row.revocation_status === "REVOKED"
+                )
+                  return (
+                    <Tooltip
+                      title={
+                        row.revoked_at
+                          ? `回收时间：${dayjs(row.revoked_at).format("YYYY-MM-DD HH:mm:ss")}`
+                          : "该授权已完成回收"
+                      }
+                    >
+                      <Tag color="green">已回收</Tag>
+                    </Tooltip>
+                  );
                 if (row.revocation_status === "FAILED")
                   return (
                     <Tag color="red" title={row.last_revoke_error || undefined}>
@@ -916,16 +989,27 @@ export default function JumpserverAccessPage() {
             {
               title: "操作",
               fixed: "right",
-              width: 100,
-              render: (_, row: any) => (
-                <Button danger type="link" onClick={() => revokeBundle(row)}>
-                  回收授权
-                </Button>
+              width: 180,
+              render: (_, row: any) => Number(row.enabled) === 1 ? (
+                <Space size={0}><Button type="link" disabled={!permissions.includes("jumpserver:grant:extend") || row.revocation_status !== "ACTIVE" || (row.expires_at && !dayjs(row.expires_at).isAfter(dayjs()))} onClick={() => openLifecycleAction("ADJUST", row)}>调整有效期</Button><Button danger type="link" onClick={() => revokeBundle(row)}>回收授权</Button></Space>
+              ) : (
+                <Tooltip
+                  title={
+                    row.successor_binding_id
+                      ? `该记录已有后续授权 #${row.successor_binding_id}，请从授权链的最新周期继续操作`
+                      : undefined
+                  }
+                >
+                  <span>
+                    <Button type="link" disabled={!permissions.includes("jumpserver:grant:reauthorize") || row.revocation_status !== "REVOKED" || Boolean(row.successor_binding_id)} onClick={() => openLifecycleAction("REAUTHORIZE", row)}>重新授权</Button>
+                  </span>
+                </Tooltip>
               ),
             },
           ]}
         />
       </Card>
+      <MfaRiskConfirm open={Boolean(lifecycleAction)} title={lifecycleAction?.type === "ADJUST" ? "调整授权有效期" : "重新授权历史记录"} resourceName={lifecycleAction?.binding?.bundle_name} impact={lifecycleAction?.type === "ADJUST" ? "将原地修改当前 JumpServer Asset Permission 的失效时间，不创建重复授权。" : "将保留原历史记录，并创建带来源关系的新授权周期。"} okText={lifecycleAction?.type === "ADJUST" ? "确认调整" : "确认重新授权"} onCancel={() => setLifecycleAction(undefined)} onConfirm={confirmLifecycleAction} okButtonProps={{ disabled: !lifecycleExpiresAt || lifecycleReason.trim().length < 5 }}><Space direction="vertical" style={{ width: "100%", marginTop: 16 }}><DatePicker showTime value={lifecycleExpiresAt} onChange={setLifecycleExpiresAt} style={{ width: "100%" }} placeholder="新的授权到期时间" /><Input.TextArea value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} maxLength={500} showCount placeholder="操作原因（至少 5 个字符）" /></Space></MfaRiskConfirm>
     </Space>
   );
   return (
