@@ -16,6 +16,8 @@ import { OncallModule } from '../oncall/oncall.module';
 import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
 import { AiOpsGrafanaMcpService } from './ai-ops-grafana-mcp.service';
 import { AiOpsAlertAgentService } from './ai-ops-alert-agent.service';
+import { AiOpsAlertNoiseControlService } from './ai-ops-alert-noise-control.service';
+import { HttpModule } from '@nestjs/axios';
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { AiOpsAlertAgentService } from './ai-ops-alert-agent.service';
     SiteConfModule,
     KubernetesModule,
     OncallModule,
+    HttpModule,
   ],
   controllers: [AiOpsController],
   providers: [
@@ -38,6 +41,7 @@ import { AiOpsAlertAgentService } from './ai-ops-alert-agent.service';
     AiOpsGroupCallbackService,
     AiOpsGrafanaMcpService,
     AiOpsAlertAgentService,
+    AiOpsAlertNoiseControlService,
   ],
 })
 export class AiOpsModule {}

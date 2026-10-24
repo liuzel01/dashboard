@@ -24,6 +24,11 @@ import { AiOpsAlertInvestigationService } from './ai-ops-alert-investigation.ser
 import type { AlertmanagerPayload } from '../oncall/oncall.types';
 import { CorrelateLogInvestigationsDto } from './dto/correlate-log-investigations.dto';
 import { CreateLogInvestigationCaseDto } from './dto/create-log-investigation-case.dto';
+import { AiOpsAlertNoiseControlService } from './ai-ops-alert-noise-control.service';
+import {
+  CancelAlertNoiseControlDto,
+  CreateAlertNoiseControlDto,
+} from './dto/alert-noise-control.dto';
 
 @Controller('ai-ops')
 export class AiOpsController {
@@ -32,6 +37,7 @@ export class AiOpsController {
     private readonly logService: AiOpsLogService,
     private readonly investigationService: AiOpsInvestigationService,
     private readonly alertInvestigationService: AiOpsAlertInvestigationService,
+    private readonly noiseControlService: AiOpsAlertNoiseControlService,
   ) {}
 
   private ensureEnvironmentHeader(environmentId: string | undefined) {
@@ -463,6 +469,122 @@ export class AiOpsController {
       environmentId,
       actor,
       numericId,
+    );
+  }
+
+  @Get('investigations/:id/noise-control-preview')
+  async previewAlertNoiseControl(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Query('scope') scope: 'RESOURCE' | 'NAMESPACE' | 'ENVIRONMENT',
+    @Query('durationMinutes') durationMinutes: string,
+    @Query('mode') mode?: 'LOCAL' | 'ALERTMANAGER',
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.noiseControlService.preview(
+      environmentId,
+      actor,
+      Number(id),
+      scope,
+      Number(durationMinutes),
+      mode,
+    );
+  }
+
+  @Get('alert-noise-controls')
+  async listAlertNoiseControls(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Query('investigationId') investigationId?: string,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.noiseControlService.list(
+      environmentId,
+      actor,
+      investigationId ? Number(investigationId) : undefined,
+    );
+  }
+
+  @Post('investigations/:id/suppressions')
+  async createAlertSuppression(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: CreateAlertNoiseControlDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.noiseControlService.createLocal(
+      environmentId,
+      actor,
+      Number(id),
+      body,
+    );
+  }
+
+  @Post('investigations/:id/alertmanager-silences')
+  async createAlertmanagerSilence(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: CreateAlertNoiseControlDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.noiseControlService.createAlertmanager(
+      environmentId,
+      actor,
+      Number(id),
+      body,
+    );
+  }
+
+  @Post('alert-suppressions/:id/cancel')
+  async cancelAlertSuppression(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: CancelAlertNoiseControlDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.noiseControlService.cancelLocal(
+      environmentId,
+      actor,
+      Number(id),
+      body.reason,
+      body.mfaCode,
+    );
+  }
+
+  @Post('alertmanager-silences/:id/cancel')
+  async cancelAlertmanagerSilence(
+    @Headers('x-target-environment') environmentId: string,
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Body(new ValidationPipe({ transform: true, whitelist: true }))
+    body: CancelAlertNoiseControlDto,
+  ) {
+    this.ensureEnvironmentHeader(environmentId);
+    const actor =
+      await this.service.resolveActorFromAuthorization(authorization);
+    return this.noiseControlService.cancelAlertmanager(
+      environmentId,
+      actor,
+      Number(id),
+      body.reason,
+      body.mfaCode,
     );
   }
 }

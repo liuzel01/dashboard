@@ -22,6 +22,7 @@ import { AIOPS_REPLAY_CASES } from './ai-ops-replay.fixtures';
 import { AiOpsContextEvidenceService } from './ai-ops-context-evidence.service';
 import { AiOpsGroupCallbackService } from './ai-ops-group-callback.service';
 import { AiOpsAlertAgentService } from './ai-ops-alert-agent.service';
+import { AiOpsAlertNoiseControlService } from './ai-ops-alert-noise-control.service';
 
 type ActorContext = {
   userId: number | null;
@@ -45,6 +46,7 @@ export class AiOpsAlertInvestigationService {
     private readonly contextEvidence: AiOpsContextEvidenceService,
     private readonly groupCallback: AiOpsGroupCallbackService,
     private readonly alertAgent: AiOpsAlertAgentService,
+    private readonly noiseControl: AiOpsAlertNoiseControlService,
   ) {}
 
   async receiveAlertmanager(
@@ -83,6 +85,11 @@ export class AiOpsAlertInvestigationService {
         excluded.includes(alertName) ||
         this.text(labels.aiops_enabled, 16).toLowerCase() === 'false'
       ) {
+        result.ignored += 1;
+        continue;
+      }
+      const environmentId = await this.environmentId(labels);
+      if (await this.noiseControl.suppresses(environmentId, labels)) {
         result.ignored += 1;
         continue;
       }

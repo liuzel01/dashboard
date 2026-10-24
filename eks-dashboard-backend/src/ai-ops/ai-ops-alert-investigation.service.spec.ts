@@ -140,6 +140,9 @@ const makeService = (
   const alertAgent = {
     analyze: jest.fn(async () => ({ status: 'DISABLED' })),
   };
+  const noiseControl = {
+    suppresses: jest.fn(async () => false),
+  };
   const service = new AiOpsAlertInvestigationService(
     db as any,
     siteConf as any,
@@ -148,6 +151,7 @@ const makeService = (
     contextEvidence as any,
     groupCallback as any,
     alertAgent as any,
+    noiseControl as any,
   );
   return {
     service,

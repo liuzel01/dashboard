@@ -78,6 +78,8 @@ const DEFAULT_PERMISSIONS = [
   { key: 'aiops:slowlog:analyze', name: '慢查询分析' },
   { key: 'aiops:log-investigate', name: 'AI 日志只读调查' },
   { key: 'aiops:notify:lark', name: 'AI 告警推送 Lark' },
+  { key: 'aiops:alert:suppress', name: 'AI 告警调查暂停' },
+  { key: 'aiops:alert:silence', name: 'Alertmanager 临时静默' },
 ];
 
 const generatePassword = () => {

@@ -1066,6 +1066,30 @@ export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
     defaultValue: '3',
     validation: { min: 1, max: 10 },
   },
+  ...['mgbx', 'icoin'].flatMap((environmentId) => [
+    {
+      key: `aiops.alertmanager.environments.${environmentId}.silence_enabled`,
+      valueType: 'boolean' as const,
+      category: 'aiops-alerts',
+      description: `是否允许 Dashboard 向 ${environmentId} Alertmanager 写入临时 Silence`,
+      defaultValue: 'false',
+    },
+    {
+      key: `aiops.alertmanager.environments.${environmentId}.base_url`,
+      valueType: 'string' as const,
+      category: 'aiops-alerts',
+      description: `${environmentId} Alertmanager 管理 API 地址（仅由服务端读取）`,
+      defaultValue: '',
+    },
+    {
+      key: `aiops.alertmanager.environments.${environmentId}.bearer_token`,
+      valueType: 'string' as const,
+      category: 'aiops-alerts',
+      description: `${environmentId} Alertmanager 管理 API Bearer Token`,
+      defaultValue: '',
+      sensitive: true,
+    },
+  ]),
   {
     key: 'aiops.alerts.agent.enabled',
     valueType: 'boolean',
