@@ -57,6 +57,8 @@ const DEFAULT_PERMISSIONS = [
   { key: 'jumpserver:portal:launch', name: 'JumpServer 受控跳转' },
   { key: 'jumpserver:config:manage', name: 'JumpServer 配置管理' },
   { key: 'jumpserver:sync:execute', name: 'JumpServer 授权同步' },
+  { key: 'jumpserver:grant:extend', name: 'JumpServer 授权有效期调整' },
+  { key: 'jumpserver:grant:reauthorize', name: 'JumpServer 历史授权重新授权' },
   { key: 'jumpserver:audit:read', name: 'JumpServer 审计读取' },
   { key: 'bytebase:catalog:read', name: 'Bytebase 目录读取' },
   { key: 'bytebase:change:submit', name: 'Bytebase 变更提交' },

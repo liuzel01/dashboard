@@ -46,12 +46,16 @@ CREATE TABLE IF NOT EXISTS `jumpserver_role_bindings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `jumpserver_user_bundle_bindings` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `provider_key` VARCHAR(64) NOT NULL DEFAULT 'primary',
   `dashboard_user_id` BIGINT UNSIGNED NOT NULL, `bundle_id` BIGINT NOT NULL,
+  `reauthorized_from_binding_id` BIGINT UNSIGNED NULL,
   `enabled` TINYINT(1) NOT NULL DEFAULT 1, `created_by` BIGINT UNSIGNED NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-  PRIMARY KEY (`provider_key`,`dashboard_user_id`,`bundle_id`),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_jumpserver_binding_cycle` (`provider_key`,`dashboard_user_id`,`bundle_id`),
+  KEY `idx_jumpserver_binding_lineage` (`reauthorized_from_binding_id`),
   CONSTRAINT `fk_jumpserver_user_binding_bundle` FOREIGN KEY (`bundle_id`) REFERENCES `jumpserver_access_bundles` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
