@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, App, Button, Card, Collapse, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd';
+import { Alert, App, Button, Card, Collapse, Descriptions, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography, type TableProps } from 'antd';
 import { BellOutlined, ExportOutlined, PlayCircleOutlined, ReloadOutlined, SafetyCertificateOutlined, StopOutlined } from '@ant-design/icons';
 import {
   DESKTOP_NOTIFICATION_PERMISSION_CHANGED,
@@ -19,9 +19,12 @@ import {
   reconcileCicdCatalog,
   syncCicdRemoteParameterSchema,
   cancelCicdRun,
+  createCicdLogShare,
   getCicdRunLog,
+  listCicdLogShares,
   listCicdRuns,
   refreshCicdRun,
+  revokeCicdLogShare,
   triggerCicdRun,
   type CicdActionType,
   type CicdDiscoveredJob,
@@ -31,6 +34,7 @@ import {
   type CicdExecutorDiagnostic,
   type CicdReconciliation,
   type CicdRun,
+  type CicdLogShare,
 } from '../services/api';
 
 const { Link, Text, Title } = Typography;
@@ -94,6 +98,7 @@ const CicdCatalogPage: React.FC = () => {
   const canExecutePublish = permissions.includes('cicd-runs:execute-publish');
   const canExecuteImagePublish = permissions.includes('cicd-runs:execute-image-publish');
   const canCancel = permissions.includes('cicd-runs:cancel');
+  const canShareLog = permissions.includes('cicd-runs:share-log');
   const [form] = Form.useForm();
   const [actionType, setActionType] = useState<CicdActionType>('BUILD_DEPLOY');
   const [bindings, setBindings] = useState<CicdEnvironmentBinding[]>([]);
@@ -117,6 +122,13 @@ const CicdCatalogPage: React.FC = () => {
   const [logText, setLogText] = useState('');
   const [logRunId, setLogRunId] = useState<string>();
   const [detailRun, setDetailRun] = useState<CicdRun>();
+  const [shareRun, setShareRun] = useState<CicdRun>();
+  const [shareExpiryHours, setShareExpiryHours] = useState(24);
+  const [shareOtpCode, setShareOtpCode] = useState('');
+  const [shareSubmitting, setShareSubmitting] = useState(false);
+  const [logShares, setLogShares] = useState<CicdLogShare[]>([]);
+  const [createdShareUrl, setCreatedShareUrl] = useState<string>();
+  const [createdShareTruncated, setCreatedShareTruncated] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
     desktopNotificationPermission,
   );
@@ -319,6 +331,51 @@ const CicdCatalogPage: React.FC = () => {
     logOffsetRef.current = 0;
   };
 
+  const openShareLog = async (run: CicdRun) => {
+    setShareRun(run);
+    setShareExpiryHours(24);
+    setShareOtpCode('');
+    setCreatedShareUrl(undefined);
+    setCreatedShareTruncated(false);
+    try {
+      setLogShares(await listCicdLogShares(run.run_id));
+    } catch (error) {
+      message.error(errorMessage(error, '日志分享记录加载失败'));
+    }
+  };
+
+  const createLogShare = async () => {
+    if (!shareRun || shareOtpCode.length !== 6) return;
+    setShareSubmitting(true);
+    try {
+      const result = await createCicdLogShare(shareRun.run_id, {
+        expiresInHours: shareExpiryHours,
+        otpCode: shareOtpCode,
+      });
+      const url = new URL(result.path, window.location.origin).toString();
+      setCreatedShareUrl(url);
+      setCreatedShareTruncated(result.truncated);
+      setLogShares(await listCicdLogShares(shareRun.run_id));
+      try {
+        await navigator.clipboard.writeText(url);
+        message.success('分享链接已创建并复制');
+      } catch {
+        message.warning('分享链接已创建，请在弹窗中手动复制');
+      }
+    } catch (error) {
+      message.error(errorMessage(error, '创建日志分享失败'));
+    } finally {
+      setShareSubmitting(false);
+    }
+  };
+
+  const revokeLogShare = async (shareId: string) => {
+    if (!shareRun) return;
+    await revokeCicdLogShare(shareRun.run_id, shareId);
+    setLogShares(await listCicdLogShares(shareRun.run_id));
+    message.success('分享已撤销');
+  };
+
   const enableNotifications = async () => {
     const result = await requestDesktopNotificationPermission();
     setNotificationPermission(result.permission);
@@ -422,10 +479,11 @@ const CicdCatalogPage: React.FC = () => {
     { key: 'status', title: '状态', dataIndex: 'status', width: 110, render: (value: string) => <Tag color={value === 'SUCCESS' ? 'success' : value === 'FAILURE' || value === 'ABORTED' ? 'error' : value === 'RUNNING' ? 'processing' : 'default'}>{value}</Tag> },
     { key: 'createdAt', title: '时间', dataIndex: 'created_at', width: 175, ellipsis: true, render: (value: string) => <Tooltip title={value}><Text ellipsis style={{ display: 'block' }}>{value}</Text></Tooltip> },
     { key: 'buildReference', title: '队列 / Build / 镜像', width: 180, render: (_: unknown, row: CicdRun) => row.action_type === 'IMAGE_BUILD_PUBLISH' ? (row.external_result_tag || '-') : `#${row.queue_id || '-'} / #${row.build_number || '-'}` },
-    { key: 'actions', title: '操作', width: 250, fixed: 'right' as const, align: 'center' as const, render: (_: unknown, row: CicdRun) => <Space size={4}>
+    { key: 'actions', title: '操作', width: 320, fixed: 'right' as const, align: 'center' as const, render: (_: unknown, row: CicdRun) => <Space size={4}>
       <Button size="small" onClick={() => setDetailRun(row)}>详情</Button>
       <Button size="small" loading={refreshingRunIds.has(row.run_id)} disabled={runsLoading} onClick={() => void refreshRun(row.run_id)}>刷新</Button>
       <Button size="small" disabled={!row.build_number && row.action_type !== 'IMAGE_BUILD_PUBLISH'} onClick={() => showLog(row.run_id)}>日志</Button>
+      <Button size="small" disabled={!canShareLog || !row.build_number || !['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => void openShareLog(row)}>分享日志</Button>
       <Button size="small" danger icon={<StopOutlined />} disabled={!canCancel || row.action_type === 'IMAGE_BUILD_PUBLISH' || ['SUCCESS', 'FAILURE', 'ABORTED', 'CANCELLED'].includes(row.status)} onClick={() => Modal.confirm({ title: '确认取消该 Jenkins 执行？', onOk: async () => { await cancelCicdRun(row.run_id); await loadRuns(); } })}>取消</Button>
     </Space> },
   ];
@@ -564,6 +622,52 @@ const CicdCatalogPage: React.FC = () => {
 
     <Modal title="Jenkins 控制台日志（实时）" open={logOpen} onCancel={closeLog} footer={<Button onClick={closeLog}>关闭</Button>} width={900} destroyOnHidden>
       <pre ref={logContainerRef} style={{ height: 560, overflow: 'auto', whiteSpace: 'pre-wrap', background: '#111', color: '#ddd', padding: 16 }}>{logText || '正在等待日志...'}</pre>
+    </Modal>
+
+    <Modal
+      title="分享 Jenkins 构建日志"
+      open={!!shareRun}
+      onCancel={() => setShareRun(undefined)}
+      okText="创建并复制链接"
+      confirmLoading={shareSubmitting}
+      okButtonProps={{ disabled: shareOtpCode.length !== 6 }}
+      onOk={() => void createLogShare()}
+      width={720}
+      destroyOnHidden
+    >
+      {shareRun && <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Alert type="warning" showIcon message="任何获得链接的人都可以在有效期内查看完整 Jenkins 原始日志" description="访问链接不要求登录。Dashboard 不进行二次脱敏或摘要；日志超过配置硬上限时保留前段内容并标记为已截断。" />
+        <Descriptions bordered size="small" column={2}>
+          <Descriptions.Item label="环境">{shareRun.environment_id}</Descriptions.Item>
+          <Descriptions.Item label="Build">#{shareRun.build_number}</Descriptions.Item>
+          <Descriptions.Item label="Job" span={2}>{shareRun.job_name}</Descriptions.Item>
+          <Descriptions.Item label="状态">{shareRun.status}</Descriptions.Item>
+          <Descriptions.Item label="有效期"><InputNumber min={1} max={168} value={shareExpiryHours} onChange={(value) => setShareExpiryHours(Number(value || 24))} addonAfter="小时" /></Descriptions.Item>
+        </Descriptions>
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          <Text>Google 验证码</Text>
+          <MfaCodeInput value={shareOtpCode} onChange={setShareOtpCode} />
+        </Space>
+        {createdShareUrl && <Alert
+          type={createdShareTruncated ? 'warning' : 'success'}
+          showIcon
+          message={createdShareTruncated ? '分享已创建，日志因超过硬上限而截断' : '分享已创建并复制到剪贴板'}
+          description={<Text copyable={{ text: createdShareUrl }} code>{createdShareUrl}</Text>}
+        />}
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="share_id"
+          dataSource={logShares}
+          columns={[
+            { title: '创建时间', dataIndex: 'created_at' },
+            { title: '到期时间', dataIndex: 'expires_at' },
+            { title: '大小', dataIndex: 'captured_size_bytes', render: (value: number) => `${(Number(value) / 1024 / 1024).toFixed(2)} MB` },
+            { title: '状态', render: (_: unknown, row: CicdLogShare) => row.revoked_at ? <Tag>已撤销</Tag> : new Date(row.expires_at).getTime() <= Date.now() ? <Tag>已过期</Tag> : <Tag color={row.truncated ? 'orange' : 'green'}>{row.truncated ? '有效 · 已截断' : '有效'}</Tag> },
+            { title: '操作', render: (_: unknown, row: CicdLogShare) => <Button type="link" danger disabled={!!row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()} onClick={() => void revokeLogShare(row.share_id)}>撤销</Button> },
+          ]}
+        />
+      </Space>}
     </Modal>
 
     <Modal title="执行详情" open={!!detailRun} onCancel={() => setDetailRun(undefined)} footer={<Button onClick={() => setDetailRun(undefined)}>关闭</Button>} width={760} destroyOnHidden>

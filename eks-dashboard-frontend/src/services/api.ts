@@ -3375,6 +3375,40 @@ export const getCicdRunLog = async (runId: string, start = 0) =>
       params: { start },
     })
   ).data as { text: string; nextStart: number; hasMore: boolean };
+export type CicdLogShare = {
+  share_id: string;
+  run_id: string;
+  captured_size_bytes: number;
+  truncated: number | boolean;
+  expires_at: string;
+  revoked_at?: string | null;
+  created_at: string;
+};
+export const listCicdLogShares = async (runId: string) =>
+  (await api.get(`/cicd/runs/${encodeURIComponent(runId)}/log-shares`))
+    .data as CicdLogShare[];
+export const createCicdLogShare = async (
+  runId: string,
+  input: { expiresInHours: number; otpCode: string },
+) =>
+  (
+    await api.post(
+      `/cicd/runs/${encodeURIComponent(runId)}/log-shares`,
+      input,
+    )
+  ).data as {
+    shareId: string;
+    path: string;
+    capturedSizeBytes: number;
+    truncated: boolean;
+    expiresInHours: number;
+  };
+export const revokeCicdLogShare = async (runId: string, shareId: string) =>
+  (
+    await api.post(
+      `/cicd/runs/${encodeURIComponent(runId)}/log-shares/${encodeURIComponent(shareId)}/revoke`,
+    )
+  ).data as { ok: true };
 
 export type DependencyHealthItem = {
   key: string;
