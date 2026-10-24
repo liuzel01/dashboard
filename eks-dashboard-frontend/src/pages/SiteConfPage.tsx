@@ -18,7 +18,7 @@ type SiteConfItem = {
   isSensitive: boolean;
   isRuntimeEditable: boolean;
   defaultValue?: string;
-  validationJson?: string;
+  validationJson?: unknown;
   updatedAt?: string;
 };
 
@@ -29,6 +29,11 @@ const validateValueByType = (value: string, type: ValueType) => {
     try { JSON.parse(value); } catch { return 'json 类型必须填写合法 JSON'; }
   }
   return '';
+};
+
+const validationJsonText = (value: SiteConfItem['validationJson']) => {
+  if (!value) return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
 };
 
 type SiteConfColumnKey = 'confKey' | 'category' | 'confValue' | 'description';
@@ -135,7 +140,7 @@ const SiteConfPage: React.FC = () => {
       isSensitive: record.isSensitive,
       isRuntimeEditable: record.isRuntimeEditable,
       defaultValue: record.defaultValue,
-      validationJson: record.validationJson,
+      validationJson: validationJsonText(record.validationJson),
     });
     setModalOpen(true);
     if (record.confKey === 'aiops.cliproxy.model') void loadLlmModels();
@@ -149,8 +154,9 @@ const SiteConfPage: React.FC = () => {
       message.error(validationError);
       return;
     }
-    if (values.validationJson) {
-      try { JSON.parse(values.validationJson); } catch { message.error('validationJson 必须是合法 JSON'); return; }
+    const validationJson = validationJsonText(values.validationJson);
+    if (validationJson) {
+      try { JSON.parse(validationJson); } catch { message.error('validationJson 必须是合法 JSON'); return; }
     }
     try {
       setSaving(true);
@@ -166,7 +172,7 @@ const SiteConfPage: React.FC = () => {
           isSensitive: values.isSensitive,
           isRuntimeEditable: values.isRuntimeEditable,
           defaultValue: values.defaultValue || undefined,
-          validationJson: values.validationJson || undefined,
+          validationJson,
         });
       }
       setModalOpen(false);

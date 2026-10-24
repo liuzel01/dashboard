@@ -12,7 +12,7 @@ type SiteConfRow = {
   is_sensitive: number;
   is_runtime_editable: number;
   default_value: string | null;
-  validation_json: string | null;
+  validation_json: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -30,6 +30,18 @@ type SiteConfItem = {
   validationJson?: string;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export const serializeSiteConfValidationJson = (
+  value: unknown,
+): string | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 };
 
 @Injectable()
@@ -151,10 +163,10 @@ export class SiteConfService implements OnModuleInit {
     await this.ensureTableAndDefaults();
     const confKey = input.confKey.trim();
     if (!confKey) throw new BadRequestException('confKey is required');
-    this.validateValue(input.confValue, input.valueType, input.validationJson);
     if (input.validationJson?.trim()) {
       try { JSON.parse(input.validationJson); } catch { throw new BadRequestException('validationJson must be valid JSON'); }
     }
+    this.validateValue(input.confValue, input.valueType, input.validationJson);
     await this.db.query(
       `INSERT INTO dashboard_site_conf
         (conf_key, conf_value, value_type, category, description, is_sensitive, is_runtime_editable, default_value, validation_json, created_at, updated_at)
@@ -427,7 +439,7 @@ export class SiteConfService implements OnModuleInit {
       isSensitive: Number(row.is_sensitive || 0) === 1,
       isRuntimeEditable: Number(row.is_runtime_editable || 0) === 1,
       defaultValue: row.default_value ?? undefined,
-      validationJson: row.validation_json ?? undefined,
+      validationJson: serializeSiteConfValidationJson(row.validation_json),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
