@@ -52,6 +52,56 @@ describe('CicdRunsService', () => {
     expect(() => jobPath('folder/../api')).toThrow('Jenkins Job 路径无效');
   });
 
+  it('keeps the raw Jenkins bytes and truncates at the configured hard limit', async () => {
+    const { service } = createService();
+    jest
+      .spyOn(
+        service as unknown as {
+          executionContext(...args: unknown[]): Promise<unknown>;
+        },
+        'executionContext',
+      )
+      .mockResolvedValue(context);
+    jest
+      .spyOn(
+        service as unknown as { request(...args: unknown[]): Promise<unknown> },
+        'request',
+      )
+      .mockResolvedValue({
+        status: 200,
+        data: Buffer.from('raw-secret-log'),
+        headers: { 'x-text-size': '14', 'x-more-data': 'true' },
+      });
+
+    const result = await (
+      service as unknown as {
+        captureRawLog(
+          row: Record<string, unknown>,
+          maxBytes: number,
+        ): Promise<{ body: Buffer; captured: number; truncated: boolean }>;
+      }
+    ).captureRawLog(
+      {
+        environment_id: 'mgbx',
+        action_type: 'BUILD_DEPLOY',
+        job_name: 'mgbx-service',
+        build_number: 12,
+      },
+      8,
+    );
+
+    expect(result.body.toString()).toBe('raw-secr');
+    expect(result).toMatchObject({ captured: 8, truncated: true });
+  });
+
+  it('rejects malformed anonymous log-share tokens without querying storage', async () => {
+    const { service, db } = createService();
+    await expect(service.openLogShare('short')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(db.query).not.toHaveBeenCalled();
+  });
+
   it('rejects an actor without the requested execution permission', async () => {
     const { service, auth, access } = createService();
     auth.verifyToken.mockResolvedValue({ sub: 7, username: 'operator' });

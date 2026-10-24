@@ -9,7 +9,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import axios from 'axios';
-import { randomUUID } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuthService } from '../auth/auth.service';
@@ -35,6 +41,7 @@ const EXECUTE_BUILD = 'cicd-runs:execute-build';
 const EXECUTE_PUBLISH = 'cicd-runs:execute-publish';
 const EXECUTE_IMAGE_PUBLISH = 'cicd-runs:execute-image-publish';
 const CANCEL = 'cicd-runs:cancel';
+const SHARE_LOG = 'cicd-runs:share-log';
 const TERMINAL = new Set<string>(TERMINAL_CICD_STATUSES);
 
 type Actor = { userId: number; username: string; permissions: string[] };
@@ -51,10 +58,7 @@ export class CicdRunsService {
     private readonly spotPublish: CicdSpotPublishService,
   ) {}
 
-  async actor(
-    authorization?: string,
-    permission = VIEW,
-  ): Promise<Actor> {
+  async actor(authorization?: string, permission = VIEW): Promise<Actor> {
     const raw = String(authorization || '');
     if (!raw.toLowerCase().startsWith('bearer '))
       throw new UnauthorizedException('Missing token');
@@ -494,6 +498,190 @@ export class CicdRunsService {
       nextStart: Number(response.headers['x-text-size'] || start),
       hasMore: String(response.headers['x-more-data'] || 'false') === 'true',
     };
+  }
+
+  private async logShareConfig() {
+    const [bucket, prefix, region, maxBytes, defaultHours, maxHours] =
+      await Promise.all([
+        this.siteConf.getString('cicd.log_share.s3_bucket', ''),
+        this.siteConf.getString('cicd.log_share.s3_prefix', ''),
+        this.siteConf.getString('cicd.log_share.s3_region', 'ap-southeast-1'),
+        this.siteConf.getNumber('cicd.log_share.max_bytes', 100 * 1024 * 1024),
+        this.siteConf.getNumber('cicd.log_share.default_expiry_hours', 24),
+        this.siteConf.getNumber('cicd.log_share.max_expiry_hours', 168),
+      ]);
+    if (!bucket.trim() || !prefix.trim())
+      throw new ServiceUnavailableException('CI/CD 日志分享 S3 尚未配置');
+    return {
+      bucket: bucket.trim(),
+      prefix: prefix.trim().replace(/^\/+|\/+$/g, ''),
+      region: region.trim() || 'ap-southeast-1',
+      maxBytes: Math.min(
+        500 * 1024 * 1024,
+        Math.max(1024 * 1024, Number(maxBytes)),
+      ),
+      defaultHours: Math.max(1, Number(defaultHours) || 24),
+      maxHours: Math.min(168, Math.max(1, Number(maxHours) || 168)),
+    };
+  }
+
+  private async captureRawLog(row: RunRow, maxBytes: number) {
+    const context = await this.executionContext(
+      row.environment_id,
+      row.action_type,
+    );
+    if (context.provider_type !== 'JENKINS' || !row.build_number)
+      throw new BadRequestException(
+        '该执行记录没有可分享的 Jenkins Build 日志',
+      );
+    let start = 0;
+    let captured = 0;
+    let truncated = false;
+    const chunks: Buffer[] = [];
+    for (let page = 0; page < 10_000; page += 1) {
+      const response = await this.request(
+        context,
+        'get',
+        `${this.jobPath(row.job_name)}/${row.build_number}/logText/progressiveText?start=${start}`,
+        { responseType: 'arraybuffer' },
+      );
+      if (response.status !== 200)
+        throw new ServiceUnavailableException(
+          `Jenkins 日志读取失败（HTTP ${response.status}）`,
+        );
+      const chunk = Buffer.from(response.data || []);
+      const remaining = maxBytes - captured;
+      if (chunk.length > remaining) {
+        if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+        captured += Math.max(0, remaining);
+        truncated = true;
+        break;
+      }
+      chunks.push(chunk);
+      captured += chunk.length;
+      const nextStart = Number(
+        response.headers['x-text-size'] || start + chunk.length,
+      );
+      const hasMore =
+        String(response.headers['x-more-data'] || 'false') === 'true';
+      if (!hasMore) break;
+      if (!Number.isFinite(nextStart) || nextStart <= start)
+        throw new ServiceUnavailableException('Jenkins 日志游标未推进');
+      start = nextStart;
+      if (captured >= maxBytes) {
+        truncated = true;
+        break;
+      }
+    }
+    return { body: Buffer.concat(chunks), captured, truncated };
+  }
+
+  async listLogShares(authorization: string | undefined, runId: string) {
+    await this.actor(authorization, SHARE_LOG);
+    await this.getRun(runId);
+    return this.db.query<any[]>(
+      `SELECT share_id,run_id,captured_size_bytes,truncated,expires_at,revoked_at,created_at
+         FROM cicd_log_shares WHERE run_id=? ORDER BY id DESC LIMIT 20`,
+      [runId],
+    );
+  }
+
+  async createLogShare(
+    authorization: string | undefined,
+    runId: string,
+    input: { expiresInHours?: number; otpCode: string },
+  ) {
+    const actor = await this.actor(authorization, SHARE_LOG);
+    await this.mfaVerification.verifyForUser(actor.userId, input.otpCode);
+    const row = await this.getRun(runId);
+    if (!TERMINAL.has(String(row.status)))
+      throw new BadRequestException('仅可分享已经结束的 Jenkins 构建日志');
+    const config = await this.logShareConfig();
+    const expiresInHours = Math.min(
+      config.maxHours,
+      Math.max(1, Number(input.expiresInHours) || config.defaultHours),
+    );
+    const captured = await this.captureRawLog(row, config.maxBytes);
+    const shareId = randomUUID();
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const objectKey = `${config.prefix}/${row.environment_id}/${runId}/${shareId}.log`;
+    const s3 = new S3Client({ region: config.region });
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: config.bucket,
+        Key: objectKey,
+        Body: captured.body,
+        ContentType: 'text/plain; charset=utf-8',
+        ContentDisposition: `inline; filename="jenkins-${row.build_number}.log"`,
+        ServerSideEncryption: 'AES256',
+        Metadata: { truncated: String(captured.truncated), run_id: runId },
+      }),
+    );
+    await this.db.query(
+      `INSERT INTO cicd_log_shares
+       (share_id,run_id,token_hash,s3_bucket,s3_object_key,captured_size_bytes,truncated,expires_at,created_by)
+       VALUES (?,?,?,?,?,?,?,DATE_ADD(UTC_TIMESTAMP(3),INTERVAL ? HOUR),?)`,
+      [
+        shareId,
+        runId,
+        tokenHash,
+        config.bucket,
+        objectKey,
+        captured.captured,
+        captured.truncated ? 1 : 0,
+        expiresInHours,
+        actor.userId,
+      ],
+    );
+    return {
+      shareId,
+      path: `/api/cicd/runs/public-log-shares/${token}`,
+      capturedSizeBytes: captured.captured,
+      truncated: captured.truncated,
+      expiresInHours,
+    };
+  }
+
+  async revokeLogShare(
+    authorization: string | undefined,
+    runId: string,
+    shareId: string,
+  ) {
+    await this.actor(authorization, SHARE_LOG);
+    const result: any = await this.db.query(
+      `UPDATE cicd_log_shares SET revoked_at=COALESCE(revoked_at,UTC_TIMESTAMP(3))
+        WHERE share_id=? AND run_id=?`,
+      [shareId, runId],
+    );
+    if (!Number(result.affectedRows || 0))
+      throw new NotFoundException('日志分享记录不存在');
+    return { ok: true };
+  }
+
+  async openLogShare(token: string) {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token))
+      throw new NotFoundException('日志分享链接不存在或已失效');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const rows = await this.db.query<any[]>(
+      `SELECT s3_bucket,s3_object_key
+         FROM cicd_log_shares
+        WHERE token_hash=? AND revoked_at IS NULL AND expires_at>UTC_TIMESTAMP(3)
+        LIMIT 1`,
+      [tokenHash],
+    );
+    if (!rows[0]) throw new NotFoundException('日志分享链接不存在或已失效');
+    const config = await this.logShareConfig();
+    return getSignedUrl(
+      new S3Client({ region: config.region }),
+      new GetObjectCommand({
+        Bucket: rows[0].s3_bucket,
+        Key: rows[0].s3_object_key,
+        ResponseContentType: 'text/plain; charset=utf-8',
+        ResponseContentDisposition: 'inline',
+      }),
+      { expiresIn: 60 },
+    );
   }
 
   async cancel(authorization: string | undefined, runId: string) {
