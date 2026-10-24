@@ -451,6 +451,7 @@ export class AiOpsAlertInvestigationService {
         'PARTIAL',
         'INEFFECTIVE',
         'INSUFFICIENT_EVIDENCE',
+        'NOISE_CANDIDATE',
       ].includes(rating)
     ) {
       throw new BadRequestException('Invalid feedback rating');
