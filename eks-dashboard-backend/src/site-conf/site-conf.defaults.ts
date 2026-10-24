@@ -14,6 +14,51 @@ export type SiteConfDefault = {
 
 export const SITE_CONF_DEFAULTS: SiteConfDefault[] = [
   {
+    key: 'cicd.log_share.s3_bucket',
+    valueType: 'string',
+    category: 'cicd',
+    description: 'CI/CD 日志分享私有 S3 Bucket',
+    defaultValue: 'mgbx-tfstate-931324892624',
+  },
+  {
+    key: 'cicd.log_share.s3_prefix',
+    valueType: 'string',
+    category: 'cicd',
+    description: 'CI/CD 日志分享 S3 Prefix',
+    defaultValue: 'dashboard/cicd-log-shares',
+  },
+  {
+    key: 'cicd.log_share.s3_region',
+    valueType: 'string',
+    category: 'cicd',
+    description: 'CI/CD 日志分享 S3 Region',
+    defaultValue: 'ap-southeast-1',
+  },
+  {
+    key: 'cicd.log_share.max_bytes',
+    valueType: 'number',
+    category: 'cicd',
+    description: '单份分享日志最大保留字节数，超过后截断',
+    defaultValue: '104857600',
+    validation: { min: 1048576, max: 524288000 },
+  },
+  {
+    key: 'cicd.log_share.default_expiry_hours',
+    valueType: 'number',
+    category: 'cicd',
+    description: '日志分享默认有效小时数',
+    defaultValue: '24',
+    validation: { min: 1, max: 168 },
+  },
+  {
+    key: 'cicd.log_share.max_expiry_hours',
+    valueType: 'number',
+    category: 'cicd',
+    description: '日志分享最大有效小时数',
+    defaultValue: '168',
+    validation: { min: 1, max: 168 },
+  },
+  {
     key: 'jumpserver.primary.base_url',
     valueType: 'string',
     category: 'jumpserver',

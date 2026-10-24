@@ -30,6 +30,7 @@ const DEFAULT_PERMISSIONS = [
   { key: 'menu:dependency-health', name: '外部依赖健康' },
   { key: 'menu:monitoring-requests', name: '监控资源申请' },
   { key: 'menu:cicd-runs', name: 'CI/CD 执行中心' },
+  { key: 'cicd-runs:share-log', name: '分享 Jenkins 构建日志' },
   { key: 'menu:bytebase', name: '数据库访问与变更中心' },
   { key: 'menu:aws-governance', name: 'AWS 云资源治理' },
   { key: 'aws-governance:catalog:read', name: 'AWS 资源目录读取' },
