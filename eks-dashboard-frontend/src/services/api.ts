@@ -957,6 +957,17 @@ export const retryAiOpsInvestigation = async (
     )
   ).data as { queued: boolean; eventId: number };
 
+export type AiOpsAlertNoiseControlScope = "RESOURCE" | "NAMESPACE" | "ENVIRONMENT";
+export type AiOpsAlertNoiseControlPreview = { environmentId: string; investigationId: number; scope: AiOpsAlertNoiseControlScope; durationMinutes: number; matchers: Array<{ name: string; value: string; isRegex: false; isEqual: true }>; localImpact: string; alertmanagerImpact: string; alertmanagerAvailable: boolean };
+export type AiOpsAlertNoiseControlRecord = { id: number; investigation_id: number; scope: AiOpsAlertNoiseControlScope; starts_at: string; ends_at: string; reason: string; hit_count?: number; created_by_username: string; cancelled_at?: string | null; alertmanager_silence_id?: string };
+
+export const previewAiOpsAlertNoiseControl = async (environmentId: string, id: number, scope: AiOpsAlertNoiseControlScope, durationMinutes: number, mode: "LOCAL" | "ALERTMANAGER" = "LOCAL") => (await api.get(`/ai-ops/investigations/${id}/noise-control-preview`, { params: { scope, durationMinutes, mode }, headers: aiOpsEnvironmentHeaders(environmentId) })).data as AiOpsAlertNoiseControlPreview;
+export const createAiOpsAlertSuppression = async (environmentId: string, id: number, input: { scope: AiOpsAlertNoiseControlScope; durationMinutes: number; reason: string; mfaCode: string }) => (await api.post(`/ai-ops/investigations/${id}/suppressions`, input, { headers: aiOpsEnvironmentHeaders(environmentId) })).data;
+export const createAiOpsAlertmanagerSilence = async (environmentId: string, id: number, input: { scope: AiOpsAlertNoiseControlScope; durationMinutes: number; reason: string; mfaCode: string }) => (await api.post(`/ai-ops/investigations/${id}/alertmanager-silences`, input, { headers: aiOpsEnvironmentHeaders(environmentId) })).data;
+export const listAiOpsAlertNoiseControls = async (environmentId: string, investigationId: number) => (await api.get('/ai-ops/alert-noise-controls', { params: { investigationId }, headers: aiOpsEnvironmentHeaders(environmentId) })).data as { local: AiOpsAlertNoiseControlRecord[]; alertmanager: AiOpsAlertNoiseControlRecord[] };
+export const cancelAiOpsAlertSuppression = async (environmentId: string, id: number, reason: string, mfaCode: string) => (await api.post(`/ai-ops/alert-suppressions/${id}/cancel`, { reason, mfaCode }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data;
+export const cancelAiOpsAlertmanagerSilence = async (environmentId: string, id: number, reason: string, mfaCode: string) => (await api.post(`/ai-ops/alertmanager-silences/${id}/cancel`, { reason, mfaCode }, { headers: aiOpsEnvironmentHeaders(environmentId) })).data;
+
 export type AiOpsQualitySummary = {
   overview: {
     total?: number;
