@@ -67,6 +67,21 @@ const safeExternalUrl = (value?: string | null) => {
   }
 };
 
+const utcTimestamp = (value?: string | null) => {
+  const normalized = String(value || '').trim().replace(' ', 'T');
+  if (!normalized) return Number.NaN;
+  return new Date(
+    /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)
+      ? normalized
+      : `${normalized}Z`,
+  ).getTime();
+};
+
+const isExpiredLogShare = (share: CicdLogShare) => {
+  const expiresAt = utcTimestamp(share.expires_at);
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now();
+};
+
 const formatDuration = (value?: number | null) => {
   const milliseconds = Number(value || 0);
   if (!milliseconds) return '-';
@@ -371,9 +386,13 @@ const CicdCatalogPage: React.FC = () => {
 
   const revokeLogShare = async (shareId: string) => {
     if (!shareRun) return;
-    await revokeCicdLogShare(shareRun.run_id, shareId);
-    setLogShares(await listCicdLogShares(shareRun.run_id));
-    message.success('分享已撤销');
+    try {
+      await revokeCicdLogShare(shareRun.run_id, shareId);
+      setLogShares(await listCicdLogShares(shareRun.run_id));
+      message.success('分享已撤销');
+    } catch (error) {
+      message.error(errorMessage(error, '撤销日志分享失败'));
+    }
   };
 
   const enableNotifications = async () => {
@@ -663,8 +682,8 @@ const CicdCatalogPage: React.FC = () => {
             { title: '创建时间', dataIndex: 'created_at' },
             { title: '到期时间', dataIndex: 'expires_at' },
             { title: '大小', dataIndex: 'captured_size_bytes', render: (value: number) => `${(Number(value) / 1024 / 1024).toFixed(2)} MB` },
-            { title: '状态', render: (_: unknown, row: CicdLogShare) => row.revoked_at ? <Tag>已撤销</Tag> : new Date(row.expires_at).getTime() <= Date.now() ? <Tag>已过期</Tag> : <Tag color={row.truncated ? 'orange' : 'green'}>{row.truncated ? '有效 · 已截断' : '有效'}</Tag> },
-            { title: '操作', render: (_: unknown, row: CicdLogShare) => <Button type="link" danger disabled={!!row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()} onClick={() => void revokeLogShare(row.share_id)}>撤销</Button> },
+            { title: '状态', render: (_: unknown, row: CicdLogShare) => row.revoked_at ? <Tag>已撤销</Tag> : isExpiredLogShare(row) ? <Tag>已过期</Tag> : <Tag color={row.truncated ? 'orange' : 'green'}>{row.truncated ? '有效 · 已截断' : '有效'}</Tag> },
+            { title: '操作', render: (_: unknown, row: CicdLogShare) => <Button type="link" danger disabled={!!row.revoked_at || isExpiredLogShare(row)} onClick={() => void revokeLogShare(row.share_id)}>撤销</Button> },
           ]}
         />
       </Space>}

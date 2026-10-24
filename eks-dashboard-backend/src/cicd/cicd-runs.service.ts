@@ -579,11 +579,30 @@ export class CicdRunsService {
   async listLogShares(authorization: string | undefined, runId: string) {
     await this.actor(authorization, SHARE_LOG);
     await this.getRun(runId);
-    return this.db.query<any[]>(
+    const rows = await this.db.query<any[]>(
       `SELECT share_id,run_id,captured_size_bytes,truncated,expires_at,revoked_at,created_at
          FROM cicd_log_shares WHERE run_id=? ORDER BY id DESC LIMIT 20`,
       [runId],
     );
+    return rows.map((row) => ({
+      ...row,
+      created_at: this.utcDateIso(row.created_at),
+      expires_at: this.utcDateIso(row.expires_at),
+      revoked_at: this.utcDateIso(row.revoked_at),
+    }));
+  }
+
+  private utcDateIso(value: unknown): string | null {
+    if (!value) return null;
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().replace(' ', 'T');
+    const date = new Date(
+      /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)
+        ? normalized
+        : `${normalized}Z`,
+    );
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
   }
 
   async createLogShare(

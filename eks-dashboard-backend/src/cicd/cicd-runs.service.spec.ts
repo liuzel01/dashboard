@@ -102,6 +102,34 @@ describe('CicdRunsService', () => {
     expect(db.query).not.toHaveBeenCalled();
   });
 
+  it('returns log-share timestamps as explicit UTC ISO values', async () => {
+    const { service, db } = createService();
+    jest.spyOn(service, 'actor').mockResolvedValue(actor);
+    db.query
+      .mockResolvedValueOnce([{ run_id: 'run-1' }])
+      .mockResolvedValueOnce([
+        {
+          share_id: 'share-1',
+          run_id: 'run-1',
+          captured_size_bytes: 1024,
+          truncated: 0,
+          created_at: '2026-10-24 07:56:11.000',
+          expires_at: '2026-10-24 10:56:11.000',
+          revoked_at: null,
+        },
+      ]);
+
+    await expect(
+      service.listLogShares('Bearer token', 'run-1'),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        created_at: '2026-10-24T07:56:11.000Z',
+        expires_at: '2026-10-24T10:56:11.000Z',
+        revoked_at: null,
+      }),
+    ]);
+  });
+
   it('rejects an actor without the requested execution permission', async () => {
     const { service, auth, access } = createService();
     auth.verifyToken.mockResolvedValue({ sub: 7, username: 'operator' });
