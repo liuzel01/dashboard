@@ -55,6 +55,40 @@ PORT=3000
 
 `.env`、siteconf 导出、kubeconfig、数据库导出以及所有密钥均不得提交到仓库或前端构建产物。
 
+## JumpServer 授权链路
+
+“服务器访问（JumpServer）”由 Dashboard 管理身份映射、期望授权、有效期、回收和审计，JumpServer 负责执行 Asset Permission、登录认证和实际会话。Dashboard 不保存 JumpServer 用户密码、Cookie、私钥、录像或命令正文。
+
+```mermaid
+flowchart LR
+  Admin[Dashboard Admin] -->|选择用户和资产范围| Snapshot[不可变授权范围快照]
+  Snapshot --> Binding[用户授权周期]
+  Binding -->|Grant Manager 同步| Permission[JumpServer Asset Permission]
+  User[Dashboard 用户] -->|一次性 Portal Ticket| Gate[跳转前资格核验]
+  Gate -->|本地授权有效且远端权限有效| Portal[JumpServer Portal]
+  Permission --> Gate
+```
+
+授权范围快照保存在 `jumpserver_access_bundles`，每次授权周期保存在 `jumpserver_user_bundle_bindings`。当前授权和历史授权不会覆盖彼此：
+
+- “调整有效期”只允许操作仍有效、未进入回收流程的当前授权，并原地更新对应受管 Asset Permission；不会创建重复授权。
+- “重新授权”只允许操作已经成功回收且位于授权链末端的历史周期。系统保留原记录并创建新范围快照和新周期，通过 `reauthorized_from_binding_id` 形成 `A -> B -> C` 链。
+- 旧周期一旦已有后继，就不能再次重新授权；后端在事务内锁定来源记录并检查后继，避免并发请求形成分叉。
+- 资产授权有效期不得超过 JumpServer 用户的 `date_expired`。两项操作均要求 MFA、后端动作权限和审计原因。
+
+相关权限如下：
+
+| 权限键 | 用途 |
+| --- | --- |
+| `jumpserver:config:manage` | 管理 Provider、身份映射和用户资产授权 |
+| `jumpserver:sync:execute` | 执行授权同步、撤销和人工对账 |
+| `jumpserver:grant:extend` | 调整当前授权有效期 |
+| `jumpserver:grant:reauthorize` | 从授权链最新的历史周期重新授权 |
+| `jumpserver:portal:launch` | 核验本人有效范围并发起受控跳转 |
+| `jumpserver:audit:read` | 查看跳转、同步和授权事件 |
+
+远端读取使用 Reader 身份，受管 Permission 写入和回收使用 Grant Manager 身份；凭证来自敏感 SiteConf，不能返回前端或进入日志。实现入口为 [`src/jumpserver-access`](src/jumpserver-access)，数据迁移见 [`scripts/sql/2026-10-24_jumpserver_grant_lifecycle.sql`](scripts/sql/2026-10-24_jumpserver_grant_lifecycle.sql)，完整设计和验证边界见 [JumpServer 集成开发计划](../docs/2026-10-18-dashboard-jumpserver-integration-development-plan.md)。
+
 ## Agent 入口
 
 同一代码库可构建 Agent 入口：

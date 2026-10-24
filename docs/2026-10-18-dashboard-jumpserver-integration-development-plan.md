@@ -103,6 +103,8 @@ sequenceDiagram
 | `jumpserver:portal:launch` | 查询本人有效范围并发起受控跳转 |
 | `jumpserver:config:manage` | 管理 Provider、身份映射和用户资产授权 |
 | `jumpserver:sync:execute` | 执行授权同步、撤销和人工对账 |
+| `jumpserver:grant:extend` | 调整仍有效授权的到期时间 |
+| `jumpserver:grant:reauthorize` | 从授权链最新的已回收周期重新授权 |
 | `jumpserver:audit:read` | 查看跳转、同步和会话摘要 |
 
 前端菜单和按钮隐藏不构成授权。所有后端接口必须再次校验动作权限、用户状态、用户授权包绑定、Provider 绑定和目标范围。Dashboard 自定义角色只聚合这些功能权限，不隐式派生任何 JumpServer 资产权限。
@@ -120,9 +122,14 @@ JumpServerAccessBundle
   riskLevel
 
 JumpServerUserBundleBinding
+  id
   dashboardUserId
   bundleId
+  reauthorizedFromBindingId
   enabled
+  expiresAt
+  revocationStatus, revokedAt
+  expirationChangeReason, expirationChangedBy, expirationChangedAt
   createdBy, createdAt, updatedAt
 ```
 
@@ -373,7 +380,7 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 
 ### 14.1 已实现
 
-- Dashboard 新增独立“服务器访问（JumpServer）”菜单和五个权限键；
+- Dashboard 新增独立“服务器访问（JumpServer）”菜单和七个权限键；
 - 新增 Provider、身份映射、授权包、用户授权包绑定、同步状态、Portal Ticket 和事件表；
 - Dashboard 自定义角色只控制菜单和动作权限；资产授权由 Admin 直接绑定到具体用户；
 - Reader/Grant Manager 使用独立 HTTP Signature 凭据；
@@ -399,6 +406,38 @@ Provider 必须采用显式 endpoint allowlist，不建设任意 URL/Method/Body
 范围引用快照会固化资产 ID、节点 ID、账号、协议和动作，但不会把节点展开为静态资产列表。源 Permission 后续修改不会传播；节点本身新增或移除资产仍会实时影响实际授权范围。`assets/all` 仅用于确认前的有效资产数量和样本预览，不作为创建 Permission 的写入数据。
 
 原 `jumpserver_role_bindings` 只为已有数据库回滚和审计保留，当前同步路径不再读取该表。增量迁移只把已经存在远端 Permission 且状态为 `SYNCED` 的精确用户—授权包关系转换为直接绑定，不会把同角色的其他成员批量展开，避免迁移时产生隐式扩权。后续新增授权必须由 Admin 显式选择具体用户。
+
+### 14.1.2 授权周期与重新授权链
+
+用户资产授权采用“周期不可变、历史可追溯”的模型。首次授权为周期 A；A 完成回收后执行“重新授权”会复制其不可变范围快照，创建新绑定 B，并由 B 的 `reauthorized_from_binding_id` 指向 A。B 后续回收并重新授权时继续生成 C，而不是恢复或覆盖 A。
+
+```mermaid
+stateDiagram-v2
+  [*] --> A_ACTIVE: 创建原始授权 A
+  A_ACTIVE --> A_REVOKED: 到期或人工回收
+  A_REVOKED --> B_ACTIVE: 从链末端重新授权
+  B_ACTIVE --> B_REVOKED: 到期或人工回收
+  B_REVOKED --> C_ACTIVE: 从链末端重新授权
+```
+
+```mermaid
+flowchart LR
+  A[周期 A<br/>原始授权 / 已回收] -->|reauthorized_from_binding_id| B[周期 B<br/>重新授权第 1 次]
+  B -->|reauthorized_from_binding_id| C[周期 C<br/>重新授权第 2 次]
+```
+
+约束如下：
+
+- 当前授权列表只展示 `enabled=1` 的周期；历史授权列表保留所有已回收周期，不因重新授权而删除 A。
+- 只有 `enabled=0`、`revocation_status=REVOKED` 且已经写入 `revoked_at` 的历史周期可以重新授权。
+- 只有授权链末端可以重新授权。只要 A 已有任何后继，即使后继也已回收，A 都不再允许发起新周期；应从最新周期继续，确保链路始终线性而不分叉。
+- 后端在同一事务内以 `FOR UPDATE` 锁定来源绑定，并使用递归查询检查后继，前端按钮禁用仅作为提示，不能替代服务端约束。
+- 新周期使用新的 `jumpserver_access_bundles` 范围快照和受管 Asset Permission，旧周期及其审计信息保持不变。
+- “调整有效期”不是新周期：它只更新当前绑定和对应受管 Permission，并同步更新期望状态 hash，避免后续同步误判为需要删除重建。
+- 新有效期必须晚于当前时间且不能超过 JumpServer 用户的 `date_expired`；有限账号失效日期下不能把资产授权改为长期有效。
+- 调整有效期和重新授权分别要求 `jumpserver:grant:extend`、`jumpserver:grant:reauthorize`，同时要求 MFA、操作原因和审计事件。
+
+`2026-10-24_jumpserver_grant_lifecycle.sql` 为已有数据库补充稳定自增 ID、组合唯一键、授权来源索引、有效期变更审计字段和两项动作权限。迁移前已有历史记录无法可靠推断彼此关系，因此保留为独立根周期；迁移后产生的重新授权才建立明确链路。
 
 ### 14.2 机器身份
 
