@@ -512,6 +512,10 @@ export class CicdRunsService {
       ]);
     if (!bucket.trim() || !prefix.trim())
       throw new ServiceUnavailableException('CI/CD 日志分享 S3 尚未配置');
+    const normalizedMaxHours = Math.min(
+      168,
+      Math.max(1, Number(maxHours) || 168),
+    );
     return {
       bucket: bucket.trim(),
       prefix: prefix.trim().replace(/^\/+|\/+$/g, ''),
@@ -520,8 +524,21 @@ export class CicdRunsService {
         500 * 1024 * 1024,
         Math.max(1024 * 1024, Number(maxBytes)),
       ),
-      defaultHours: Math.max(1, Number(defaultHours) || 24),
-      maxHours: Math.min(168, Math.max(1, Number(maxHours) || 168)),
+      defaultHours: Math.min(
+        normalizedMaxHours,
+        Math.max(1, Number(defaultHours) || 24),
+      ),
+      maxHours: normalizedMaxHours,
+    };
+  }
+
+  async getLogSharePolicy(authorization: string | undefined) {
+    await this.actor(authorization, SHARE_LOG);
+    const config = await this.logShareConfig();
+    return {
+      defaultExpiryHours: config.defaultHours,
+      maxExpiryHours: config.maxHours,
+      maxBytes: config.maxBytes,
     };
   }
 

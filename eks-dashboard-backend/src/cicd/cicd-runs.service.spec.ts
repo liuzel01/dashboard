@@ -37,7 +37,7 @@ const createService = () => {
     siteConf as never,
     spotPublish as never,
   );
-  return { service, db, auth, mfaVerification, access };
+  return { service, db, auth, mfaVerification, access, siteConf };
 };
 
 describe('CicdRunsService', () => {
@@ -128,6 +128,31 @@ describe('CicdRunsService', () => {
         revoked_at: null,
       }),
     ]);
+  });
+
+  it('returns the effective log-share policy from siteconf', async () => {
+    const { service, siteConf } = createService();
+    jest.spyOn(service, 'actor').mockResolvedValue(actor);
+    siteConf.getString.mockImplementation(
+      async (key: string, fallback: string) => {
+        if (key === 'cicd.log_share.s3_bucket') return 'private-bucket';
+        if (key === 'cicd.log_share.s3_prefix') return 'cicd-log-shares';
+        return fallback;
+      },
+    );
+    siteConf.getNumber.mockImplementation(
+      async (key: string, fallback: number) => {
+        if (key === 'cicd.log_share.default_expiry_hours') return 8;
+        if (key === 'cicd.log_share.max_expiry_hours') return 72;
+        return fallback;
+      },
+    );
+
+    await expect(service.getLogSharePolicy('Bearer token')).resolves.toEqual({
+      defaultExpiryHours: 8,
+      maxExpiryHours: 72,
+      maxBytes: 100 * 1024 * 1024,
+    });
   });
 
   it('rejects an actor without the requested execution permission', async () => {

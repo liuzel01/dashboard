@@ -74,6 +74,11 @@ export class CicdRunsController {
     return this.service.list(authorization, query.environmentId);
   }
 
+  @Get('log-share-policy')
+  logSharePolicy(@Headers('authorization') authorization: string | undefined) {
+    return this.service.getLogSharePolicy(authorization);
+  }
+
   @Post(':runId/refresh')
   refresh(
     @Headers('authorization') authorization: string | undefined,

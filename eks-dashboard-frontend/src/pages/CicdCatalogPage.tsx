@@ -20,6 +20,7 @@ import {
   syncCicdRemoteParameterSchema,
   cancelCicdRun,
   createCicdLogShare,
+  getCicdLogSharePolicy,
   getCicdRunLog,
   listCicdLogShares,
   listCicdRuns,
@@ -139,6 +140,8 @@ const CicdCatalogPage: React.FC = () => {
   const [detailRun, setDetailRun] = useState<CicdRun>();
   const [shareRun, setShareRun] = useState<CicdRun>();
   const [shareExpiryHours, setShareExpiryHours] = useState(24);
+  const [shareMaxExpiryHours, setShareMaxExpiryHours] = useState(168);
+  const [sharePolicyLoading, setSharePolicyLoading] = useState(false);
   const [shareOtpCode, setShareOtpCode] = useState('');
   const [shareSubmitting, setShareSubmitting] = useState(false);
   const [logShares, setLogShares] = useState<CicdLogShare[]>([]);
@@ -349,14 +352,33 @@ const CicdCatalogPage: React.FC = () => {
   const openShareLog = async (run: CicdRun) => {
     setShareRun(run);
     setShareExpiryHours(24);
+    setShareMaxExpiryHours(168);
     setShareOtpCode('');
     setCreatedShareUrl(undefined);
     setCreatedShareTruncated(false);
-    try {
-      setLogShares(await listCicdLogShares(run.run_id));
-    } catch (error) {
-      message.error(errorMessage(error, '日志分享记录加载失败'));
+    setSharePolicyLoading(true);
+    const [sharesResult, policyResult] = await Promise.allSettled([
+      listCicdLogShares(run.run_id),
+      getCicdLogSharePolicy(),
+    ]);
+    if (sharesResult.status === 'fulfilled') {
+      setLogShares(sharesResult.value);
+    } else {
+      setLogShares([]);
+      message.error(errorMessage(sharesResult.reason, '日志分享记录加载失败'));
     }
+    if (policyResult.status === 'fulfilled') {
+      const maxHours = Math.max(1, Number(policyResult.value.maxExpiryHours) || 168);
+      const defaultHours = Math.min(
+        maxHours,
+        Math.max(1, Number(policyResult.value.defaultExpiryHours) || 24),
+      );
+      setShareMaxExpiryHours(maxHours);
+      setShareExpiryHours(defaultHours);
+    } else {
+      message.warning(errorMessage(policyResult.reason, '日志分享策略加载失败，暂时使用默认值'));
+    }
+    setSharePolicyLoading(false);
   };
 
   const createLogShare = async () => {
@@ -648,8 +670,8 @@ const CicdCatalogPage: React.FC = () => {
       open={!!shareRun}
       onCancel={() => setShareRun(undefined)}
       okText="创建并复制链接"
-      confirmLoading={shareSubmitting}
-      okButtonProps={{ disabled: shareOtpCode.length !== 6 }}
+      confirmLoading={shareSubmitting || sharePolicyLoading}
+      okButtonProps={{ disabled: sharePolicyLoading || shareOtpCode.length !== 6 }}
       onOk={() => void createLogShare()}
       width={720}
       destroyOnHidden
@@ -661,7 +683,7 @@ const CicdCatalogPage: React.FC = () => {
           <Descriptions.Item label="Build">#{shareRun.build_number}</Descriptions.Item>
           <Descriptions.Item label="Job" span={2}>{shareRun.job_name}</Descriptions.Item>
           <Descriptions.Item label="状态">{shareRun.status}</Descriptions.Item>
-          <Descriptions.Item label="有效期"><InputNumber min={1} max={168} value={shareExpiryHours} onChange={(value) => setShareExpiryHours(Number(value || 24))} addonAfter="小时" /></Descriptions.Item>
+          <Descriptions.Item label="有效期"><InputNumber min={1} max={shareMaxExpiryHours} value={shareExpiryHours} disabled={sharePolicyLoading} onChange={(value) => setShareExpiryHours(Number(value || 1))} addonAfter="小时" /></Descriptions.Item>
         </Descriptions>
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
           <Text>Google 验证码</Text>

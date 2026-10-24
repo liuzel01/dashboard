@@ -3387,6 +3387,14 @@ export type CicdLogShare = {
 export const listCicdLogShares = async (runId: string) =>
   (await api.get(`/cicd/runs/${encodeURIComponent(runId)}/log-shares`))
     .data as CicdLogShare[];
+export type CicdLogSharePolicy = {
+  defaultExpiryHours: number;
+  maxExpiryHours: number;
+  maxBytes: number;
+};
+export const getCicdLogSharePolicy = async () =>
+  (await api.get('/cicd/runs/log-share-policy'))
+    .data as CicdLogSharePolicy;
 export const createCicdLogShare = async (
   runId: string,
   input: { expiresInHours: number; otpCode: string },
