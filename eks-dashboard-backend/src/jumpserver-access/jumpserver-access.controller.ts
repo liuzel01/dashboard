@@ -19,6 +19,8 @@ import {
   IsString,
   MaxLength,
   Min,
+  MinLength,
+  Matches,
 } from 'class-validator';
 import { JumpserverAccessService } from './jumpserver-access.service';
 
@@ -54,6 +56,11 @@ class TemplateGrantDto {
 }
 class TicketDto {
   @IsString() ticket!: string;
+}
+class GrantLifecycleDto {
+  @IsOptional() @IsISO8601() expiresAt?: string;
+  @IsString() @MinLength(5) @MaxLength(500) reason!: string;
+  @IsString() @Matches(/^\d{6}$/) mfaCode!: string;
 }
 
 @Controller('jumpserver-access')
@@ -108,6 +115,20 @@ export class JumpserverAccessController {
     @Param('id') id: string,
   ) {
     return this.service.syncUser(a, Number(id));
+  }
+  @Post('user-grants/:id/expiration') adjustExpiration(
+    @Headers('authorization') a: string | undefined,
+    @Param('id') id: string,
+    @Body() body: GrantLifecycleDto,
+  ) {
+    return this.service.adjustGrantExpiration(a, Number(id), body);
+  }
+  @Post('user-grants/:id/reauthorize') reauthorize(
+    @Headers('authorization') a: string | undefined,
+    @Param('id') id: string,
+    @Body() body: GrantLifecycleDto,
+  ) {
+    return this.service.reauthorizeGrant(a, Number(id), body);
   }
   @Get('me') me(@Headers('authorization') a?: string) {
     return this.service.myStatus(a);

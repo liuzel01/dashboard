@@ -12,11 +12,12 @@ describe('JumpserverAccessService safety policy', () => {
   const auth: any = {};
   const access: any = {};
   const siteConf: any = {};
+  const mfa: any = { verifyForUser: jest.fn() };
   let service: JumpserverAccessService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new JumpserverAccessService(db, auth, access, siteConf);
+    service = new JumpserverAccessService(db, auth, access, siteConf, mfa);
     jest.spyOn(service as any, 'remoteUserState').mockResolvedValue({
       status: 'ACTIVE',
       dateExpired: null,
@@ -52,6 +53,152 @@ describe('JumpserverAccessService safety policy', () => {
         date_expired: 'not-a-date',
       }).status,
     ).toBe('UNKNOWN');
+  });
+
+  it('rejects an asset grant beyond the JumpServer user expiration', () => {
+    expect(() =>
+      (service as any).assertExpirationWithinRemoteUser(
+        {
+          status: 'ACTIVE',
+          dateExpired: '2026-12-01T00:00:00Z',
+          reason: '',
+        },
+        '2026-12-02T00:00:00Z',
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('rejects making a grant permanent when the JumpServer user has a finite expiration', () => {
+    expect(() =>
+      (service as any).assertExpirationWithinRemoteUser(
+        {
+          status: 'ACTIVE',
+          dateExpired: '2026-12-01T00:00:00Z',
+          reason: '',
+        },
+        null,
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('patches an active managed permission when adjusting its expiration', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    jest.spyOn(service as any, 'actor').mockResolvedValue({
+      userId: 9,
+      permissions: ['jumpserver:grant:extend'],
+    });
+    jest.spyOn(service as any, 'remote').mockResolvedValue({ id: 'remote-7' });
+    db.query
+      .mockResolvedValueOnce([
+        {
+          id: 12,
+          dashboard_user_id: 3,
+          bundle_id: 7,
+          enabled: 1,
+          revocation_status: 'ACTIVE',
+          revoked_at: null,
+          expires_at: '2026-10-30 00:00:00.000',
+          remote_user_id: 'user-3',
+          remote_username: 'operator',
+          remote_permission_id: 'remote-7',
+          accounts_json: '["@ALL"]',
+          protocols_json: '["ssh"]',
+          actions_json: '["connect"]',
+        },
+      ])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce([{ target_type: 'ASSET', remote_id: 'asset-1' }])
+      .mockResolvedValueOnce({ affectedRows: 1 })
+      .mockResolvedValueOnce({ insertId: 1 });
+
+    await expect(
+      service.adjustGrantExpiration(undefined, 12, {
+        expiresAt: expiresAt.toISOString(),
+        reason: 'approved extension',
+        mfaCode: '123456',
+      }),
+    ).resolves.toMatchObject({ ok: true, bindingId: 12 });
+    expect(mfa.verifyForUser).toHaveBeenCalledWith(9, '123456');
+    expect((service as any).remote).toHaveBeenCalledWith(
+      'grant',
+      'PATCH',
+      '/api/v1/perms/asset-permissions/remote-7/',
+      expect.objectContaining({ date_expired: expiresAt.toISOString() }),
+    );
+  });
+
+  it('does not reauthorize a binding that has not completed revocation', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({
+      userId: 9,
+      permissions: ['jumpserver:grant:reauthorize'],
+    });
+    db.query.mockResolvedValueOnce([
+      {
+        id: 12,
+        dashboard_user_id: 3,
+        bundle_id: 7,
+        enabled: 0,
+        revocation_status: 'PENDING',
+        revoked_at: null,
+      },
+    ]);
+    await expect(
+      service.reauthorizeGrant(undefined, 12, {
+        expiresAt: new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+        reason: 'approved renewal',
+        mfaCode: '123456',
+      }),
+    ).rejects.toThrow('仅可对已经成功回收的历史授权重新授权');
+    expect(db.withTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not reauthorize an old cycle when its chain already has a successor', async () => {
+    jest.spyOn(service as any, 'actor').mockResolvedValue({
+      userId: 9,
+      permissions: ['jumpserver:grant:reauthorize'],
+    });
+    db.query.mockResolvedValueOnce([
+      {
+        id: 12,
+        dashboard_user_id: 3,
+        bundle_id: 7,
+        enabled: 0,
+        revocation_status: 'REVOKED',
+        revoked_at: '2026-10-20 00:00:00.000',
+        remote_user_id: 'user-3',
+        accounts_json: '[]',
+        protocols_json: '["ssh"]',
+        actions_json: '["connect"]',
+      },
+    ]);
+    const execute = jest
+      .fn()
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 12,
+            enabled: 0,
+            revocation_status: 'REVOKED',
+            revoked_at: '2026-10-20 00:00:00.000',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ id: 13 }]]);
+    db.withTransaction.mockImplementation((callback: any) =>
+      callback({ execute }),
+    );
+
+    await expect(
+      service.reauthorizeGrant(undefined, 12, {
+        expiresAt: new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+        reason: 'approved renewal',
+        mfaCode: '123456',
+      }),
+    ).rejects.toThrow('该记录已有后续授权 #13');
   });
 
   it('blocks unknown read endpoints before credentials are resolved', async () => {
@@ -118,11 +265,27 @@ describe('JumpserverAccessService safety policy', () => {
       ])
       .mockResolvedValueOnce([
         {
+          id: 12,
           dashboard_user_id: 2,
           bundle_id: 7,
           dashboard_username: 'user@example.com',
           dashboard_display_name: 'Kevin',
           expires_at: '2026-10-19 05:49:00.000',
+          accounts_json: '[]',
+          protocols_json: '[]',
+          actions_json: '[]',
+          targets: '',
+        },
+        {
+          id: 13,
+          dashboard_user_id: 2,
+          bundle_id: 8,
+          reauthorized_from_binding_id: 12,
+          enabled: 1,
+          revocation_status: 'ACTIVE',
+          dashboard_username: 'user@example.com',
+          dashboard_display_name: 'Kevin',
+          expires_at: '2026-11-19 05:49:00.000',
           accounts_json: '[]',
           protocols_json: '[]',
           actions_json: '[]',
@@ -136,6 +299,14 @@ describe('JumpserverAccessService safety policy', () => {
     expect(configuration.userBindings[0].expires_at).toBe(
       '2026-10-19T05:49:00.000Z',
     );
+    expect(configuration.userBindings[0]).toMatchObject({
+      authorization_cycle_number: 1,
+      successor_binding_id: 13,
+      active_successor_binding_id: 13,
+    });
+    expect(configuration.userBindings[1]).toMatchObject({
+      authorization_cycle_number: 2,
+    });
     expect(db.query.mock.calls[0][0]).toContain('u.display_name');
     expect(db.query.mock.calls[1][0]).toContain('u.display_name');
   });

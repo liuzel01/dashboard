@@ -14,6 +14,7 @@ import { AccessControlService } from '../access-control/access-control.service';
 import { PlatformDatabaseService } from '../access-control/platform-database.service';
 import { AuthService } from '../auth/auth.service';
 import { SiteConfService } from '../site-conf/site-conf.service';
+import { MfaVerificationService } from '../auth/mfa-verification.service';
 
 type Actor = { userId: number; username: string; permissions: string[] };
 type RemoteUserStatus =
@@ -39,6 +40,7 @@ export class JumpserverAccessService {
     private readonly auth: AuthService,
     private readonly access: AccessControlService,
     private readonly siteConf: SiteConfService,
+    private readonly mfa: MfaVerificationService,
   ) {}
 
   private async actor(
@@ -117,7 +119,7 @@ export class JumpserverAccessService {
 
   private async remote(
     identity: 'reader' | 'grant',
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     data?: unknown,
   ) {
@@ -244,6 +246,24 @@ export class JumpserverAccessService {
     });
   }
 
+  private assertExpirationWithinRemoteUser(
+    state: RemoteUserState,
+    expiresAt: string | null,
+  ) {
+    if (!state.dateExpired) return;
+    const userExpiry = new Date(state.dateExpired).getTime();
+    if (!Number.isFinite(userExpiry))
+      throw new BadRequestException('JumpServer 用户失效日期格式无法识别');
+    if (!expiresAt)
+      throw new BadRequestException(
+        `JumpServer 用户将在 ${state.dateExpired} 到期，不能设置长期资产授权`,
+      );
+    if (new Date(expiresAt).getTime() > userExpiry)
+      throw new BadRequestException(
+        `资产授权有效期不能超过 JumpServer 用户失效日期 ${state.dateExpired}`,
+      );
+  }
+
   async diagnostics(authorization?: string) {
     await this.actor(authorization, 'jumpserver:config:manage');
     const result: any = {
@@ -339,7 +359,7 @@ export class JumpserverAccessService {
           ORDER BY m.id DESC`,
       ),
       this.db.query<any[]>(
-        `SELECT ub.dashboard_user_id,ub.bundle_id,ub.enabled,ub.expires_at,ub.revocation_status,ub.revoked_at,ub.last_revoke_error,
+        `SELECT ub.id,ub.dashboard_user_id,ub.bundle_id,ub.reauthorized_from_binding_id,ub.enabled,ub.expires_at,ub.revocation_status,ub.revoked_at,ub.last_revoke_error,
                 u.username dashboard_username,u.display_name dashboard_display_name,b.name bundle_name,
                 b.accounts_json,b.protocols_json,b.actions_json,
                 b.source_permission_id,b.source_permission_name,b.source_snapshot_hash,
@@ -349,7 +369,7 @@ export class JumpserverAccessService {
            JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
            LEFT JOIN jumpserver_bundle_targets t ON t.bundle_id=b.id
           WHERE ub.provider_key='primary'
-          GROUP BY ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.enabled,ub.expires_at,ub.revocation_status,ub.revoked_at,ub.last_revoke_error,u.username,u.display_name,b.name,b.accounts_json,b.protocols_json,b.actions_json,b.source_permission_id,b.source_permission_name,b.source_snapshot_hash
+          GROUP BY ub.id,ub.provider_key,ub.dashboard_user_id,ub.bundle_id,ub.reauthorized_from_binding_id,ub.enabled,ub.expires_at,ub.revocation_status,ub.revoked_at,ub.last_revoke_error,u.username,u.display_name,b.name,b.accounts_json,b.protocols_json,b.actions_json,b.source_permission_id,b.source_permission_name,b.source_snapshot_hash
           ORDER BY ub.updated_at DESC`,
       ),
     ]);
@@ -366,6 +386,45 @@ export class JumpserverAccessService {
         };
       }),
     );
+    const bindingsById = new Map(
+      userBindings.map((binding) => [Number(binding.id), binding]),
+    );
+    const childrenById = new Map<number, any[]>();
+    userBindings.forEach((binding) => {
+      const parentId = Number(binding.reauthorized_from_binding_id);
+      if (!parentId) return;
+      childrenById.set(parentId, [
+        ...(childrenById.get(parentId) || []),
+        binding,
+      ]);
+    });
+    const cycleNumber = (binding: any) => {
+      let cycle = 1;
+      let current = binding;
+      const visited = new Set<number>();
+      while (current?.reauthorized_from_binding_id) {
+        const parentId = Number(current.reauthorized_from_binding_id);
+        if (!parentId || visited.has(parentId)) break;
+        visited.add(parentId);
+        current = bindingsById.get(parentId);
+        if (!current) break;
+        cycle += 1;
+      }
+      return cycle;
+    };
+    const activeSuccessor = (bindingId: number) => {
+      const queue = [...(childrenById.get(bindingId) || [])];
+      const visited = new Set<number>();
+      while (queue.length) {
+        const child = queue.shift();
+        const childId = Number(child?.id);
+        if (!childId || visited.has(childId)) continue;
+        visited.add(childId);
+        if (Number(child.enabled) === 1) return child;
+        queue.push(...(childrenById.get(childId) || []));
+      }
+      return undefined;
+    };
     return {
       mappings: enrichedMappings,
       userBindings: userBindings.map((binding) => ({
@@ -376,6 +435,9 @@ export class JumpserverAccessService {
         protocols: this.json(binding.protocols_json),
         actions: this.json(binding.actions_json),
         targets: this.targetLines(binding.targets),
+        authorization_cycle_number: cycleNumber(binding),
+        successor_binding_id: childrenById.get(Number(binding.id))?.[0]?.id,
+        active_successor_binding_id: activeSuccessor(Number(binding.id))?.id,
       })),
     };
   }
@@ -704,6 +766,204 @@ export class JumpserverAccessService {
       grants,
       sync,
     };
+  }
+
+  async adjustGrantExpiration(
+    authorization: string | undefined,
+    bindingId: number,
+    input: { expiresAt?: string; reason: string; mfaCode: string },
+  ) {
+    const actor = await this.actor(authorization, 'jumpserver:grant:extend');
+    await this.mfa.verifyForUser(actor.userId, input.mfaCode);
+    const expiresAt = this.grantExpiration(input.expiresAt);
+    const rows = await this.db.query<any[]>(
+      `SELECT ub.*,m.remote_user_id,m.remote_username,g.remote_permission_id,
+              b.accounts_json,b.protocols_json,b.actions_json
+         FROM jumpserver_user_bundle_bindings ub
+         JOIN jumpserver_identity_mappings m ON m.provider_key=ub.provider_key AND m.dashboard_user_id=ub.dashboard_user_id AND m.status='ACTIVE'
+         JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
+         LEFT JOIN jumpserver_grant_states g ON g.provider_key=ub.provider_key AND g.dashboard_user_id=ub.dashboard_user_id AND g.bundle_id=ub.bundle_id
+        WHERE ub.id=? AND ub.provider_key='primary' LIMIT 1`,
+      [bindingId],
+    );
+    const binding = rows[0];
+    if (!binding) throw new BadRequestException('授权记录不存在');
+    if (
+      Number(binding.enabled) !== 1 ||
+      binding.revocation_status !== 'ACTIVE' ||
+      binding.revoked_at ||
+      (binding.expires_at &&
+        new Date(this.utcDateIso(binding.expires_at)!).getTime() <= Date.now())
+    )
+      throw new BadRequestException('仅可调整仍然有效且未进入回收流程的授权');
+    if (!binding.remote_permission_id)
+      throw new BadRequestException('远端授权不存在，请先执行同步');
+    const userState = await this.assertRemoteUserActive(binding);
+    this.assertExpirationWithinRemoteUser(userState, expiresAt);
+    const oldExpiresAt = this.utcDateIso(binding.expires_at);
+    await this.remote(
+      'grant',
+      'PATCH',
+      `/api/v1/perms/asset-permissions/${encodeURIComponent(binding.remote_permission_id)}/`,
+      {
+        date_expired: expiresAt || '2099-12-31T23:59:59Z',
+        comment: `Managed by Dashboard; expiry adjusted: ${input.reason.trim()}`,
+      },
+    );
+    await this.db.query(
+      `UPDATE jumpserver_user_bundle_bindings
+          SET expires_at=?,expiration_change_reason=?,expiration_changed_by=?,expiration_changed_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3)
+        WHERE id=? AND enabled=1 AND revocation_status='ACTIVE'`,
+      [this.mysqlDate(expiresAt), input.reason.trim(), actor.userId, bindingId],
+    );
+    const targets = await this.db.query<any[]>(
+      'SELECT target_type,remote_id FROM jumpserver_bundle_targets WHERE bundle_id=? ORDER BY id',
+      [binding.bundle_id],
+    );
+    const desired = {
+      user: binding.remote_user_id,
+      bundle: Number(binding.bundle_id),
+      targets: targets.map((target) => [target.target_type, target.remote_id]),
+      accounts: this.json(binding.accounts_json),
+      protocols: this.json(binding.protocols_json),
+      actions: this.json(binding.actions_json).length
+        ? this.json(binding.actions_json)
+        : ['connect'],
+      ...(expiresAt ? { expiresAt: `${this.mysqlDate(expiresAt)}.000` } : {}),
+    };
+    await this.db.query(
+      `UPDATE jumpserver_grant_states SET desired_hash=?,status='SYNCED',last_error=NULL,last_synced_at=UTC_TIMESTAMP(3)
+        WHERE provider_key='primary' AND dashboard_user_id=? AND bundle_id=?`,
+      [
+        this.hash(JSON.stringify(desired)),
+        binding.dashboard_user_id,
+        binding.bundle_id,
+      ],
+    );
+    await this.event(
+      actor.userId,
+      Number(binding.dashboard_user_id),
+      'GRANT_EXPIRATION_UPDATE',
+      String(bindingId),
+      'SUCCESS',
+      `有效期由 ${oldExpiresAt || '长期有效'} 调整为 ${expiresAt || '长期有效'}；原因：${input.reason.trim()}`,
+    );
+    return { ok: true, bindingId, expiresAt };
+  }
+
+  async reauthorizeGrant(
+    authorization: string | undefined,
+    bindingId: number,
+    input: { expiresAt?: string; reason: string; mfaCode: string },
+  ) {
+    const actor = await this.actor(
+      authorization,
+      'jumpserver:grant:reauthorize',
+    );
+    await this.mfa.verifyForUser(actor.userId, input.mfaCode);
+    const expiresAt = this.grantExpiration(input.expiresAt);
+    const rows = await this.db.query<any[]>(
+      `SELECT ub.*,m.remote_user_id,m.remote_username,b.name bundle_name,b.description,
+              b.accounts_json,b.protocols_json,b.actions_json,b.source_permission_id,b.source_permission_name,b.source_snapshot_hash
+         FROM jumpserver_user_bundle_bindings ub
+         JOIN jumpserver_identity_mappings m ON m.provider_key=ub.provider_key AND m.dashboard_user_id=ub.dashboard_user_id AND m.status='ACTIVE'
+         JOIN jumpserver_access_bundles b ON b.id=ub.bundle_id
+        WHERE ub.id=? AND ub.provider_key='primary' LIMIT 1`,
+      [bindingId],
+    );
+    const source = rows[0];
+    if (!source) throw new BadRequestException('历史授权记录不存在');
+    if (
+      Number(source.enabled) !== 0 ||
+      source.revocation_status !== 'REVOKED' ||
+      !source.revoked_at
+    )
+      throw new BadRequestException('仅可对已经成功回收的历史授权重新授权');
+    const userState = await this.assertRemoteUserActive(source);
+    this.assertExpirationWithinRemoteUser(userState, expiresAt);
+    const created = await this.db.withTransaction(async (conn) => {
+      const [lockedRows]: any = await conn.execute(
+        `SELECT id,enabled,revocation_status,revoked_at
+           FROM jumpserver_user_bundle_bindings
+          WHERE id=? AND provider_key='primary' FOR UPDATE`,
+        [bindingId],
+      );
+      const lockedSource = lockedRows[0];
+      if (
+        !lockedSource ||
+        Number(lockedSource.enabled) !== 0 ||
+        lockedSource.revocation_status !== 'REVOKED' ||
+        !lockedSource.revoked_at
+      )
+        throw new BadRequestException('仅可对已经成功回收的历史授权重新授权');
+      const [successors]: any = await conn.execute(
+        `WITH RECURSIVE successors AS (
+           SELECT id,enabled FROM jumpserver_user_bundle_bindings WHERE reauthorized_from_binding_id=?
+           UNION ALL
+           SELECT child.id,child.enabled
+             FROM jumpserver_user_bundle_bindings child
+             JOIN successors parent ON child.reauthorized_from_binding_id=parent.id
+         )
+         SELECT id,enabled FROM successors LIMIT 1`,
+        [bindingId],
+      );
+      if (successors.length)
+        throw new BadRequestException(
+          `该记录已有后续授权 #${successors[0].id}，请从授权链的最新周期重新授权`,
+        );
+      const name = `reauth-${source.dashboard_user_id}-${source.bundle_id}-${randomUUID().slice(0, 8)}`;
+      const [bundleResult]: any = await conn.execute(
+        `INSERT INTO jumpserver_access_bundles
+         (provider_key,name,description,accounts_json,protocols_json,actions_json,source_permission_id,source_permission_name,source_snapshot_hash,enabled,created_by)
+         VALUES('primary',?,?,?,?,?,?,?,?,1,?)`,
+        [
+          name,
+          `Reauthorized from binding ${bindingId}: ${input.reason.trim()}`.slice(
+            0,
+            500,
+          ),
+          this.jsonParameter(source.accounts_json),
+          this.jsonParameter(source.protocols_json),
+          this.jsonParameter(source.actions_json),
+          source.source_permission_id,
+          source.source_permission_name,
+          source.source_snapshot_hash,
+          actor.userId,
+        ],
+      );
+      const newBundleId = Number(bundleResult.insertId);
+      await conn.execute(
+        `INSERT INTO jumpserver_bundle_targets(bundle_id,target_type,remote_id,remote_name)
+         SELECT ?,target_type,remote_id,remote_name FROM jumpserver_bundle_targets WHERE bundle_id=?`,
+        [newBundleId, source.bundle_id],
+      );
+      const [bindingResult]: any = await conn.execute(
+        `INSERT INTO jumpserver_user_bundle_bindings
+         (provider_key,dashboard_user_id,bundle_id,reauthorized_from_binding_id,enabled,expires_at,revocation_status,created_by)
+         VALUES('primary',?,?,?,1,?,'ACTIVE',?)`,
+        [
+          source.dashboard_user_id,
+          newBundleId,
+          bindingId,
+          this.mysqlDate(expiresAt),
+          actor.userId,
+        ],
+      );
+      return {
+        bindingId: Number(bindingResult.insertId),
+        bundleId: newBundleId,
+      };
+    });
+    const sync = await this.syncUser(authorization, source.dashboard_user_id);
+    await this.event(
+      actor.userId,
+      Number(source.dashboard_user_id),
+      'GRANT_REAUTHORIZE',
+      `${bindingId}->${created.bindingId}`,
+      'SUCCESS',
+      `从历史授权 ${bindingId} 重新授权；原因：${input.reason.trim()}`,
+    );
+    return { ...created, reauthorizedFromBindingId: bindingId, sync };
   }
 
   async unbindUser(
@@ -1342,6 +1602,10 @@ export class JumpserverAccessService {
     } catch {
       return [];
     }
+  }
+
+  private jsonParameter(value: unknown) {
+    return typeof value === 'string' ? value : JSON.stringify(value ?? []);
   }
 
   private grantExpiration(value: unknown): string | null {
